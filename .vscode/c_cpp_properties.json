@@ -1,0 +1,31 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}/engine/qjsx",
+                "${workspaceFolder}/common/jsbind",
+                "${workspaceFolder}/common/runtime",
+                "${workspaceFolder}/common/runtime/modules",
+                "${workspaceFolder}/common/agent",
+                "${workspaceFolder}/common/board",
+                "${workspaceFolder}/host",
+                "${workspaceFolder}/host/modules",
+                "${workspaceFolder}/host/platform"
+            ],
+            "defines": [
+                "_DEBUG",
+                "DEBUG",
+                "DUMP_LEAKS",
+                "_GNU_SOURCE",
+                "__USE_MINGW_ANSI_STDIO",
+                "CONFIG_VERSION=\"2026-06-04\""
+            ],
+            "compilerPath": "C:/tools/msys64/mingw64/bin/gcc.exe",
+            "intelliSenseMode": "windows-gcc-x64",
+            "cStandard": "gnu11",
+            "cppStandard": "c++17"
+        }
+    ],
+    "version": 4
+}

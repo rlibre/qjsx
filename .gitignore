@@ -1,0 +1,31 @@
+# Build of the desktop tool (premake5 + make): makefiles, objects, test
+# outputs, then the executables and stdlib.qjslib
+/build/
+/bin/
+
+# What espjs itself builds in a project: packages and libraries, in the
+# "build" folder of the project (tests/fixtures/*/build, lib/*/build)
+build/
+*.qjspkg
+*.qjslib
+
+# ESP-IDF builds, one folder per board (its sdkconfig is inside), and what
+# idf.py may write next to the project
+/ports/esp32/build-*/
+/ports/esp32/sdkconfig
+/ports/esp32/sdkconfig.old
+/ports/esp32/managed_components/
+
+# The old program, kept on disk only (no longer built)
+/legacy/
+
+# Local settings of Claude Code, and the prompt used to resume a work
+# session (a personal working note, kept on disk only)
+/.claude/settings.local.json
+/doc/prompt-reprise.md
+
+# Editors and systems
+*.swp
+*~
+.DS_Store
+Thumbs.db

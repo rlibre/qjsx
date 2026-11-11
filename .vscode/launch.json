@@ -1,0 +1,33 @@
+{
+	// Debugging the espjs tool itself (C and C++ code) with gdb. The Debug
+	// executable must be built first: make -C build config=debug
+	"version": "0.2.0",
+	"configurations": [
+		{
+			// runs a script, or a package (.qjspkg) like a device does
+			"name": "espjs run (gdb)",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/bin/Debug/espjs.exe",
+			"args": ["run", "tests/runtime.test.js"],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+		},
+		{
+			// a command written in JS (host/js): here the build of the demo project
+			"name": "espjs build (gdb)",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/bin/Debug/espjs.exe",
+			"args": ["build", "tests/fixtures/demo"],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+		},
+	]
+}
