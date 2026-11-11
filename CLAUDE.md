@@ -469,7 +469,7 @@ C / C++ projects). Summary of what was agreed:
 
 - File header (user, 2026-11-11, APPLIED to 134 files the same day): every source file of
   the project starts with the block of `doc/coding-rules.md` 3 ("File header"): "qjsx" in
-  ASCII art, "qjsx - JavaScript for devices", "Author: Etienne Cochard", "Copyright (c) 2026
+  ASCII art, "qjsx - JavaScript for devices", "Author: Etienne Cochard + Opus 5.5", "Copyright (c) 2026
   R-LIBRE INGENIERIE" (exactly as in LICENSE), "SPDX-License-Identifier: MIT (see LICENSE)".
   A `/* */` block in C / C++ / JS (a `//` line ending with `\` would continue the comment);
   `# ` lines in shell / CMake / Perl / PowerShell / sdkconfig / partition CSV (after `#!`),

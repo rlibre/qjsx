@@ -172,7 +172,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/q
 @@ -0,0 +1,241 @@
 +/*          _
 + *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
-+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
++ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
 + * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
 + *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
 + */
@@ -996,7 +996,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/debug.c engine/qjsx/core/
 @@ -0,0 +1,597 @@
 +/*          _
 + *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
-+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
++ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
 + * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
 + *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
 + */
@@ -1971,7 +1971,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/qu
 @@ -0,0 +1,300 @@
 +/*          _
 + *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
-+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
++ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
 + * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
 + *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
 + */
