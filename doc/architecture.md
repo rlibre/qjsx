@@ -12,10 +12,10 @@ of the split engine ([quickjs-map.md](quickjs-map.md)), the measurements
 prevails.
 
 **Device.** In this document, a *device* is a target board that runs the programs
-(precompiled bytecode, debug and deployment agent, no compiler). Today:
+(precompiled bytecode, debug and deployment agent, no compiler):
 
-- the **ESP32** (ESP32-S3, YD board with a WROOM-1 module, PSRAM);
-- the **RP2350** (Olimex PICO2-XXL, RP2350B, 8 MB of PSRAM).
+- the **ESP32** (ESP32-S3, YD board with a WROOM-1 module, PSRAM): ported, runs on the board;
+- the **RP2350** (Olimex PICO2-XXL, RP2350B, 8 MB of PSRAM): planned, not written.
 
 This list will grow: what is said of a device holds for any new target
 (one more port in `ports/`, one implementation of `board.h`). A chip is named only
@@ -28,7 +28,7 @@ Each section carries an explicit status:
 | Status | Meaning |
 |---|---|
 | **done** | the code exists in the repository and has been tested or measured |
-| **being implemented** | the design is settled and the code is being written; at the time of writing, no corresponding file is in the repository yet |
+| **in progress** | part of the code exists; the status block says what is done and what is not |
 | **designed, not implemented** | the decision is taken, no code exists |
 | **to verify** | a point that the sources explicitly mark as still to be confirmed |
 
@@ -50,8 +50,12 @@ project.
 
 ## 1. Overview
 
-> **Status: designed, not implemented** for the whole chain. Only the engine (section 2)
-> exists today, as the untouched original and as the split version.
+> **Status: in progress** (2026-11-11). What runs today, on the PC and on an ESP32-S3 board:
+> the engine (section 2), the packages and the libraries (4.1, 4.5), the device agent and its
+> protocol (4.3), the runtime (5), the host tool (6) and the ESP32-S3 firmware (5.5). For the
+> debugger, the part that lives on the device is done and tested (4.3); the host part (proxy,
+> CDP server, VS Code) is not written (section 3). Not started: hardware modules (GPIO,
+> I2C…), files on a device, native USB and WiFi links, the RP2350 port.
 
 ### 1.1 Goals
 
@@ -77,23 +81,25 @@ target.
 | Component | Where it runs | Role |
 |---|---|---|
 | QuickJS engine | host and device | interpreter; the compiler exists only on the host |
-| Host tool `qjsx` | host | a single executable: host QuickJS + C modules (event loop, sockets, serial port, SHA-256, compile API); its commands are written in JS, precompiled and embedded |
+| Host tool `qjsx` | host | one executable: host QuickJS + C modules (event loop, sockets, serial port, SHA-256, compile API); its commands are written in JS, embedded as source and compiled when the tool starts. The standard library is delivered next to it (`stdlib.qjslib`) |
 | Firmware + device agent | device | runs the scripts; the agent ("device agent") contains the debug stub and receives the deployments |
-| Debug proxy | host, in `qjsx debug` | CDP adapter written in JS; translates CDP into agent messages; compiles the expressions to evaluate |
+| Debug proxy (not written) | host, in `qjsx debug` | CDP adapter written in JS; translates CDP into agent messages; compiles the expressions to evaluate |
 | VS Code + js-debug | host | debugger client, built into VS Code, speaks CDP |
 
 ### 1.4 The end-to-end flow
 
 1. The developer writes JavaScript sources in a project described by `qjsx.json`.
 2. `qjsx build` compiles the sources with the host compiler ("debug info" option), and
-   produces a `.qjspkg` package: bytecode, debug sidecars, copy of the sources, manifest. It
-   also writes the `.d.ts` typings of the native modules for VS Code.
-3. `qjsx deploy` sends to the device, through the agent, a reduced package (same extension, the
-   manifest says what it contains) which is written to flash.
+   produces a `.qjspkg` package: bytecode, debug sidecars, copy of the sources, manifest, with
+   the library modules the program imports (4.5). Planned, not done: it also writes the
+   `.d.ts` typings of the native modules for VS Code.
+3. `qjsx deploy` sends the package to the device, through the agent, which writes it to
+   flash. Today the whole package is sent, debug sidecars and sources included; a reduced
+   package (same extension, the manifest says what it contains) is planned.
 4. The device runs the bytecode, with no compilation on the target.
-5. `qjsx debug` starts the proxy: it opens a CDP server for VS Code (through js-debug) and talks
-   to the device agent over a serial or TCP link. It finds the debug sidecars thanks to the
-   build ids that the agent reports to it.
+5. Planned, not written: `qjsx debug` starts the proxy. It opens a CDP server for VS Code
+   (through js-debug) and talks to the device agent over a serial or TCP link. It finds the
+   debug sidecars thanks to the build ids that the agent reports to it.
 
 ```mermaid
 flowchart LR
@@ -109,6 +115,8 @@ flowchart LR
 
 Three links are planned: serial (UART, COM/USB), WiFi and wired network (TCP). The debug
 protocol is independent of the transport: the same framing applies everywhere (section 4.3).
+Done today: the serial link of the ESP32-S3 (UART0), and TCP for the desktop agent that stands
+in for a board.
 
 ---
 
@@ -131,9 +139,12 @@ and the list of every item in [quickjs-items.csv](quickjs-items.csv).
 
 ### 2.2 The split engine (`engine/qjsx/`)
 
-> **Status: done.** Generated automatically; tested and measured (section 2.4).
+> **Status: done.** Generated automatically, tested and measured (section 2.4), then modified
+> by hand since 2026-11-10 (section 2.3 and [engine-changes.md](engine-changes.md)).
 
-`engine/qjsx/` contains the same engine split into **55 source files**. Each file
+`engine/qjsx/` contains the same engine split into **55 source files** by the generator. The
+hand changes added three files: `quickjs-debug.h`, `core/debug.c` and
+`compiler/debug-info.c`. Each generated file
 states at its top the lines of `quickjs.c` it comes from (for example `builtins/json.c`:
 "Lines of quickjs.c: 23156-23360, 49092-50177").
 
@@ -226,9 +237,11 @@ Steps of `split.js`:
 
 **Rules of use:**
 
-- `engine/qjsx/` is **generated**: any manual change is lost at the next
-  regeneration. The author of the project must be asked before changing it by hand or
-  regenerating it.
+- `engine/qjsx/` was generated, and now carries changes made by hand: a regeneration would
+  erase them, so `regen.sh` refuses to overwrite the folder without `--force`. To move to a
+  new version of QuickJS, regenerate in another folder, then reapply
+  [engine-changes.patch](engine-changes.patch). The author of the project must be asked
+  before the engine is regenerated, or changed outside the work already agreed.
 - The line ranges of `split-config.js` refer to the `quickjs.c` of version
   2026-06-04. For another version, they must be checked again.
 
@@ -301,17 +314,19 @@ What the split already allows:
   `JS_AddIntrinsicEval` with `__JS_EvalInternal`. If the pointer is NULL, `JS_EvalInternal` throws
   a `TypeError` "eval is not supported"; this is the path of `JS_Eval`, `JS_EvalThis`,
   `JS_EvalObject`, of the global eval, of the `Function` constructor and of the direct eval;
-- `JS_NewContext` calls `JS_AddIntrinsicEval`; a build without compiler must start from
-  `JS_NewContextRaw` and add only the intrinsics it wants;
+- `JS_NewContext` called `JS_AddIntrinsicEval`, the only dependency of the rest of the engine
+  on the compiler: with `QJSX_NO_COMPILER` defined it no longer does (change H);
 - the couplings identified in [quickjs-map.md](quickjs-map.md) (JSON, `free_function_bytecode`,
   `opcode_info`, `js_parse_error` in the exports, mixed roles of the `eval-api`, compiler
   types) are handled by the split (sections 2.2 and 2.3).
 
-No build for a device without `compiler/` has been made yet.
+The ESP32-S3 firmware is such a build (section 5.5); on the PC, the executable `qjsx-target`
+is the tool linked with the engine without compiler, used by the tests to run packages like
+a device does.
 
 ### 2.6 Compiler changes
 
-> **Status: done on 2026-11-10, with two deviations.** Up-to-date description, files touched and
+> **Status: done on 2026-11-10, with three deviations.** Up-to-date description, files touched and
 > tests in [engine-changes.md](engine-changes.md). The text below is the original
 > design. Deviations:
 > - the positions go through the operand of `OP_line_num` (two bits for the kind), not through a
@@ -354,8 +369,8 @@ No build for a device without `compiler/` has been made yet.
 
 > **Status: done on 2026-11-10, except `sf->call_sp`** (prediction of uncaught
 > exceptions, not done). Public API in `engine/qjsx/quickjs-debug.h`, details in
-> [engine-changes.md](engine-changes.md), section F. The stub that uses it is not written
-> yet.
+> [engine-changes.md](engine-changes.md), section F. The debugger stub of the device agent
+> uses it (section 4.3).
 
 - **Two dispatch tables** (option C): a normal table and a debug table. The debug
   table checks a per-function bitmap of the stop positions. When "computed goto" is
@@ -372,20 +387,34 @@ Existing entry points useful to the debugger (lines of the original `quickjs.c`,
 
 ### 2.8 Build
 
-> **Status: done for the test build of the split; project build to be updated.**
+> **Status: done.**
 
-- Toolchain: Windows, gcc 13.1 mingw64, premake5 5.0.0, node 26. The makefiles are
-  generated with `premake5 gmake --cc=gcc --shell=posix`.
-- The project's `premake5.lua` / `qjs.make` still build `engine/qjs-bellard` and are not up to
-  date for 2026-06-04: `dtoa.c` must be added (regenerate `qjs.make`) and
-  `CONFIG_VERSION` defined (`-DCONFIG_VERSION="2026-06-04"`).
-- The test build (original and split) is in `tools/quickjs-split/test/`.
+- Toolchain: Windows, gcc 13.1 mingw64, premake5 5.0.0. The makefiles are
+  generated with `premake5 gmake --cc=gcc --shell=posix`, then `make -C build config=release`
+  (or `config=debug`).
+- `premake5.lua` builds the engine as two static libraries, `qjsx-engine` and
+  `qjsx-engine-target` (the same without `compiler/`, with `QJSX_NO_COMPILER`), and the tool
+  (section 6). `CONFIG_VERSION` comes from `engine/qjsx/VERSION`.
+- The devices build the same engine sources through `ports/cmake/qjsx.cmake` (section 5.5).
+- The test build that compares the original engine and the split one is apart, in
+  `tools/quickjs-split/test/` (it needs node for its benchmark table).
 
 ---
 
 ## 3. The debugger
 
-> **Status of the whole section: designed, not implemented.**
+> **Status of the whole section: in progress.** This section is the design. What exists
+> today (2026-11-11):
+> - **done, on the device**: the debugger stub of the agent (`common/agent/debugger.*`):
+>   breakpoints and statement stops, pause of a running program, stepping, pause on every
+>   exception, stack, slots and properties, changing a variable, loading and calling
+>   bytecode compiled on the host. Messages in 4.3; tested through the desktop agent and on the
+>   ESP32-S3 (`tests/debugger.test.js`, 52 checks);
+> - **known defect**: step over and step out compare the stack depth, not the frames as
+>   designed in 3.3 ([known-bugs.md](known-bugs.md));
+> - **not done**: the whole host side (proxy, CDP server, `qjsx debug`, VS Code), the
+>   "uncaught" prediction (3.4), conditional breakpoints (3.6), waiting for the debugger at
+>   startup (3.8).
 
 ### 3.1 Architecture
 
@@ -401,8 +430,8 @@ Existing entry points useful to the debugger (lines of the original `quickjs.c`,
   loop only waits on stdin, timers and workers. The host therefore needs
   C modules for an event loop, TCP sockets and the serial port (section 5).
 - **Split debug info**: since the code arrives precompiled,
-  the debug info lives on the host, next to the proxy, in a sidecar indexed by the
-  build id stored in the bytecode, and not in the target's bytecode.
+  the debug info lives on the host, next to the proxy, in a sidecar, and not in the target's
+  bytecode. A script is identified by the build id of its package and its module name (3.7).
 
 Division of roles:
 
@@ -425,11 +454,8 @@ Division of roles:
   the bytecode may be in ROM, and patching complicates stepping.
 - The possible stop positions are the statement start positions produced by the
   compiler (2.6).
-- The proxy sends the stop positions with the `SetStopPoints` message. It keeps the list of
-  breakpoints and re-applies them at each `ScriptLoaded` and after a device restart.
-
-Note: one bullet of `CLAUDE.md` still presents breakpoint detection as "under
-discussion", while another gives it as decided (option C). See section 7.
+- The proxy sends the stop positions with the `SET_STOPS` message. It keeps the list of
+  breakpoints and re-applies them at each `SCRIPT_LOADED` and after a device restart.
 
 ### 3.3 Stepping
 
@@ -449,7 +475,8 @@ All the rules are expressed as "next statement start":
 
 ### 3.4 Pause on exceptions
 
-Two modes, set by `SetPauseOnExceptions`:
+Two modes, set by `SET_EXCEPTIONS`. Today the stub pauses in the "all" mode only; the
+"uncaught" mode never pauses, because its prediction is not done:
 
 - **"all"**: pause at the `throw`, before the stack is unwound.
 - **"uncaught"**: the prediction is made at the `throw`, by scanning the frames
@@ -461,17 +488,18 @@ Two modes, set by `SetPauseOnExceptions`:
 - **Async boundaries**: an exception that crosses the boundary of an `async` function
   counts as caught. Unhandled promise rejections are reported (console, stack captured
   at the `throw`) through the "promise rejection tracker".
-- The agent also emits an `UncaughtException` event.
+- An uncaught exception of the program is printed on its error output (a `LOG` message
+  during a session), and the program goes on. A dedicated event is not done.
 
 ### 3.5 Expression evaluation
 
 - The proxy wraps the expression in a function whose parameters are the variables
   visible at the stop position (known from the debug sidecar), compiles it on the host, then the
-  stub runs it (`LoadFunction` then `Call`).
+  stub runs it (`LOAD_FUNCTION` then `CALL`).
 - This covers `Runtime.evaluate`, `Debugger.evaluateOnCallFrame` and `Runtime.callFunctionOn`.
-- The js-debug helper functions are loaded only once (`LoadFunction`).
-- Accessors (getters) are never run implicitly during a `GetProperties`.
-- Changing a variable goes through `SetSlot`.
+- The js-debug helper functions are loaded only once (`LOAD_FUNCTION`).
+- Accessors (getters) are never run implicitly during a `GET_PROPERTIES`.
+- Changing a variable goes through `SET_SLOT`.
 
 ### 3.6 Conditional breakpoints, logpoints, hit counts
 
@@ -480,11 +508,13 @@ Conditions, logpoints and hit counts are compiled by the proxy and
 
 ### 3.7 Source / bytecode / sidecar consistency
 
-- Each script has a build id: the hash of its bytecode with the id field set to
-  zero. The stub reports to the proxy the build id of the loaded scripts (the sources do not say
-  through which field of which message).
-- The proxy indexes the `.qjspkg` packages it finds to find the sidecar that matches a
-  build id.
+- Each script has a build id: the first 32 hexadecimal digits of the SHA-256 of its
+  bytecode. It is recorded in the manifest of the package and in the sidecar, not in the
+  bytecode itself.
+- The device reports the build id of the package it runs (`STARTED`, `INFO`) and the name of
+  each module it loads (`SCRIPT_LOADED`, `LIST_SCRIPTS`): a script is identified by both.
+- The proxy indexes the `.qjspkg` packages it finds to find the package, then the sidecar of
+  the module.
 - The proxy checks the consistency between the source, the bytecode and the sidecar (the manifest
   contains the hash of the source).
 - The scripts are announced to VS Code with `file:///` URLs pointing to the local sources.
@@ -519,32 +549,33 @@ Conditions, logpoints and hit counts are compiled by the proxy and
 >   ids of the scripts and of the main module; file `<name>-<12 digits>.qjspkg`;
 > - zip with stored entries, fixed dates (1980-01-01): same content, same archive.
 >
-> Temporary deviation: the bytecode is compiled with `JS_STRIP_SOURCE` (without the source text, but
-> with positions, file name and variable names). Full stripping (`JS_STRIP_DEBUG`)
-> breaks `import.meta` and dynamic `import()`: QuickJS finds the current module by the file
-> name of the debug info (`JS_GetScriptOrModuleName`, Bellard's "XXX" comment).
-> The fix (a reference to the script in each function) is part of the engine changes
-> for the debugger. The build id is not yet written in the bytecode
-> itself (same step).
+> The bytecode is compiled with every debug info stripped (`strip: "all"`, `JS_STRIP_DEBUG`):
+> no source text, positions nor variable names. The engine keeps the module name outside the
+> debug info (change A of [engine-changes.md](engine-changes.md)), so `import.meta` still
+> works. There is no build id inside the bytecode: a script is identified by the build id of
+> its package and its module name.
 
-- **One zip per build**, extension `.qjspkg`. The same extension is used for the full package and
-  for the reduced package sent to the device; the manifest says what it contains.
+- **One zip per build**, extension `.qjspkg`. Today there is one kind of package, the full
+  one, and it is what `qjsx deploy` sends. A reduced package for the device (same extension,
+  the manifest saying what it contains) is planned, not done.
 - **Entries stored without compression**: no dependency on a compression library, and
-  the device can execute the bytecode in place from flash, with `JS_READ_OBJ_ROM_DATA`
-  (on the ESP32 through `esp_partition_mmap`). **This last point is to verify.**
+  the device reads the package in place. On the ESP32 the slot of the package is mapped with
+  `esp_partition_mmap` and the modules are read from there, without copying the package into
+  RAM. The engine still copies the bytecode it loads: `JS_READ_OBJ_ROM_DATA`, which would let
+  it run the bytecode straight from flash, is not used. **To try.**
 - The zip (with its CRC32) is written by the host JS.
 
 Content:
 
 | Entry | Content |
 |---|---|
-| `manifest.json` | format version, build id, compiler id, list of the scripts (path, script build id, source hash) |
+| `manifest.json` | format version, build id, compiler id, bytecode version, main module, `env`, libraries, native modules, list of the scripts (path, script build id, source hash) |
 | `bytecode/` | the bytecode, that is, what goes to the device |
 | `debug/` | one JSON debug sidecar per script |
 | `src/` | exact copy of the compiled sources |
 
-The exact names of the manifest fields and the hash algorithm of the source are not fixed
-in the sources.
+The exact names of the manifest fields are in the status block above; every hash is a
+SHA-256.
 
 **Package compiled for another engine** (done on 2026-11-11). An engine only reads the
 bytecode of its own version (QuickJS's `BC_VERSION`, `0x45` today, given by
@@ -605,7 +636,7 @@ never travel to or from the device: they are read in the sidecar.
 
 ### 4.3 The device agent protocol
 
-> **Status: done for deployment** (the debug part will come with the debugger). Two
+> **Status: done**, for deployment and for the device side of the debugger. Two
 > implementations that must stay equivalent: JS on the host side (`host/js/cbor.js`,
 > `frames.js`, `protocol.js`, `device.js`, `deploy.js`) and C++ on the device side (`common/agent/`:
 > `cbor`, `frames`, `protocol.h`, `agent` — portable code, for the device and for the desktop agent
@@ -667,11 +698,12 @@ On every link (serial and TCP), a frame has the form:
 - COBS guarantees that there is no `0x00` byte inside the frame; `0x00` delimits the frames.
 - A frame whose CRC is wrong is ignored.
 - On a serial link, bytes that do not decode as a valid frame are console text.
-  During a session, the stub wraps the console, `printf` and the ESP-IDF logs into
-  `Log` messages.
+  During a session, the agent sends the console of the program (`console.*`, uncaught
+  exceptions) as `LOG` messages. The logs of ESP-IDF itself are not wrapped: on UART0 they
+  stay plain text between the frames. Wrapping them is planned for the links that are not
+  the console.
 
-The exact value and size of the magic marker, and the CRC-16 variant, are not
-specified in the sources.
+The magic marker is one byte, `0xE5`; the CRC is CRC-16/CCITT-FALSE (status block above).
 
 #### Encoding
 
@@ -687,47 +719,52 @@ integer-keyed maps.
   - `persistent`.
 - Primitive values travel inline.
 - Names never travel: they come from the debug sidecar.
-- `Release` releases handles.
+- `RELEASE` releases handles.
 
 #### Robustness
 
 - Requests are numbered: a duplicate gets the same response again, without being
   executed again.
-- The maximum size of a message is negotiated in `Hello`.
-- Big payloads are chunked (`Upload Begin` / `Chunk` / `End`).
+- The agent gives the maximum size of a message in its answer to `HELLO` (`MAX_MESSAGE`,
+  64 KB).
+- Big payloads are chunked (`UPLOAD_BEGIN` / `UPLOAD_CHUNK` / `UPLOAD_END`).
 
 #### Messages
 
 | Category | Messages |
 |---|---|
-| Opening | `Hello` (maximum size, token over TCP) |
-| Execution control | `Pause`, `Resume`, `Step`, `SetStopPoints`, `SetPauseOnExceptions` |
-| Scripts | `ListScripts` |
-| Inspection | `GetStack`, `GetFrameSlots`, `GetProperties` (without running getters), `GetInternals` |
-| Modification | `SetSlot` |
-| Code execution | `LoadFunction`, `Call` |
-| Handles | `Release` |
-| Events (agent → proxy) | `Paused`, `Resumed`, `ScriptLoaded`, `Log`, `UncaughtException` |
-| Deployment | write a `.qjspkg` to flash (through `Upload Begin`/`Chunk`/`End`), list files, restart |
+| Opening | `HELLO` (protocol version, token; the answer gives the maximum size), `INFO` |
+| Deployment | `UPLOAD_BEGIN`, `UPLOAD_CHUNK`, `UPLOAD_END` (write a `.qjspkg` to flash), `RUN`, `STOP`, `RESET` |
+| Debug session | `DEBUG_ATTACH`, `DEBUG_DETACH` |
+| Execution control | `PAUSE`, `RESUME`, `STEP`, `SET_STOPS`, `SET_EXCEPTIONS` |
+| Scripts | `LIST_SCRIPTS` |
+| Inspection | `GET_STACK`, `GET_SLOTS`, `GET_PROPERTIES` (without running getters; it also gives the internal slots) |
+| Modification | `SET_SLOT` |
+| Code execution | `LOAD_FUNCTION`, `CALL` |
+| Handles | `RELEASE` |
+| Events (agent → host) | `LOG`, `STARTED`, `EXITED`, `PAUSED`, `RESUMED`, `SCRIPT_LOADED` |
 
-The names of the deployment messages other than the upload, and the details of the fields of each
-message, are not fixed in the sources yet.
+The numbers and the fields of each message are in `host/js/protocol.js` and
+`common/agent/protocol.h`, which must stay identical. Not done: listing the files of a device.
 
 #### Security over TCP
 
-Over TCP, the stub is **disabled by default**, and a **token** is required in `Hello`.
+Design: over TCP, the agent is **disabled by default**, and a **token** is required in
+`HELLO`. Done today: the token (the desktop agent started with `--token`). No device has a
+TCP link yet.
 
 ### 4.4 Position kinds
 
-> **Status: designed, not implemented.**
+> **Status: done on 2026-11-10** (engine change E; the kinds are the numbers of the
+> `positions` of the debug sidecar, section 4.2).
 
 Each position recorded by the compiler carries a kind:
 
-| Kind | Origin |
-|---|---|
-| statement | statement start, `catch` clause, entry of the function body, loop condition |
-| return | each `return` and the implicit return (lets the return value be shown) |
-| expression | planned kind; its precise use is not detailed in the sources |
+| Kind | Number | Origin |
+|---|---|---|
+| expression | 0 | the positions QuickJS already recorded (its pc2line table): error positions, stack traces |
+| statement | 1 | statement start, `catch` clause, entry of the function body, loop condition and update: where the debugger can stop |
+| return | 2 | each `return` and the implicit return (lets the return value be shown) |
 
 ### 4.5 The `.qjslib` libraries
 
@@ -824,7 +861,7 @@ its position (engine change J). The JS of the tool itself is not concerned.
   `qjsx run package.qjspkg`.
 - A typo in the name of a native module (`"cryto"`) is only seen when the
   program is loaded: the build does not know the list of the native modules of a firmware. It is planned
-  that the firmware gives it in `Hello` and that `qjsx deploy` compares it to `natives`.
+  that the firmware gives it in `HELLO` and that `qjsx deploy` compares it to `natives`.
 - If only `lib/stdlib/qjsx.json` changes, `make` does not remake `stdlib.qjslib` (it remakes it
   when the executable is relinked, so as soon as a source of `stdlib` changes).
 
@@ -834,17 +871,19 @@ its position (engine change J). The JS of the tool itself is not concerned.
 
 ### 5.1 Event loop
 
-> **Status: done for the host** (`common/runtime/loop.h`, `loop.cpp`, `platform_host.cpp` for
-> Windows and POSIX) and tested (`tests/runtime.test.js`). Device version (FreeRTOS queue) not
-> implemented. On the host, an uncaught exception stops the loop with code 1
-> (`setExitOnUncaught`), like Node; the device will print it and continue.
+> **Status: done** (`common/runtime/loop.h`, `loop.cpp`), for the host (`platform_host.cpp`,
+> Windows and POSIX) and for the FreeRTOS devices (`ports/freertos/platform_freertos.cpp`);
+> tested by `tests/runtime.test.js` and on the ESP32-S3. On the host, an uncaught exception
+> stops the loop with code 1 (`setExitOnUncaught`), like Node; on a device it is printed and
+> the program goes on. Not done: posting a message from an interrupt handler.
 
 Same model on every platform (host and device):
 
 - **a single JS thread**;
-- **event producers** (drivers, I/O threads, ISRs on the device) post messages
-  into **a single bounded queue**: FreeRTOS queue on the device, mutex + condition/event on
-  the host;
+- **event producers** (drivers, I/O threads, later ISRs on the device) post messages
+  into **a single bounded queue**, guarded by `platform::Signal`: a mutex and a condition on
+  the host, a mutex and a binary semaphore on FreeRTOS (not a FreeRTOS queue, as first
+  planned);
 - the loop drains the promise jobs, waits for the next message or timer, then handles it on
   the JS thread;
 - messages carry a **source id + a generation**, never a raw pointer
@@ -858,7 +897,9 @@ continues; restarting remains an option.
 
 ### 5.2 Async styles
 
-> **Status: designed, not implemented.**
+> **Status: rule applied** by the modules written so far (`net`, `serial`: callbacks for
+> the data and the close, a promise for `connect`). The `uart` example below is the design:
+> that module does not exist yet.
 
 - **Callbacks** for spontaneous events: `uart.onData(fn)`.
 - **Promises** for operations started by the script:
@@ -919,7 +960,8 @@ C++17, header-only, **no `std::` at all**, no C++ exceptions, no RTTI.
 - The JS constructor corresponds to an optional `init(...)` method; the C++ constructor has
   no arguments.
 - Fields become properties, read-only if they are `const`.
-- `JS_MODULE(name, classes...)` declares a module.
+- `JS_MODULE(name, m) { ... }` declares a module: its body registers the functions
+  (`JS_FUNCTION`) and the classes (`JS_ADD_CLASS`).
 
 #### Lifetime and GC
 
@@ -931,13 +973,13 @@ C++17, header-only, **no `std::` at all**, no C++ exceptions, no RTTI.
 
 #### Typings
 
-`.d.ts` typings for VS Code can be generated from the declarations; `qjsx build`
-writes them (section 6).
+`.d.ts` typings for VS Code can be generated from the declarations. Planned, not done:
+`qjsx build` would write them (section 6).
 
 ### 5.4 Standard library
 
-> **Status: partly done for the host** (`common/runtime/modules/`), tested by
-> `tests/runtime.test.js` (46 checks):
+> **Status: done for what is listed here** (`common/runtime/modules/` for what is shared
+> with the devices, `host/modules/` for the host only), tested by `tests/runtime.test.js`:
 > - globals: `console` (`log`, `info`, `debug`, `warn`, `error`), `setTimeout`, `setInterval`,
 >   `clearTimeout`, `clearInterval`, `TextEncoder` / `TextDecoder` (UTF-8 only), `process`
 >   (`argv`, `env`, `platform`, `exit`, `cwd`), global as in Node; on a device (agent),
@@ -958,7 +1000,8 @@ writes them (section 6).
 >   `write(text or bytes)`, `close()`, `remoteAddress()`, `remotePort()`. One read
 >   thread per connection; `listen` listens on 127.0.0.1 by default (tested, `tests/net.test.js`);
 > - `serial` (host): `list()`, `open(port, {baudRate})` → `onData`, `onClose`, `write`,
->   `close`, 8N1. List tested; opening and exchanges **not tested for lack of hardware**;
+>   `close`, 8N1. Used on Windows with the ESP32-S3 board (deployment, debugger); the POSIX
+>   part is written, not tried;
 > - `process.stdout.write` / `process.stderr.write`.
 >
 > On the device, without a compiler, a module written in JS such as `stdlib/path` arrives as bytecode
@@ -975,24 +1018,23 @@ the device where it makes sense.
 **Globals:**
 
 - `console`;
-- `setTimeout`, `setInterval`, `clearTimeout`;
+- `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`;
 - `TextEncoder`, `TextDecoder`;
+- `process`;
 - `Uint8Array` for bytes (no Node-style `Buffer`).
 
 **Modules:**
 
 | Module | Platform | Description |
 |---|---|---|
-| `fs` | host, and device where relevant | files, synchronous |
+| `fs` | host; present on a device, where it fails with `ENOSYS` until a board has a file system | files, synchronous |
 | `stdlib/path` | all (standard library, in JS) | paths |
-| `process` | host | |
-| `net` | | TCP, asynchronous |
-| `serial` | host | serial port; on the device, the equivalent is `uart` |
-| `crypto` | | `sha256` |
+| `crypto` | all | `sha256` |
+| `net` | host | TCP, asynchronous |
+| `serial` | host | serial port; on the device, the equivalent will be `uart` |
 | `compiler` | host | compile API |
 
-The sources do not specify the platform of `net` and `crypto` beyond the rule
-"shared with the device where it makes sense".
+`process` is a global, on every platform. No hardware module (GPIO, I2C, `uart`…) exists yet.
 
 **Naming rule:**
 
@@ -1069,17 +1111,21 @@ of listening to the console, against one every 5 s before).
   therefore leaves the installed package intact, and the running program, mapped from its slot by
   `esp_partition_mmap`, is never erased under it.
 - **Links**: the board starts all those it can handle; the host chooses its own, and
-  the link that receives the `Hello` carries the session. Today UART0 (COM port, CH343): the
+  the link that receives the `HELLO` carries the session. Today UART0 (COM port, CH343): the
   UART driver also serves the console (`uart_vfs`), one write per call, so a frame is
   never cut by text. To come: native USB, TCP over WiFi.
-- **Console**: during a session, the program's output goes out as `Log` messages on the link
+- **Console**: during a session, the program's output goes out as `LOG` messages on the link
   of the session; otherwise it goes to the ESP-IDF console (UART0, 921600 baud).
 - **Engine**: two changes for newlib (`engine-changes.md`, I); compile options
-  for GCC 15 on 32 bits (`int32_t` is a `long`).
+  for GCC 14 and later on 32 bits (`int32_t` is a `long`).
 - **Libraries**: a program that imports `stdlib/path` and a test library
   (`tests/fixtures/uselib`) gives on the board the same output as on the PC (2026-11-11);
   the modules come from its package (section 4.5).
-- **Limits**: no `fs` yet (`cwd()` is `"/"`), no `net`.
+- **Limits**: no file system yet (`fs` fails with `ENOSYS`, `cwd()` is `"/"`), no `net`,
+  no hardware module.
+
+How to add a board, or a new chip, is described step by step in
+[new-device.md](new-device.md).
 
 ---
 
@@ -1087,7 +1133,7 @@ of listening to the console, against one every 5 s before).
 
 > **Status: in progress.** Done (`host/`):
 > - `qjsx run <file.js | package.qjspkg> [arguments]`: a script is run as an ES
->   module; a package is run from its bytecode, as the device will do (package reader
+>   module; a package is run from its bytecode, as the device does (package reader
 >   `common/runtime/package.*`, without copying, shared with the device). Module loader: native,
 >   bytecode of the package, embedded JS, files;
 > - `qjsx build [directory]`: compiles the project (`qjsx.json`) into a `.qjspkg` (see 4.1), with
@@ -1112,9 +1158,10 @@ of listening to the console, against one every 5 s before).
 > Tests: `tests/run-tests.sh [Release|Debug]` (binding, runtime, tool modules, package
 > run exactly like the sources, zip readable by an external tool, reproducible build,
 > syntax error with its location). Build: `premake5 gmake --cc=gcc --shell=posix` then
-> `make -C build config=release`; executables in `bin/Release/` (`qjsx`, and `qjsx-tests`
-> which adds the test module). The other commands are not implemented yet. The old
-> program (`legacy/main.cpp`, `legacy/devices/`) is no longer built but stays on the disk.
+> `make -C build config=release`; in `bin/Release/`: `qjsx`, `stdlib.qjslib`, `qjsx-tests`
+> (which adds the test modules) and `qjsx-target` (the tool linked with the engine without
+> compiler). Not implemented: `qjsx debug` and `qjsx trace`. The old program (`legacy/`) is
+> no longer built; it stays on the author's disk and is not in the repository.
 
 ### 6.1 Composition
 
@@ -1122,24 +1169,25 @@ A single executable:
 
 - host QuickJS, with the compiler;
 - C modules: event loop, sockets, serial port, SHA-256, compile API;
-- commands written in JS, precompiled and embedded.
+- commands written in JS, embedded as source and compiled when the tool starts;
+- next to the executable, the standard library `stdlib.qjslib` (section 4.5).
 
 ### 6.2 Commands
 
 | Command | Role |
 |---|---|
-| `build` | compiles the project, produces the `.qjspkg` and the `.d.ts` of the native modules |
+| `run` | runs a script on the PC, or a package from its bytecode like a device does |
+| `build` | compiles the project and produces the `.qjspkg` (planned: the `.d.ts` of the native modules) |
 | `mklib` | compiles a library project, produces the `.qjslib` (section 4.5) |
-| `deploy` | sends the package to the device through the agent |
-| `debug` | starts the proxy: CDP server for VS Code |
-| `monitor` | |
-| `targets` | |
-| `device ls` / `device reset` / `device info` | operations on the device; from their names and the deployment messages: list files, restart, information |
-| `trace` | |
-| `run` | |
+| `deploy` | sends a package to the device through the agent and starts it; `--monitor` then shows the program's output |
+| `monitor` | shows the output of the program running on a device |
+| `device info` / `run` / `stop` / `reset` | installed package and state, start, stop, restart of the device |
+| `targets` | lists the serial ports of the PC |
+| `agent` | the device agent on the desktop, which stands in for a board |
+| `debug` | planned: starts the proxy, a CDP server for VS Code |
+| `trace` | planned; its behaviour is not designed yet |
 
-Only the names of `monitor`, `targets`, `trace` and `run` appear in the sources; their
-behaviour is not described.
+Planned too, not done: `device ls`, to list the files of a device.
 
 ### 6.3 Targets
 
@@ -1164,7 +1212,7 @@ key or one of the wrong type is an error:
 | `exclude` | `[]` | patterns removed from `sources` |
 | `output` | `"build/packages"` | folder of the packages |
 | `keep` | `10` | number of packages kept for the project |
-| `target` | — | default device (not used yet) |
+| `target` | — | default device of `deploy`, `monitor` and `device` when `--target` is not given |
 | `env` | — | `process.env` of the program on a device (strings only) |
 | `libraries` | `[]` | paths of the `.qjslib` files the program may import, in addition to `stdlib` |
 
@@ -1179,11 +1227,13 @@ A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with
 
 ### 6.5 VS Code integration
 
+> **Status: designed, not implemented.**
+
 - "attach" configuration. The js-debug target type to use (node or chrome) is
   **to verify**.
 - The scripts are announced with `file:///` URLs to the local sources.
 - `qjsx build` writes the `.d.ts` of the native modules.
-- The proxy keeps the breakpoints and re-applies them on `ScriptLoaded` and after a device
+- The proxy keeps the breakpoints and re-applies them on `SCRIPT_LOADED` and after a device
   restart.
 - `--wait-debugger`: see 3.8.
 
@@ -1193,8 +1243,9 @@ A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with
 
 ### 7.1 To verify (flagged as such in the sources)
 
-- Execution of the bytecode in place from flash (`esp_partition_mmap` +
-  `JS_READ_OBJ_ROM_DATA`) with a `.qjspkg` stored without compression.
+- Running the bytecode straight from flash with `JS_READ_OBJ_ROM_DATA`. Reading the package
+  in place through `esp_partition_mmap` works; the engine still copies the bytecode it loads
+  (section 4.1).
 - js-debug target type for the "attach" configuration: node or chrome.
 - The explanation of the microbench differences (inlining of `static` functions by gcc) is an
   unverified hypothesis.
@@ -1204,21 +1255,22 @@ A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with
 | Task | State |
 |---|---|
 | Analyze the possible optimizations of the engine (later), starting from the microbench differences (−48% to +27%) | open |
-| Send JS sources (files, folders) to the target | decided: the agent sends a `.qjspkg` to flash; not implemented |
-| Make it easier to write C objects visible in JS | answer: binding library (5.3), in progress |
-| Decide what to remove from `quickjs-libc` | decided: replaced by the project's modules (5.4); not implemented |
+| Send JS sources (files, folders) to the target | done differently: `qjsx deploy` sends a `.qjspkg`, written to flash by the agent (4.3, 5.5) |
+| Make it easier to write C objects visible in JS | done: binding library (5.3) |
+| Decide what to remove from `quickjs-libc` | done: it is not used; the project's modules replace it (5.4) |
 
-### 7.3 Points the sources do not specify
+### 7.3 Points not designed yet
 
-- Value and size of the magic marker, CRC-16 variant, details of the fields of each agent
-  message, names of the deployment messages.
-- Hash algorithm of the build id and of the source hash (SHA-256 is available on the host side,
-  but its use for these ids is not written down).
-- Names of the keys of `qjsx.json` and of the fields of `manifest.json`.
-- Behaviour of the `monitor`, `targets`, `trace` and `run` commands.
-- Use of the "expression" position kind.
+Most of the points this list held were settled when the code was written (framing, hashes,
+keys of `qjsx.json` and of the manifest, commands, position kinds: see sections 4 and 6).
+Still open:
+
 - Writing back the variables modified by an evaluated expression (the wrapper function
-  receives the variables as parameters; only `SetSlot` is described for changing a variable).
+  receives the variables as parameters; only `SET_SLOT` is described for changing a variable).
+- Behaviour of the `trace` command.
+- The reduced package sent to a device (which entries it keeps).
+- The style of the JS API of the hardware modules.
+
 ### 7.4 Inconsistencies between sources
 
 The inconsistencies noticed when this document was written have been fixed in the sources:
@@ -1251,11 +1303,18 @@ The inconsistencies noticed when this document was written have been fixed in th
 | Path | Content |
 |---|---|
 | `engine/qjs-bellard/` | upstream QuickJS 2026-06-04, unmodified |
-| `engine/qjsx/` | the same engine split into 55 files, generated |
-| `tools/quickjs-split/` | generator, configuration, test build (`test/premake5.lua`), tests and microbench (`test/run.sh`, `test/bench-table.js`) |
+| `engine/qjsx/` | the engine actually built: the same engine split into files by the generator, then modified by hand (2.2, 2.3) |
+| `common/jsbind/` | the C++ ↔ JS binding library (5.3) |
+| `common/runtime/` | event loop, platform interface, memory, files, package reader, SHA-256, modules shared with the devices (5.1, 5.4) |
+| `common/board/` | `board.h`: what the common code needs from a board (5.5) |
+| `common/agent/` | the device agent: protocol, deployment, debugger stub, runner of the installed package (4.3) |
+| `host/` | the `qjsx` tool: C++ entry points, host-only modules, commands written in JS (`host/js/`), desktop platform and board (6) |
+| `lib/stdlib/` | sources of the standard library (4.5) |
+| `ports/` | device firmwares: `cmake/` (common build), `freertos/` (shared by the FreeRTOS ports), `esp32/` (5.5) |
+| `tests/` | `run-tests.sh`, the test scripts and their fixtures |
+| `tools/` | `quickjs-split/` (generator of the split engine, its test build and microbench), `embed-js.lua`, `idf.ps1`, style and documentation checks |
 | `doc/` | documentation |
-| `legacy/main.cpp`, `legacy/devices/` | existing host program (uart and console modules), meant to be replaced |
-| `premake5.lua`, `qjs.make` | project build (to be updated, see 2.8) |
+| `premake5.lua` | build of the desktop tool (2.8) |
 
 ### 8.3 Glossary
 
@@ -1263,7 +1322,7 @@ The inconsistencies noticed when this document was written have been fixed in th
 |---|---|
 | Device agent | software embedded on the device that contains the debug stub and handles deployment |
 | Debug sidecar | one JSON file per script holding the debug info, kept on the host |
-| Build id | id of a script: hash of its bytecode, id field set to zero |
+| Build id | id of a script (SHA-256 of its bytecode, first 32 hexadecimal digits) or of a package (same, over the ids of its scripts, its main module and its `env`) |
 | CDP | Chrome DevTools Protocol, spoken by js-debug |
 | COBS | Consistent Overhead Byte Stuffing: an encoding that removes the `0x00` bytes from a frame |
 | Proxy | CDP adapter on the host, between VS Code and the agent |

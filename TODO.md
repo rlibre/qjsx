@@ -7,9 +7,10 @@
       dans le moteur, firmware `qjsx.bin`. Les bibliothèques du moteur sont les projets premake
       `qjsx-engine` et `qjsx-engine-target`. Seul le dossier de travail garde l'ancien nom
       (`C:\Sandbox\espjs`). Tests PC OK en Release et en Debug (49 vérifications), tests
-      d'origine de QuickJS OK, firmware compilé. RESTE : flasher ce firmware (la carte
-      s'annonce encore « espjs esp32s3 ») ; un projet existant doit renommer son
-      `espjs.json` en `qjsx.json`.
+      d'origine de QuickJS OK. Firmware `qjsx.bin` flashé et vérifié sur la carte le
+      2026-11-11 : elle s'annonce « qjsx esp32s3 », `process.argv` vaut `["qjsx", ...]`,
+      déploiement, refus d'un paquet d'un autre moteur et debugger (52/52) OK. Un projet
+      existant doit renommer son `espjs.json` en `qjsx.json`.
 - [x] **Dépôt git** : https://github.com/rlibre/qjsx.git, branche `main`. `README.md` en
       anglais. **Documentation en anglais** (2026-11-11) : tous les fichiers de `doc/` sont
       traduits ; `TODO.md` et `doc/prompt-reprise.md` (hors dépôt) restent en français.
@@ -129,11 +130,27 @@
         `ports/freertos/` ou équivalent, ce que `platform.h` et `board.h` demandent (fonction par
         fonction, threads, propriété), point d'entrée, liaisons, stockage des paquets, pièges
         rencontrés (int32_t = long, newlib, `-Werror` d'IDF, PSRAM octale ou quad).
-      À écrire quand la structure par carte est validée sur l'ESP32 (en cours).
+      ÉCRIT le 2026-11-11 par un agent (`doc/new-device.md`, 756 lignes, en anglais), PAS
+      ENCORE CONTRÔLÉ en entier contre le code : seul le premier tiers est relu. Reste aussi
+      à le lier depuis `README.md`. Ce que l'agent a relevé dans le code (macro en double
+      dans `qjsx.cmake`, commentaires d'en-tête périmés, `board::identity()` jamais appelée,
+      une seule liaison à la fois, picolibc au lieu de newlib) est listé dans
+      `doc/prompt-reprise.md`.
+- [x] **`doc/architecture.md` relu et remis à jour** par rapport au code le 2026-11-11
+      (statuts, noms des messages du protocole, commandes, organisation du dépôt).
+- [ ] **Debugger côté PC** (chantier choisi le 2026-11-11, rien de codé). D'abord le
+      pas-à-pas over / out : proposition en attente d'accord (numéro d'activation par frame
+      dans le moteur, au lieu de la profondeur de pile). Puis le cœur du proxy sans CDP, le
+      serveur CDP, VS Code. Détail dans `doc/prompt-reprise.md`.
 - [ ] **Diagramme du principe de fonctionnement** (demande de l'utilisateur, 2026-11-11) : un
       diagramme en SVG qui explique le fonctionnement global du système (tout qjsx : PC,
       outil hôte, paquets, liaisons, agent, moteur sur le device, debugger). Emplacement décidé :
       un fichier SVG dans `doc/`, affiché en tête de doc/architecture.md.
+- [ ] **Threads ou workers** (demande de l'utilisateur, 2026-11-11) : réfléchir à la
+      possibilité de faire tourner du JS sur plusieurs threads (ou des workers). À étudier :
+      un runtime QuickJS par thread, ce que ça coûte en mémoire sur un device, comment les
+      threads échangent (messages), et ce que ça change pour la boucle d'événements, l'agent
+      et le debugger.
 - [ ] **Statistiques du device** (demande de l'utilisateur, 2026-11-11) : l'agent doit pouvoir
       envoyer des statistiques (mémoire, etc.). À concevoir : quelles valeurs, quel message du
       protocole, quelle commande de `qjsx`.

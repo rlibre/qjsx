@@ -431,6 +431,12 @@ C / C++ projects). Summary of what was agreed:
 
 ## Working notes
 
+- SUBAGENTS (user, 2026-11-11): every subagent is launched with the model Opus 5.5
+  (`model: "opus"`) and a high reasoning effort (`effort: "high"`), never with the model of
+  the session (Fable 5.2 costs too much for delegated work: five agents were launched that
+  way on 2026-11-11 without warning, about 460,000 tokens for four translations). Say in one
+  line what is launched, and why, before launching.
+
 - Git (2026-11-11): the repository is https://github.com/rlibre/qjsx.git (remote `origin`,
   branch `main`, NOT `master`: before giving a push command, check the name of the local
   branch against the default branch of the remote). `.gitignore` leaves out the build outputs
