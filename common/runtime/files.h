@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // File system primitives with UTF-8 paths (on Windows, converted to UTF-16
 // and passed to the wide API, so that non-ASCII paths work).
 // Every function returns false / nullptr on failure, with errno set.

@@ -6,10 +6,6 @@ by severity. There is no open "serious" defect any more. The fixed defects are i
 
 ## Medium
 
-- **Step over / step out** (separate debugger work): they compare the stack depth. After an
-  `await`, or in another callback, they can stop in unrelated code. Agreed design: frames
-  compared by C stack address, those of generators and of async functions by their state
-  object.
 - **Fixes not compiled on POSIX / macOS**: the POSIX / macOS branches of the fixes of the
   "medium" defects were only reread, not compiled (`pthread_condattr_setclock`, `poll`,
   `fseeko`, `MSG_NOSIGNAL`...).
@@ -46,7 +42,23 @@ by severity. There is no open "serious" defect any more. The fixed defects are i
   - `Convert<Range<T,Lo,Hi>>` compares with `(T)Lo`: a negative `Lo` with an unsigned `T`
     overflows.
 
+### Recorded while checking new-device.md (2026-11-11)
+
+- **ESP32, answer to `RESET`**: the agent hands the answer to `UartLink::send`, then
+  `board::restart()` calls `esp_restart()` at once. `uart_write_bytes` only copies the frame
+  into the transmit buffer of the driver: the chip may restart before it leaves, and the host
+  then waits for an answer that never comes. Lead: wait for the end of the transmission
+  (`uart_wait_tx_done`) before `esp_restart()`.
+
 ## Minor and differences with Node or the web
+
+- **Desktop `startLinks()`** (`host/platform/board_host.cpp`): when the accept thread cannot
+  start, it returns false without printing why, against the contract of `board.h`.
+- **ESP32 `writeConsole()`** (`ports/esp32/main/board_esp32.cpp`): compares `stream` with the
+  literal `2` instead of `rt::OUTPUT_STDERR`, as the desktop board does.
+- **Agent upload hash** (`common/agent/agent.cpp`): allocated with `new` / `delete`, outside
+  `memory::allocate` / `release` (the allocation rule only names malloc / realloc / free: to
+  decide).
 
 - **`TextDecoder`**: it does not remove the BOM, does not handle `fatal` nor `ignoreBOM`, and
   rejects an encoding name surrounded by spaces.

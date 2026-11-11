@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // Configuration of split.js for quickjs.c of QuickJS 2026-06-04.
 // Line numbers refer to the unmodified upstream quickjs.c.
 'use strict';

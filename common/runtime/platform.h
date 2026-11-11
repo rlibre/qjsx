@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // Platform layer of the runtime: the few system services the event loop
 // needs. One implementation per platform (platform_host.cpp for Windows,
 // macOS and Linux; the ESP32 one will use FreeRTOS).

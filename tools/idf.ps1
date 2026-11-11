@@ -1,3 +1,9 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # Loads the ESP-IDF v6.1 environment (the user's IDF PowerShell profile), then
 # runs, in the qjsx ESP32 project (ports/esp32), for one board:
 #   [board=NAME] ninja ...     ninja itself (e.g. "ninja -k 0": every error in one pass)

@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // Framing of the device agent protocol, identical on every link (serial, TCP):
 //
 //   0x00 | COBS( MAGIC | VERSION | CRC-16 | message ) | 0x00

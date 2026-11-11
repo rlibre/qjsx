@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // jsbind - conversions between JS values and C++ types.
 //
 // Convert<T>::from(ctx, value, out, where) converts a JS value into 'out'; on

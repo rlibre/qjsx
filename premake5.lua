@@ -1,3 +1,9 @@
+--          _
+--  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+-- / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+-- \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+--    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 -- qjsx build (desktop).
 --   premake5 gmake --cc=gcc --shell=posix
 --   make -C build config=release        (or config=debug)

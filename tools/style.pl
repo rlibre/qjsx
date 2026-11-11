@@ -1,4 +1,10 @@
 #!/usr/bin/perl
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # Style pass of the qjsx C++ sources (rules of CLAUDE.md, "Coding rules"):
 #   1. a lone "{" after a function signature (or a constructor initializer
 #      list) goes up on the line before: "void f() {";

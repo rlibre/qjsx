@@ -5,6 +5,25 @@ one comes first.
 
 ## 2026-11-11
 
+### Step over / step out stopping in unrelated code
+
+- **Defect.** The debugger stub compared frames by the address of their `JSStackFrame` and by
+  the depth of the stack. A step "over" the end of `first()` in `add(first(), second())`
+  stopped in `second()`, called next from the same place of the C stack (same address). A step
+  "over" an `await` stopped in a timer callback that ran meanwhile (shallower stack).
+- **Second defect, found by the new test.** `core/debug.c` described the frames of async
+  functions and generators as native frames (no module, number, pc nor slots): it only
+  recognized the class `JS_CLASS_BYTECODE_FUNCTION`.
+- **Fix.** An activation number per frame, given by the engine on demand, unique and never
+  reused (`JSDebugFrame.id`), and `JSDebugFrame.is_async` ([engine-changes.md](engine-changes.md),
+  L). The stub records the start frame and its callers when a step starts, waits for an
+  `async` start frame, and ends the step at the next statement run when no recorded frame is
+  left, as V8 ([architecture.md](architecture.md), 3.3). `js_class_has_bytecode()` in
+  `core/debug.c` for the other defect.
+- **Verified.** `tests/debugger.test.js` (72 checks, fixture `tests/fixtures/debuggee`: end
+  of `first()`, `await` with a timer, step out of an async function resumed by a promise job),
+  tests in Debug on the PC. Not yet: Release, original QuickJS tests, microbench, board.
+
 ### Very slow serial port on Windows
 
 - **Defect.** `qjsx deploy` took 16 to 26 s to send 47 KB to the board at 921600 baud, and

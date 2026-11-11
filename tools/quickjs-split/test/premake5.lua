@@ -1,3 +1,9 @@
+--          _
+--  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+-- / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+-- \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+--    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 -- Test build: qjs linked with the original QuickJS (engine/qjs-bellard) and with the
 -- split one (engine/qjsx), to compare behaviour and speed.
 --

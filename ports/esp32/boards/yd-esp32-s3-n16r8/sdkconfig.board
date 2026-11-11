@@ -1,3 +1,9 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # VCC-GND YD-ESP32-S3, WROOM-1 N16R8 module: ESP32-S3 with 8 MB of octal PSRAM
 # inside the chip package, 16 MB of flash (as esptool reports them). Host link
 # on UART0 through the COM port (CH343 bridge).

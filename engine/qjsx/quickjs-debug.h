@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 /*
  * qjsx: debugger support in the QuickJS engine.
  *
@@ -147,11 +154,16 @@ JSValue JS_DebugGetInternal(JSContext *ctx, JSValueConst obj, JSDebugInternal wh
 /* Frames, from the frame where the hook was called (level 0) to the
    outermost one. Only valid while the hook runs. */
 typedef struct JSDebugFrame {
-    /* identity of the frame, stable while the frame exists: compares frames
-       between two hook calls (stepping). Address of the frame record (on
-       the C stack, or in the state of a generator / async function). */
-    uintptr_t id;
+    /* activation number of the frame: unique in the runtime and never
+       reused, so a frame created later never has the id of an earlier one
+       (stepping compares frames between two hook calls with it). The frame
+       of a generator or an async function keeps it across 'yield' and
+       'await'. Never 0. */
+    uint64_t id;
     JS_BOOL is_bytecode;     /* FALSE: native function, the fields below are 0 */
+    /* frame of an async function or an async generator: an 'await'
+       suspends it, a promise job resumes it later, with another caller */
+    JS_BOOL is_async;
     JSAtom module_name;      /* borrowed, JS_ATOM_NULL if unknown */
     int function_number;
     /* offset in the bytecode: the instruction about to run at level 0 for a

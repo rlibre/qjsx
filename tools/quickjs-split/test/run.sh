@@ -1,4 +1,10 @@
 #!/bin/bash
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # Runs the QuickJS tests on qjs-original and qjs-split, and optionally compares their speed.
 # Usage: run.sh <build dir> <release dir> [bench runs]
 #   <build dir>   the --builddir given to premake (contains bin/qjs-original and bin/qjs-split)

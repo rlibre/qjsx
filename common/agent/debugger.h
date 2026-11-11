@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // Debugger stub: the device side of the debugger (portable C++, same code on
 // the ESP and in the desktop agent). It answers the debugger requests of the
 // agent protocol (host/js/protocol.js, kinds DEBUG_ATTACH..RELEASE) with
@@ -269,9 +276,18 @@ private:
      */
     void             startStep(StepMode mode);
     /**
-     * Number of frames of the stack (only valid inside the hook).
+     * Adds an activation number to the frames where the step may stop.
      */
-    int              stackDepth();
+    void             recordStepFrame(uint64_t frameId);
+    /**
+     * True if the step may stop in the frame of activation number 'frameId'.
+     */
+    bool             isStepFrame(uint64_t frameId);
+    /**
+     * True if a frame where the step may stop is on the stack, below the
+     * frame of the hook (only valid inside the hook).
+     */
+    bool             stepFrameBelow();
 
     // ### values (debugger_values.cpp) ########################################
 
@@ -381,9 +397,13 @@ private:
     bool             _paused;           // in the pause loop (program stopped in the hook)
     bool             _resumeRequested;  // RESUME / STEP received: leave the pause loop
     int              _requestDepth;     // > 0 while a request runs JS code: no pause then
+    bool             _pausedAtReturn;   // the current pause is at a return position
     StepMode         _stepMode;         // step in progress; None: not stepping
-    uintptr_t        _stepFrameId;      // frame where the step started
-    int              _stepDepth;        // its depth (number of frames below + 1)
+    uint64_t         _stepStartFrame;   // activation number of the frame where an over / out step started; 0: none
+    uint64_t        *_stepFrames;       // activation numbers of the frames where an over / out step may stop; malloc'd
+    int              _stepFrameCount;   // used entries of _stepFrames
+    int              _stepCapacity;     // allocated entries of _stepFrames
+    uint64_t         _stepAsyncFrame;   // async start frame an over step waits for; 0: none
     Handle          *_handles;          // malloc'd array; its values are owned
     int              _handleCount;      // used entries of _handles
     int              _handleCapacity;   // allocated entries of _handles

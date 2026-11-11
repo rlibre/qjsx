@@ -1,7 +1,7 @@
 # Changes to the QuickJS engine
 
 This document describes the changes made by hand in `engine/qjsx/`: first for the
-debugger (A to F), then for the packages, the devices and the libraries (G to K). It
+debugger (A to F, L), then for the packages, the devices and the libraries (G to K). It
 completes [architecture.md](architecture.md) (sections 2.6, 2.7, 3 and 4).
 
 - Every change is commented `qjsx:` in the code.
@@ -15,7 +15,7 @@ completes [architecture.md](architecture.md) (sections 2.6, 2.7, 3 and 4).
 - The bytecode format changes: `BC_VERSION` goes from 5 to `0x45`. A bytecode of another
   version is refused when it is read.
 
-Changes A to K below are in the order in which they were made. The "Limits" section
+Changes A to L below are in the order in which they were made. The "Limits" section
 lists what is not done or behaves differently from what was planned.
 
 ## A. Module name kept without the debug info
@@ -256,7 +256,9 @@ is in `JSRuntime.debug` (`JSDebugState`, in `quickjs-internal.h`).
 ### Frames and slots
 
 - `JS_DebugGetFrame(ctx, level, &frame)`: level 0 = stopped frame. The structure gives:
-  - `id`: address of the `JSStackFrame`, on the C stack or in the state of a generator;
+  - `id`: activation number of the frame, unique and never reused (section L; it was the
+    address of the `JSStackFrame` before);
+  - `is_async`: frame of an async function (section L);
   - the module and the number of the function;
   - the `pc`;
   - the numbers of arguments, local variables and closure variables.
@@ -435,6 +437,43 @@ loader). The original QuickJS tests pass with the modified engine. The microbenc
 give a usable measurement that day (too much noise between two passes of the same binary)
 and was not run again; these changes do not touch the interpreter.
 
+## L. Activation number of the frames, async frames seen as bytecode
+
+Debugger work, choice of the user (2026-11-11). Stepping "over" and "out" compared the
+frames by the address of their `JSStackFrame` and by the depth of the stack. Two calls made one
+after the other from the same place have the same address (`second()` after `first()` in
+`add(first(), second())`), and a callback of the event loop that runs during an `await` has a
+shallow stack: the step stopped in unrelated code.
+
+**Activation number.**
+- New field `JSStackFrame.debug_activation` (`quickjs-internal.h`), set to 0 when the frame is
+  created: in `JS_CallInternal` (`core/interpreter.c`) and in `js_call_c_function`
+  (`core/closures.c`). This store is the only cost on the call path. The frame of a generator or
+  an async function lives in its state, zeroed by `async_func_init` (`memset`), and keeps its
+  number across `yield` / `await`.
+- `JS_DebugGetFrame` gives a frame its number the first time it is asked for it
+  (`JSDebugState.last_activation`, 64 bits: never reused). `JSDebugFrame.id` is now this number
+  (`uint64_t`), no longer an address.
+- New field `JSDebugFrame.is_async`: the function is async (async function or async
+  generator, `func_kind & JS_FUNC_ASYNC`): an `await` suspends it, a promise job resumes it with
+  other callers.
+- What the stub does with it: [architecture.md](architecture.md), stepping of the debugger stub.
+
+**Async frames seen as bytecode (fix).** `core/debug.c` recognized a function running bytecode
+only by the class `JS_CLASS_BYTECODE_FUNCTION`. The frames of async functions, generators and
+async generators (classes `JS_CLASS_ASYNC_FUNCTION`...) were therefore described as native: no
+module, no function number, no pc, no slots. `js_debug_frame_bytecode`,
+`JS_DebugGetFunctionLocation` and `js_debug_module_bytecode` (a module with a top-level `await`
+is an async function) now use `js_class_has_bytecode()`, as the backtraces do.
+
+**Bytecode.** Unchanged: `BC_VERSION` stays `0x45`.
+
+**Tests.** `tests/debugger.test.js` (72 checks), fixture `tests/fixtures/debuggee`: step over
+the end of `first()` reaches the next statement of the module, not `second()`; step over an
+`await` while a timer fires goes on in the same async function; step out of an async function
+resumed by a promise job stops in the next code run. Run in Debug only on 2026-11-11 (user);
+the original QuickJS tests and the microbench are left for the final test.
+
 ## Limits and items not done
 
 - **"Uncaught" prediction (`sf->call_sp`): not done.** The hook is called for all
@@ -515,3 +554,4 @@ Measurements of 2026-11-10:
 | `compiler/funcdef.c` | scope 0, release of the positions |
 | `builtins/date.c` | `getTimezoneOffset` without `tm_gmtoff` with newlib (I) |
 | `core/runtime.c` (also) | `js_def_malloc_usable_size` returns 0 with newlib (I) |
+| `quickjs-internal.h`, `quickjs-debug.h`, `core/debug.c`, `core/interpreter.c`, `core/closures.c` (also) | activation number of the frames, `is_async`, async frames seen as bytecode (L) |

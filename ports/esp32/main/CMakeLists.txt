@@ -1,3 +1,9 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # The firmware as one component: the sources shared by every device port
 # (ports/cmake/qjsx.cmake), the ESP32 board, platform and entry point, and the
 # description of the chosen board (boards/<QJSX_BOARD>/board_config.h).

@@ -1,4 +1,10 @@
 #!/usr/bin/perl
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # Lists the functions without a "/** */" comment (CLAUDE.md, "Coding rules":
 # every function and method has one). A function is a declaration or a
 # definition at namespace or class scope (never a statement of a body); its

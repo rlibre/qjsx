@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // What process looks like to a program: on a device (the desktop agent) argv
 // is ["qjsx", main module], env comes from qjsx.json, cwd is the data
 // directory of the board and fs resolves relative paths against it. Run on

@@ -137,6 +137,7 @@ The detailed documentation is in the [`doc/`](doc/) folder:
 
 - [architecture.md](doc/architecture.md): how it is all designed, and the status of each part;
 - [engine-changes.md](doc/engine-changes.md): what was changed in QuickJS, and why;
+- [new-device.md](doc/new-device.md): how to run qjsx on a new board or a new chip;
 - [coding-rules.md](doc/coding-rules.md): the rules the code is written by;
 - [known-bugs.md](doc/known-bugs.md) and [history.md](doc/history.md): the known defects, and
   those that were fixed.

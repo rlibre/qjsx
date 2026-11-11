@@ -619,6 +619,7 @@ JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     rt->current_stack_frame = sf;
     ctx = p->u.cfunc.realm; /* change the current realm */
     sf->js_mode = 0;
+    sf->debug_activation = 0;   /* qjsx: numbered on demand by the debugger */
     sf->cur_func = (JSValue)func_obj;
     sf->arg_count = argc;
     arg_buf = argv;

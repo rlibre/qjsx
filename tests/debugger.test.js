@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // Tests of the debugger stub (common/agent/debugger.*) through the desktop
 // agent: builds tests/fixtures/debuggee, installs it, debugs it with the
 // agent protocol (no CDP: that is the proxy's job).
@@ -261,9 +268,40 @@ equal(paused.get(KEY.REASON), PAUSE_REASON.DEBUGGER, "reason: debugger statement
 await device.request(KIND.RESUME);
 await expectEvent(KIND.RESUMED, "resumed after 'debugger;'");
 
+// --- step over the end of a function: not into the next call at the same
+// place of the C stack (second() after first()), but to the next statement
+// of the caller
+const moduleCode = functionNamed(main, "<eval>");
+const firstInfo = functionNamed(main, "first");
+await expectEvent(KIND.PAUSED, "paused on 'debugger;' in first()");
+where = { number: firstInfo.number };
+for (let i = 0; i < 5 && where.number === firstInfo.number; i++) {
+    where = await stepAndWhere(STEP_KIND.OVER);
+}
+equal(`${where.number}:${statementAt(main, moduleCode, where.pc)}`, `${moduleCode.number}:waitAndCount().then(showTicks);`,
+    "step over the end of first(): next statement of the module, not second()");
+await device.request(KIND.RESUME);
+await expectEvent(KIND.RESUMED, "resumed after the steps over first()");
+
+// --- step over an 'await' while a timer fires, then out of the async
+// function resumed by a promise job
+const waitInfo = functionNamed(main, "waitAndCount");
+const showInfo = functionNamed(main, "showTicks");
+await expectEvent(KIND.PAUSED, "paused on 'debugger;' in waitAndCount()");
+where = await stepAndWhere(STEP_KIND.OVER);
+equal(`${where.number}:${statementAt(main, waitInfo, where.pc)}`, `${waitInfo.number}:await sleep(20);`, "step over to the 'await'");
+where = await stepAndWhere(STEP_KIND.OVER);
+equal(`${where.number}:${statementAt(main, waitInfo, where.pc)}`, `${waitInfo.number}:return ticks;`,
+    "step over the 'await': back in waitAndCount(), not in the timer");
+where = await stepAndWhere(STEP_KIND.OUT);
+equal(`${where.number}:${statementAt(main, showInfo, where.pc)}`, `${showInfo.number}:console.log("ticks", count);`,
+    "step out of the resumed async function: the next code run");
+await device.request(KIND.RESUME);
+await expectEvent(KIND.RESUMED, "resumed after the async steps");
+
 const exited = await expectEvent(KIND.EXITED, "program ended");
 equal(exited.get(KEY.CODE), 0, "exit code");
-equal(output.join(""), "area 20\nspun true\nexpected failure\ndone\n", "program output");
+equal(output.join(""), "area 20\nspun true\nexpected failure\nsum 3\nticks 1\ndone\n", "program output");
 
 await device.request(KIND.DEBUG_DETACH);
 device.close();

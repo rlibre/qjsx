@@ -311,6 +311,8 @@ typedef struct JSDebugState {
     /* frame where the running hook was called, NULL outside the hook (no
        nested hook call while it is set) */
     struct JSStackFrame *paused_frame;
+    /* last activation number given to a frame (JSStackFrame.debug_activation) */
+    uint64_t last_activation;
     /* last thrown value given to the hook (owned), JS_UNINITIALIZED if none
        (no JS value is uninitialized, not even 'throw undefined'):
        the same value unwinding through the calling frames, or rethrown by a
@@ -426,6 +428,12 @@ typedef struct JSStackFrame {
     /* only used in generators. Current stack pointer value. NULL if
        the function is running. */
     JSValue *cur_sp;
+    /* qjsx: activation number of the frame for the debugger, 0 until
+       JS_DebugGetFrame() gives it one (unique in the runtime, never
+       reused). Set to 0 when the frame is created; the frame of a generator
+       or an async function lives in its state (zeroed when the state is
+       made) and keeps its number across 'yield' / 'await'. */
+    uint64_t debug_activation;
 } JSStackFrame;
 
 typedef enum {

@@ -1,3 +1,9 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # Partition table of the 8 MB ESP32 boards, OTA reserved (as 16MB.csv).
 #   otadata        which of ota_0 / ota_1 boots (idf.py flash writes ota_0)
 #   ota_0, ota_1   the firmware, 2.5 MB each (it takes about 0.7 MB)

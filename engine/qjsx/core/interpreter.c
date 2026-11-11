@@ -149,6 +149,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         return JS_ThrowStackOverflow(caller_ctx);
 
     sf->js_mode = b->js_mode;
+    sf->debug_activation = 0;   /* qjsx: numbered on demand by the debugger */
     arg_buf = argv;
     sf->arg_count = argc;
     sf->cur_func = (JSValue)func_obj;

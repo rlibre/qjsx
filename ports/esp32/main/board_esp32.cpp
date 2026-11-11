@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // The ESP32 boards (see board.h), shared by every board: what differs comes
 // from the board's description (boards/<board>/board_config.h, sdkconfig.board).
 // The host link is UART0 (the boards' USB-serial bridge). The JS heap lives in

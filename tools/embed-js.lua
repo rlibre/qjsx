@@ -1,3 +1,9 @@
+--          _
+--  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+-- / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+-- \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+--    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 -- Embeds a JS file in a C++ file that registers it as an embedded module of
 -- the runtime (see rt::EmbeddedRegistration in common/runtime/modules/modules.h).
 --

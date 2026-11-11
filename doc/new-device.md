@@ -276,8 +276,10 @@ its own three files, adds `QJSX_INCLUDE_DIRS` and the folder of the chosen board
 path, applies `QJSX_DEFINES` to the whole component, and applies `QJSX_ENGINE_OPTIONS` to the
 engine sources with `set_source_files_properties(... COMPILE_OPTIONS ...)`.
 
-Do the same in your build. Our C++ code needs C++17 and is written without exceptions and
-without RTTI; the ESP32 port states it in `sdkconfig.defaults`.
+Do the same in your build. Our C++ code needs C++17 or later and is written without exceptions
+and without RTTI. The ESP32 port states the last two in `sdkconfig.defaults`
+(`CONFIG_COMPILER_CXX_EXCEPTIONS=n`, `CONFIG_COMPILER_CXX_RTTI=n`); it does not set the C++
+standard, so ESP-IDF's default, later than C++17, is used.
 
 The source lists are globs: after adding or removing a file, run CMake again.
 
@@ -541,7 +543,7 @@ The board implements `agent::Storage` (`common/agent/agent.h`) and the pair
 | Method | What it must do |
 |---|---|
 | `bool beginUpload(size_t size)` | Prepare room for a package of `size` bytes. Must not touch the installed package. Return false if it cannot hold it. An unfinished previous upload has been dropped with `abortUpload()` first |
-| `bool writeUpload(size_t offset, const uint8_t *data, size_t size)` | Write a chunk. Chunks come in order, without gaps (the agent checks). The tool sends 2048 bytes at a time (`UPLOAD_CHUNK`, `host/js/protocol.js`). After an error the upload stays open and the host may send the chunk again |
+| `bool writeUpload(size_t offset, const uint8_t *data, size_t size)` | Write a chunk. Chunks come in order, without gaps (the agent checks). The tool sends 2048 bytes at a time (`UPLOAD_CHUNK`, `host/js/protocol.js`). After an error the upload stays open and the host may send the chunk again, in a new request: a request repeated with the same id gets the same error answer back, without being run again |
 | `bool finishUpload(const char *buildId)` | Make the uploaded package the installed one, with its build id. Called only when every byte has arrived and the SHA-256 matches (the agent checks both). Ends the upload, whether it succeeds or not |
 | `void abortUpload()` | Drop the upload. The installed package stays |
 | `bool installed(char *buildId, size_t buildIdSize, size_t *packageSize)` | Build id (zero-terminated) and size of the installed package. Return false if none |
@@ -566,8 +568,8 @@ any flash:
 2. A slot starts with a **header** in its first sector (4096 bytes): a magic number, a
    sequence number, the size of the package, the build id. The package follows.
 3. The **installed** package is the slot with a valid header and the highest sequence. A
-   header is valid when its magic is right, its size fits the slot and its build id is
-   terminated.
+   header is valid when its magic is right, its size is not zero and fits the slot, and its
+   build id is terminated.
 4. `beginUpload()` takes the slot that is not installed. It refuses if the package does not
    fit (`size > slot size - 4096`) or if that slot is the one the running program is mapped
    from. It then erases the header sector and the room of the package, rounded up to a sector.

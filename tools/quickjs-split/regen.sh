@@ -1,4 +1,10 @@
 #!/bin/bash
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # Regenerates engine/qjsx from engine/qjs-bellard (quickjs.c and the other engine files).
 # Usage: tools/quickjs-split/regen.sh [--force] [output directory]
 #

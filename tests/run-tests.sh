@@ -1,4 +1,10 @@
 #!/bin/bash
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # Runs every test. The executables must be built (make -C build config=release).
 # Usage: tests/run-tests.sh [Release|Debug]
 set -u
@@ -30,6 +36,7 @@ check "debugger support of the engine" "$BIN/qjsx-tests" run tests/debug.test.js
 check "runtime library" "$BIN/qjsx" run tests/runtime.test.js
 check "tool modules" "$BIN/qjsx" run tests/tools.test.js
 check "protocol (CBOR, COBS, frames)" "$BIN/qjsx" run tests/protocol.test.js
+check "debug info (lines, breakpoints, scopes)" "$BIN/qjsx" run tests/debuginfo.test.js
 check "net and serial modules" "$BIN/qjsx" run tests/net.test.js
 check "process.exit: qjsx run returns its code, nothing runs after it"     bash -c "out=\$('$BIN/qjsx' run tests/fixtures/exit-async.js 2>&1); test \$? -eq 6 && test -z \"\$out\""
 
@@ -60,7 +67,7 @@ fi
 NOCOMPILER=tests/fixtures/nocompiler
 rm -rf "${NOCOMPILER:?}/build"
 check "eval() gives a warning with its position, the build still succeeds" \
-    bash -c "'$BIN/qjsx' build '$NOCOMPILER' 2> build/nocompiler-build.txt > /dev/null && grep -q 'src/main.js:46:[0-9]*: warning: eval() needs the compiler' build/nocompiler-build.txt"
+    bash -c "'$BIN/qjsx' build '$NOCOMPILER' 2> build/nocompiler-build.txt > /dev/null && grep -q 'src/main.js:53:[0-9]*: warning: eval() needs the compiler' build/nocompiler-build.txt"
 NOCOMPILER_PACKAGE=$(ls "$NOCOMPILER"/build/packages/*.qjspkg)
 "$BIN/qjsx" run "$NOCOMPILER_PACKAGE" > build/nocompiler-full.txt 2>&1
 "$BIN/qjsx-target" run "$NOCOMPILER_PACKAGE" > build/nocompiler-target.txt 2>&1
@@ -165,6 +172,7 @@ check "PC: process.argv[0] and argv[1] have '/' separators" bash -c "grep '^argv
 
 # --- debugger stub, through the agent protocol
 check "debugger stub (breakpoints, steps, pause, values)" "$BIN/qjsx" run tests/debugger.test.js "$AGENT_TARGET"
+check "debugger proxy core (lines, names, evaluation)" "$BIN/qjsx" run tests/proxy.test.js "$AGENT_TARGET"
 
 kill "$AGENT_PID" 2> /dev/null
 wait "$AGENT_PID" 2> /dev/null
@@ -174,13 +182,13 @@ done
 
 # --- a syntax error is reported with its position.
 BROKEN=tests/fixtures/broken
-check "syntax error reported" bash -c "! '$BIN/qjsx' build '$BROKEN' > '$ROOT/build/broken.txt' 2>&1 && grep -q 'src/main.js:3' '$ROOT/build/broken.txt'"
+check "syntax error reported" bash -c "! '$BIN/qjsx' build '$BROKEN' > '$ROOT/build/broken.txt' 2>&1 && grep -q 'src/main.js:10' '$ROOT/build/broken.txt'"
 rm -rf "${BROKEN:?}/build"
 
 # --- what a build refuses: 'import()' (every module must be known at build
 # time), reported with its position, and a module of an undeclared library.
 DYNAMIC=tests/fixtures/dynamicimport
-check "import() refused with its position" bash -c "! '$BIN/qjsx' build '$DYNAMIC' > '$ROOT/build/dynamicimport.txt' 2>&1 && grep -q \"'import()' is not allowed\" '$ROOT/build/dynamicimport.txt' && grep -q 'src/main.js:3' '$ROOT/build/dynamicimport.txt'"
+check "import() refused with its position" bash -c "! '$BIN/qjsx' build '$DYNAMIC' > '$ROOT/build/dynamicimport.txt' 2>&1 && grep -q \"'import()' is not allowed\" '$ROOT/build/dynamicimport.txt' && grep -q 'src/main.js:10' '$ROOT/build/dynamicimport.txt'"
 rm -rf "${DYNAMIC:?}/build"
 NOLIBRARY=tests/fixtures/nolibrary
 check "module of an undeclared library refused" bash -c "! '$BIN/qjsx' build '$NOLIBRARY' > '$ROOT/build/nolibrary.txt' 2>&1 && grep -q \"src/main.js imports 'nolib/thing'.*no library 'nolib' is declared\" '$ROOT/build/nolibrary.txt'"

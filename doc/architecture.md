@@ -409,10 +409,16 @@ Existing entry points useful to the debugger (lines of the original `quickjs.c`,
 >   breakpoints and statement stops, pause of a running program, stepping, pause on every
 >   exception, stack, slots and properties, changing a variable, loading and calling
 >   bytecode compiled on the host. Messages in 4.3; tested through the desktop agent and on the
->   ESP32-S3 (`tests/debugger.test.js`, 52 checks);
-> - **known defect**: step over and step out compare the stack depth, not the frames as
->   designed in 3.3 ([known-bugs.md](known-bugs.md));
-> - **not done**: the whole host side (proxy, CDP server, `qjsx debug`, VS Code), the
+>   ESP32-S3 (`tests/debugger.test.js`, 52 checks on the board; 72 since the stepping by
+>   activation number of 3.3, checked on the desktop agent only);
+> - **done, on the host**: the core of the proxy, without CDP (2026-11-11):
+>   `host/js/debuginfo.js` (packages indexed by build id, sidecars, byte offsets ↔ lines and
+>   UTF-16 columns, where a breakpoint goes, visible variables by scope) and
+>   `host/js/debugsession.js` (a session with a device: breakpoints by line kept and set again
+>   at each `SCRIPT_LOADED` / `STARTED`, stack with names and lines, variables by name,
+>   evaluation as in 3.5, steps). Lines and columns from 0, as in CDP. Tested by
+>   `tests/debuginfo.test.js` and `tests/proxy.test.js` (desktop agent);
+> - **not done**: the CDP server, `qjsx debug`, VS Code, the
 >   "uncaught" prediction (3.4), conditional breakpoints (3.6), waiting for the debugger at
 >   startup (3.8).
 
@@ -467,9 +473,25 @@ All the rules are expressed as "next statement start":
 | into (enter) | anywhere; native functions are stepped over, JS callbacks called from C are entered |
 | out (leave) | in a calling frame |
 
-- **Frame comparison**: by address in the C stack. The frames of generators and of
-  `async` functions are compared by their state object; so a step "over" an `await`
-  resumes in the same `async` function.
+- **Frame comparison** (decided 2026-11-11, replaces the address in the C stack and the stack
+  depth): by the **activation number** the engine gives each frame
+  ([engine-changes.md](engine-changes.md), L). It is unique and never reused: a frame created
+  later at the same place of the C stack never passes for an earlier one. The frame of a
+  generator or an `async` function keeps its number across `yield` / `await`.
+- **What the stub records when a step starts** (`startStep`, `common/agent/debugger.cpp`):
+  - over: the start frame, unless the pause is at its return position (it is ending);
+  - over from an `async` function: only that frame. An `await` suspends it and a promise job
+    resumes it later, with other callers: the step waits for it, so a step "over" an `await`
+    resumes in the same `async` function. A generator suspended by `yield` goes back to its
+    caller, which is recorded;
+  - otherwise, over and out: every calling frame that runs bytecode.
+- **Where the step stops** (`shouldStopStepping`): at a statement start of a recorded frame.
+  While a recorded frame is still on the stack below, the code it called runs without
+  stopping. When none is left (end of a callback of the event loop, out of an `async`
+  function resumed by a promise job, uncaught exception), the step goes on as an "into", as
+  V8 does: it stops at the first statement run outside the start frame.
+- **Known limit**: an `async` function that ends with an exception after a step "over" from
+  inside it is never resumed; stepping stays on (slower program) until the next pause.
 - **Additional stops**: at the start of a `catch` clause, and at function end (at each
   `return` and at the implicit return) to show the return value.
 

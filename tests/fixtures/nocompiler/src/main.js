@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // Run by tests/run-tests.sh with qjsx (engine with compiler) and with
 // qjsx-target (engine without compiler, like the ESP32 / RP2350 targets):
 // the outputs must be the same, except the last line (eval).

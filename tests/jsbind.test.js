@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // Tests of the binding library through the native module "jsbind_test".
 // Run with: bin/Release/qjsx-tests run tests/jsbind.test.js
 import { Device, add, gc, destroyedCount } from "jsbind_test";

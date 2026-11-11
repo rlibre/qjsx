@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // Part of platform.h specific to the ESP32 (ESP-IDF): clock, fatal stop,
 // tasks. Locks, signal and sleep are shared with the RP2350
 // (ports/freertos/platform_freertos.cpp).

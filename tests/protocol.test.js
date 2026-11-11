@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // Tests of the protocol modules: CBOR, COBS, CRC-16, frames, messages.
 // Run with: bin/Release/qjsx run tests/protocol.test.js
 import { encode, decode } from "qjsx:cbor";

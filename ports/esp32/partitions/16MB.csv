@@ -1,3 +1,9 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # Partition table of the 16 MB ESP32 boards, OTA reserved (chosen 2026-11-11,
 # OTA itself still to be decided): two app slots, so that OTA would need no
 # repartitioning.

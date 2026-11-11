@@ -1,3 +1,9 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # What every device port builds (ESP32 with ESP-IDF, RP2350 with the pico-sdk,
 # both CMake): the engine without its compiler (no eval on a device), the
 # runtime, the agent and the debugger stub. The port adds its board

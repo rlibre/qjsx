@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // CBOR subset of the agent protocol (same as host/js/cbor.js):
 // unsigned/negative integers, byte and text strings, arrays, maps, false,
 // true, null, undefined, floats (written on 64 bits; read on 16, 32 or 64).

@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // Part of platform.h common to the FreeRTOS ports (ESP32, RP2350): locks,
 // the signal of the event queue, sleeping. What differs between the chips
 // (clock, restart, task creation and core pinning) is in each port

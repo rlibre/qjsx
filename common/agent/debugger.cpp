@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 #include "debugger.h"
 #include "memory.h"
 
@@ -264,8 +271,8 @@ Debugger::Debugger(Agent *agent)
     : _agent(agent), _firstRequest(nullptr), _lastRequest(nullptr), _pendingCount(0), _attached(false),
       _runAborted(false), _exceptionMode(EXCEPTIONS_NONE), _mailbox(nullptr), _loopSource{ -1, 0 },
       _runActive(false), _ctx(nullptr), _loop(nullptr), _hookInstalled(false), _paused(false),
-      _resumeRequested(false), _requestDepth(0), _stepMode(StepMode::None), _stepFrameId(0), _stepDepth(0),
-      _handles(nullptr), _handleCount(0), _handleCapacity(0), _nextHandle(1), _scripts(nullptr), _scriptCount(0) {
+      _resumeRequested(false), _requestDepth(0), _pausedAtReturn(false), _stepMode(StepMode::None),
+      _stepStartFrame(0), _stepFrames(nullptr), _stepFrameCount(0), _stepCapacity(0), _stepAsyncFrame(0), _handles(nullptr), _handleCount(0), _handleCapacity(0), _nextHandle(1), _scripts(nullptr), _scriptCount(0) {
 }
 
 /**
@@ -280,8 +287,10 @@ Debugger::~Debugger() {
         memory::release(request);
     }
 
-    // the handle array (its values were freed by finish())
+    // the handle array (its values were freed by finish()) and the frames of
+    // the last step
     memory::release(_handles);
+    memory::release(_stepFrames);
 }
 
 // ### Transport thread ########################################################
@@ -1321,34 +1330,55 @@ void Debugger::removeHook() {
 }
 
 /**
- * Number of frames from the frame of the hook down to the outermost one.
- */
-int Debugger::stackDepth() {
-    JSDebugFrame frame;
-    int depth = 0;
-
-    while (JS_DebugGetFrame(_ctx, depth, &frame) == 0) {
-        depth++;
-    }
-
-    return depth;
-}
-
-/**
  * Starts a step of 'mode' from the current pause (its frame is level 0), or
  * for a pause request (StepMode::Any: no frame needed).
+ *
+ * Frames are told apart by their activation number (JSDebugFrame.id),
+ * unique for every call: a frame created later at the same place never
+ * passes for one of the recorded frames.
+ *   1. over: the start frame is recorded, unless the pause is at its return
+ *      position (it is ending);
+ *   2. an async start frame: an 'await' suspends it and a promise job
+ *      resumes it later, with other callers. The step waits for it and its
+ *      callers are not recorded (an over step on 'await' goes on in the same
+ *      function);
+ *   3. otherwise the callers are recorded: over and out stop in them once
+ *      the start frame has returned.
+ * When no recorded frame is left on the stack, shouldStopStepping() ends the
+ * step at the next statement run outside the start frame.
  */
 void Debugger::startStep(StepMode mode) {
-    // record the mode, no start frame yet
+    // record the mode; no frame recorded yet
     _stepMode = mode;
-    _stepFrameId = 0;
-    _stepDepth = 0;
+    _stepStartFrame = 0;
+    _stepFrameCount = 0;
+    _stepAsyncFrame = 0;
 
-    // over and out: remember the frame where the step starts, by id and depth
+    // over and out: the start frame
     JSDebugFrame frame;
     if (mode != StepMode::Any && JS_DebugGetFrame(_ctx, 0, &frame) == 0) {
-        _stepFrameId = frame.id;
-        _stepDepth = stackDepth();
+        _stepStartFrame = frame.id;
+    }
+
+    // over: the step may stop in the start frame again, and waits for it if
+    // it is async
+    bool startCounts = mode == StepMode::Over && !_pausedAtReturn && _stepStartFrame != 0;
+    if (startCounts) {
+        recordStepFrame(frame.id);
+        if (frame.is_async) {
+            _stepAsyncFrame = frame.id;
+        }
+    }
+
+    // over and out: the calling frames that run bytecode, unless the step
+    // waits for an async start frame
+    bool callersCount = mode != StepMode::Any && _stepAsyncFrame == 0;
+    if (callersCount) {
+        for (int level = 1; JS_DebugGetFrame(_ctx, level, &frame) == 0; level++) {
+            if (frame.is_bytecode) {
+                recordStepFrame(frame.id);
+            }
+        }
     }
 
     // stepping on: the hook is called at every statement start
@@ -1356,30 +1386,85 @@ void Debugger::startStep(StepMode mode) {
 }
 
 /**
+ * Appends 'frameId' to the recorded frames of the step (16 entries, then
+ * doubling).
+ */
+void Debugger::recordStepFrame(uint64_t frameId) {
+    // full: grow the array
+    if (_stepFrameCount == _stepCapacity) {
+        _stepCapacity = _stepCapacity == 0 ? 16 : _stepCapacity * 2;
+        _stepFrames = (uint64_t *)memory::reallocate(_stepFrames, sizeof(uint64_t) * (size_t)_stepCapacity);
+    }
+
+    _stepFrames[_stepFrameCount++] = frameId;
+}
+
+/**
+ * True if 'frameId' is one of the recorded frames of the step.
+ */
+bool Debugger::isStepFrame(uint64_t frameId) {
+    for (int i = 0; i < _stepFrameCount; i++) {
+        if (_stepFrames[i] == frameId) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * True if a recorded frame of the step is on the stack below the frame of
+ * the hook (the step will come back to it).
+ */
+bool Debugger::stepFrameBelow() {
+    JSDebugFrame frame;
+
+    for (int level = 1; JS_DebugGetFrame(_ctx, level, &frame) == 0; level++) {
+        if (isStepFrame(frame.id)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * A statement start was reached while stepping: true if the current step
  * ends here.
  */
 bool Debugger::shouldStopStepping() {
-    JSDebugFrame frame;
-
     switch (_stepMode) {
         case StepMode::Any: {
             // into: any statement
             return true;
         }
-        case StepMode::Over: {
-            // over: a statement of the same frame (also after an 'await': the
-            // frame of an async function keeps its id)
-            if (JS_DebugGetFrame(_ctx, 0, &frame) == 0 && frame.id == _stepFrameId) {
+        case StepMode::Over:
+        case StepMode::Out: {
+            // a statement of a recorded frame (over: the start frame or a
+            // caller; out: a caller): the step ends here
+            JSDebugFrame frame = {};
+            if (JS_DebugGetFrame(_ctx, 0, &frame) == 0 && isStepFrame(frame.id)) {
                 return true;
             }
 
-            // or of a calling frame: the stack is shallower than at the start
-            return stackDepth() < _stepDepth;
-        }
-        case StepMode::Out: {
-            // out: a statement of a calling frame (shallower stack)
-            return stackDepth() < _stepDepth;
+            // an async start frame: the step waits until a promise job
+            // resumes it
+            if (_stepAsyncFrame != 0) {
+                return false;
+            }
+
+            // a recorded frame below: code called from it runs, the step
+            // will come back to it
+            if (stepFrameBelow()) {
+                return false;
+            }
+
+            // no recorded frame left (end of a callback of the event loop,
+            // out of an async function resumed by a promise job, uncaught
+            // exception): as in V8, the step goes on as an "into" and ends
+            // at the first statement run outside the start frame (an out
+            // step never stops in the frame it leaves, at its return)
+            return frame.id != _stepStartFrame;
         }
         case StepMode::None: {
             break;
@@ -1457,10 +1542,12 @@ int Debugger::onHook(const JSDebugEvent *event) {
  * program goes on, RESUMED event.
  */
 void Debugger::pause(int reason, const JSDebugEvent *event) {
-    // end any step (stepping off); paused from now on
+    // end any step (stepping off); paused from now on, at a return position
+    // or not (a step from here starts from it)
     _stepMode = StepMode::None;
     JS_DebugSetStepping(JS_GetRuntime(_ctx), false);
     _paused = true;
+    _pausedAtReturn = event->at_return;
     _resumeRequested = false;
 
     // build PAUSED { REASON, EXCEPTION?, RETURN_VALUE? }: the thrown value at

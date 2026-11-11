@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 /*
  * QuickJS - core/debug.c
  *
@@ -237,7 +244,8 @@ static JSFunctionBytecode *js_debug_module_bytecode(JSModuleDef *m)
         return JS_VALUE_GET_PTR(function);
     if (JS_VALUE_GET_TAG(function) == JS_TAG_OBJECT) {
         JSObject *p = JS_VALUE_GET_OBJ(function);
-        if (p->class_id == JS_CLASS_BYTECODE_FUNCTION)
+        /* a module with a top-level 'await' is an async function */
+        if (js_class_has_bytecode(p->class_id))
             return p->u.func.function_bytecode;
     }
     return NULL;
@@ -348,7 +356,9 @@ static JSFunctionBytecode *js_debug_frame_bytecode(JSStackFrame *sf)
     if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
         return NULL;
     p = JS_VALUE_GET_OBJ(sf->cur_func);
-    if (p->class_id != JS_CLASS_BYTECODE_FUNCTION)
+    /* plain, generator, async and async generator functions all run
+       bytecode */
+    if (!js_class_has_bytecode(p->class_id))
         return NULL;
     return p->u.func.function_bytecode;
 }
@@ -362,7 +372,7 @@ int JS_DebugGetFunctionLocation(JSContext *ctx, JSValueConst function,
     if (JS_VALUE_GET_TAG(function) != JS_TAG_OBJECT)
         return -1;
     p = JS_VALUE_GET_OBJ(function);
-    if (p->class_id != JS_CLASS_BYTECODE_FUNCTION)
+    if (!js_class_has_bytecode(p->class_id))
         return -1;
     b = p->u.func.function_bytecode;
     *module_name = b->filename;
@@ -502,11 +512,17 @@ int JS_DebugGetFrame(JSContext *ctx, int level, JSDebugFrame *frame)
     if (sf == NULL)
         return -1;
     memset(frame, 0, sizeof(*frame));
-    frame->id = (uintptr_t)sf;
+
+    /* the activation number, given the first time the frame is asked for */
+    if (sf->debug_activation == 0)
+        sf->debug_activation = ++ctx->rt->debug.last_activation;
+    frame->id = sf->debug_activation;
+
     b = js_debug_frame_bytecode(sf);
     if (b == NULL)
         return 0;
     frame->is_bytecode = TRUE;
+    frame->is_async = (b->func_kind & JS_FUNC_ASYNC) != 0;
     frame->module_name = b->filename;
     frame->function_number = b->function_number;
     frame->pc = sf->cur_pc - b->byte_code_buf;

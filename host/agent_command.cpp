@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // qjsx agent: the device side running on the desktop, a stand-in for a
 // board. The same code as the firmware (agent::runDevice, common/agent),
 // with the desktop board (host/platform/board_host.cpp): packages in files,

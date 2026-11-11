@@ -1,3 +1,9 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # Partition table of the 4 MB ESP32 boards, without OTA: two 1.75 MB app slots
 # would leave too little room for the packages (option B of 2026-11-11).
 #   factory   the firmware (it takes about 0.7 MB)

@@ -1,3 +1,9 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # qjsx firmware for the ESP32 boards (ESP-IDF project). One firmware per board:
 # the board is chosen with QJSX_BOARD (a folder of boards/), each board in its
 # own build folder, with its own sdkconfig. In the ESP-IDF PowerShell, from

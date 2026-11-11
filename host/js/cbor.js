@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // CBOR (RFC 8949) subset used by the device agent protocol:
 //   integers (up to 2^53), floats (decoded from 16/32/64 bits, encoded on 64),
 //   byte strings (Uint8Array), text strings, arrays, maps (keys: integers or

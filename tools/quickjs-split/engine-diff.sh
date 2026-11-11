@@ -1,4 +1,10 @@
 #!/bin/bash
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # Writes doc/engine-changes.patch: the exact difference between the split
 # engine generated from engine/qjs-bellard (unchanged QuickJS) and engine/qjsx
 # (with the hand-made changes described in doc/engine-changes.md).

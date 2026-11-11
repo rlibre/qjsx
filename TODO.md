@@ -28,7 +28,6 @@
       et `platformName` compris). Restent :
       - écrire un test ciblé par défaut corrigé, quand c'est possible sans matériel (demande
         initiale pour les « graves ») ;
-      - le pas-à-pas over / out (travail du debugger, conception convenue) ;
       - les défauts relevés pendant les corrections (section de known-bugs.md) ;
       - les « mineurs », qui attendent l'utilisateur.
 - [x] **Chemins Windows** (demande du 2026-11-11, fait le même jour) : tout en `/` (Windows
@@ -120,7 +119,7 @@
       vérifiée par `qjsx deploy`, `.d.ts` par cible. Questions posées : firmware générique
       par carte ou par projet ? API JS à nous ou proche d'une existante ?
       Code C chargeable à la volée (« pseudo .lib ») : abandonné par l'utilisateur (2026-11-11).
-- [ ] **Doc « créer un nouveau device »** (demande de l'utilisateur, 2026-11-11) : un guide
+- [x] **Doc « créer un nouveau device »** (demande de l'utilisateur, 2026-11-11) : un guide
       pas à pas, `doc/new-device.md`, pour deux cas :
       - une nouvelle carte d'une puce déjà portée (ESP32) : dossier `ports/esp32/boards/<carte>/`
         (`sdkconfig.board` : puce, flash, table de `partitions/`, PSRAM ; `board_config.h`),
@@ -130,17 +129,26 @@
         `ports/freertos/` ou équivalent, ce que `platform.h` et `board.h` demandent (fonction par
         fonction, threads, propriété), point d'entrée, liaisons, stockage des paquets, pièges
         rencontrés (int32_t = long, newlib, `-Werror` d'IDF, PSRAM octale ou quad).
-      ÉCRIT le 2026-11-11 par un agent (`doc/new-device.md`, 756 lignes, en anglais), PAS
-      ENCORE CONTRÔLÉ en entier contre le code : seul le premier tiers est relu. Reste aussi
-      à le lier depuis `README.md`. Ce que l'agent a relevé dans le code (macro en double
-      dans `qjsx.cmake`, commentaires d'en-tête périmés, `board::identity()` jamais appelée,
-      une seule liaison à la fois, picolibc au lieu de newlib) est listé dans
-      `doc/prompt-reprise.md`.
+      ÉCRIT le 2026-11-11 par un agent (`doc/new-device.md`, en anglais), CONTRÔLÉ en entier
+      contre le code le 2026-11-11 (trois imprécisions corrigées : norme C++, renvoi d'un
+      morceau d'envoi, en-tête valide), lié depuis `README.md`. Ce que l'agent a relevé dans
+      le code (macro en double dans `qjsx.cmake`, commentaires d'en-tête périmés,
+      `board::identity()` jamais appelée, une seule liaison à la fois, picolibc au lieu de
+      newlib) est listé dans `doc/prompt-reprise.md`. Les écarts relevés pendant le
+      contrôle sont dans `doc/known-bugs.md`.
 - [x] **`doc/architecture.md` relu et remis à jour** par rapport au code le 2026-11-11
       (statuts, noms des messages du protocole, commandes, organisation du dépôt).
-- [ ] **Debugger côté PC** (chantier choisi le 2026-11-11, rien de codé). D'abord le
-      pas-à-pas over / out : proposition en attente d'accord (numéro d'activation par frame
-      dans le moteur, au lieu de la profondeur de pile). Puis le cœur du proxy sans CDP, le
+- [ ] **Debugger côté PC** (chantier choisi le 2026-11-11). D'abord le pas-à-pas over /
+      out : CODÉ le 2026-11-11 (changement moteur L : numéro d'activation par frame,
+      `is_async` ; en plus, les frames `async` et générateurs n'étaient pas vues comme du
+      bytecode par core/debug.c, corrigé). Fin de chaîne comme V8 ; un « over » depuis une
+      fonction `async` attend cette fonction ; un générateur rend la main à son appelant.
+      `tests/debugger.test.js` : 72/72, tests en Debug seulement (demande de
+      l'utilisateur). RESTE le test final : Release, tests d'origine de QuickJS, microbench
+      au calme, firmware recompilé et debugger sur la carte. Puis le cœur du proxy sans CDP :
+      CODÉ le 2026-11-11 (`host/js/debuginfo.js`, `host/js/debugsession.js`, API dans
+      CLAUDE.md ; `tests/debuginfo.test.js` 20/20, `tests/proxy.test.js` 30/30, en Debug
+      seulement ; à essayer aussi sur la carte). Ensuite le
       serveur CDP, VS Code. Détail dans `doc/prompt-reprise.md`.
 - [ ] **Diagramme du principe de fonctionnement** (demande de l'utilisateur, 2026-11-11) : un
       diagramme en SVG qui explique le fonctionnement global du système (tout qjsx : PC,

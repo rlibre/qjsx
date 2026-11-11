@@ -127,8 +127,23 @@ keeps the old name: `C:\Sandbox\espjs`.
   - TCP: stub disabled by default, token required in `Hello`.
 - Stepping: over = next statement start in the same or a calling frame; into = next statement
   start anywhere (native functions are stepped over, JS callbacks from C are entered); out =
-  next statement start in a calling frame. Frames compared by C stack address; generator/async
-  frames by their state object (step over `await` resumes in the same async function). Stop at
+  next statement start in a calling frame. Frames compared by ACTIVATION NUMBER (user,
+  2026-11-11, replaces the C stack address and the stack depth): a new `JSStackFrame` field set
+  to 0 when the frame is created (one store per call; async/generator states are zeroed by
+  their memset), given a unique 64-bit number by `JS_DebugGetFrame` the first time it is asked
+  (`JSDebugFrame.id`); an async/generator frame keeps its number across `await` / `yield`. At
+  the start of a step the stub records the numbers of the frame and of all its callers; over
+  stops in the frame or a recorded caller, out in a recorded caller. Engine change: microbench
+  to redo. End of chain (user, 2026-11-11, as V8): when no recorded frame is on the stack any
+  more, the step becomes an "into" and stops at the next statement run (next callback, often
+  the awaiter of an async function), never in the start frame. An over from an ASYNC function
+  (`JSDebugFrame.is_async`) records only that frame and waits for it (over `await` stays in
+  it); a generator suspended by `yield` goes back to its recorded caller. A step started at a
+  return position no longer counts its own frame. Known limit: an async function ending by an
+  exception after an "over" from inside it leaves stepping on until the next pause.
+  IMPLEMENTED 2026-11-11 (engine change L, which also fixed async/generator frames seen as
+  native by core/debug.c); tested in Debug only, final test (Release, upstream tests,
+  microbench, board) still to do. Stop at
   the start of a `catch` clause and at function end (each `return` + implicit return) to show
   the return value.
 - Pause on exceptions: "all" pauses at the throw, before unwinding. "uncaught" predicts at the
@@ -139,6 +154,37 @@ keeps the old name: `C:\Sandbox\espjs`.
   at the throw) via the promise rejection tracker.
 - Conditional breakpoints, logpoints and hit counts are compiled by the proxy and evaluated on
   the ESP itself (no round trip per hit).
+- Proxy core without CDP (API agreed by the user 2026-11-11, IMPLEMENTED the same day in
+  `host/js/debuginfo.js` and `host/js/debugsession.js`, tested in Debug only; the CDP server
+  will sit on it unchanged). Small additions to the agreed API: `PackageIndex(paths, {
+  sourceRoot })` (gives `localPath`), `breakpointAt` also returns `pcs` (every offset of the
+  statement), `ScriptInfo.thisSlot(number)`, handler `onError`. Two embedded JS modules:
+  - `qjsx:debuginfo` (no device): `PackageIndex(folders)` indexes `.qjspkg` by build id
+    (manifest only); `DebugPackage` (`buildId`, `main`, `script(module)`, `scripts()`);
+    `ScriptInfo` (`module`, `source` from `src/`, `library`, `localPath` or null for a library
+    module, `check()` source/sidecar/local file consistency, `location(number, pc, { exact })`
+    (level 0 exact: last position <= pc; callers: <= pc - 1), `breakpointAt(line, column)`
+    (first statement position from there, innermost function; slides forward like V8),
+    `statementStops()`, `functionName(number)`, `scopesAt(number, pc)` (local / block /
+    closure, innermost first, internal variables hidden, `this` apart));
+  - `qjsx:debugsession`: `DebugSession(device, index, { onPaused({ reason, frames, exception,
+    returnValue }), onResumed, onScriptLoaded, onStarted, onExited })`; `attach()`,
+    `setBreakpoint(module, line, column?)` -> `{ id, location }`, `removeBreakpoint`,
+    `setPauseOnExceptions`, `pause/resume/stepInto/stepOver/stepOut`, `scopes(level)`,
+    `properties(handle)`, `setVariable(level, name, value)`, `evaluate(expression, { level })`
+    (wrapped in a function whose parameters are the visible variables, innermost wins;
+    assignments do not reach the program: use setVariable), `detach()`. On SCRIPT_LOADED it
+    sets the statement stops and the kept breakpoints then RESUME; on STARTED it reloads the
+    package and re-applies breakpoints by line; frames resolved at each pause, variables on
+    demand. Values decoded as `{ type, value }` / `{ type: "object", handle, kind, className,
+    description, size, location }` (RemoteObject is the CDP step's job).
+  - Lines and columns 0-based, columns in UTF-16 units, everywhere (CDP convention). Packages
+    searched only in the project's output folder and in files given explicitly.
+  - Tests: `tests/debuginfo.test.js` (no device: positions with accents and an emoji,
+    breakpoint choice, scopes), `tests/proxy.test.js` (desktop agent, debuggee fixture, also
+    runnable on the board).
+  - Not in this step: conditions / logpoints / hit counts, global and script scopes,
+    multi-statement evaluation, async stack traces.
 - Compiler changes (host compiler, "debug info" option when producing a `.qjspkg`). IMPLEMENTED
   2026-11-10, see `doc/engine-changes.md`; the two deviations below await the user's review:
   - statement / return positions: implemented as a kind in the 2 high bits of the
@@ -290,8 +336,8 @@ in the include path (no two headers share a name; keep it so).
   match host/js/protocol.js; agent core with Link / Storage / Controller interfaces) and the
   debugger stub (`debugger.{h,cpp}`, `debugger_values.cpp`: on the JS thread, requests queued
   from the transport thread; tested by `tests/debugger.test.js` through the desktop agent,
-  fixture `tests/fixtures/debuggee`). The host side of the debugger (proxy, CDP) is not
-  written yet.
+  fixture `tests/fixtures/debuggee`). Host side: the proxy core (`qjsx:debuginfo`,
+  `qjsx:debugsession`) is written; the CDP server is not.
 - `host/` — the `qjsx` executable: `main.cpp`, `host.*` (runtime + module loader, `RunHooks`),
   `agent_command.cpp` (`qjsx agent`, desktop stand-in for an ESP), `platform/platform_host.cpp`,
   `modules/` (host-only native modules: net + sockets, serial, compiler), `js/*.js` = the tool
@@ -302,7 +348,8 @@ in the include path (no two headers share a name; keep it so).
 - `tests/` — `run-tests.sh`, `assert.js`, `jsbind.test.js` (binding library, through
   `tests/native/test_module.cpp`, built only into `qjsx-tests`), `debug.test.js` (engine debugger
   API, through `tests/native/debug_module.cpp` and `tests/fixtures/debug/target.js`),
-  `debugger.test.js` (stub), `runtime.test.js`, `tools.test.js`, `protocol.test.js`,
+  `debugger.test.js` (stub), `debuginfo.test.js` and `proxy.test.js` (proxy core),
+  `runtime.test.js`, `tools.test.js`, `protocol.test.js`,
   `net.test.js`, `fixtures/`.
 - `doc/architecture.md` — full design + status of each part (keep it updated);
   `doc/engine-changes.md` (+ `.patch`); `doc/quickjs-map.md` (map of quickjs.c, description of

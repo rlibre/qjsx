@@ -1,4 +1,10 @@
 #!/usr/bin/perl
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
 # Lists the data members of structs and classes without a short comment
 # (doc/coding-rules.md: every member has a "//" comment at the end of its
 # line, or a comment block right above it). Methods are not listed (see

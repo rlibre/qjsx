@@ -1,3 +1,10 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
 // Framing of the agent protocol (same as host/js/frames.js):
 //   0x00 | COBS( 0xE5 | version 1 | CRC-16/CCITT-FALSE (big endian) | message ) | 0x00
 #pragma once
