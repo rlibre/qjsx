@@ -55,6 +55,14 @@ typedef struct JSDebugEvent {
        JS_UNDEFINED. While the hook runs there is no pending exception: the
        engine puts it back when the hook returns. */
     JSValueConst exception;
+    /* JS_DEBUG_REASON_EXCEPTION: TRUE if no handler will catch the value,
+       as predicted at the throw: a 'catch' on the stack of the throwing
+       frame, or a 'try' region around the call in a calling frame (a
+       'finally' does not count, it throws the value again); an async
+       function catches it (the value becomes a rejection). A throw in a
+       promise callback reaches the bottom of the stack: predicted uncaught,
+       although it becomes a rejection. */
+    JS_BOOL uncaught;
     /* TRUE when the frame stops on a return instruction (breakpoint or step
        on a JS_DEBUG_POSITION_RETURN position): 'return_value' (borrowed) is
        the value about to be returned. */

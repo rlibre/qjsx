@@ -1,7 +1,7 @@
 # Changes to the QuickJS engine
 
 This document describes the changes made by hand in `engine/qjsx/`: first for the
-debugger (A to F, L), then for the packages, the devices and the libraries (G to K). It
+debugger (A to F, L, M), then for the packages, the devices and the libraries (G to K). It
 completes [architecture.md](architecture.md) (sections 2.6, 2.7, 3 and 4).
 
 - Every change is commented `qjsx:` in the code.
@@ -15,7 +15,7 @@ completes [architecture.md](architecture.md) (sections 2.6, 2.7, 3 and 4).
 - The bytecode format changes: `BC_VERSION` goes from 5 to `0x45`. A bytecode of another
   version is refused when it is read.
 
-Changes A to L below are in the order in which they were made. The "Limits" section
+Changes A to M below are in the order in which they were made. The "Limits" section
 lists what is not done or behaves differently from what was planned.
 
 ## A. Module name kept without the debug info
@@ -477,12 +477,43 @@ version, totals stable within 0.2 %): −3.3 % against the original, `func_call`
 store added on the call path costs nothing measurable (table:
 `C:\temp\qjs-engine-test\bench-table-activation.md`).
 
+## M. Prediction of uncaught exceptions
+
+Debugger work, choice of the user (2026-11-11), instead of the `sf->call_sp` of the
+original design (a store before every call, and before every property access that may
+call a getter). The pause mode "uncaught" needs to know, at the throw, whether a handler
+will catch the value.
+
+- New field `JSDebugEvent.uncaught`, filled for `JS_DEBUG_REASON_EXCEPTION` by
+  `js_debug_is_uncaught()` (`core/debug.c`). `js_debug_on_exception()` now receives the
+  value stack of the throwing frame (`sp`, `stack_buf`), from the `exception:` label of
+  `JS_CallInternal`.
+- The prediction, only computed when a value is reported to a hook (nothing on the hot
+  path):
+  1. the throwing frame: a catch offset on its real stack, except offset 0 (iterator
+     close) and a rethrow handler (`gosub; throw` or `throw`: a `finally`,
+     `js_debug_is_rethrow_handler`);
+  2. an async function or async generator catches everything (the value becomes a
+     rejection, `js_debug_rejects`), except the top-level function of a module
+     (`<eval>`): QuickJS compiles every module as an async function, but its rejection is
+     the failure of the module;
+  3. each calling frame: its pc (just after its call) inside the try region of a
+     `catch` clause, found statically by reading its instructions
+     (`js_debug_pc_in_try`: from an `OP_catch` to its handler, the handler not being a
+     rethrow), or an async function as in 2; native frames let the value through;
+  4. nothing down to the bottom of the stack: uncaught.
+- Known approximation: a throw in a promise callback reaches the bottom of the stack and
+  is predicted uncaught, although it becomes a rejection.
+- **Bytecode**: unchanged. **Tests**: `tests/debug.test.js` (caught by the caller,
+  through a `finally`, through a native call, in an async function, nothing to the bottom
+  of the stack), and the "uncaught" mode of the stub in `tests/proxy.test.js` (a caught
+  exception does not pause).
+
 ## Limits and items not done
 
-- **"Uncaught" prediction (`sf->call_sp`): not done.** The hook is called for all
-  the exceptions; knowing whether it will be caught remains to be done. Two leads:
-  - `call_sp` saved before each call, as planned;
-  - or the sidecar gives the `try` ranges to the proxy, without changing the engine.
+- **"Uncaught" prediction**: done statically (section M), not with the planned
+  `sf->call_sp`. A throw in a promise callback (`then`) is predicted uncaught although it
+  becomes a rejection.
 - **Refresh of the table.** A frame that called a getter, a `valueOf` or a
   native callback only changes table at its next call, backward jump or return. A "step
   out" from a getter can therefore stop a little further than expected.
@@ -559,3 +590,4 @@ Measurements of 2026-11-10:
 | `builtins/date.c` | `getTimezoneOffset` without `tm_gmtoff` with newlib (I) |
 | `core/runtime.c` (also) | `js_def_malloc_usable_size` returns 0 with newlib (I) |
 | `quickjs-internal.h`, `quickjs-debug.h`, `core/debug.c`, `core/interpreter.c`, `core/closures.c` (also) | activation number of the frames, `is_async`, async frames seen as bytecode (L) |
+| `quickjs-debug.h`, `core/debug.c`, `core/core.h`, `core/interpreter.c` (also) | prediction of uncaught exceptions, `JSDebugEvent.uncaught` (M) |

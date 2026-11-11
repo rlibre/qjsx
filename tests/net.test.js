@@ -7,8 +7,8 @@
 
 // Tests of the "net" and "serial" modules (serial: listing only, no hardware).
 // Run with: bin/Release/qjsx run tests/net.test.js
-import { connect, listen } from "net";
-import { list } from "serial";
+import { connect, listen } from "sys/net";
+import { list } from "device/serial";
 import { check, equal, rejects, report } from "./assert.js";
 
 const decode = bytes => new TextDecoder().decode(bytes);

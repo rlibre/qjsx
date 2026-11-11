@@ -9,8 +9,8 @@
 // stepping, 'debugger;', exceptions, frames and slots, checked against the
 // debug info (sidecar) given by the compiler.
 // Run with: bin/Release/qjsx-tests run tests/debug.test.js
-import * as fs from "fs";
-import { compile } from "compiler";
+import * as fs from "sys/fs";
+import { compile } from "sys/compiler";
 import * as debug from "debug_test";
 import * as target from "./fixtures/debug/target.js";
 import { check, equal, report } from "./assert.js";
@@ -166,12 +166,29 @@ debug.setHook(event => events.push({
     reason: event.reason,
     message: event.exception instanceof Error ? event.exception.message : String(event.exception),
     number: debug.frame(0).number,
+    uncaught: event.uncaught,
 }));
 target.catcher();
 equal(events.length, 0, "no exception reported while reporting is off");
 debug.setExceptionReporting(true);
 equal(target.catcher(), "caught", "catcher()");
-equalJson(events, [{ reason: "exception", message: "boom", number: throwerNumber }], "caught exception reported at the throw");
+equalJson(events, [{ reason: "exception", message: "boom", number: throwerNumber, uncaught: false }],
+    "caught exception reported at the throw, predicted caught");
+
+// --- prediction of the catch, at the throw
+events = [];
+try {
+    [1].map(() => target.thrower());
+} catch (error) {
+    // expected
+}
+equal(events[0]?.uncaught, false, "a try around a native call (Array.prototype.map) catches: predicted caught");
+events = [];
+new Promise(() => target.thrower()).catch(() => {});
+equal(events[0]?.uncaught, true, "no try down to the bottom of the stack (a Promise executor): predicted uncaught");
+events = [];
+await target.asyncThrower().catch(() => {});
+equal(events[0]?.uncaught, false, "a throw in an async function becomes a rejection: predicted caught");
 events = [];
 let escaped = null;
 try {
@@ -181,6 +198,7 @@ try {
 }
 equal(escaped, "boom", "the exception went through the finally clause");
 equal(events.length, 1, "an exception rethrown by 'finally' is reported once");
+equal(events[0]?.uncaught, false, "through a 'finally', the try of the caller catches: predicted caught");
 events = [];
 try {
     target.throughFinallyWithCode();

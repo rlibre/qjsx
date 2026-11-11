@@ -74,10 +74,11 @@ The same program also runs on the PC, without a board:
 qjsx run src/main.js
 ```
 
-To debug it in VS Code, start the debugger server of the project:
+To debug it in VS Code, start the debugger server of the project (`--restart` starts the
+program again each time VS Code attaches, so that its startup code can be debugged):
 
 ```bash
-qjsx debug --target serial:COM3@921600
+qjsx debug --target serial:COM3@921600 --restart
 ```
 
 then attach VS Code to it, with this configuration in `.vscode/launch.json`:
@@ -124,7 +125,7 @@ engine instead of crashing.
 | Libraries (`.qjslib`) | works |
 | Debugger on the board | works |
 | Debugger in VS Code (`qjsx debug`) | works (conditional breakpoints and logpoints to do) |
-| Hardware modules (GPIO, I2C, SPI, WiFi…) | to do |
+| Hardware modules | `device/gpio`, `device/rmt` and RGB LEDs (`stdlib/rgbled`) on the ESP32; I2C, SPI, PWM, ADC, WiFi to do |
 | Files on the board | to do |
 | Native USB link, WiFi link | to do |
 | RP2350 board (Olimex PICO2-XXL) | planned |

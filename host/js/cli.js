@@ -10,15 +10,16 @@
 //
 // Status messages go to stderr; stdout only carries the program output
 // (monitor), so that it can be redirected or compared.
-import * as fs from "fs";
+import * as fs from "sys/fs";
 import { join } from "stdlib/path";
-import { list as listSerialPorts } from "serial";
+import { list as listSerialPorts } from "device/serial";
 import { build } from "qjsx:build";
 import { warningText } from "qjsx:compile";
+import { qjsxVersion } from "sys/compiler";
 import { makeLibrary } from "qjsx:library";
 import { loadProject, PROJECT_FILE } from "qjsx:project";
 import { Device } from "qjsx:device";
-import { upload, latestPackage } from "qjsx:deploy";
+import { upload, latestPackage, reducePackage } from "qjsx:deploy";
 import { KIND, KEY, STREAM, kindName } from "qjsx:protocol";
 import { PackageIndex } from "qjsx:debuginfo";
 import { CdpServer } from "qjsx:cdp";
@@ -41,6 +42,7 @@ commands:
       --target, --token
       --port <port>       default: "debugPort" of qjsx.json (9339)
       --host <address>    default: 127.0.0.1
+      --restart           start the program again when VS Code attaches (debug its startup)
   targets                                      list the serial ports
   agent [--host h] [--port p] [--storage dir] [--token t]
                                                desktop device agent (stand-in for an ESP)
@@ -94,7 +96,8 @@ function status(text) {
 async function openDevice(target, token, monitor) {
     const device = await Device.open(target, monitor);
     const info = await device.hello(token);
-    status(`connected to ${info.get(KEY.AGENT)} (QuickJS ${info.get(KEY.ENGINE)}) on ${target}`);
+    const firmware = device.version === undefined ? "" : `qjsx ${device.version}, `;
+    status(`connected to ${info.get(KEY.AGENT)} (${firmware}QuickJS ${info.get(KEY.ENGINE)}) on ${target}`);
     return device;
 }
 
@@ -150,8 +153,13 @@ async function deployCommand(args) {
     const bytes = fs.readFileSync(packagePath);
     const monitor = monitorHandlers(true);
     const device = await openDevice(target, options.token, monitor.handlers);
+    // a firmware of another qjsx version may not run this package as the tool
+    // expects: said, not refused (the bytecode number is what must match)
+    if (device.version !== undefined && device.version !== qjsxVersion) {
+        status(`warning: the device runs qjsx ${device.version}, this tool is qjsx ${qjsxVersion}`);
+    }
     const buildId = await upload(device, bytes);
-    status(`installed ${packagePath} (${bytes.length} bytes, build ${buildId.slice(0, 12)})`);
+    status(`installed ${packagePath} (${reducePackage(bytes).length} bytes sent, build ${buildId.slice(0, 12)})`);
     if (options["no-run"]) {
         device.close();
         return 0;
@@ -190,6 +198,7 @@ async function deviceCommand(args) {
     const device = await openDevice(targetOf(options, currentProject()), options.token, {});
     const answer = await device.request(requests[action]);
     if (action === "info") {
+        console.log(`firmware: qjsx ${device.version ?? "(unknown: older firmware)"}`);
         console.log(`running:  ${answer.get(KEY.RUNNING)}`);
         console.log(`package:  ${answer.get(KEY.BUILD_ID) ?? "(none)"} (${answer.get(KEY.PACKAGE_SIZE)} bytes)`);
     } else {
@@ -247,10 +256,10 @@ function mklibCommand(args) {
 // qjsx debug: the debugger server (CDP) of the project's device, for VS Code.
 // Runs until Ctrl+C or until the device goes away.
 async function debugCommand(args) {
-    const { options, positional } = parseArguments(args, { values: ["target", "token", "port", "host"] });
+    const { options, positional } = parseArguments(args, { values: ["target", "token", "port", "host"], flags: ["restart"] });
     const project = currentProject();
     if (project === undefined || positional.length > 0) {
-        throw new Error(`usage: qjsx debug [--target <target>] [--port <port>], in a project folder (${PROJECT_FILE})`);
+        throw new Error(`usage: qjsx debug [--target <target>] [--port <port>] [--restart], in a project folder (${PROJECT_FILE})`);
     }
 
     // the packages of the project, to find the one the device runs
@@ -276,6 +285,7 @@ async function debugCommand(args) {
         device, index, host, port,
         title: `qjsx ${project.name}`,
         sourceCache: join(output, "debug-src"),
+        restart: options.restart === true,
         onStatus: status,
     });
     server.start();

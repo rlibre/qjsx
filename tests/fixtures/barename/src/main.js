@@ -5,7 +5,8 @@
  *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
  */
 
-// Version of the qjsx tool (the QuickJS version is CONFIG_VERSION).
-#pragma once
+// Imports a native module by its old bare name: qjsx build refuses it (native
+// modules are named sys/... or device/...; tests/run-tests.sh).
+import { readFileSync } from "fs";
 
-#define QJSX_VERSION "0.1.0"
+console.log(readFileSync("x"));

@@ -15,7 +15,7 @@ namespace rt {
 typedef JSModuleDef *NativeModuleFactory(JSContext *ctx, const char *moduleName);
 
 struct NativeModule {
-    const char          *name;    // import name ("fs"); static text
+    const char          *name;    // import name ("sys/fs"); static text
     NativeModuleFactory *create;  // creates the module in a context
 };
 
@@ -30,9 +30,21 @@ struct EmbeddedModule {
 };
 
 /**
- * Native module registered under this name ("fs"...), or nullptr.
+ * Native module registered under this name ("sys/fs"...), or nullptr.
  */
 const NativeModule *findNativeModule(const char *name);
+
+/**
+ * Number of native modules registered: the modules a program of this
+ * firmware may import (the agent lists them in its answer to HELLO).
+ */
+int countNativeModules();
+
+/**
+ * Name of the native module at 'index' (0 <= index < countNativeModules()),
+ * a static text.
+ */
+const char *nativeModuleNameAt(int index);
 
 /**
  * Embedded JS module registered under this name ("stdlib/path"...), or nullptr.

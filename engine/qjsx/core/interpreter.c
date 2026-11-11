@@ -2850,7 +2850,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     /* qjsx: report the throw to the debugger (only in the frame of the
        throw, not again while it unwinds through the calling frames) */
     if (unlikely(rt->debug.hook != NULL))
-        js_debug_on_exception(ctx, sf, pc);
+        js_debug_on_exception(ctx, sf, pc, sp, stack_buf);
     if (!rt->current_exception_is_uncatchable) {
         while (sp > stack_buf) {
             JSValue val = *--sp;

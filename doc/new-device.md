@@ -41,7 +41,7 @@ contains no JavaScript at all.
 | Part | Source | Written per port? |
 |---|---|---|
 | QuickJS engine, without its compiler (no `eval` on a device) | `engine/qjsx/` except `compiler/`, built with `QJSX_NO_COMPILER` | no |
-| Runtime: event loop, globals (`console`, timers, `process`), modules `fs` and `crypto`, package reader | `common/runtime/` | no |
+| Runtime: event loop, globals (`console`, timers, `process`), modules `sys/fs` and `sys/crypto`, package reader | `common/runtime/` | no |
 | Device agent, debugger stub, runner of the installed package | `common/agent/` | no |
 | System services: clock, fatal stop, threads, mutex, signal | implementation of `common/runtime/platform.h` | yes (shared between FreeRTOS ports: `ports/freertos/`) |
 | The chip and its wiring: memory, package storage, links, console | implementation of `common/board/board.h` | yes |

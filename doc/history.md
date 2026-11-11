@@ -5,6 +5,17 @@ one comes first.
 
 ## 2026-11-11
 
+### Answer to `RESET` lost on the ESP32
+
+- **Defect.** The agent handed the answer to `UartLink::send`, then `board::restart()`
+  called `esp_restart()` at once: `uart_write_bytes` only copies the frame into the transmit
+  buffer of the driver, so the chip could restart before the answer left, and the host waited
+  for it in vain.
+- **Fix.** `board::restart()` (`ports/esp32/main/board_esp32.cpp`) waits for the end of the
+  transmission (`uart_wait_tx_done`, at most `RESTART_FLUSH_MS` = 100 ms) before
+  `esp_restart()`.
+- **Verified.** On the board: `qjsx device reset` answers ("reset done").
+
 ### `onData` callback freed while it runs (`net`, `serial`)
 
 - **Defect.** The `net` and `serial` modules called the `onData` callback straight from

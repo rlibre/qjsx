@@ -27,7 +27,7 @@ export const KIND = {
     RESPONSE: 1,
     ERROR: 2,
     // session
-    HELLO: 10,          // { PROTOCOL, TOKEN? } -> { PROTOCOL, AGENT, ENGINE, MAX_MESSAGE }
+    HELLO: 10,          // { PROTOCOL, TOKEN? } -> { PROTOCOL, AGENT, ENGINE, VERSION?, MAX_MESSAGE, NATIVES? }
     INFO: 11,           // {} -> { RUNNING, BUILD_ID, PACKAGE_SIZE }
     // deployment
     UPLOAD_BEGIN: 20,   // { SIZE, SHA256, BUILD_ID, BYTECODE } -> {}; refused if the device reads another bytecode
@@ -71,7 +71,7 @@ export const KIND = {
     CALL: 53,           // { FUNCTION, THIS, ARGUMENTS, GROUP } -> { VALUE } or { EXCEPTION }
     RELEASE: 54,        // { GROUP } or { HANDLE } -> {}
     // debugger events
-    PAUSED: 60,         // { REASON, EXCEPTION?, RETURN_VALUE? }
+    PAUSED: 60,         // { REASON, EXCEPTION?, UNCAUGHT?, RETURN_VALUE? }
     RESUMED: 61,        // {}
     SCRIPT_LOADED: 62,  // { MODULE }   a module was loaded and is not run yet: the device
                         //   waits for RESUME (the host sets the stops of the module first)
@@ -118,6 +118,9 @@ export const KEY = {
     RETURN_VALUE: 38,
     STEP: 39,
     BYTECODE: 40,       // version of the bytecode of a package (the engine only reads its own)
+    UNCAUGHT: 41,       // PAUSED on an exception: true if no handler will catch it (prediction)
+    VERSION: 43,        // HELLO answer: qjsx version of the firmware (older firmware: absent)
+    NATIVES: 42,        // HELLO answer: names of the native modules of the firmware (older firmware: absent)
 };
 
 export const STREAM = { STDOUT: 1, STDERR: 2 };

@@ -5,9 +5,9 @@
  *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
  */
 
-// Module "compiler" (host only): compiles JS source into QuickJS bytecode.
+// Module "sys/compiler" (host only): compiles JS source into QuickJS bytecode.
 //
-//   import { compile } from "compiler";
+//   import { compile } from "sys/compiler";
 //   const { bytecode, debug, imports } = compile(source, "src/main.js",
 //       { module: true, strip: "all", debug: true, dynamicImport: false });
 //
@@ -333,7 +333,7 @@ js::Value compile(js::Str source, js::Str name, js::Optional<CompileOptions> opt
 } // namespace
 
 /**
- * Module "compiler": compile(), and the versions recorded in the package
+ * Module "sys/compiler": compile(), and the versions recorded in the package
  * manifest.
  */
 JS_MODULE(compiler, module) {

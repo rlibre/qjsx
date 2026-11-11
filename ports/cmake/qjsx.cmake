@@ -15,6 +15,9 @@
 #   QJSX_ENGINE_SOURCES    the engine (C)
 #   QJSX_COMMON_SOURCES    runtime, modules, agent (C++)
 #   QJSX_FREERTOS_SOURCES  the FreeRTOS part of platform.h, shared by the ports
+#   QJSX_DEVICE_GPIO_SOURCES  the module device/gpio: add it when the port
+#                          implements common/hal/hal_gpio.h (and register it)
+#   QJSX_DEVICE_RMT_SOURCES   the module device/rmt (common/hal/hal_rmt.h)
 #   QJSX_INCLUDE_DIRS      every source folder (headers are included by name)
 #   QJSX_DEFINES           for every source
 #   QJSX_ENGINE_OPTIONS    compile options of the engine sources
@@ -43,6 +46,10 @@ file(GLOB QJSX_COMMON_SOURCES
 
 set(QJSX_FREERTOS_SOURCES "${QJSX_ROOT}/ports/freertos/platform_freertos.cpp")
 
+# the hardware modules (common/device/), one list per hal interface
+set(QJSX_DEVICE_GPIO_SOURCES "${QJSX_ROOT}/common/device/gpio_module.cpp")
+set(QJSX_DEVICE_RMT_SOURCES "${QJSX_ROOT}/common/device/rmt_module.cpp")
+
 set(QJSX_INCLUDE_DIRS
     "${QJSX_ROOT}/engine/qjsx"
     "${QJSX_ROOT}/common/jsbind"
@@ -50,6 +57,8 @@ set(QJSX_INCLUDE_DIRS
     "${QJSX_ROOT}/common/runtime/modules"
     "${QJSX_ROOT}/common/agent"
     "${QJSX_ROOT}/common/board"
+    "${QJSX_ROOT}/common/hal"
+    "${QJSX_ROOT}/common/device"
     "${QJSX_ROOT}/ports/freertos")
 
 set(QJSX_DEFINES

@@ -9,7 +9,7 @@
 // is ["qjsx", main module], env comes from qjsx.json, cwd is the data
 // directory of the board and fs resolves relative paths against it. Run on
 // the PC (qjsx run), argv and env are the real ones.
-import * as fs from "fs";
+import * as fs from "sys/fs";
 
 console.log(`argv ${JSON.stringify(process.argv)}`);
 console.log(`env ${JSON.stringify(process.env)}`);

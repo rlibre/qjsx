@@ -10,7 +10,7 @@
 // its manifest; a package also gets another build id, so that it can be told
 // from the original once installed.
 // Usage: qjsx run tests/tamper-package.js <package or library> <copy>
-import * as fs from "fs";
+import * as fs from "sys/fs";
 import { readZip, writeZip } from "qjsx:zip";
 
 const [original, copy] = process.argv.slice(2);

@@ -13,8 +13,8 @@
 //   device.close();
 //
 // Targets:  tcp:<host>:<port>   serial:<port>[@<baud rate>]   (COM3, /dev/ttyUSB0...)
-import { connect } from "net";
-import { open as openSerial } from "serial";
+import { connect } from "sys/net";
+import { Serial } from "device/serial";
 import { encodeFrame, FrameParser } from "qjsx:frames";
 import { KIND, KEY, PROTOCOL_VERSION, encodeMessage, decodeMessage, kindName } from "qjsx:protocol";
 
@@ -47,7 +47,7 @@ export class Device {
         const target = parseTarget(targetText);
         const link = target.kind === "tcp"
             ? await connect({ host: target.host, port: target.port })
-            : openSerial(target.path, { baudRate: target.baudRate });
+            : new Serial(target.path, { baudRate: target.baudRate });
         return new Device(link, handlers, target.kind === "serial");
     }
 
@@ -64,12 +64,18 @@ export class Device {
         this.textTimer = isSerial ? setInterval(() => this.parser.flushText(), 100) : undefined;
     }
 
-    hello(token) {
+    // Opens the session. Keeps the native modules of the firmware in
+    // 'natives' and its qjsx version in 'version' (undefined if an older
+    // firmware does not say).
+    async hello(token) {
         const payload = { [KEY.PROTOCOL]: PROTOCOL_VERSION };
         if (token !== undefined) {
             payload[KEY.TOKEN] = token;
         }
-        return this.request(KIND.HELLO, payload);
+        const answer = await this.request(KIND.HELLO, payload);
+        this.natives = answer.get(KEY.NATIVES);
+        this.version = answer.get(KEY.VERSION);
+        return answer;
     }
 
     // Sends a request; resolves with the answer payload (a Map). A request

@@ -10,8 +10,8 @@
 // agent protocol (no CDP: that is the proxy's job).
 // Run with: bin/Release/qjsx run tests/debugger.test.js tcp:127.0.0.1:<port>
 // (an "qjsx agent" must listen there; tests/run-tests.sh starts one).
-import * as fs from "fs";
-import { compile } from "compiler";
+import * as fs from "sys/fs";
+import { compile } from "sys/compiler";
 import { build } from "qjsx:build";
 import { readZip } from "qjsx:zip";
 import { Device } from "qjsx:device";

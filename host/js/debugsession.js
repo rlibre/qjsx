@@ -40,7 +40,7 @@
 // Objects stay on the device: their handles live in the "pause" group
 // (released when the program resumes), or in the "console" group when the
 // program is not paused.
-import { compile } from "compiler";
+import { compile } from "sys/compiler";
 import {
     KIND, KEY, VALUE, OBJECT_KIND, STEP_KIND, STOP_KIND, EXCEPTION_MODE, SLOT_KIND, GROUP, PAUSE_REASON,
     PROPERTY, encodeStops,
@@ -321,6 +321,7 @@ export class DebugSession {
             const pause = { reason, frames };
             if (payload.has(KEY.EXCEPTION)) {
                 pause.exception = decodeValue(payload.get(KEY.EXCEPTION));
+                pause.uncaught = payload.get(KEY.UNCAUGHT) === true;
             }
             if (payload.has(KEY.RETURN_VALUE)) {
                 pause.returnValue = decodeValue(payload.get(KEY.RETURN_VALUE));
@@ -418,6 +419,20 @@ export class DebugSession {
                 value: decodeValue(values[variable.slotKind][variable.index]),
             })),
         }));
+    }
+
+    // The value of 'this' in a frame of the pause, or undefined when the
+    // function has no 'this' slot (QuickJS makes one only when the function
+    // uses 'this').
+    async thisOf(level) {
+        const frame = this.pausedFrame(level);
+        const slot = frame.script.thisSlot(frame.number);
+        if (slot === null) {
+            return undefined;
+        }
+
+        const values = await this.readSlots(level, [slot.slotKind]);
+        return decodeValue(values[slot.slotKind][slot.index]);
     }
 
     // The visible variable 'name' of a frame (the innermost one), or undefined.

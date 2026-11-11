@@ -7,7 +7,7 @@
 
 // Tests of the JS modules of the tool: zip, glob, project.
 // Run with: bin/Release/qjsx run tests/tools.test.js
-import * as fs from "fs";
+import * as fs from "sys/fs";
 import { join } from "stdlib/path";
 import { writeZip, readZip, crc32 } from "qjsx:zip";
 import { globToRegExp, matchFiles } from "qjsx:glob";

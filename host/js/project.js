@@ -33,7 +33,7 @@
 //     },
 //     "output": "build/packages"      where sensors.qjslib is written
 //   }
-import * as fs from "fs";
+import * as fs from "sys/fs";
 import { join, basename, resolve } from "stdlib/path";
 
 export const PROJECT_FILE = "qjsx.json";

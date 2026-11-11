@@ -11,7 +11,7 @@
 // Run with: bin/Release/qjsx run tests/proxy.test.js tcp:127.0.0.1:<port>
 // (an "qjsx agent" must listen there; tests/run-tests.sh starts one). Also
 // runs on a board: serial:COM11@921600.
-import * as fs from "fs";
+import * as fs from "sys/fs";
 import { build } from "qjsx:build";
 import { Device } from "qjsx:device";
 import { upload } from "qjsx:deploy";
@@ -105,7 +105,8 @@ await session.removeBreakpoint(slid.id);
 const breakpointLine = lineOf(main, "const result = area(box);");
 const breakpoint = await session.setBreakpoint("src/main.js", breakpointLine);
 equal(breakpoint?.location?.line, breakpointLine, "breakpoint set on its line");
-await session.setPauseOnExceptions("none");
+// "uncaught": the exception of failSoftly() is caught there, it must not pause
+await session.setPauseOnExceptions("uncaught");
 
 await device.request(KIND.RUN);
 
@@ -161,7 +162,8 @@ equal(pause.frames[0].functionName, "spin", "paused in spin()");
 await session.setVariable(0, "keepSpinning", false);
 await session.resume();
 
-// --- 'debugger;' of the module code (the exception of failSoftly() does not pause)
+// --- 'debugger;' of the module code (the exception of failSoftly(), caught, does not
+// pause in "uncaught" mode)
 pause = await pauses.next();
 equal(`${pause.reason}:${pause.frames[0].functionName}`, "debugger:<module>", "paused on 'debugger;' of the module");
 await session.resume();

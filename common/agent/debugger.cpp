@@ -1523,9 +1523,10 @@ int Debugger::onHook(const JSDebugEvent *event) {
             break;
         }
         case JS_DEBUG_REASON_EXCEPTION: {
-            // "all" pauses at the throw; "uncaught" needs the prediction of the
-            // catch: not done yet, it never pauses
-            if (mode == EXCEPTIONS_ALL) {
+            // "all" pauses at every throw; "uncaught" only when the engine
+            // predicts that no handler will catch the value
+            bool pauses = mode == EXCEPTIONS_ALL || (mode == EXCEPTIONS_UNCAUGHT && event->uncaught);
+            if (pauses) {
                 pause(REASON_EXCEPTION, event);
             }
 
@@ -1550,8 +1551,9 @@ void Debugger::pause(int reason, const JSDebugEvent *event) {
     _pausedAtReturn = event->at_return;
     _resumeRequested = false;
 
-    // build PAUSED { REASON, EXCEPTION?, RETURN_VALUE? }: the thrown value at
-    // an exception stop, as a handle of the pause group
+    // build PAUSED { REASON, EXCEPTION?, UNCAUGHT?, RETURN_VALUE? }: the
+    // thrown value at an exception stop, as a handle of the pause group, and
+    // whether a handler will catch it
     cbor::Writer payload;
     int fieldCount = 1;
     payload.integer(KEY_REASON);
@@ -1559,7 +1561,9 @@ void Debugger::pause(int reason, const JSDebugEvent *event) {
     if (event->reason == JS_DEBUG_REASON_EXCEPTION) {
         payload.integer(KEY_EXCEPTION);
         writeValue(&payload, event->exception, GROUP_PAUSE);
-        fieldCount++;
+        payload.integer(KEY_UNCAUGHT);
+        payload.boolean(event->uncaught);
+        fieldCount += 2;
     }
 
     // the return value at a return stop, as a handle of the pause group

@@ -5,9 +5,9 @@
  *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
  */
 
-// Module "net": TCP client and server.
+// Module "sys/net": TCP client and server.
 //
-//   import { connect, listen } from "net";
+//   import { connect, listen } from "sys/net";
 //   const server = listen({ port: 0 }, connection => {
 //       connection.onData(bytes => connection.write(bytes));   // echo
 //   });
@@ -709,7 +709,7 @@ js::Promise<js::Value> netConnect(ConnectOptions options) {
 } // namespace
 
 /**
- * Module "net": connect(), listen() and the classes Connection and Server.
+ * Module "sys/net": connect(), listen() and the classes Connection and Server.
  */
 JS_MODULE(net, module) {
     JS_FUNCTION_AS(module, netConnect, "connect");   // C++ names: connect/listen are socket functions

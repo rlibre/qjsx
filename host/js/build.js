@@ -36,16 +36,17 @@
 //
 // Identifiers (those of a script are in qjsx:compile):
 //   package buildId = first 32 hex digits of sha256 over the scripts' ids and the main module
-import * as fs from "fs";
+import * as fs from "sys/fs";
 import { join, resolve } from "stdlib/path";
-import { sha256 } from "crypto";
+import { sha256 } from "sys/crypto";
 import { writeZip } from "qjsx:zip";
 import { matchFiles } from "qjsx:glob";
 import { loadProject, PROJECT_FILE } from "qjsx:project";
 import { hex, encodeText } from "qjsx:util";
 import { compileModule, compilerId, BYTECODE_VERSION } from "qjsx:compile";
 import {
-    readLibrary, libraryModule, libraryOf, madeByThisCompiler, standardLibraryFile, STANDARD_LIBRARY,
+    readLibrary, libraryModule, libraryOf, isNativeModule, bareNameError, madeByThisCompiler, standardLibraryFile,
+    STANDARD_LIBRARY, NATIVE_PREFIXES,
 } from "qjsx:library";
 
 export const PACKAGE_FORMAT = 1;
@@ -110,6 +111,9 @@ function loadLibraries(project) {
     const libraries = new Map();
     for (const file of files) {
         const library = readLibrary(file);
+        if (NATIVE_PREFIXES.includes(library.name)) {
+            throw new Error(`${file}: a library cannot be named '${library.name}', the prefix of the native modules`);
+        }
         const sameName = libraries.get(library.name);
         if (sameName !== undefined) {
             throw new Error(`two libraries are named '${library.name}': ${sameName.file} and ${file}`);
@@ -119,11 +123,19 @@ function loadLibraries(project) {
     return libraries;
 }
 
-// What 'importer' imports, when it is not already in the package: a module
-// of a library, returned to be added, or a native module, added to
-// 'natives' (nothing is returned). Anything else is an error.
+// What 'importer' imports, when it is not already in the package: a native
+// module (sys/..., device/...), added to 'natives' (nothing is returned), or a
+// module of a library, returned to be added. Anything else is an error.
 function importedModule(importer, imported, libraries, natives) {
     const where = `${importer.script.path} imports '${imported.specifier}'`;
+
+    // a native module: the firmware (or the tool on the PC) has it, the
+    // device says which ones at deploy time
+    if (isNativeModule(imported.name)) {
+        natives.add(imported.name);
+        return undefined;
+    }
+
     const libraryName = libraryOf(imported.name);
     const library = libraries.get(libraryName);
 
@@ -148,9 +160,8 @@ function importedModule(importer, imported, libraries, natives) {
         throw new Error(`${where}: not a module of the program, and no library '${libraryName}' is declared ('libraries' in ${PROJECT_FILE})`);
     }
 
-    // a name without '/': a native module
-    natives.add(imported.name);
-    return undefined;
+    // a name without '/': no such module
+    throw bareNameError(where, imported.name);
 }
 
 // Removes the oldest packages of the project, keeping 'keep' of them.

@@ -78,8 +78,8 @@ int runAgentCommand(int argc, char **argv) {
     }
 
     // run the device: the calling thread becomes the JS thread
-    agent::Identity identity = { "qjsx desktop agent " QJSX_VERSION, CONFIG_VERSION, options.token,
-                                 JS_GetBytecodeVersion() };
+    agent::Identity identity = { "qjsx desktop agent", CONFIG_VERSION, options.token, JS_GetBytecodeVersion(),
+                                 QJSX_VERSION };
     agent::runDevice(identity);
     return 1;   // runDevice returns only when the links could not start
 }

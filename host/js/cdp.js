@@ -32,11 +32,12 @@
 //                 "scope:<pause number>:<level>:<index>" for a scope
 //   breakpointId  "bp:<number>"
 // A callFrameId or a scope of a pause that is over is refused.
-import * as fs from "fs";
+import * as fs from "sys/fs";
 import { dirname, resolve } from "stdlib/path";
-import { qjsxVersion } from "compiler";
+import { qjsxVersion } from "sys/compiler";
 import { startServer } from "qjsx:websocket";
 import { DebugSession } from "qjsx:debugsession";
+import { KIND } from "qjsx:protocol";
 
 export const DEFAULT_PORT = 9339;
 const TARGET_ID = "qjsx";
@@ -46,9 +47,14 @@ const CONTEXT_ID = 1;
 const METHOD_NOT_FOUND = -32601;
 const SERVER_ERROR = -32000;
 
+// Object previews (Runtime.getProperties and evaluations with
+// generatePreview): at most this many properties, values cut to this length.
+const PREVIEW_PROPERTIES = 5;
+const PREVIEW_TEXT = 100;
+
 // Methods accepted and ignored: js-debug sends them, nothing here needs them.
 const IGNORED_METHODS = new Set([
-    "Runtime.runIfWaitingForDebugger", "Profiler.enable", "Profiler.disable", "NodeWorker.enable",
+    "Profiler.enable", "Profiler.disable", "NodeWorker.enable",
     "NodeWorker.disable", "Debugger.setAsyncCallStackDepth", "Runtime.setAsyncCallStackDepth",
     "Debugger.setBlackboxPatterns", "Debugger.setBreakpointsActive", "Runtime.releaseObjectGroup",
     "Runtime.disable", "Debugger.disable",
@@ -73,14 +79,18 @@ export class CdpServer {
     // device: an opened Device (hello done); index: a PackageIndex;
     // host, port: where to listen; title: shown by the debugger;
     // sourceCache: folder where the sources of the library modules are
-    // written (js-debug opens files); onStatus(text): messages for the user
-    constructor({ device, index, host = "127.0.0.1", port = DEFAULT_PORT, title = "qjsx", sourceCache, onStatus }) {
+    // written (js-debug opens files); restart: start the program again when
+    // a client is ready (Runtime.runIfWaitingForDebugger, sent by js-debug
+    // once its breakpoints are set), so that startup code can be debugged;
+    // onStatus(text): messages for the user
+    constructor({ device, index, host = "127.0.0.1", port = DEFAULT_PORT, title = "qjsx", sourceCache, restart = false, onStatus }) {
         this.device = device;
         this.index = index;
         this.host = host;
         this.listenPort = port;
         this.title = title;
         this.sourceCache = sourceCache;
+        this.restart = restart;
         this.onStatus = onStatus ?? (() => {});
 
         this.server = null;
@@ -436,9 +446,10 @@ export class CdpServer {
 
     // ### Pauses ##############################################################
 
-    onPaused(pause) {
+    async onPaused(pause) {
         this.pauseNumber++;
-        this.pause = { number: this.pauseNumber, frames: pause.frames, scopes: new Map() };
+        const number = this.pauseNumber;
+        this.pause = { number, frames: pause.frames, scopes: new Map() };
 
         // the scripts of the stack are announced before the pause
         for (const frame of pause.frames) {
@@ -447,16 +458,27 @@ export class CdpServer {
             }
         }
 
-        const callFrames = pause.frames
-            .filter(frame => !frame.native && this.scriptIds.has(frame.module) && frame.line !== undefined)
-            .map(frame => this.callFrame(frame));
+        // the frames, with their 'this' read on the device (one request per
+        // frame whose function uses 'this')
+        const shown = pause.frames.filter(frame => !frame.native && this.scriptIds.has(frame.module) && frame.line !== undefined);
+        const callFrames = [];
+        for (const frame of shown) {
+            const thisValue = await this.session.thisOf(frame.level);
+            callFrames.push(this.callFrame(frame, thisValue));
+        }
+
+        // the program may have gone on meanwhile (the client left, a stop)
+        if (this.pause === null || this.pause.number !== number) {
+            return;
+        }
+
         if (callFrames.length > 0 && pause.returnValue !== undefined) {
             callFrames[0].returnValue = remoteObject(pause.returnValue);
         }
 
         const params = { callFrames, reason: pause.reason === "exception" ? "exception" : "other" };
         if (pause.exception !== undefined) {
-            params.data = remoteObject(pause.exception);
+            params.data = { ...remoteObject(pause.exception), uncaught: pause.uncaught === true };
         }
         if (pause.reason === "breakpoint" && pause.frames.length > 0) {
             params.hitBreakpoints = this.hitBreakpoints(pause.frames[0]);
@@ -470,8 +492,9 @@ export class CdpServer {
     }
 
     // A frame of the device as a CDP call frame; the scopes are objects whose
-    // properties are read on demand (Runtime.getProperties).
-    callFrame(frame) {
+    // properties are read on demand (Runtime.getProperties). 'thisValue':
+    // undefined when the function has no 'this' slot.
+    callFrame(frame, thisValue) {
         const number = this.pause.number;
         const scopeChain = this.session.scopesOf(frame).map((scope, index) => ({
             type: scope.kind,
@@ -489,7 +512,7 @@ export class CdpServer {
             location: { scriptId: this.scriptIds.get(frame.module), lineNumber: frame.line, columnNumber: frame.column },
             url: this.urls.get(frame.module),
             scopeChain,
-            this: { type: "undefined" },
+            this: thisValue === undefined ? { type: "undefined" } : remoteObject(thisValue),
             canBeRestarted: false,
         };
     }
@@ -516,6 +539,62 @@ export class CdpServer {
             this.pause.scopes.set(level, scopes);
         }
         return scopes[index]?.variables ?? [];
+    }
+
+    // ### Previews ############################################################
+
+    // An evaluation result with the preview of its value, when asked.
+    async withPreview(result, generatePreview) {
+        await this.addPreviews([result.result], generatePreview);
+        return result;
+    }
+
+    // Adds a preview to each object of 'remotes' (RemoteObjects), when
+    // asked: one request to the device per object, sent together.
+    async addPreviews(remotes, generatePreview) {
+        if (generatePreview !== true) {
+            return;
+        }
+
+        const objects = remotes.filter(remote => remote.type === "object" && remote.objectId?.startsWith("h:"));
+        await Promise.all(objects.map(async remote => {
+            try {
+                remote.preview = await this.previewOf(remote);
+            } catch (error) {
+                // no preview: the description is enough
+            }
+        }));
+    }
+
+    // The CDP ObjectPreview of an object of the device: its first enumerable
+    // own properties, each value as a short text (an object by its
+    // description); getters are never called.
+    async previewOf(remote) {
+        const { properties } = await this.session.properties(handleOf(remote.objectId));
+        const shown = properties.filter(property => property.enumerable && typeof property.name === "string");
+
+        const entries = shown.slice(0, PREVIEW_PROPERTIES).map(property => {
+            if (property.accessor) {
+                return { name: property.name, type: "accessor" };
+            }
+            const value = remoteObject(property.value);
+            const entry = { name: property.name, type: value.type, value: previewText(value) };
+            if (value.subtype !== undefined) {
+                entry.subtype = value.subtype;
+            }
+            return entry;
+        });
+
+        const preview = {
+            type: remote.type,
+            description: remote.description,
+            overflow: shown.length > PREVIEW_PROPERTIES,
+            properties: entries,
+        };
+        if (remote.subtype !== undefined) {
+            preview.subtype = remote.subtype;
+        }
+        return preview;
     }
 
     // ### Commands ############################################################
@@ -624,27 +703,41 @@ const COMMANDS = {
         return {};
     },
 
-    async "Debugger.evaluateOnCallFrame"({ callFrameId, expression, returnByValue }) {
+    // With --restart: the client has set its breakpoints, the program starts
+    // again under the debugger (each module waits for its stops when it is
+    // loaded). Otherwise nothing to do: the program already runs.
+    async "Runtime.runIfWaitingForDebugger"() {
+        if (!this.restart) {
+            return {};
+        }
+
+        await this.ensureSession();
+        await this.device.request(KIND.RUN);
+        this.onStatus("program started again for the debugger (--restart)");
+        return {};
+    },
+
+    async "Debugger.evaluateOnCallFrame"({ callFrameId, expression, returnByValue, generatePreview }) {
         const level = this.levelOf(callFrameId);
         const answer = await this.session.evaluate(expression, { level, returnByValue: returnByValue === true });
-        return evaluationResult(answer);
+        return this.withPreview(evaluationResult(answer), generatePreview);
     },
 
-    async "Runtime.evaluate"({ expression, returnByValue }) {
+    async "Runtime.evaluate"({ expression, returnByValue, generatePreview }) {
         const session = await this.ensureSession();
         const answer = await session.evaluate(expression, { level: 0, returnByValue: returnByValue === true });
-        return evaluationResult(answer);
+        return this.withPreview(evaluationResult(answer), generatePreview);
     },
 
-    async "Runtime.callFunctionOn"({ functionDeclaration, objectId, arguments: callArguments, returnByValue }) {
+    async "Runtime.callFunctionOn"({ functionDeclaration, objectId, arguments: callArguments, returnByValue, generatePreview }) {
         const session = await this.ensureSession();
         const thisValue = objectId === undefined || objectId.startsWith("scope:") ? undefined : valueOfObjectId(objectId);
         const args = (callArguments ?? []).map(fromCallArgument);
         const answer = await session.callFunction(functionDeclaration, { thisValue, args, returnByValue: returnByValue === true });
-        return evaluationResult(answer);
+        return this.withPreview(evaluationResult(answer), generatePreview);
     },
 
-    async "Runtime.getProperties"({ objectId, accessorPropertiesOnly }) {
+    async "Runtime.getProperties"({ objectId, accessorPropertiesOnly, generatePreview }) {
         if (accessorPropertiesOnly === true) {
             return { result: [] };
         }
@@ -656,6 +749,7 @@ const COMMANDS = {
                 name: variable.name, value: remoteObject(variable.value),
                 writable: true, configurable: true, enumerable: true, isOwn: true,
             }));
+            await this.addPreviews(result.map(descriptor => descriptor.value), generatePreview);
             return { result };
         }
 
@@ -664,6 +758,7 @@ const COMMANDS = {
         const { properties, internals } = await session.properties(handleOf(objectId));
         const result = properties.map(property => propertyDescriptor(property));
         const internalProperties = internals.map(({ name, value }) => ({ name, value: remoteObject(value) }));
+        await this.addPreviews(result.map(descriptor => descriptor.value).filter(value => value !== undefined), generatePreview);
         return { result, internalProperties };
     },
 
@@ -765,6 +860,24 @@ function objectRemote(value) {
         remote.subtype = subtype;
     }
     return remote;
+}
+
+// The text of a value in an object preview: a primitive as text (cut), an
+// object by its description.
+function previewText(remote) {
+    let text;
+    if (remote.unserializableValue !== undefined) {
+        text = remote.unserializableValue;
+    } else if (remote.subtype === "null") {
+        text = "null";
+    } else if (remote.type === "undefined") {
+        text = "undefined";
+    } else if (remote.value !== undefined && typeof remote.value !== "object") {
+        text = String(remote.value);
+    } else {
+        text = remote.description ?? "";
+    }
+    return text.length > PREVIEW_TEXT ? `${text.slice(0, PREVIEW_TEXT)}…` : text;
 }
 
 // A property of qjsx:debugsession properties() as a CDP PropertyDescriptor.

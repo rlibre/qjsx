@@ -328,6 +328,7 @@ const int UART_RX_BUFFER = 4096;            // driver buffers, bytes
 const int UART_TX_BUFFER = 4096;
 const size_t READ_BLOCK = 256;              // bytes read at once by the reader task
 const int READ_TIMEOUT_MS = 20;             // the reader gives what came after that much silence
+const int RESTART_FLUSH_MS = 100;           // restart() waits that long at most for the UART to send
 
 // agent::Link over UART0. The console (printf, IDF logs) shares the wire:
 // every write goes through the driver, one call at a time, so a frame is
@@ -399,9 +400,12 @@ const char *dataDirectory() {
 }
 
 /**
- * Restarts the chip: does not return.
+ * Restarts the chip: does not return. The answer to RESET was only copied
+ * into the transmit buffer of the UART driver: wait until it has left (at
+ * most RESTART_FLUSH_MS), else the host would never get it.
  */
 bool restart() {
+    uart_wait_tx_done(HOST_UART, pdMS_TO_TICKS(RESTART_FLUSH_MS));
     esp_restart();
 }
 

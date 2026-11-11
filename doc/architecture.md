@@ -21,6 +21,11 @@ This list will grow: what is said of a device holds for any new target
 (one more port in `ports/`, one implementation of `board.h`). A chip is named only
 for what is specific to it (ESP-IDF, `esp_partition_mmap`, RP2350 boot ROM…).
 
+![Overview of qjsx: the PC compiles and debugs, the device runs bytecode](architecture.png)
+
+The source of this image is [architecture.svg](architecture.svg) (edit the SVG, then
+render it again as `architecture.png`).
+
 ## How to read this document
 
 Each section carries an explicit status:
@@ -94,8 +99,10 @@ target.
    the library modules the program imports (4.5). Planned, not done: it also writes the
    `.d.ts` typings of the native modules for VS Code.
 3. `qjsx deploy` sends the package to the device, through the agent, which writes it to
-   flash. Today the whole package is sent, debug sidecars and sources included; a reduced
-   package (same extension, the manifest says what it contains) is planned.
+   flash. It sends a reduced package (2026-11-11): the manifest (`"reduced": true`) and
+   `bytecode/` only; the debug sidecars and the sources stay in the full package on the PC.
+   Before sending, it checks that the firmware has every native module the program
+   imports (the agent lists them in its answer to `HELLO`).
 4. The device runs the bytecode, with no compilation on the target.
 5. Planned, not written: `qjsx debug` starts the proxy. It opens a CDP server for VS Code
    (through js-debug) and talks to the device agent over a serial or TCP link. It finds the
@@ -422,8 +429,11 @@ Existing entry points useful to the debugger (lines of the original `quickjs.c`,
 >   (HTTP + WebSocket) and `host/js/cdp.js` (3.9). Tested by `tests/websocket.test.js` and
 >   `tests/cdp.test.js` (a client that plays js-debug's part; desktop agent and ESP32-S3).
 >   Tried in VS Code itself on 2026-11-11 (desktop agent);
-> - **not done**: the "uncaught" prediction (3.4), conditional breakpoints and logpoints
->   (3.6: refused by the CDP server until then), waiting for the debugger at startup (3.8).
+> - **done (2026-11-11, step 4)**: pause on uncaught exceptions (3.4), debugging startup code
+>   with `qjsx debug --restart` (3.8), `this` of the frames and object previews in VS Code
+>   (3.9). Tested on the desktop agent and on the ESP32-S3;
+> - **not done**: conditional breakpoints, logpoints and hit counts (3.6: refused by the CDP
+>   server until then, postponed by the user).
 
 ### 3.1 Architecture
 
@@ -500,19 +510,27 @@ All the rules are expressed as "next statement start":
 
 ### 3.4 Pause on exceptions
 
-Two modes, set by `SET_EXCEPTIONS`. Today the stub pauses in the "all" mode only; the
-"uncaught" mode never pauses, because its prediction is not done:
+Two modes, set by `SET_EXCEPTIONS` (done on 2026-11-11):
 
 - **"all"**: pause at the `throw`, before the stack is unwound.
-- **"uncaught"**: the prediction is made at the `throw`, by scanning the frames
-  for `catch` offsets. The following do not count as handlers:
-  - offset 0 (iterator close);
-  - a handler that starts with `gosub; throw` (rethrow of a `finally`).
+- **"uncaught"**: the engine predicts at the `throw` whether a handler will catch the value
+  ([engine-changes.md](engine-changes.md), M), and the stub pauses only when none will.
+  The prediction is computed only when a debugger is attached (no cost otherwise):
+  - in the throwing frame, from its real stack: a `catch` offset, except offset 0 (iterator
+    close) and a handler that rethrows (`gosub; throw` or `throw`: a `finally`);
+  - in each calling frame, statically: is its pc inside the try region of a `catch`
+    clause (from an `OP_catch` to its handler)? Native frames let the value through;
+  - an `async` function counts as catching (the value becomes a rejection), except the
+    top-level function of a module (QuickJS compiles modules as async functions, but their
+    rejection is the failure of the module);
+  - nothing down to the bottom of the stack: uncaught.
 
-  This prediction needs the new `sf->call_sp` (2.7).
-- **Async boundaries**: an exception that crosses the boundary of an `async` function
-  counts as caught. Unhandled promise rejections are reported (console, stack captured
-  at the `throw`) through the "promise rejection tracker".
+  It replaces the `sf->call_sp` of the first design, which needed a store before every
+  call. Approximation: a throw in a promise callback (`then`) is predicted uncaught
+  although it becomes a rejection. `PAUSED` carries `UNCAUGHT` (the prediction), passed
+  to VS Code as `data.uncaught`.
+- **Unhandled promise rejections** (reported through the "promise rejection tracker"): not
+  done.
 - An uncaught exception of the program is printed on its error output (a `LOG` message
   during a session), and the program goes on. A dedicated event is not done.
 
@@ -544,13 +562,20 @@ Conditions, logpoints and hit counts are compiled by the proxy and
   contains the hash of the source).
 - The scripts are announced to VS Code with `file:///` URLs pointing to the local sources.
 
-### 3.8 Waiting for the debugger at startup (`--wait-debugger`)
+### 3.8 Debugging startup code (`qjsx debug --restart`)
 
-- The agent holds `main` until the proxy gives the go-ahead, so that the startup code
-  can be debugged (opening the serial port often resets ESP32 boards).
-- The setting is remembered by the agent for the next startup.
-- It has a timeout.
-- It is never used on production devices.
+> **Status: done on 2026-11-11.** Replaces the first design, a `--wait-debugger` flag kept
+> by the agent from one boot to the next (persistent storage on every board, a timeout,
+> never on production devices): dropped for now, to reconsider only if what follows a real
+> chip reset has to be debugged.
+
+- `qjsx debug --restart` (off by default): js-debug sends `Runtime.runIfWaitingForDebugger`
+  once its breakpoints are set; the server then sends `RUN`, so the program starts again
+  with the debugger attached. Each module waits at `SCRIPT_LOADED` for its stops, so the
+  breakpoints of the startup code are hit.
+- VS Code's Restart button (which detaches and attaches again) then restarts the program
+  too.
+- Only the program restarts, not the chip: the hardware state of the previous run stays.
 
 ### 3.9 The CDP server (`qjsx debug`)
 
@@ -599,13 +624,21 @@ What the server does:
   objects; getters never called), `Runtime.releaseObject`, `Debugger.setVariableValue`.
   `returnByValue` goes through `JSON.stringify` on the device. Accepted and ignored:
   `Profiler.enable`, `NodeWorker.enable`, `setAsyncCallStackDepth`, `setBlackboxPatterns`,
-  `setBreakpointsActive`, `runIfWaitingForDebugger`, the `disable` commands.
+  `setBreakpointsActive`, the `disable` commands; `runIfWaitingForDebugger` restarts the
+  program with `--restart` (3.8).
 - **A breakpoint with a condition, and a logpoint, are refused** until 3.6 is done (VS Code
   shows them unbound).
 - **Program output** goes to the debug console as `Runtime.consoleAPICalled`, one message
   per line; the end of the program as an "info" message.
-- **Not done**: previews of objects, `this` of the frames (always `undefined`), async stack
-  traces, the "global" scope.
+- **`this` of the frames**: read at the pause for the frames whose function has a `this`
+  slot (QuickJS makes one only when the function uses `this`); elsewhere `undefined`.
+- **Object previews** (`generatePreview`): built on the host, one `GET_PROPERTIES` per
+  object, at most 5 enumerable own properties, nested values by their description; to
+  measure on the board over serial (next step if too slow: a small preview added by the
+  stub to each object value).
+- **`--restart`**: 3.8. **Uncaught exceptions**: `data.uncaught` of `Debugger.paused`
+  (3.4).
+- **Not done**: async stack traces, the "global" scope.
 
 ---
 
@@ -635,9 +668,11 @@ What the server does:
 > works. There is no build id inside the bytecode: a script is identified by the build id of
 > its package and its module name.
 
-- **One zip per build**, extension `.qjspkg`. Today there is one kind of package, the full
-  one, and it is what `qjsx deploy` sends. A reduced package for the device (same extension,
-  the manifest saying what it contains) is planned, not done.
+- **One zip per build**, extension `.qjspkg`. `qjsx build` writes the full package;
+  `qjsx deploy` sends the device a reduced one, made on the fly (`reducePackage`,
+  `host/js/deploy.js`, 2026-11-11): same extension, `manifest.json` marked `"reduced": true`
+  (its scripts without their `debug` and `source` entries) and `bytecode/` only. The build
+  id does not change: the debugger finds the full package on the PC by it.
 - **Entries stored without compression**: no dependency on a compression library, and
   the device reads the package in place. On the ESP32 the slot of the package is mapped with
   `esp_partition_mmap` and the modules are read from there, without copying the package into
@@ -729,7 +764,8 @@ never travel to or from the device: they are read in the sidecar.
 > - **message**: CBOR array `[type, id, content]`; `id` > 0 for a request and its response,
 >   0 for an event; content = integer-keyed map (or `null`);
 > - **types**: `RESPONSE` 1, `ERROR` 2 (`{MESSAGE}`), `HELLO` 10 (`{PROTOCOL, TOKEN?}` →
->   `{PROTOCOL, AGENT, ENGINE, MAX_MESSAGE}`), `INFO` 11 (→ `{RUNNING, BUILD_ID, PACKAGE_SIZE}`),
+>   `{PROTOCOL, AGENT, ENGINE, VERSION, MAX_MESSAGE, NATIVES}`; VERSION: qjsx version of the
+>   firmware, NATIVES: names of its native modules, 2026-11-11), `INFO` 11 (→ `{RUNNING, BUILD_ID, PACKAGE_SIZE}`),
 >   `UPLOAD_BEGIN` 20 (`{SIZE, SHA256, BUILD_ID, BYTECODE}`, refused if the bytecode number
 >   is not that of the device's engine), `UPLOAD_CHUNK` 21 (`{OFFSET, DATA}`, 2,048
 >   bytes, in order), `UPLOAD_END` 22 (checks size and SHA-256, installs), `RUN` 23,
@@ -871,7 +907,10 @@ import { read } from "sensors/bme280";
 ```
 
 - The standard library is called `stdlib` (`stdlib.qjslib`).
-- Native modules keep their short names (`fs`, `crypto`…).
+- Native modules are named with a reserved prefix (2026-11-11): `sys/` for the system
+  (`sys/fs`, `sys/crypto`, `sys/net`, `sys/compiler`) and `device/` for the hardware of the
+  machine the program runs on (`device/serial`, then `device/gpio`…). No library may take
+  these names (`qjsx mklib` and `qjsx build` refuse them).
 - Two libraries cannot have the same name, so their modules never
   collide.
 - Inside a library, a module imports its neighbours by their full name or relatively:
@@ -912,7 +951,9 @@ The same sources are also embedded in the host executable, under the same names
 3. It follows the imports of each module. A name that is not a module of the program is:
    - a module of a known library: it is added to the package, whole, and its own
      imports are followed in turn;
-   - a name without `/`: a native module, recorded in `natives` of the manifest;
+   - a `sys/...` or `device/...` name: a native module, recorded in `natives` of the
+     manifest (checked by `qjsx deploy` against the modules of the firmware);
+   - a bare name (`fs`, the old naming): an error that gives the new form (`sys/fs`);
    - otherwise an error, which names the importing module (relative import not found,
      library not declared, module missing from the library).
 4. It writes into the package the bytecode, the debug sidecar and the source of each module, those
@@ -939,9 +980,11 @@ its position (engine change J). The JS of the tool itself is not concerned.
 - `qjsx run script.js` (without a build) only knows the embedded copy of `stdlib`: a script
   that imports another library must be built, then started with
   `qjsx run package.qjspkg`.
-- A typo in the name of a native module (`"cryto"`) is only seen when the
-  program is loaded: the build does not know the list of the native modules of a firmware. It is planned
-  that the firmware gives it in `HELLO` and that `qjsx deploy` compares it to `natives`.
+- A typo in the name of a native module (`"cryto"`) is not seen by the build, which does
+  not know the firmware; `qjsx deploy` refuses it (2026-11-11): the agent lists the native
+  modules of its firmware in its answer to `HELLO` (`NATIVES`) and the tool compares them
+  to `natives` of the manifest before sending anything. An older firmware that does not
+  list them is not checked.
 - If only `lib/stdlib/qjsx.json` changes, `make` does not remake `stdlib.qjslib` (it remakes it
   when the executable is relinked, so as soon as a source of `stdlib` changes).
 
@@ -977,7 +1020,7 @@ continues; restarting remains an option.
 
 ### 5.2 Async styles
 
-> **Status: rule applied** by the modules written so far (`net`, `serial`: callbacks for
+> **Status: rule applied** by the modules written so far (`sys/net`, `device/serial`: callbacks for
 > the data and the close, a promise for `connect`). The `uart` example below is the design:
 > that module does not exist yet.
 
@@ -1065,22 +1108,23 @@ C++17, header-only, **no `std::` at all**, no C++ exceptions, no RTTI.
 >   (`argv`, `env`, `platform`, `exit`, `cwd`), global as in Node; on a device (agent),
 >   `argv` is `["qjsx", main module]`, `env` comes from the `env` section of qjsx.json (through
 >   the manifest), `cwd()` is the data folder of the board (`board::dataDirectory()`,
->   `<storage>/data` for the desktop agent) and `fs` resolves relative paths against it;
+>   `<storage>/data` for the desktop agent) and `sys/fs` resolves relative paths against it;
 >   `process.exit` ends the program, never the process (the agent survives);
-> - `fs`: `readFileSync`, `writeFileSync`, `existsSync`, `statSync`, `readdirSync`,
+> - `sys/fs`: `readFileSync`, `writeFileSync`, `existsSync`, `statSync`, `readdirSync`,
 >   `mkdirSync` (`recursive`), `rmSync` (`recursive`, `force`), `renameSync`, `unlinkSync`;
 >   UTF-8 paths (wide APIs on Windows);
 > - `stdlib/path`: written in JS, in the standard library (`lib/stdlib`, section 4.5);
 >   semantics of Node's `path.posix`, plus drive letters and `\` as input on
 >   Windows; results always with `/` (Node on Windows produces `\`);
-> - `crypto`: `sha256(string or bytes)` → `Uint8Array`.
+> - `sys/crypto`: `sha256(string or bytes)` and `sha1(...)` → `Uint8Array` (base64: the
+>   standard `Uint8Array.prototype.toBase64` / `Uint8Array.fromBase64` of the engine).
 >
-> - `net`: `connect({host, port})` → promise of a connection, `listen({host, port},
+> - `sys/net`: `connect({host, port})` → promise of a connection, `listen({host, port},
 >   onConnection)` → server (`port()`, `close()`); connection: `onData`, `onClose`,
 >   `write(text or bytes)`, `close()`, `remoteAddress()`, `remotePort()`. One read
 >   thread per connection; `listen` listens on 127.0.0.1 by default (tested, `tests/net.test.js`);
-> - `serial` (host): `list()`, `open(port, {baudRate})` → `onData`, `onClose`, `write`,
->   `close`, 8N1. Used on Windows with the ESP32-S3 board (deployment, debugger); the POSIX
+> - `device/serial` (PC today): `list()`, `new Serial(port, {baudRate})` → `onData`,
+>   `onClose`, `write`, `close`, 8N1. Used on Windows with the ESP32-S3 board (deployment, debugger); the POSIX
 >   part is written, not tried;
 > - `process.stdout.write` / `process.stderr.write`.
 >
@@ -1107,14 +1151,29 @@ the device where it makes sense.
 
 | Module | Platform | Description |
 |---|---|---|
-| `fs` | host; present on a device, where it fails with `ENOSYS` until a board has a file system | files, synchronous |
+| `sys/fs` | host; present on a device, where it fails with `ENOSYS` until a board has a file system | files, synchronous |
 | `stdlib/path` | all (standard library, in JS) | paths |
-| `crypto` | all | `sha256` |
-| `net` | host | TCP, asynchronous |
-| `serial` | host | serial port; on the device, the equivalent will be `uart` |
-| `compiler` | host | compile API |
+| `sys/crypto` | all | `sha256`, `sha1` |
+| `sys/net` | host | TCP, asynchronous |
+| `device/serial` | host (class `Serial`) | serial port; on a board the same module will drive the UARTs |
+| `sys/compiler` | host | compile API |
+| `device/gpio` | ESP32 | class `Gpio`: `read`, `write`, `toggle`, `onChange`, `waitFor`, `close` |
+| `device/rmt` | ESP32 | class `Rmt`: pulse trains (`send`, `sendBytes`), promises |
+| `stdlib/rgbled` | boards with `device/rmt` (standard library, in JS) | class `RgbLed` (WS2812…): `set`, `fill`, `setHsv`, `fillHsv`, `show`, `close` |
 
-`process` is a global, on every platform. No hardware module (GPIO, I2C, `uart`…) exists yet.
+`process` is a global, on every platform.
+
+**Hardware modules** (2026-11-11): three layers. An interface of the hardware in
+`common/hal/` (`hal_gpio.h`, `hal_rmt.h`: free functions, called on the JS thread; events
+reported by an event task of the hal), one implementation per port
+(`ports/esp32/main/hal_*_esp32.cpp`), and the JS class written once with the binding
+library in `common/device/`, which the port compiles and registers in its entry point
+(`device_modules.h`). Interrupts never post to the loop themselves: they queue to the
+event task of the hal, which posts through a table of targets (mailbox + source) by pin
+or channel. A pin is not reset at the end of a program (only `close()` resets it).
+Measured on the YD-ESP32-S3 (240 MHz, JS heap in PSRAM): a `toggle()` loop gives 247 kHz on
+the pin, `write(1)` / `write(0)` 183 kHz; the WS2812 LED on GPIO48 takes about 67 frames
+per second from a JS loop with a 10 ms pause.
 
 **Naming rule:**
 
@@ -1232,7 +1291,7 @@ How to add a board, or a new chip, is described step by step in
 >
 > The commands other than `run` and `--version` are written in JS (`host/js/`), embedded
 > in the executable as modules `qjsx:<name>` by a premake rule
-> (`tools/embed-js.lua`). Native module `compiler` (host): `compile(source, name, { module,
+> (`tools/embed-js.lua`). Native module `sys/compiler` (host): `compile(source, name, { module,
 > strip: "none" | "source" | "all", debug, dynamicImport })` → `{ bytecode, debug, imports,
 > warnings }`, plus `quickjsVersion`, `qjsxVersion` and `bytecodeVersion`.
 > Tests: `tests/run-tests.sh [Release|Debug]` (binding, runtime, tool modules, package
@@ -1366,7 +1425,6 @@ Still open:
 - Writing back the variables modified by an evaluated expression (the wrapper function
   receives the variables as parameters; only `SET_SLOT` is described for changing a variable).
 - Behaviour of the `trace` command.
-- The reduced package sent to a device (which entries it keeps).
 - The style of the JS API of the hardware modules.
 
 ### 7.4 Inconsistencies between sources

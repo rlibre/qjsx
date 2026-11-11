@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "debugger.h"
+#include "modules.h"
 #include "protocol.h"
 
 namespace agent {
@@ -360,7 +361,8 @@ void Agent::handleHello(int64_t id, const Fields *fields) {
     _session = true;
     _mutex.unlock();
 
-    // answer who we are: protocol, agent name, engine, maximum message size
+    // answer who we are: protocol, agent name, qjsx and engine versions,
+    // maximum message size
     cbor::Writer payload;
     payload.integer(KEY_PROTOCOL);
     payload.integer(PROTOCOL_VERSION);
@@ -368,9 +370,22 @@ void Agent::handleHello(int64_t id, const Fields *fields) {
     payload.text(_identity.name);
     payload.integer(KEY_ENGINE);
     payload.text(_identity.engine);
+    payload.integer(KEY_VERSION);
+    payload.text(_identity.version);
     payload.integer(KEY_MAX_MESSAGE);
     payload.integer(DEFAULT_MAX_MESSAGE);
-    respond(id, &payload, 4);
+
+    // and the native modules of this firmware: the host refuses to deploy a
+    // program that imports another one
+    int nativeCount = rt::countNativeModules();
+    payload.integer(KEY_NATIVES);
+    payload.array((uint64_t)nativeCount);
+
+    for (int i = 0; i < nativeCount; i++) {
+        payload.text(rt::nativeModuleNameAt(i));
+    }
+
+    respond(id, &payload, 6);
 }
 
 /**

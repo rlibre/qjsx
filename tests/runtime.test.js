@@ -7,10 +7,10 @@
 
 // Tests of the runtime library: globals, fs, path, crypto, timers.
 // Run with: bin/Release/qjsx run tests/runtime.test.js
-import * as fs from "fs";
+import * as fs from "sys/fs";
 import path from "stdlib/path";
 import { join, dirname, basename, extname, relative, normalize, isAbsolute, resolve } from "stdlib/path";
-import { sha256 } from "crypto";
+import { sha256 } from "sys/crypto";
 import { check, equal, throws, report } from "./assert.js";
 
 // --- process

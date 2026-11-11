@@ -79,8 +79,10 @@
         52/52. Le port série lent sous Windows, trouvé pendant cet essai, est corrigé
         (history.md).
         Restent, non faits :
-        - `qjsx deploy` qui compare `natives` du manifeste à une liste que le firmware
-          donnerait dans `Hello` (changement de protocole) ;
+        - FAIT le 2026-11-11 : `qjsx deploy` compare `natives` du manifeste à la liste
+          que le firmware donne dans `HELLO` (clé `NATIVES`), et n'envoie à la carte que le
+          paquet réduit (manifeste + bytecode : demo 5 944 octets au lieu de 52 896) ;
+          vérifié sur la carte, avec la réponse à `RESET` qui n'est plus perdue ;
         - les `.d.ts` des bibliothèques ;
         - `qjsx run script.js` ne connaît que `stdlib` (un script qui importe une autre
           bibliothèque doit être construit) ;
@@ -110,7 +112,26 @@
         CONFIG_MBEDTLS_HARDWARE_SHA, partage géré par mbedTLS). RP2350 : `pico_sha256` du
         pico-sdk (un seul accélérateur, pris sous verrou). Pas urgent : sert à vérifier les
         paquets reçus et au `crypto.sha256` du JS.
-- [ ] **Modules matériels par carte** (gpio, pwm, i2c, spi, uart, adc, wifi...) : proposition
+- [ ] **Modules matériels par carte** (gpio, pwm, i2c, spi, uart, adc, rmt, ws2812, wifi...
+      ; rmt et ws2812 ajoutés par l'utilisateur le 2026-11-11 : RMT = périphérique de
+      trains d'impulsions de l'ESP32, PIO sur le RP2350 ; ws2812 = LED adressables, au-dessus
+      de rmt sur l'ESP32). DÉCIDÉ le 2026-11-11 (CLAUDE.md « Names of the native
+      modules », « device/serial », « device/gpio ») : préfixes `sys/` (fs, crypto,
+      process, net, compiler) et `device/` (serial, gpio, i2c...), classes `new Gpio(pin,
+      { mode, pull })` et `new Serial(port, { baudRate })`, broches par numéro, aucune
+      vérification. On commence par `device/gpio` et un test de bascule sur GPIO1 mesuré à
+      l'oscilloscope. RENOMMAGE FAIT le 2026-11-11 (sys/fs, sys/crypto, sys/net,
+      sys/compiler, device/serial avec la classe Serial ; `process` reste un global ; un
+      import à l'ancien nom est refusé par le build ; tests en Debug). Firmware reflashé.
+      `device/gpio` CODÉ et FLASHÉ le 2026-11-11 (classe Gpio : registres W1TS/W1TC, toggle
+      sur le registre de sortie, interruptions -> tâche gpio-events -> boucle, anti-rebond).
+      Mesures à l'oscilloscope sur GPIO1, YD-ESP32-S3 à 240 MHz, tas JS en PSRAM :
+      `write(1)`/`write(0)` en boucle 183 kHz, `toggle()` 247 kHz ; soit environ 1,7 µs par
+      appel sans argument et 2,6 µs pour `write` (l'argument passe par js::Value).
+      L'utilisateur : « ça explose tous mes précédents essais qjs » ; optimisations
+      laissées de côté (pistes : conversion directe de l'argument de write, tas en RAM
+      interne, chemin d'appel de jsbind, recherche de la méthode). Pas encore essayés sur la
+      carte : onChange, waitFor, close. Ancienne note : proposition
       faite le 2026-11-11, en discussion. Trois couches (module JS commun écrit avec jsbind,
       interface `hal/*.h` en fonctions libres, implémentation par port), table de la carte
       (broches, fonctions, réservées, noms comme `LED`), un module par fonction (jamais par
@@ -155,12 +176,19 @@
       (agent de bureau, projet d'essai C:\temp\qjsx-try) : « ça marche super ». Test final
       du 2026-11-11 : Release et Debug OK, tests d'origine de QuickJS OK, firmware compilé
       et FLASHÉ, sur la carte debugger 72/72, proxy 30/30, cdp 50/50 ; microbench −3,3 %
-      contre l'original (pas de régression). Ensuite le
+      contre l'original (pas de régression). Étape 4 (sans conditions, logpoints ni
+      compteurs, reportés au backlog) : CODÉE le 2026-11-11 (CLAUDE.md « Pause on
+      exceptions » et « Debugger step 4 », engine-changes.md M) : prédiction « uncaught »
+      statique dans le moteur, `qjsx debug --restart` à la place de `--wait-debugger`, `this`
+      et aperçus d'objets. Tests en Debug (debug.test.js 45/45, proxy 30/30, cdp 53/53) ;
+      firmware FLASHÉ et sur la carte debugger 72/72, proxy 30/30, cdp 53/53. Pas encore
+      essayée dans VS Code (aperçus : mesurer la vitesse sur la liaison série). Ensuite le
       serveur CDP, VS Code. Détail dans `doc/prompt-reprise.md`.
-- [ ] **Diagramme du principe de fonctionnement** (demande de l'utilisateur, 2026-11-11) : un
+- [x] **Diagramme du principe de fonctionnement** (demande de l'utilisateur, 2026-11-11) : un
       diagramme en SVG qui explique le fonctionnement global du système (tout qjsx : PC,
       outil hôte, paquets, liaisons, agent, moteur sur le device, debugger). Emplacement décidé :
-      un fichier SVG dans `doc/`, affiché en tête de doc/architecture.md.
+      un fichier SVG dans `doc/`, affiché en tête de doc/architecture.md. Dessiné le
+      2026-11-11 dans `doc/architecture.svg`, affiché en tête de doc/architecture.md.
 - [ ] **Threads ou workers** (demande de l'utilisateur, 2026-11-11) : réfléchir à la
       possibilité de faire tourner du JS sur plusieurs threads (ou des workers). À étudier :
       un runtime QuickJS par thread, ce que ça coûte en mémoire sur un device, comment les
@@ -199,6 +227,53 @@
       jsbind-orig, doc-trial, final-style, espjs-backup-before-style…), qu'on peut supprimer.
 
 ## Backlog
+
+- [ ] **Troisième carte : WeAct Studio STM32H743** (utilisateur, 2026-11-11 ; caractéristiques
+      citées de mémoire, à vérifier sur le schéma WeAct) : Cortex-M7 480 MHz, FPU double, 2 Mo
+      de flash interne, ~1 Mo de RAM en plusieurs blocs (tas JS dans les 512 Ko d'AXI SRAM, pas
+      de SDRAM), flash QSPI 8 Mo (paquets lus en place, mode memory-mapped), microSD (un vrai
+      `sys/fs` avec FatFS), USB-C en USB FS (liaison USB CDC ou UART), écran TFT 0,96" ST7735
+      160×80 RGB565 en SPI (`device/spi` + pilote JS en bibliothèque, primitives natives pour
+      remplir / envoyer un tampon). WS2812 : timer + DMA ou SPI derrière `hal_rmt.h`. Cache du
+      M7 et DMA : cohérence à gérer. Pack STM32CubeH7 + FreeRTOS à télécharger (accord).
+      Après le RP2350.
+- [ ] **microSD des cartes** : la PICO2-XXL (RP2350) en a une aussi (schéma Olimex Rev. C) ;
+      même sujet que la H743 : `sys/fs` sur FatFS, et `board::dataDirectory()`.
+
+- [x] **WS2812 sur GPIO48** (choix de l'utilisateur, 2026-11-11, CODÉ et ESSAYÉ sur la carte
+      le même jour : couleurs et arc-en-ciel, 667 images en 10 s avec une pause de 10 ms ;
+      `setHsv` / `fillHsv` ajoutés, idée de l'utilisateur) : `device/rmt` natif (`send`, `sendBytes`, promesses) et `RgbLed` en JS dans
+      `stdlib/rgbled`, le type de LED en option (CLAUDE.md « device/rmt + stdlib/rgbled »).
+      Vérifier le pont de soudure « RGB » de la carte. Ensuite : le port RP2350 (pico-sdk et
+      FreeRTOS-Kernel à télécharger, avec accord).
+
+- [ ] **Version de qjsx visible du JS** (utilisateur, 2026-11-11 : « je ne sais pas encore
+      comment ») : le firmware la connaît (`QJSX_VERSION`, envoyée dans `HELLO`). Pistes :
+      `process.versions.qjsx` / `process.versions.quickjs` (comme `process.versions.node`),
+      ou `process.env` (mais `env` vient de `qjsx.json` sur un device et du système avec
+      `qjsx run` : une valeur du firmware s'y mélangerait).
+
+- [ ] **Documentation détaillée de jsbind + guide d'utilisation** (demande de
+      l'utilisateur, 2026-11-11) : un document en anglais dans `doc/` (`jsbind.md`) :
+      principes (pas de std::, pas d'exceptions, « first error wins »), chaque macro
+      (`JS_CLASS`, `JS_EXPORT`, `JS_MODULE`, `JS_FUNCTION`, `JS_STRUCT`, `JS_ENUM`), les
+      types (`js::Str`, `js::Bytes`, `js::Buffer`, `js::Function`, `js::Value`,
+      `js::Range`, `js::Optional`), les erreurs (`js::fail`, `failSystem`), les promesses
+      (`js::Promise`, `Resolver`), `init()`, `keepAlive`, la durée de vie des objets, et un
+      guide pas à pas pour écrire un module natif (exemple complet : `device/gpio`).
+
+- [ ] **CI/CD : créer la release dans GitHub** (demande de l'utilisateur, 2026-11-11) : à
+      concevoir avant de coder : GitHub Actions déclenchées par un tag ; construire `qjsx`
+      (Windows, et Linux / macOS une fois compilés), lancer `tests/run-tests.sh`,
+      construire le firmware ESP32 par carte (image ESP-IDF officielle) ; attacher à la
+      release les exécutables, `stdlib.qjslib` et les `qjsx.bin` (avec l'adresse de
+      flashage). Questions : déclencheur (tag `v*` ?), plateformes, signature, numéro de
+      version (`QJSX_VERSION`).
+
+- [ ] **Points d'arrêt conditionnels, logpoints et compteurs de passages** (reportés par
+      l'utilisateur le 2026-11-11, quand on a repris l'étape 4 du debugger sans eux) :
+      évalués sur le device, sans aller-retour par passage (conception 3.6). Aujourd'hui
+      le serveur CDP les refuse et VS Code les montre non résolus.
 
 - [ ] **Accepter TypeScript** (demande de l'utilisateur, 2026-11-11) : des sources `.ts` dans
       un projet qjsx. À concevoir avant de coder : qui retire les types (un transpileur

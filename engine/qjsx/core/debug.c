@@ -54,6 +54,7 @@ static void js_debug_init_event(JSDebugEvent *event, JSDebugReason reason)
 {
     event->reason = reason;
     event->exception = JS_UNDEFINED;
+    event->uncaught = FALSE;
     event->at_return = FALSE;
     event->return_value = JS_UNDEFINED;
 }
@@ -158,7 +159,10 @@ void js_debug_mark_exception_reported(JSContext *ctx)
     rt->debug.reported_exception = JS_DupValue(ctx, pending);
 }
 
-void js_debug_on_exception(JSContext *ctx, JSStackFrame *sf, const uint8_t *pc)
+static BOOL js_debug_is_uncaught(JSStackFrame *sf, JSValue *sp, JSValue *stack_buf);
+
+void js_debug_on_exception(JSContext *ctx, JSStackFrame *sf, const uint8_t *pc,
+                           JSValue *sp, JSValue *stack_buf)
 {
     JSRuntime *rt = ctx->rt;
     JSValue thrown;
@@ -177,6 +181,7 @@ void js_debug_on_exception(JSContext *ctx, JSStackFrame *sf, const uint8_t *pc)
     rt->current_exception = JS_UNINITIALIZED;
     js_debug_init_event(&event, JS_DEBUG_REASON_EXCEPTION);
     event.exception = thrown;
+    event.uncaught = js_debug_is_uncaught(sf, sp, stack_buf);
     js_debug_call_hook(ctx, sf, pc, &event);
     /* an exception left by the hook is dropped: the thrown value goes on */
     JS_FreeValue(ctx, rt->current_exception);
@@ -209,6 +214,91 @@ void js_debug_exception_caught(JSRuntime *rt, JSFunctionBytecode *b, int handler
     if (js_debug_is_rethrow_handler(b, handler_offset))
         return;
     js_debug_forget_exception(rt);
+}
+
+static JSFunctionBytecode *js_debug_frame_bytecode(JSStackFrame *sf);
+
+/* TRUE if the bytecode offset 'pc' of 'b' lies in the try region of a
+   'catch' clause: between an OP_catch and its handler, the handler not
+   being a rethrow (a 'finally'). Static: reads the instructions of 'b'
+   (only done when a value is thrown with a debugger attached). For a
+   calling frame, 'pc' is just after its call instruction. */
+static BOOL js_debug_pc_in_try(JSFunctionBytecode *b, int pc)
+{
+    int pos = 0;
+
+    while (pos < b->byte_code_len) {
+        int op = b->byte_code_buf[pos];
+        int size = opcode_info[op].size;
+        if (size <= 0)
+            return FALSE;
+        if (op == OP_catch) {
+            /* the operand is relative to the end of the opcode byte, as
+               in the interpreter */
+            int handler = pos + 1 + (int32_t)get_u32(b->byte_code_buf + pos + 1);
+            if (pos < pc && pc <= handler && !js_debug_is_rethrow_handler(b, handler))
+                return TRUE;
+        }
+        pos += size;
+    }
+    return FALSE;
+}
+
+/* TRUE if a value thrown out of 'b' becomes the rejection of a promise:
+   an async function or async generator. Not the top-level function of a
+   module ("<eval>"): it is compiled as an async function too, but its
+   rejection is the failure of the module, an uncaught error. */
+static BOOL js_debug_rejects(JSFunctionBytecode *b)
+{
+    BOOL is_async = (b->func_kind & JS_FUNC_ASYNC) != 0;
+    BOOL is_top_level = b->func_name == JS_ATOM__eval_;
+
+    return is_async && !is_top_level;
+}
+
+/* Prediction, at the throw, of whether a handler will catch the value
+   thrown in 'sf' (its value stack is stack_buf..sp):
+   1. the throwing frame: a catch offset on its real stack (offset 0 closes
+      an iterator, a rethrow handler is a 'finally': neither counts);
+   2. an async function (or async generator) catches everything: the value
+      becomes the rejection of its promise (js_debug_rejects);
+   3. each calling frame: a try region around its call (static, see
+      js_debug_pc_in_try), or an async function as in 2; native frames let
+      the value through;
+   4. no handler down to the bottom of the stack: uncaught. */
+static BOOL js_debug_is_uncaught(JSStackFrame *sf, JSValue *sp, JSValue *stack_buf)
+{
+    JSFunctionBytecode *b = js_debug_frame_bytecode(sf);
+    JSStackFrame *caller;
+    JSValue *p;
+
+    /* 1. the stack of the throwing frame */
+    for (p = sp; b != NULL && p > stack_buf; ) {
+        JSValue value = *--p;
+        if (JS_VALUE_GET_TAG(value) == JS_TAG_CATCH_OFFSET) {
+            int handler = JS_VALUE_GET_INT(value);
+            if (handler != 0 && !js_debug_is_rethrow_handler(b, handler))
+                return FALSE;
+        }
+    }
+
+    /* 2. an async throwing frame */
+    if (b != NULL && js_debug_rejects(b))
+        return FALSE;
+
+    /* 3. the calling frames */
+    for (caller = sf->prev_frame; caller != NULL; caller = caller->prev_frame) {
+        b = js_debug_frame_bytecode(caller);
+        if (b == NULL)
+            continue;
+        if (js_debug_pc_in_try(b, caller->cur_pc - b->byte_code_buf))
+            return FALSE;
+        if (js_debug_rejects(b))
+            return FALSE;
+    }
+
+    /* 4. nobody */
+    return TRUE;
 }
 
 /* ---------------------------------------------------------------------- */

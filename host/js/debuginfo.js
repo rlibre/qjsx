@@ -21,9 +21,9 @@
 // CDP. The sidecar gives byte offsets in the UTF-8 source (format in
 // host/modules/compiler_module.cpp); each ScriptInfo keeps a table of line
 // starts to convert them.
-import * as fs from "fs";
+import * as fs from "sys/fs";
 import { join } from "stdlib/path";
-import { sha256 } from "crypto";
+import { sha256 } from "sys/crypto";
 import { readZip } from "qjsx:zip";
 import { hex } from "qjsx:util";
 

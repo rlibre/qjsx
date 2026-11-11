@@ -10,12 +10,12 @@
 #include <string.h>
 
 /**
- * Creates the "fs" module (defined by JS_MODULE in fs.cpp).
+ * Creates the "sys/fs" module (defined by JS_MODULE in fs.cpp).
  */
 JSModuleDef *jsNewModule_fs(JSContext *ctx, const char *moduleName);
 
 /**
- * Creates the "crypto" module (defined by JS_MODULE in crypto.cpp).
+ * Creates the "sys/crypto" module (defined by JS_MODULE in crypto.cpp).
  */
 JSModuleDef *jsNewModule_crypto(JSContext *ctx, const char *moduleName);
 
@@ -24,8 +24,8 @@ namespace rt {
 namespace {
 
 NativeModule nativeModules[32] = {
-    { "fs", &jsNewModule_fs },
-    { "crypto", &jsNewModule_crypto },
+    { "sys/fs", &jsNewModule_fs },
+    { "sys/crypto", &jsNewModule_crypto },
 };
 // the modules of one platform only (net, serial, compiler...) are added by its
 // main with registerNativeModule()
@@ -64,6 +64,20 @@ const NativeModule *findNativeModule(const char *name) {
     }
 
     return nullptr;
+}
+
+/**
+ * Number of native modules registered (see nativeModuleNameAt).
+ */
+int countNativeModules() {
+    return nativeModuleCount;
+}
+
+/**
+ * Name of the native module at 'index' (0 <= index < countNativeModules()).
+ */
+const char *nativeModuleNameAt(int index) {
+    return nativeModules[index].name;
 }
 
 /**

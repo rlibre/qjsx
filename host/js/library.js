@@ -30,9 +30,9 @@
 //
 // manifest.modules[]: { name ("sensors/bme280"), buildId, sourceHash,
 // bytecode, debug, source (entry names), imports (module names) }.
-// manifest.natives[]: the native modules the library imports ("fs"...): a
-// name without '/' that is not a module of a library.
-import * as fs from "fs";
+// manifest.natives[]: the native modules the library imports ("sys/fs",
+// "device/gpio"...): see isNativeModule.
+import * as fs from "sys/fs";
 import { join, dirname } from "stdlib/path";
 import { writeZip, readZip } from "qjsx:zip";
 import { loadProject, PROJECT_FILE } from "qjsx:project";
@@ -52,11 +52,26 @@ export function standardLibraryFile() {
 }
 
 // Library a module name belongs to ("stdlib/path" -> "stdlib"); undefined
-// for a name without '/', which can only be a native module or a module at
-// the root of a program.
+// for a name without '/'.
 export function libraryOf(moduleName) {
     const slash = moduleName.indexOf("/");
     return slash < 0 ? undefined : moduleName.slice(0, slash);
+}
+
+// The prefixes of the native modules (of the firmware, or of the tool on the
+// PC): "sys/fs", "sys/net", "device/serial", "device/gpio"... No library may
+// take one of these names.
+export const NATIVE_PREFIXES = ["sys", "device"];
+
+// True if a module name is the one of a native module (sys/..., device/...).
+export function isNativeModule(moduleName) {
+    return NATIVE_PREFIXES.includes(libraryOf(moduleName));
+}
+
+// The error of an import of a name without '/' that no module has: native
+// modules are named with a prefix now ("fs" became "sys/fs").
+export function bareNameError(where, name) {
+    return new Error(`${where}: no module '${name}' (native modules are named sys/<name> or device/<name>, e.g. 'sys/fs')`);
 }
 
 // Compiles the modules of a library project (qjsx.json with 'modules') and
@@ -72,6 +87,9 @@ export function makeLibrary(directory, outputFile) {
     }
     if (project.version === undefined) {
         throw new Error(`${projectFile}: a library needs a 'version'`);
+    }
+    if (NATIVE_PREFIXES.includes(project.name)) {
+        throw new Error(`${projectFile}: a library cannot be named '${project.name}', the prefix of the native modules`);
     }
 
     // compile each module under its full name
@@ -98,9 +116,10 @@ export function makeLibrary(directory, outputFile) {
         entries.push({ name: module.source, data: encodeText(source) });
     }
 
-    // what the modules import: a module of this library must exist; a name
-    // without '/' is a native module; the rest belongs to other libraries,
-    // which the program that uses this one must declare
+    // what the modules import: a module of this library must exist; sys/...
+    // and device/... are native modules; a bare name is an error; the rest
+    // belongs to other libraries, which the program that uses this one must
+    // declare
     const names = new Set(modules.map(module => module.name));
     const natives = new Set();
     for (const module of modules) {
@@ -109,8 +128,11 @@ export function makeLibrary(directory, outputFile) {
             if (libraryName === project.name && !names.has(imported)) {
                 throw new Error(`${module.name} imports '${imported}', which is not among the 'modules' of ${projectFile}`);
             }
-            if (libraryName === undefined) {
+            if (isNativeModule(imported)) {
                 natives.add(imported);
+            }
+            if (libraryName === undefined) {
+                throw bareNameError(`${module.name} imports '${imported}'`, imported);
             }
         }
     }

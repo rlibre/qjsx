@@ -15,14 +15,20 @@ idf_component_register(
         ${QJSX_ENGINE_SOURCES}
         ${QJSX_COMMON_SOURCES}
         ${QJSX_FREERTOS_SOURCES}
+        ${QJSX_DEVICE_GPIO_SOURCES}
+        ${QJSX_DEVICE_RMT_SOURCES}
         "main.cpp"
         "board_esp32.cpp"
         "platform_esp32.cpp"
+        "hal_gpio_esp32.cpp"
+        "hal_rmt_esp32.cpp"
     INCLUDE_DIRS
         "."
         "${QJSX_BOARD_INCLUDE}"
         ${QJSX_INCLUDE_DIRS}
     REQUIRES
+        esp_driver_gpio
+        esp_driver_rmt
         esp_driver_uart
         esp_partition
         esp_psram

@@ -18,8 +18,8 @@
 // host/modules/compiler_module.cpp and quickjs-debug.h). Positions are byte
 // offsets in the source; the debugger proxy converts them into lines and
 // UTF-16 columns.
-import { compile, quickjsVersion, qjsxVersion, bytecodeVersion } from "compiler";
-import { sha256 } from "crypto";
+import { compile, quickjsVersion, qjsxVersion, bytecodeVersion } from "sys/compiler";
+import { sha256 } from "sys/crypto";
 import { hex } from "qjsx:util";
 
 export const SIDECAR_FORMAT = 2;   // 2: with 'functions'

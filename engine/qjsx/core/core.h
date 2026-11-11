@@ -549,7 +549,8 @@ int JS_AddIntrinsicBasicObjects(JSContext *ctx);
 int js_debug_check_stop(JSContext *ctx, JSStackFrame *sf, JSFunctionBytecode *b,
                         const uint8_t *pc, const JSValue *sp);
 int js_debug_on_debugger_statement(JSContext *ctx, JSStackFrame *sf, const uint8_t *pc);
-void js_debug_on_exception(JSContext *ctx, JSStackFrame *sf, const uint8_t *pc);
+void js_debug_on_exception(JSContext *ctx, JSStackFrame *sf, const uint8_t *pc,
+                           JSValue *sp, JSValue *stack_buf);
 void js_debug_mark_exception_reported(JSContext *ctx);
 void js_debug_exception_caught(JSRuntime *rt, JSFunctionBytecode *b, int handler_offset);
 void js_debug_forget_exception(JSRuntime *rt);

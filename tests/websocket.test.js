@@ -8,8 +8,8 @@
 // Tests of crypto.sha1, of the standard base64 of the engine, and of
 // qjsx:websocket: frames, handshake, a server and a client talking.
 // Run with: bin/Release/qjsx run tests/websocket.test.js
-import { connect as netConnect } from "net";
-import { sha1 } from "crypto";
+import { connect as netConnect } from "sys/net";
+import { sha1 } from "sys/crypto";
 import { hex } from "qjsx:util";
 import { acceptKey, encodeFrame, FrameParser, OPCODE, startServer, connect } from "qjsx:websocket";
 import { check, equal, report } from "./assert.js";

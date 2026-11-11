@@ -23,8 +23,8 @@
 // Only what a debugger needs: GET requests answered with JSON, text messages
 // (fragmented or not), ping / pong, close. No extensions, no TLS. connect()
 // is the client side, for the tests.
-import { listen, connect as netConnect } from "net";
-import { sha1 } from "crypto";
+import { listen, connect as netConnect } from "sys/net";
+import { sha1 } from "sys/crypto";
 
 // Added to the key of the client to make Sec-WebSocket-Accept (RFC 6455 1.3).
 const HANDSHAKE_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";

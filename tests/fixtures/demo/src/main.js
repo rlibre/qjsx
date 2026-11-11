@@ -10,7 +10,7 @@
 import { greet } from "./lib/greet.js";
 import { add } from "./lib/math/add.js";
 import { join } from "stdlib/path";
-import { sha256 } from "crypto";
+import { sha256 } from "sys/crypto";
 
 console.log(greet("qjsx"));
 console.log("main module:", import.meta.main);

@@ -5,7 +5,7 @@
  *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
  */
 
-// Module "fs": synchronous file system functions, named and behaving like
+// Module "sys/fs": synchronous file system functions, named and behaving like
 // their Node counterparts (subset).
 #include <stdlib.h>
 #include <string.h>
@@ -453,7 +453,7 @@ void unlinkSync(js::Str path) {
 } // namespace
 
 /**
- * The "fs" module: its functions and the Stats class.
+ * The "sys/fs" module: its functions and the Stats class.
  */
 JS_MODULE(fs, module) {
     JS_FUNCTION(module, readFileSync);

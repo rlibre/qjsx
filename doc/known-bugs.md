@@ -42,13 +42,14 @@ by severity. There is no open "serious" defect any more. The fixed defects are i
   - `Convert<Range<T,Lo,Hi>>` compares with `(T)Lo`: a negative `Lo` with an unsigned `T`
     overflows.
 
-### Recorded while checking new-device.md (2026-11-11)
+### To verify: `device/gpio` `waitFor` (2026-11-11)
 
-- **ESP32, answer to `RESET`**: the agent hands the answer to `UartLink::send`, then
-  `board::restart()` calls `esp_restart()` at once. `uart_write_bytes` only copies the frame
-  into the transmit buffer of the driver: the chip may restart before it leaves, and the host
-  then waits for an answer that never comes. Lead: wait for the end of the transmission
-  (`uart_wait_tx_done`) before `esp_restart()`.
+- On the YD-ESP32-S3 board, `waitFor(0, { timeout: 15000 })` on the BOOT button (GPIO0) timed
+  out in every run of the trial program (`C:	empqjsx-button`), while `onChange` saw every
+  press and the timeout itself works (3 s wait rejected after 3002 ms). Not proven: the
+  presses may have fallen outside the 15 s window. Differences with `onChange`: the wait
+  watches the pin without debounce, and it is the first watch of the pin since boot. Next
+  step: three `waitFor(0)` without timeout, printing each press.
 
 ## Minor and differences with Node or the web
 

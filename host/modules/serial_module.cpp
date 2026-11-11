@@ -5,11 +5,12 @@
  *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
  */
 
-// Module "serial" (host only; the ESP has "uart"): serial ports.
+// Module "device/serial", the PC side: the serial ports of the machine (on a
+// board, the same module will drive the UARTs).
 //
-//   import { list, open } from "serial";
+//   import { list, Serial } from "device/serial";
 //   list()                                   ["COM3", ...] or ["/dev/ttyUSB0", ...]
-//   const port = open("COM3", { baudRate: 115200 });
+//   const port = new Serial("COM3", { baudRate: 115200 });
 //   port.onData(bytes => ...);
 //   port.onClose(() => ...);
 //   port.write("text" or bytes);
@@ -476,22 +477,31 @@ void readLoop(void *argument) {
     releasePortState(state);
 }
 
+// Default speed of a port, bits per second.
+const int DEFAULT_BAUD_RATE = 115200;
+
+// Options of 'new Serial(path, options)'.
+struct OpenOptions {
+    js::Range<int, 300, 4000000> baudRate = DEFAULT_BAUD_RATE;   // bits per second
+};
+JS_STRUCT(OpenOptions, baudRate);
+
 /**
- * An open serial port (JS class SerialPort), made by open(). Life cycle:
- * start() opens the port, registers the message source, starts the reader
+ * An open serial port (JS class Serial), made by 'new Serial(path,
+ * { baudRate })'. Life cycle: init() opens the port, registers the message source, starts the reader
  * thread and keeps the object alive; close() only asks the reader thread to
  * stop (the thread owns the PortState and closes the handle); its
  * MESSAGE_CLOSED removes the source, drops the keep-alive and calls onClose.
  */
-class SerialPort {
-    JS_CLASS(SerialPort);
+class Serial {
+    JS_CLASS(Serial);
 
 public:
     /**
      * Finalizer (no JS here): asks the reader thread to stop if it still
      * runs, and removes the source.
      */
-    ~SerialPort() {
+    ~Serial() {
         requestClose();
         if (_loop != nullptr) {
             _loop->removeSource(_source);
@@ -499,8 +509,17 @@ public:
     }
 
     /**
-     * C++ side (JS thread), called by serialOpen(): opens the port and starts
-     * reading. Returns false with a pending error.
+     * JS constructor: new Serial(path, { baudRate }) opens the port (115200
+     * bauds by default). Throws if the port cannot be opened.
+     */
+    void init(js::Str path, js::Optional<OpenOptions> options) {
+        int baudRate = options.has() ? (int)(options.value().baudRate) : DEFAULT_BAUD_RATE;
+        start(path.data(), baudRate);
+    }
+
+    /**
+     * Opens the port and starts reading (JS thread). Returns false with a
+     * pending error.
      */
     bool start(const char *path, int baudRate) {
         // open and configure the port (fails with a system error)
@@ -605,7 +624,7 @@ public:
     }
 
     /**
-     * JS: the path given to open().
+     * JS: the path given to the constructor.
      */
     JS_EXPORT(path) const char *path() const {
         return _path;
@@ -640,7 +659,7 @@ private:
         // block after this call). Called through a local copy of the
         // callback: the callback may replace itself (port.onData(...)), which
         // would free the function while it runs
-        SerialPort *port = (SerialPort *)opaque;
+        Serial *port = (Serial *)opaque;
         if (message->kind == MESSAGE_DATA) {
             js::Function callback = port->_dataCallback;
             callback(js::Buffer::copy(message->data, message->size));
@@ -666,7 +685,7 @@ private:
         callback();
     }
 
-    char _path[256] = "";               // port name as given to open()
+    char _path[256] = "";               // port name as given to the constructor
     rt::Loop *_loop = nullptr;          // loop of the JS thread; nullptr before start()
     rt::SourceId _source = { -1, 0 };   // message source of the reader thread
     PortState *_state = nullptr;        // freed by the reader thread; nullptr once closed
@@ -675,42 +694,21 @@ private:
     js::Function _closeCallback;        // onClose callback; empty: none
 };
 
-struct OpenOptions {
-    js::Range<int, 300, 4000000> baudRate = 115200;   // bits per second
-};
-JS_STRUCT(OpenOptions, baudRate);
-
 /**
- * JS list(): the names of the serial ports of the machine (named serialList /
- * serialOpen in C++: 'open' would hide POSIX open()).
+ * JS list(): the names of the serial ports of the machine (named serialList
+ * in C++, like the other module functions).
  */
 js::Value serialList() {
     JSContext *ctx = js::context();
     return js::Value(ctx, listPorts(ctx));
 }
 
-/**
- * JS open(path, { baudRate }): a new SerialPort, open (115200 bauds by
- * default). Throws if the port cannot be opened.
- */
-js::Value serialOpen(js::Str path, js::Optional<OpenOptions> options) {
-    // make the object and open the port (the error is pending if either fails)
-    int baudRate = options.has() ? (int)(options.value().baudRate) : 115200;
-    js::Created<SerialPort> port = js::create<SerialPort>();
-    if (port.object == nullptr || !port.object->start(path.data(), baudRate)) {
-        return js::Value();
-    }
-
-    return port.value;
-}
-
 } // namespace
 
 /**
- * Module "serial": list(), open() and the class SerialPort.
+ * Module "device/serial": list() and the class Serial.
  */
 JS_MODULE(serial, module) {
     JS_FUNCTION_AS(module, serialList, "list");
-    JS_FUNCTION_AS(module, serialOpen, "open");
-    JS_ADD_CLASS(module, SerialPort);
+    JS_ADD_CLASS(module, Serial);
 }

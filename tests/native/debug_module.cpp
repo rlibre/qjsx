@@ -60,13 +60,15 @@ const char *reasonName(JSDebugReason reason) {
 }
 
 /**
- * The event given to the JS callback: { reason, exception, atReturn,
- * returnValue } (the values are duplicated: the event only borrows them).
+ * The event given to the JS callback: { reason, exception, uncaught,
+ * atReturn, returnValue } (the values are duplicated: the event only borrows
+ * them).
  */
 JSValue eventToJs(JSContext *ctx, const JSDebugEvent *event) {
     JSValue object = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, object, "reason", JS_NewString(ctx, reasonName(event->reason)));
     JS_SetPropertyStr(ctx, object, "exception", JS_DupValue(ctx, event->exception));
+    JS_SetPropertyStr(ctx, object, "uncaught", JS_NewBool(ctx, event->uncaught));
     JS_SetPropertyStr(ctx, object, "atReturn", JS_NewBool(ctx, event->at_return));
     JS_SetPropertyStr(ctx, object, "returnValue", JS_DupValue(ctx, event->return_value));
     return object;

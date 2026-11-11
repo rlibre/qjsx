@@ -7,7 +7,7 @@
 
 // jsbind - native modules and global objects.
 //
-//   JS_MODULE(fs, m)                       // import { readFileSync } from "fs"
+//   JS_MODULE(fs, m)                       // import { readFileSync } from "sys/fs"
 //   {
 //       JS_FUNCTION(m, readFileSync);
 //       JS_ADD_CLASS(m, Stats);

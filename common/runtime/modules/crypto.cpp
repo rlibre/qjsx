@@ -5,7 +5,7 @@
  *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
  */
 
-// Module "crypto":
+// Module "sys/crypto":
 //   sha256(data) -> Uint8Array(32)
 //   sha1(data)   -> Uint8Array(20)   (only for what a protocol imposes: SHA-1 is broken)
 // data: a string (hashed as UTF-8) or bytes (Uint8Array, typed array, ArrayBuffer).
@@ -95,7 +95,7 @@ js::Buffer sha1(js::Value data) {
 } // namespace
 
 /**
- * The "crypto" module: sha256, sha1.
+ * The "sys/crypto" module: sha256, sha1.
  */
 JS_MODULE(crypto, module) {
     JS_FUNCTION(module, sha256);

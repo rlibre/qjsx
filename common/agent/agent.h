@@ -119,6 +119,7 @@ struct Identity {
     const char *engine;     // QuickJS version
     const char *token;      // required in HELLO if not null (network links)
     int         bytecode;   // version of the bytecode the engine reads (JS_GetBytecodeVersion)
+    const char *version;    // qjsx version of the firmware (QJSX_VERSION)
 };
 
 // The agent itself: decodes the frames received from the host, answers the

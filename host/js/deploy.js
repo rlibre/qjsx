@@ -6,9 +6,14 @@
  */
 
 // Sends a package to a device and starts it.
-import * as fs from "fs";
-import { sha256 } from "crypto";
-import { readZip } from "qjsx:zip";
+//
+// The device gets a reduced package: manifest.json (with "reduced": true)
+// and bytecode/ only, what its loader reads. The debug sidecars (debug/) and
+// the sources (src/) stay in the full package on the PC, where the debugger
+// finds it by its build id, which does not change.
+import * as fs from "sys/fs";
+import { sha256 } from "sys/crypto";
+import { readZip, writeZip } from "qjsx:zip";
 import { KIND, KEY, UPLOAD_CHUNK } from "qjsx:protocol";
 
 // The manifest of a package (its manifest.json, parsed).
@@ -33,26 +38,66 @@ export function latestPackage(directory, name) {
     return newest?.path;
 }
 
-// Uploads 'packageBytes' (Uint8Array) to an open device (session started).
-// onProgress(sentBytes, totalBytes) is optional. The device is told which
-// bytecode version the package holds: it refuses the upload at once, before
-// writing anything, if its engine reads another one.
+// The reduced package of a full one: its manifest marked "reduced": true and
+// its bytecode/ entries, stored as in any package (read in place). The
+// scripts of the manifest lose their 'debug' and 'source' entries, which are
+// not in the reduced package.
+export function reducePackage(packageBytes) {
+    const entries = readZip(packageBytes);
+    const manifest = packageManifest(packageBytes);
+    const scripts = manifest.scripts.map(({ debug, source, ...kept }) => kept);
+    const reducedManifest = { ...manifest, scripts, reduced: true };
+
+    const kept = [{ name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(reducedManifest, null, 1)) }];
+    for (const [name, data] of entries) {
+        if (name.startsWith("bytecode/")) {
+            kept.push({ name, data });
+        }
+    }
+    return writeZip(kept);
+}
+
+// The native modules a program needs that the device does not have, or []
+// when the device does not say which ones it has (an older firmware).
+export function missingNatives(device, manifest) {
+    if (!Array.isArray(device.natives)) {
+        return [];
+    }
+    return (manifest.natives ?? []).filter(name => !device.natives.includes(name));
+}
+
+// Uploads the package 'packageBytes' (Uint8Array, a full package) to an open
+// device (session started), reduced (see reducePackage). onProgress(sentBytes,
+// totalBytes) is optional. Refused before anything is written when:
+//   - the program needs native modules the device does not have (its answer
+//     to HELLO lists them);
+//   - the device reads another bytecode version (it refuses UPLOAD_BEGIN).
 export async function upload(device, packageBytes, onProgress) {
     const manifest = packageManifest(packageBytes);
     if (typeof manifest.bytecode !== "number") {
         throw new Error("the package does not say which bytecode version it holds: rebuild it");
     }
+
+    // every native module the program imports must be in the firmware
+    const missing = missingNatives(device, manifest);
+    if (missing.length > 0) {
+        throw new Error(`the program needs native module(s) ${missing.join(", ")}, which this device does not have`
+            + ` (it has: ${device.natives.join(", ")})`);
+    }
+
+    // send the reduced package
+    const reduced = reducePackage(packageBytes);
     const buildId = manifest.buildId;
     await device.request(KIND.UPLOAD_BEGIN, {
-        [KEY.SIZE]: packageBytes.length,
-        [KEY.SHA256]: sha256(packageBytes),
+        [KEY.SIZE]: reduced.length,
+        [KEY.SHA256]: sha256(reduced),
         [KEY.BUILD_ID]: buildId,
         [KEY.BYTECODE]: manifest.bytecode,
     });
-    for (let offset = 0; offset < packageBytes.length; offset += UPLOAD_CHUNK) {
-        const chunk = packageBytes.subarray(offset, offset + UPLOAD_CHUNK);
+    for (let offset = 0; offset < reduced.length; offset += UPLOAD_CHUNK) {
+        const chunk = reduced.subarray(offset, offset + UPLOAD_CHUNK);
         await device.request(KIND.UPLOAD_CHUNK, { [KEY.OFFSET]: offset, [KEY.DATA]: chunk });
-        onProgress?.(offset + chunk.length, packageBytes.length);
+        onProgress?.(offset + chunk.length, reduced.length);
     }
     await device.request(KIND.UPLOAD_END, {});
     return buildId;

@@ -11,8 +11,8 @@
 // on tests/fixtures/debuggee.
 // Run with: bin/Release/qjsx run tests/cdp.test.js tcp:127.0.0.1:<port>
 // (an "qjsx agent" must listen there; tests/run-tests.sh starts one).
-import * as fs from "fs";
-import { connect as netConnect } from "net";
+import * as fs from "sys/fs";
+import { connect as netConnect } from "sys/net";
 import { resolve } from "stdlib/path";
 import { build } from "qjsx:build";
 import { Device } from "qjsx:device";
@@ -36,7 +36,7 @@ await device.hello();
 await device.request(KIND.STOP);
 await upload(device, fs.readFileSync(projectBuild.file));
 
-server = new CdpServer({ device, index, port: 0, title: "qjsx test", sourceCache: `${PROJECT}/build/debug-src` });
+server = new CdpServer({ device, index, port: 0, title: "qjsx test", sourceCache: `${PROJECT}/build/debug-src`, restart: true });
 server.start();
 
 // --- HTTP discovery, as js-debug does it
@@ -149,8 +149,9 @@ check(conditional.error !== undefined, "a conditional breakpoint is refused (ste
 const breakpoint = await command("Debugger.setBreakpointByUrl", { urlRegex, lineNumber: breakpointLine, columnNumber: 0 });
 check(breakpoint.breakpointId !== undefined, "breakpoint set by urlRegex");
 
-// --- run: the scripts, the breakpoint resolved, the pause
-await device.request(KIND.RUN);
+// --- run, as with --restart: js-debug says it is ready, the server starts
+// the program; then the scripts, the breakpoint resolved, the pause
+await command("Runtime.runIfWaitingForDebugger");
 const parsed = await nextEvent("Debugger.scriptParsed");
 equal(parsed.url, mainUrl, "src/main.js announced by its file:/// URL");
 const resolved = await nextEvent("Debugger.breakpointResolved");
@@ -163,10 +164,14 @@ check(paused.hitBreakpoints?.includes(breakpoint.breakpointId), "hitBreakpoints 
 
 // --- scopes and objects
 const localScope = top.scopeChain.find(scope => scope.type === "local");
-const locals = (await command("Runtime.getProperties", { objectId: localScope.object.objectId, ownProperties: true })).result;
+const locals = (await command("Runtime.getProperties", { objectId: localScope.object.objectId, ownProperties: true, generatePreview: true })).result;
 const localByName = new Map(locals.map(property => [property.name, property.value]));
 equal(localByName.get("width")?.value, 3, "local 'width'");
 equal(localByName.get("box")?.className, "Object", "local 'box' is an object");
+const boxPreview = localByName.get("box")?.preview;
+equal(boxPreview?.properties?.map(property => `${property.name}=${property.value}`).join(","), "width=3,height=4,label=box",
+    "preview of 'box' (generatePreview)");
+equal(top.this?.type, "undefined", "compute() does not use 'this': no value");
 const boxProperties = (await command("Runtime.getProperties", { objectId: localByName.get("box").objectId, ownProperties: true })).result;
 equal(boxProperties.map(property => property.name).join(","), "width,height,label", "properties of 'box'");
 

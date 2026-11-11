@@ -10,7 +10,7 @@
 //   "*"             any characters except '/'
 //   "?"             one character except '/'
 //   "**/"           any number of directories (including none)
-import * as fs from "fs";
+import * as fs from "sys/fs";
 import { join } from "stdlib/path";
 
 const SKIPPED_DIRECTORIES = new Set([".git"]);

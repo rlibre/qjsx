@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1200" height="904" viewBox="0 0 1200 904">
+  <title>qjsx architecture: the PC compiles and debugs, the device runs bytecode</title>
+  <style>
+    text { font-family: Helvetica, Arial, sans-serif; font-size: 13px; fill: #1a1a1a; }
+    .title { font-size: 22px; font-weight: bold; }
+    .subtitle { font-size: 14px; fill: #333333; }
+    .area-label { font-size: 17px; font-weight: bold; }
+    .box-title { font-size: 15px; font-weight: bold; }
+    .bold { font-weight: bold; }
+    .deploy-text { fill: #b85600; }
+    .debug-text { fill: #6a3d9a; }
+    .pc-area { fill: #eef4fb; stroke: #4a78b5; stroke-width: 1.5; }
+    .tool { fill: #dce8f6; stroke: #4a78b5; stroke-width: 1.5; }
+    .pc-box { fill: #ffffff; stroke: #4a78b5; stroke-width: 1.5; }
+    .file { fill: #fff7dc; stroke: #c79a1e; stroke-width: 1.5; }
+    .link-band { fill: #f4f4f4; stroke: #8a8a8a; stroke-width: 1.5; stroke-dasharray: 6 4; }
+    .alt-target { fill: #ffffff; stroke: #4a78b5; stroke-width: 1.5; stroke-dasharray: 5 3; }
+    .device-area { fill: #eef7ee; stroke: #3c8a3c; stroke-width: 1.5; }
+    .device-box { fill: #ffffff; stroke: #3c8a3c; stroke-width: 1.5; }
+    .layer { fill: #dcecdc; stroke: #3c8a3c; stroke-width: 1.5; }
+    .deploy-arrow { fill: none; stroke: #d9730d; stroke-width: 2.5; }
+    .debug-arrow { fill: none; stroke: #6a3d9a; stroke-width: 2.5; }
+    .debug-dashed { fill: none; stroke: #6a3d9a; stroke-width: 2; stroke-dasharray: 6 4; }
+  </style>
+  <defs>
+    <marker id="deploy-end" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#d9730d"/>
+    </marker>
+    <marker id="debug-end" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6a3d9a"/>
+    </marker>
+    <marker id="debug-start" viewBox="0 0 10 10" refX="1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto">
+      <path d="M10,0 L0,5 L10,10 z" fill="#6a3d9a"/>
+    </marker>
+  </defs>
+
+  <!-- ### Background and title ############################################ -->
+  <rect x="0" y="0" width="1200" height="904" fill="#ffffff"/>
+  <text class="title" x="600" y="36" text-anchor="middle">qjsx: compile and debug on the PC, run bytecode on the device</text>
+  <text class="subtitle" x="600" y="60" text-anchor="middle">Code is compiled on the PC and the device runs stripped bytecode only; debug info and the compilation of evaluated expressions stay on the PC.</text>
+
+  <!-- ### Development machine ############################################# -->
+  <rect class="pc-area" x="16" y="76" width="1168" height="376" rx="10"/>
+  <text class="area-label" x="32" y="100">DEVELOPMENT MACHINE (PC)<tspan class="subtitle" font-weight="normal"> Windows, macOS, Linux</tspan></text>
+
+  <!-- Inputs: project and libraries -->
+  <rect class="file" x="36" y="114" width="170" height="108" rx="6"/>
+  <text class="box-title" x="52" y="138">Project</text>
+  <text x="52" y="162">src/*.js</text>
+  <text x="52" y="182">qjsx.json</text>
+  <text x="52" y="202">(name, main, env…)</text>
+
+  <rect class="file" x="226" y="114" width="160" height="108" rx="6"/>
+  <text class="box-title" x="242" y="138">Libraries</text>
+  <text x="242" y="162">*.qjslib files</text>
+  <text x="242" y="182">stdlib.qjslib:</text>
+  <text x="242" y="202">the standard library</text>
+
+  <!-- The package -->
+  <rect class="file" x="446" y="114" width="414" height="108" rx="6"/>
+  <text class="box-title" x="462" y="136">Package<tspan font-weight="normal" font-size="13px">   app.qjspkg (zip, entries stored)</tspan></text>
+  <text class="bold deploy-text" x="462" y="157">bytecode/</text>
+  <text class="deploy-text" x="575" y="157">stripped bytecode: what the device runs</text>
+  <text class="bold debug-text" x="462" y="175">debug/</text>
+  <text class="debug-text" x="575" y="175">sidecars, read by the proxy on the PC</text>
+  <text class="bold debug-text" x="462" y="193">src/</text>
+  <text class="debug-text" x="575" y="193">exact copies of the sources</text>
+  <text class="bold" x="462" y="211">manifest.json</text>
+  <text x="575" y="211">build id, modules, bytecode version</text>
+
+  <!-- VS Code -->
+  <rect class="pc-box" x="900" y="114" width="264" height="108" rx="6"/>
+  <text class="box-title" x="916" y="138">VS Code</text>
+  <text x="916" y="162">built-in debugger js-debug</text>
+  <text x="916" y="182">attach configuration</text>
+  <text x="916" y="202">(type "node", port 9339)</text>
+
+  <!-- The qjsx tool: its caption is at the bottom, where no arrow passes -->
+  <rect class="tool" x="36" y="240" width="1128" height="200" rx="8"/>
+  <text class="box-title" x="52" y="428">qjsx tool<tspan font-weight="normal" font-size="13px">  one executable: host QuickJS + compiler + native modules</tspan></text>
+
+  <rect class="pc-box" x="52" y="284" width="348" height="116" rx="6"/>
+  <text class="box-title" x="68" y="308">qjsx build</text>
+  <text x="68" y="330">compiles the program and the library modules</text>
+  <text x="68" y="348">it imports, with debug info on</text>
+  <text x="68" y="366">(host compiler: positions, scopes, names)</text>
+  <text x="68" y="386">writes the .qjspkg package</text>
+
+  <rect class="pc-box" x="440" y="284" width="160" height="116" rx="6"/>
+  <text class="box-title" x="456" y="308">qjsx deploy</text>
+  <text x="456" y="330">uploads and runs</text>
+  <text x="456" y="348">the package</text>
+  <text x="456" y="368">also: monitor,</text>
+  <text x="456" y="386">device ls|reset|info</text>
+
+  <rect class="tool" x="616" y="252" width="536" height="158" rx="6" fill="#e9f0fa"/>
+  <text class="bold" x="632" y="272" font-size="14px">qjsx debug</text>
+
+  <rect class="pc-box" x="630" y="286" width="242" height="116" rx="6"/>
+  <text class="box-title" x="646" y="308">Debugger proxy</text>
+  <text x="646" y="328">DebugSession: breakpoints,</text>
+  <text x="646" y="346">steps, stack, variables</text>
+  <text x="646" y="364">DebugInfo: reads the sidecars</text>
+  <text x="646" y="382">compiles evaluated expressions</text>
+
+  <rect class="pc-box" x="900" y="286" width="244" height="116" rx="6"/>
+  <text class="box-title" x="916" y="308">CDP server</text>
+  <text x="916" y="328">HTTP + WebSocket</text>
+  <text x="916" y="346">127.0.0.1:9339</text>
+  <text x="916" y="364">translates CDP into</text>
+  <text x="916" y="382">device agent requests</text>
+
+  <!-- Arrows on the PC -->
+  <path class="deploy-arrow" d="M121,222 L121,282" marker-end="url(#deploy-end)"/>
+  <path class="deploy-arrow" d="M306,222 L306,282" marker-end="url(#deploy-end)"/>
+  <path class="deploy-arrow" d="M400,330 L422,330 L422,168 L444,168" marker-end="url(#deploy-end)"/>
+  <path class="deploy-arrow" d="M520,222 L520,282" marker-end="url(#deploy-end)"/>
+  <path class="debug-dashed" d="M751,222 L751,284" marker-end="url(#debug-end)"/>
+  <text class="debug-text" x="766" y="274">debug/, src/</text>
+  <path class="debug-arrow" d="M1024,224 L1024,284" marker-start="url(#debug-start)" marker-end="url(#debug-end)"/>
+  <text class="debug-text" x="1039" y="274">CDP / WebSocket</text>
+  <path class="debug-arrow" d="M874,344 L898,344" marker-start="url(#debug-start)" marker-end="url(#debug-end)"/>
+
+  <!-- ### Link ############################################################## -->
+  <rect class="link-band" x="16" y="464" width="1168" height="120" rx="10"/>
+  <text class="area-label" x="32" y="488">LINK<tspan class="subtitle" font-weight="normal">  serial (UART0, COM port, 921600 baud) or TCP</tspan></text>
+  <text x="32" y="510">frame = 0x00 | COBS(magic, version, CRC-16, CBOR message) | 0x00</text>
+  <text x="32" y="528">on serial, bytes outside the frames are console text</text>
+  <text x="32" y="546">events to the PC: LOG, STARTED, EXITED, PAUSED, SCRIPT_LOADED</text>
+  <text x="32" y="564">one protocol for deployment and debugging</text>
+
+  <text class="bold deploy-text" x="532" y="488">deployment</text>
+  <text class="deploy-text" x="532" y="505">HELLO, INFO,</text>
+  <text class="deploy-text" x="532" y="522">UPLOAD_* (2 KB chunks),</text>
+  <text class="deploy-text" x="532" y="539">RUN, STOP, RESET</text>
+
+  <text class="bold debug-text" x="762" y="488">debugging</text>
+  <text class="debug-text" x="762" y="505">SET_STOPS, STEP, PAUSE,</text>
+  <text class="debug-text" x="762" y="522">GET_STACK, GET_SLOTS,</text>
+  <text class="debug-text" x="762" y="539">LOAD_FUNCTION, CALL</text>
+  <text class="debug-text" x="762" y="556">(bytecode compiled on the PC)</text>
+
+  <rect class="alt-target" x="1000" y="476" width="168" height="96" rx="6"/>
+  <text class="bold" x="1014" y="497" font-size="14px">qjsx agent</text>
+  <text x="1014" y="516">on the PC: stands in</text>
+  <text x="1014" y="533">for a device, same</text>
+  <text x="1014" y="550">common code, TCP</text>
+  <text x="1014" y="566" font-size="13px" fill="#555555">(alternative target)</text>
+
+  <!-- ### Device ############################################################ -->
+  <rect class="device-area" x="16" y="596" width="1168" height="296" rx="10"/>
+  <text class="area-label" x="32" y="620">DEVICE<tspan class="subtitle" font-weight="normal">  ESP32-S3 today, RP2350 planned</tspan></text>
+  <text x="790" y="620">firmware: no compiler, no JS inside (only native modules)</text>
+
+  <rect class="device-box" x="36" y="634" width="240" height="76" rx="6"/>
+  <text class="bold" x="52" y="656" font-size="14px">Flash: 2 package slots</text>
+  <text x="52" y="676">upload goes to the free slot,</text>
+  <text x="52" y="694">bytecode read in place (mmap)</text>
+
+  <rect class="device-box" x="316" y="634" width="564" height="76" rx="6"/>
+  <text class="box-title" x="332" y="656">Device agent</text>
+  <text x="332" y="676">frames, CBOR, HELLO, upload into flash, RUN / STOP / RESET</text>
+  <text x="332" y="694">the program's console goes to the PC as LOG messages</text>
+
+  <rect class="device-box" x="920" y="634" width="244" height="76" rx="6"/>
+  <text class="box-title" x="936" y="656">Debugger stub</text>
+  <text x="936" y="676">stops, steps, stack, slots,</text>
+  <text x="936" y="694">runs bytecode sent by the PC</text>
+
+  <rect class="device-box" x="36" y="734" width="240" height="60" rx="6"/>
+  <text class="box-title" x="52" y="758">Runner</text>
+  <text x="52" y="778">starts the installed package</text>
+
+  <rect class="device-box" x="316" y="734" width="848" height="60" rx="6"/>
+  <text class="box-title" x="332" y="758">QuickJS engine without compiler</text>
+  <text x="332" y="778">runs bytecode only (no eval); two dispatch tables, normal and debug (breakpoints, steps)</text>
+
+  <rect class="layer" x="36" y="808" width="1128" height="34" rx="6"/>
+  <text x="52" y="830"><tspan class="bold">Runtime</tspan>  one JS thread, event loop with one message queue, timers, native modules (fs, crypto…)</text>
+
+  <rect class="layer" x="36" y="850" width="1128" height="34" rx="6"/>
+  <text x="52" y="872"><tspan class="bold">Port layer</tspan>  board.h / platform.h: FreeRTOS, ESP-IDF, UART0 link, JS heap in PSRAM, flash partitions</text>
+
+  <!-- Arrows on the device -->
+  <path class="deploy-arrow" d="M316,672 L278,672" marker-end="url(#deploy-end)"/>
+  <path class="deploy-arrow" d="M156,710 L156,732" marker-end="url(#deploy-end)"/>
+  <path class="deploy-arrow" d="M276,764 L314,764" marker-end="url(#deploy-end)"/>
+  <path class="debug-arrow" d="M882,672 L918,672" marker-start="url(#debug-start)" marker-end="url(#debug-end)"/>
+  <path class="debug-arrow" d="M1042,712 L1042,732" marker-start="url(#debug-start)" marker-end="url(#debug-end)"/>
+
+  <!-- ### Arrows across the link ############################################ -->
+  <path class="deploy-arrow" d="M520,400 L520,632" marker-end="url(#deploy-end)"/>
+  <path class="debug-arrow" d="M751,404 L751,632" marker-start="url(#debug-start)" marker-end="url(#debug-end)"/>
+</svg>

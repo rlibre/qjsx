@@ -94,7 +94,7 @@ check "library modules run from the package, without compiler" diff --strip-trai
 check "imported library modules are packaged, followed through the libraries" \
     bash -c "grep -a -q 'bytecode/testlib/greet.qbc' '$USELIB_PACKAGE' && grep -a -q 'bytecode/testlib/words.qbc' '$USELIB_PACKAGE' && grep -a -q 'bytecode/stdlib/path.qbc' '$USELIB_PACKAGE'"
 check "a library module nobody imports is not packaged" bash -c "! grep -a -q 'testlib/unused' '$USELIB_PACKAGE'"
-check "native modules are listed in the manifest" bash -c "grep -a -A 2 '\"natives\"' '$USELIB_PACKAGE' | grep -q '\"crypto\"'"
+check "native modules are listed in the manifest" bash -c "grep -a -A 2 '\"natives\"' '$USELIB_PACKAGE' | grep -q '\"sys/crypto\"'"
 # A library made by another compiler (another bytecode version) is not
 # refused: it holds its sources, the build compiles its modules again and
 # says so; the program runs the same.
@@ -129,6 +129,22 @@ check "device info shows the installed build" bash -c "'$BIN/qjsx' device info -
 check "a package of another bytecode version is refused by the device" \
     bash -c "! '$BIN/qjsx' deploy build/other-bytecode.qjspkg --target '$AGENT_TARGET' > /dev/null 2> build/other-bytecode-deploy.txt && grep -q 'holds bytecode version .* this device reads version' build/other-bytecode-deploy.txt"
 check "the installed package stays after the refusal" bash -c "'$BIN/qjsx' device info --target '$AGENT_TARGET' 2>/dev/null | grep -q \"package:  \$(basename '$PACKAGE' .qjspkg | sed 's/^demo-//')\""
+
+# The device gets a reduced package: manifest and bytecode, no debug sidecars
+# nor sources (they stay in the full package on the PC).
+check "the device gets a reduced package (no debug/, no src/)" \
+    bash -c "grep -aq '\"reduced\": true' build/test-agent/app.qjspkg && ! grep -aq 'debug/src/' build/test-agent/app.qjspkg && grep -aq 'bytecode/src/' build/test-agent/app.qjspkg"
+
+# A program that imports a native module the firmware does not have is refused
+# by qjsx deploy, before anything is sent (the device lists its native modules
+# in its answer to HELLO).
+NONATIVE=tests/fixtures/nonative
+"$BIN/qjsx" build "$NONATIVE" > /dev/null 2>&1
+check "a program needing a missing native module is refused" \
+    bash -c "! '$BIN/qjsx' deploy \$(ls '$NONATIVE'/build/packages/*.qjspkg) --target '$AGENT_TARGET' > /dev/null 2> build/nonative-deploy.txt && grep -q 'needs native module(s) device/gpio, which this device does not have' build/nonative-deploy.txt"
+check "the installed package stays after that refusal" bash -c "'$BIN/qjsx' device info --target '$AGENT_TARGET' 2>/dev/null | grep -q \"package:  \$(basename '$PACKAGE' .qjspkg | sed 's/^demo-//')\""
+rm -rf "${NONATIVE:?}/build"
+
 check "a package of another bytecode version does not run" \
     bash -c "! '$BIN/qjsx' run build/other-bytecode.qjspkg > build/other-bytecode-run.txt 2>&1 && grep -q 'holds bytecode version .* this engine reads version' build/other-bytecode-run.txt"
 
@@ -195,6 +211,10 @@ rm -rf "${DYNAMIC:?}/build"
 NOLIBRARY=tests/fixtures/nolibrary
 check "module of an undeclared library refused" bash -c "! '$BIN/qjsx' build '$NOLIBRARY' > '$ROOT/build/nolibrary.txt' 2>&1 && grep -q \"src/main.js imports 'nolib/thing'.*no library 'nolib' is declared\" '$ROOT/build/nolibrary.txt'"
 rm -rf "${NOLIBRARY:?}/build"
+
+BARENAME=tests/fixtures/barename
+check "a native module imported by a bare name is refused (sys/fs, not fs)" bash -c "! '$BIN/qjsx' build '$BARENAME' > '$ROOT/build/barename.txt' 2>&1 && grep -q \"src/main.js imports 'fs': no module 'fs' (native modules are named sys/<name> or device/<name>\" '$ROOT/build/barename.txt'"
+rm -rf "${BARENAME:?}/build"
 
 echo
 if [ "$failures" -eq 0 ]; then

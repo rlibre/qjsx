@@ -27,5 +27,11 @@ endif()
 set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults;${QJSX_BOARD_DIR}/sdkconfig.board")
 set(SDKCONFIG "${CMAKE_BINARY_DIR}/sdkconfig")
 
+# the version of the application (esp_app_desc_t, read by the ESP-IDF tools and
+# by an OTA): the qjsx version, from the #define of common/runtime/version.h
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/../../common/runtime/version.h" QJSX_VERSION_LINE REGEX "#define QJSX_VERSION")
+string(REGEX MATCH "\"([^\"]+)\"" QJSX_VERSION_QUOTED "${QJSX_VERSION_LINE}")
+set(PROJECT_VER "${CMAKE_MATCH_1}")
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(qjsx)

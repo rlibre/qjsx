@@ -19,17 +19,17 @@
 #include "modules.h"
 
 /**
- * Creates the native module "compiler" (compiler_module.cpp, JS_MODULE).
+ * Creates the native module "sys/compiler" (compiler_module.cpp, JS_MODULE).
  */
 JSModuleDef *jsNewModule_compiler(JSContext *ctx, const char *moduleName);
 
 /**
- * Creates the native module "net" (net.cpp, JS_MODULE).
+ * Creates the native module "sys/net" (net.cpp, JS_MODULE).
  */
 JSModuleDef *jsNewModule_net(JSContext *ctx, const char *moduleName);
 
 /**
- * Creates the native module "serial" (serial_module.cpp, JS_MODULE).
+ * Creates the native module "device/serial" (serial_module.cpp, JS_MODULE).
  */
 JSModuleDef *jsNewModule_serial(JSContext *ctx, const char *moduleName);
 
@@ -99,10 +99,10 @@ int main(int argc, char **argv) {
     // created (qjsx-target is linked with the engine without compiler,
     // premake5.lua; the test modules exist in qjsx-tests only)
 #ifndef QJSX_NO_COMPILER
-    rt::registerNativeModule("compiler", &jsNewModule_compiler);
+    rt::registerNativeModule("sys/compiler", &jsNewModule_compiler);
 #endif
-    rt::registerNativeModule("net", &jsNewModule_net);
-    rt::registerNativeModule("serial", &jsNewModule_serial);
+    rt::registerNativeModule("sys/net", &jsNewModule_net);
+    rt::registerNativeModule("device/serial", &jsNewModule_serial);
 #ifdef QJSX_TESTS
     registerTestModules();
 #endif

@@ -10,7 +10,7 @@
 // expected.txt.
 import { greet } from "testlib/greet";
 import { basename } from "stdlib/path";
-import { sha256 } from "crypto";
+import { sha256 } from "sys/crypto";
 
 console.log(greet("device"));
 console.log(basename("/a/b/c.txt"));

@@ -98,6 +98,9 @@ enum Key {
     KEY_RETURN_VALUE = 38,
     KEY_STEP = 39,
     KEY_BYTECODE = 40,
+    KEY_UNCAUGHT = 41,
+    KEY_NATIVES = 42,
+    KEY_VERSION = 43,
 };
 
 enum Stream {

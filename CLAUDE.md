@@ -56,7 +56,8 @@ keeps the old name: `C:\Sandbox\espjs`.
   - NAMES (user, 2026-11-11, on the model of `node:path`): every library module is named
     `<library>/<module>` and imported by that name: `import { join } from "stdlib/path"`,
     `import { read } from "sensors/bme280"`. The standard library is `stdlib`. Native modules
-    keep their short names (`fs`, `crypto`). No short-name aliases;
+    are named with the reserved prefixes `sys/` and `device/` (`sys/fs`, `device/gpio`: see
+    "Names of the native modules", DONE 2026-11-11). No short-name aliases;
   - a `.qjslib` is a zip laid out like a `.qjspkg` (manifest kind "library": name, version,
     compiler, natives, modules with their imports; `src/`, `debug/`, `bytecode/` as a cache);
     it always contains its sources (user: the FILE is what is delivered, not the source
@@ -75,11 +76,13 @@ keeps the old name: `C:\Sandbox\espjs`.
     the `.qjspkg` every library module used, WHOLE (no function-level tree shaking),
     transitively; the bytecode of the `.qjslib` is used when the compiler id matches, else
     the module is recompiled from its source; the debugger sees them (sidecar and source in
-    the package). A name without `/` that is no module of the program is a native module,
-    listed in `natives` of the manifest;
+    the package). A `sys/...` or `device/...` name is a native module, listed in `natives` of
+    the manifest; a bare name (`fs`) is an error;
   - the firmware contains no JS at all, only native modules; the device loader finds library
-    modules in the package like any other. NOT DONE: `qjsx deploy` checking `natives`
-    against a list the firmware would give in `Hello`;
+    modules in the package like any other. DONE 2026-11-11: the agent lists the native
+    modules of its firmware in the HELLO answer (`NATIVES`, from rt::countNativeModules /
+    nativeModuleNameAt) and `qjsx deploy` refuses a program that imports another one
+    (`upload()`, host/js/deploy.js); an older firmware is not checked;
   - dynamic `import()` is FORBIDDEN in programs built by `qjsx build` and in libraries (PC
     and devices alike), so the dependency graph is complete at build time: a compiler flag
     (`JS_EVAL_FLAG_NO_DYNAMIC_IMPORT`, engine change J) makes it a syntax error with its
@@ -101,7 +104,9 @@ keeps the old name: `C:\Sandbox\espjs`.
   error (the build succeeds). Syntactic detection in the compiler
   (`JS_SetCompileWarningHandler`); indirect uses are not seen.
 - Build package: one zip archive per build, extension `.qjspkg` (same extension for the full
-  package and the reduced one sent to the ESP; the manifest says what it contains),
+  package and the reduced one sent to the ESP; the manifest says what it contains; DONE
+  2026-11-11: `upload()` sends `manifest.json` with `"reduced": true` and its scripts without
+  `debug` / `source`, and `bytecode/` only; same build id),
   entries stored without compression (no dependency; lets the ESP execute bytecode in place
   from flash via esp_partition_mmap + JS_READ_OBJ_ROM_DATA, to verify). Layout:
   `manifest.json` (format version, build id, compiler id, scripts: path, script build id, source
@@ -146,12 +151,30 @@ keeps the old name: `C:\Sandbox\espjs`.
   microbench, board) still to do. Stop at
   the start of a `catch` clause and at function end (each `return` + implicit return) to show
   the return value.
-- Pause on exceptions: "all" pauses at the throw, before unwinding. "uncaught" predicts at the
-  throw by scanning frames for catch offsets (offset 0 = iterator close and a handler starting
-  with `gosub; throw` = finally rethrow do not count); needs a new `sf->call_sp` saved before
-  each call (`cur_sp` already means something for generators). An exception crossing an async
-  function boundary counts as caught; unhandled rejections are reported (console, stack captured
-  at the throw) via the promise rejection tracker.
+- Pause on exceptions: "all" pauses at the throw, before unwinding. "uncaught" (user,
+  2026-11-11, replaces the `sf->call_sp` design, IMPLEMENTED the same day, engine change M): the engine predicts at the throw,
+  only when a hook is set (no cost on the hot path): in the throwing frame by scanning its
+  real stack for catch offsets; in each calling frame STATICALLY, by checking in its bytecode
+  whether its pc lies in a try region (from an `OP_catch` to its handler); offset 0 = iterator
+  close and a `gosub; throw` / plain `throw` handler (finally rethrow,
+  js_debug_is_rethrow_handler) do not count; an async function frame counts as caught (the
+  exception becomes a rejection); reaching the bottom of the stack = uncaught. Result in a new
+  `JSDebugEvent.uncaught`; the stub pauses in "uncaught" mode only when it is true. Known
+  approximation: a throw in a promise callback (`then`) is seen as uncaught. Unhandled
+  rejections reported via the promise rejection tracker: not done.
+- Debugger step 4 (user, 2026-11-11, IMPLEMENTED the same day; tested in Debug on the desktop agent and on the ESP32-S3: debugger 72/72, proxy 30/30, cdp 53/53), besides the "uncaught" prediction above:
+  - `qjsx debug --restart` (opt-in, off by default): on `Runtime.runIfWaitingForDebugger`
+    (js-debug sends it once its breakpoints are set) the server sends RUN, so the program
+    starts again with the debugger attached and each module waits at SCRIPT_LOADED for its
+    breakpoints: startup code can be debugged, and VS Code's Restart restarts the program.
+    Only the program restarts, not the chip. REPLACES the persistent `--wait-debugger` flag
+    (dropped for now; to reconsider only to debug what follows a real chip reset);
+  - `this` of the frames: read at the pause for the frames whose function has a `this`
+    slot (ScriptInfo.thisSlot); elsewhere `undefined`, described as not available;
+  - object previews (CDP `preview`) built on the host when js-debug asks for them: one more
+    GET_PROPERTIES per object, at most 5 properties, nested values by their description;
+    to measure on the board (next step if too slow: a small preview added by the stub).
+  - Conditional breakpoints, logpoints, hit counts: postponed (TODO backlog).
 - Conditional breakpoints, logpoints and hit counts are compiled by the proxy and evaluated on
   the ESP itself (no round trip per hit).
 - Proxy core without CDP (API agreed by the user 2026-11-11, IMPLEMENTED the same day in
@@ -252,8 +275,8 @@ keeps the old name: `C:\Sandbox\espjs`.
     as `functions` in the sidecar JSON (format 2).
 - Interpreter (implemented, `quickjs-debug.h`, `core/debug.c`): debug dispatch table chosen per
   frame, JS_SetDebugHook, stepping flag, breakpoint/statement bitmaps, frame and slot access,
-  exception reporting once per thrown value. NOT DONE: caught/uncaught prediction
-  (`sf->call_sp`).
+  exception reporting once per thrown value. caught/uncaught prediction: static, at the throw
+  (see "Pause on exceptions"), done.
 - Host tool `qjsx`: a single executable (host QuickJS + C modules: event loop, sockets, serial,
   SHA-256, compile API; commands written in JS, precompiled and embedded). Commands: build,
   deploy, debug (proxy, CDP server for VS Code), monitor, targets, device ls|reset|info, trace,
@@ -263,14 +286,14 @@ keeps the old name: `C:\Sandbox\espjs`.
   (js-debug target type to verify: node vs chrome), scripts announced with `file:///` URLs of
   local sources, `.d.ts` of native modules written by `qjsx build`; breakpoints kept by the
   proxy and re-applied on ScriptLoaded and after an ESP restart.
-  "Wait for debugger at boot" (`--wait-debugger`, remembered by the agent for the next boot,
-  with a timeout, never on production devices): the agent holds `main` until the proxy says go,
-  so startup code can be debugged (opening the serial port often resets ESP32 boards).
+  Debugging startup code: `qjsx debug --restart` (see "Debugger step 4"), which replaced the
+  persistent "wait for debugger at boot" flag (`--wait-debugger`, dropped for now).
 - Runtime library (replaces quickjs-libc, written with the binding library, shared with the ESP
   where it makes sense): globals `console`, `setTimeout`/`setInterval`/`clearTimeout`,
-  `TextEncoder`/`TextDecoder`; `Uint8Array` for bytes (no Node `Buffer`). Modules: `fs` (sync),
-  `stdlib/path` (JS, standard library), `process` (host), `net` (TCP, async), `serial` (host;
-  `uart` on the ESP), `crypto` (`sha256`), `compiler` (host). Naming rule: when a function behaves exactly like Node's, use
+  `TextEncoder`/`TextDecoder`; `Uint8Array` for bytes (no Node `Buffer`). Modules: `sys/fs` (sync),
+  `stdlib/path` (JS, standard library), `sys/net` (TCP, async), `device/serial` (class
+  `Serial`; PC ports today, UARTs on a board later), `sys/crypto` (`sha256`, `sha1`),
+  `sys/compiler` (PC only); `process` is a global. Naming rule: when a function behaves exactly like Node's, use
   Node's name (hence `fs.readFileSync`, `path.join`, `process.argv`...); otherwise our own short
   names following the async rules (callbacks for events, promises for operations).
   System errors carry a Node-like `code` ("ENOENT").
@@ -304,6 +327,53 @@ keeps the old name: `C:\Sandbox\espjs`.
 - Async styles in modules: callbacks for spontaneous events (`uart.onData(fn)`), promises for
   operations started by the script (`await uart.readLine({ timeout })`); a module may offer
   both. Async iteration (`for await`) maybe later, built on promises.
+- Names of the native modules (user, 2026-11-11, DONE the same day except `device/gpio`;
+  replaces "native modules keep their short names"; `process` is a global, not a module:
+  not renamed): two reserved prefixes, `sys/` and `device/`; no library may take
+  these names (`qjsx mklib` and `qjsx build` refuse them); `qjsx build` lists every
+  `sys/...` and `device/...` import in `natives` (checked by `qjsx deploy`; `qjsx run` on
+  the PC refuses a module the host does not have); the firmware registers the full names.
+  Renaming: `fs` -> `sys/fs`, `crypto` -> `sys/crypto`, `process` -> `sys/process`, `net` ->
+  `sys/net`, `compiler` -> `sys/compiler` (PC only: the firmware does not have it),
+  `serial` -> `device/serial`. `device/` = the hardware of the machine the program runs on:
+  on the PC only `device/serial`; on a board `device/gpio`, then `device/i2c`, `spi`, `pwm`,
+  `adc`, `rmt`, `ws2812`, `serial` (UART)... Never a chip name in a module name.
+- `device/serial` (user, 2026-11-11, DONE on the PC the same day; UARTs of a board: not yet): one concept on the PC and on a board, a class
+  `new Serial(port, { baudRate, ... })` with `onData`, `write`, `close`; the port is a system
+  name on the PC ("COM3", "/dev/ttyUSB0"), a UART number plus pins on a board
+  (`new Serial(1, { baudRate, tx, rx })`). Replaces the current function `open(path,
+  { baudRate })` of the PC module (the tool's own `qjsx:device` and `targets` adapt).
+- `device/rmt` + `stdlib/rgbled` (user, 2026-11-11, DONE the same day and tried on the board:
+  colors and a rainbow on GPIO48; `setHsv` / `fillHsv` added, user's idea), for the WS2812 LED of the
+  YD-ESP32-S3 on GPIO48 (only connected when the "RGB" solder bridge of the board is closed):
+  - `device/rmt` (native): `new Rmt(pin, { resolution })` (ticks per second), `send(pulses)`
+    ([duration, level, ...] in ticks) and `sendBytes(bytes, { bit0: [high, low], bit1: [high,
+    low], reset })`, both promises settled when the emission is over; `close()`. Same layers
+    as gpio: `common/hal/hal_rmt.h`, ESP32 implementation with the ESP-IDF RMT driver (TX
+    channel, bytes encoder, end-of-transmission callback posted to the loop), class in
+    `common/device/`. RP2350 later through PIO. Reception later;
+  - `stdlib/rgbled` (JS, standard library, on top of device/rmt): `new RgbLed(pin, { count,
+    type })`, `set(index, r, g, b)`, `fill(r, g, b)`, `await show()`, `close()`; the LED type
+    is an option (`type: "ws2812"` first: GRB order, 0.4 / 0.8 us timings): a new LED model is
+    a table, no firmware change. The first JS layer of the standard library over a native
+    module.
+- Firmware version (user, 2026-11-11, DONE): `QJSX_VERSION` is in `common/runtime/version.h`
+  (moved from host/), the same for the tool and the firmwares; `agent::Identity.version`,
+  sent in the HELLO answer (`VERSION`), shown by `qjsx device info` ("firmware: qjsx ...")
+  and in "connected to ..."; `qjsx deploy` warns (does not refuse) when the tool and the
+  firmware differ; ESP-IDF takes it as PROJECT_VER (ports/esp32/CMakeLists.txt parses the
+  #define). How a JS program reads it: NOT decided (ideas: `process.versions.qjsx` as in
+  Node, or `process.env`).
+- `device/gpio` (user, 2026-11-11, IMPLEMENTED the same day on the ESP32, see TODO): a class `new Gpio(pin, { mode, pull })`
+  (`init(...)` of the binding library), mode "input" | "output" | "open-drain", pull "up" |
+  "down" | "none" (JS_ENUM); `read()`, `write(level)`, `toggle()`, `close()`;
+  `onChange(callback(level), { edge: "rising" | "falling" | "both", debounce })` (event);
+  `waitFor(level, { timeout })` (promise). Pins by their GPIO number only (a table of names
+  per board, "LED", "BOOT", maybe later). NO check of the pins (reserved, strapping): the
+  program is responsible. Pins are NOT reset at the end of a program (user, 2026-11-11: an output
+  keeps its state; only close() resets a pin); ESP-IDF then warns "gpio: conflict found for
+  GPIO[n]" when the next program configures the pin again: harmless, kept. First test: toggle GPIO1 as fast as possible in a loop, the user
+  measures the frequency with an oscilloscope (expect a ~1 ms gap every 100 ms: yieldIfDue).
 - No eval on the ESP at all, debug builds included: the compiler (`compiler/`) is not built
   for the ESP. Anything the debugger evaluates (`Runtime.evaluate`, `evaluateOnCallFrame`,
   `callFunctionOn`) must be compiled on the host and sent to the target as bytecode.
