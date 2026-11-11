@@ -1,0 +1,22 @@
+// The desktop "board" of "espjs agent" (board.h): packages in files, a TCP
+// link (one host at a time), the console on stdout / stderr.
+#pragma once
+
+namespace board {
+
+/**
+ * Options of the desktop board, given by "espjs agent".
+ */
+struct HostOptions {
+    const char *host;      // address to listen on
+    int         port;      // TCP port to listen on
+    const char *storage;   // directory of <storage>/app.qjspkg and app.buildid
+};
+
+/**
+ * Records the options and creates the storage directory. To call before anything
+ * else of board.h. Returns false if the directory cannot be created (after printing why).
+ */
+bool configureHost(HostOptions options);
+
+} // namespace board

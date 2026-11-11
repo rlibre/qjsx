@@ -1,0 +1,11 @@
+# Partition table of the 4 MB ESP32 boards, without OTA: two 1.75 MB app slots
+# would leave too little room for the packages (option B of 2026-11-11).
+#   factory   the firmware (it takes about 0.7 MB)
+#   packages  the installed .qjspkg: two slots of 512 KB (board_esp32.cpp)
+#   data      the program's files (fs), later
+# Name,     Type, SubType, Offset,   Size
+nvs,        data, nvs,     0x9000,   0x6000
+phy_init,   data, phy,     0xf000,   0x1000
+factory,    app,  factory, 0x10000,  0x280000
+packages,   data, 0x40,    0x290000, 0x100000
+data,       data, spiffs,  0x390000, 0x70000

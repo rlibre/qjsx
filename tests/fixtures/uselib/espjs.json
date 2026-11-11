@@ -1,0 +1,5 @@
+{
+    "name": "uselib",
+    "main": "src/main.js",
+    "libraries": ["../testlib/build/packages/testlib.qjslib"]
+}

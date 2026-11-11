@@ -1,0 +1,3 @@
+Hello, device! (lib/greet)
+c.txt
+sha256 length: 32

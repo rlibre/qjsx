@@ -1,0 +1,4 @@
+{
+    "name": "deviceprocess",
+    "env": { "GREETING": "hello", "MODE": "test" }
+}

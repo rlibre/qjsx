@@ -1,0 +1,14 @@
+# VCC-GND YD-ESP32-S3, WROOM-1 N16R8 module: ESP32-S3 with 8 MB of octal PSRAM
+# inside the chip package, 16 MB of flash (as esptool reports them). Host link
+# on UART0 through the COM port (CH343 bridge).
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# flash and partitions
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/16MB.csv"
+
+# PSRAM: octal, only through heap_caps_malloc(MALLOC_CAP_SPIRAM), for the JS heap
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_USE_CAPS_ALLOC=y

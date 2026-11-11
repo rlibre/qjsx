@@ -1,0 +1,7 @@
+{
+    "name": "demo",
+    "main": "src/main.js",
+    "sources": ["src/**/*.js"],
+    "exclude": ["src/**/*.test.js"],
+    "keep": 3
+}

@@ -1,0 +1,2376 @@
+diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/date.c engine/qjsx/builtins/date.c
+--- build/qjsx-baseline/builtins/date.c	2026-11-11 15:49:05.263397800 +0100
++++ engine/qjsx/builtins/date.c	2026-11-11 13:26:26.786838400 +0100
+@@ -39,7 +39,9 @@
+         }
+     }
+     ti = time;
+-#if defined(_WIN32)
++    /* espjs: newlib (ESP32, RP2350) has no tm_gmtoff: it takes the Windows
++       way, gmtime + localtime + mktime, which is plain C */
++#if defined(_WIN32) || defined(__NEWLIB__)
+     {
+         struct tm *tm;
+         time_t gm_ti, loc_ti;
+diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/bytecode/reader.c
+--- build/qjsx-baseline/bytecode/reader.c	2026-11-11 15:49:05.258869200 +0100
++++ engine/qjsx/bytecode/reader.c	2026-11-11 15:34:49.321521200 +0100
+@@ -427,6 +427,11 @@
+     bc.js_mode = v8;
+     if (bc_get_atom(s, &bc.func_name))  //@ atom leak if failure
+         goto fail;
++    /* espjs: read even without debug info */
++    if (bc_get_atom(s, &bc.filename))
++        goto fail;
++    if (bc_get_leb128_u16(s, &bc.function_number))
++        goto fail;
+     if (bc_get_leb128_u16(s, &bc.arg_count))
+         goto fail;
+     if (bc_get_leb128_u16(s, &bc.var_count))
+@@ -551,11 +556,6 @@
+     if (b->has_debug) {
+         /* read optional debug information */
+         bc_read_trace(s, "debug {\n");
+-        if (bc_get_atom(s, &b->debug.filename))
+-            goto fail;
+-#ifdef DUMP_READ_OBJECT
+-        bc_read_trace(s, "filename: "); print_atom(s->ctx, b->debug.filename); printf("\n");
+-#endif
+         if (bc_get_leb128_int(s, &b->debug.pc2line_len))
+             goto fail;
+         if (b->debug.pc2line_len) {
+@@ -1074,6 +1074,12 @@
+     return obj;
+ }
+ 
++/* espjs: the bytecode version checked by JS_ReadObjectAtoms() below */
++int JS_GetBytecodeVersion(void)
++{
++    return BC_VERSION;
++}
++
+ static int JS_ReadObjectAtoms(BCReaderState *s)
+ {
+     uint8_t v8;
+diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/bytecode/writer.c
+--- build/qjsx-baseline/bytecode/writer.c	2026-11-11 15:49:05.257871500 +0100
++++ engine/qjsx/bytecode/writer.c	2026-11-10 19:57:29.182430100 +0100
+@@ -444,6 +444,9 @@
+     bc_put_u16(s, flags);
+     bc_put_u8(s, b->js_mode);
+     bc_put_atom(s, b->func_name);
++    /* espjs: written even without debug info */
++    bc_put_atom(s, b->filename);
++    bc_put_leb128(s, b->function_number);
+ 
+     bc_put_leb128(s, b->arg_count);
+     bc_put_leb128(s, b->var_count);
+@@ -490,7 +493,6 @@
+         goto fail;
+ 
+     if (b->has_debug) {
+-        bc_put_atom(s, b->debug.filename);
+         bc_put_leb128(s, b->debug.pc2line_len);
+         dbuf_put(&s->dbuf, b->debug.pc2line_buf, b->debug.pc2line_len);
+         if (b->debug.source) {
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjsx/compiler/compiler.h
+--- build/qjsx-baseline/compiler/compiler.h	2026-11-11 15:49:05.276405300 +0100
++++ engine/qjsx/compiler/compiler.h	2026-11-11 15:34:49.494455400 +0100
+@@ -189,8 +189,31 @@
+ typedef struct JSVarScope {
+     int parent;  /* index into fd->scopes of the enclosing scope */
+     int first;   /* index into fd->vars of the last variable in this scope */
++    /* espjs: source range of the scope, for the debug info. -1: from the
++       start / to the end of the function */
++    int source_start;
++    int source_end;
+ } JSVarScope;
+ 
++/* espjs: debugger positions are carried by OP_line_num, whose operand is a
++   source offset: its two high bits give the kind (JSDebugPositionKind).
++   Plain positions (kind 0) are those of upstream QuickJS. The others are
++   emitted by emit_debug_pos() and recorded by resolve_labels() at the pc
++   of the next instruction. The peephole optimizations do not cross them
++   (code_match), so that no statement start is merged into another one. */
++#define LINE_NUM_KIND_SHIFT  30
++#define LINE_NUM_POS_MASK    ((1u << LINE_NUM_KIND_SHIFT) - 1)
++
++static inline uint32_t line_num_pos(uint32_t operand)
++{
++    return operand & LINE_NUM_POS_MASK;
++}
++
++static inline JSDebugPositionKind line_num_kind(uint32_t operand)
++{
++    return (JSDebugPositionKind)(operand >> LINE_NUM_KIND_SHIFT);
++}
++
+ typedef struct JSVarDef {
+     JSAtom var_name;
+     /* index into fd->scopes of this variable lexical scope */
+@@ -218,6 +241,8 @@
+ typedef struct JSFunctionDef {
+     JSContext *ctx;
+     struct JSFunctionDef *parent;
++    /* espjs: in the root function only: next JSFunctionBytecode.function_number */
++    int function_counter;
+     int parent_cpool_idx; /* index in the constant pool of the parent
+                              or -1 if none */
+     int parent_scope_level; /* scope level in parent at point of definition */
+@@ -326,6 +351,13 @@
+     char *source;  /* raw source, utf-8 encoded */
+     int source_len;
+ 
++    /* espjs: debug info (compiler/debug-info.c), only filled when a debug
++       info collector is set */
++    uint32_t source_end;            /* end of the function source */
++    JSDebugPosition *debug_positions;
++    int debug_position_count;
++    int debug_position_size;
++
+     JSModuleDef *module; /* != NULL when parsing a module */
+     BOOL has_await; /* TRUE if await is used (used in module eval) */
+ } JSFunctionDef;
+@@ -368,6 +400,8 @@
+     BOOL is_module; /* parsing a module */
+     BOOL allow_html_comments;
+     BOOL ext_json; /* JSON parsing: true if accepting JSON superset */
++    /* espjs: 'import()' is a syntax error (JS_EVAL_FLAG_NO_DYNAMIC_IMPORT) */
++    BOOL no_dynamic_import;
+     GetLineColCache get_line_col_cache;
+ } JSParseState;
+ 
+@@ -463,6 +497,13 @@
+ void emit_u16(JSParseState *s, uint16_t val);
+ void emit_u32(JSParseState *s, uint32_t val);
+ void emit_source_pos(JSParseState *s, const uint8_t *source_ptr);
++void emit_debug_pos(JSParseState *s, JSDebugPositionKind kind, const uint8_t *source_ptr);
++/* espjs: compiler/debug-info.c */
++void js_debug_info_add_position(JSFunctionDef *s, uint32_t pc, uint32_t operand);
++uint32_t js_debug_skipped_marker(const uint8_t *bc_buf, int bc_len, int start, int end);
++void js_debug_info_collect(JSContext *ctx, JSFunctionDef *fd, JSFunctionBytecode *b);
++void js_compile_warning(JSParseState *s, JSCompileWarningKind kind, const uint8_t *ptr);
++BOOL js_last_op_is_scope_var(JSFunctionDef *fd, JSAtom name);
+ void emit_op(JSParseState *s, uint8_t val);
+ void emit_atom(JSParseState *s, JSAtom name);
+ int update_label(JSFunctionDef *s, int label, int delta);
+@@ -531,7 +572,10 @@
+                              int label_break, int label_cont,
+                              int drop_count);
+ void pop_break_entry(JSFunctionDef *fd);
+-void emit_return(JSParseState *s, BOOL hasval);
++/* espjs: 'source_ptr' is the debugger position of the return instruction
++   (JS_DEBUG_POSITION_RETURN), NULL for a return the debugger does not stop
++   at (code generated for generators and default constructors) */
++void emit_return(JSParseState *s, BOOL hasval, const uint8_t *source_ptr);
+ __exception int js_parse_var(JSParseState *s, int parse_flags, int tok,
+                                     BOOL export_flag);
+ int is_let(JSParseState *s, int decl_mask);
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/qjsx/compiler/debug-info.c
+--- build/qjsx-baseline/compiler/debug-info.c	1970-01-01 01:00:00.000000000 +0100
++++ engine/qjsx/compiler/debug-info.c	2026-11-11 15:34:49.454357800 +0100
+@@ -0,0 +1,234 @@
++/*
++ * QuickJS - compiler/debug-info.c
++ *
++ * espjs: debug info of the compiled functions, given to the collector set by
++ * JS_SetDebugInfoCollector() (quickjs-debug.h). Not part of upstream
++ * QuickJS: see doc/engine-changes.md.
++ *
++ * Positions are recorded by resolve_labels() while it emits the final
++ * bytecode (debugger positions carried by OP_line_num, and the positions of
++ * the pc2line table); variables and scopes are read from the JSFunctionDef
++ * by js_create_function() before it strips them.
++ */
++
++#include "quickjs-internal.h"
++#include "compiler/compiler.h"
++
++void JS_SetDebugInfoCollector(JSRuntime *rt, JSDebugInfoCollector *collector,
++                              void *opaque)
++{
++    rt->debug.info_collector = collector;
++    rt->debug.info_opaque = opaque;
++}
++
++void JS_SetCompileWarningHandler(JSRuntime *rt, JSCompileWarningHandler *handler,
++                                 void *opaque)
++{
++    rt->debug.warning_handler = handler;
++    rt->debug.warning_opaque = opaque;
++}
++
++/* Tells the handler, if any, about a construct that needs the compiler at
++   run time. 'ptr' is its position in the source. */
++void js_compile_warning(JSParseState *s, JSCompileWarningKind kind,
++                        const uint8_t *ptr)
++{
++    JSRuntime *rt = s->ctx->rt;
++    int line_num, col_num;
++
++    if (!rt->debug.warning_handler)
++        return;
++    line_num = get_line_col(&col_num, s->buf_start, ptr - s->buf_start);
++    rt->debug.warning_handler(s->ctx, kind, line_num + 1, col_num + 1,
++                              rt->debug.warning_opaque);
++}
++
++/* TRUE if the last instruction emitted reads the variable 'name' by its
++   name: the callee of a call that follows is that name. */
++BOOL js_last_op_is_scope_var(JSFunctionDef *fd, JSAtom name)
++{
++    if (get_prev_opcode(fd) != OP_scope_get_var)
++        return FALSE;
++    return get_u32(fd->byte_code.buf + fd->last_opcode_pos + 1) == name;
++}
++
++static BOOL js_debug_info_wanted(JSFunctionDef *s)
++{
++    return s->ctx->rt->debug.info_collector != NULL;
++}
++
++/* 'operand' is an OP_line_num operand: source offset + kind. */
++void js_debug_info_add_position(JSFunctionDef *s, uint32_t pc, uint32_t operand)
++{
++    JSDebugPosition position;
++    JSDebugPosition *last;
++
++    if (!js_debug_info_wanted(s))
++        return;
++    position.pc = pc;
++    position.source_pos = line_num_pos(operand);
++    position.kind = line_num_kind(operand);
++
++    if (s->debug_position_count > 0) {
++        last = &s->debug_positions[s->debug_position_count - 1];
++        BOOL same_pc = last->pc == pc;
++        BOOL both_stops = last->kind != JS_DEBUG_POSITION_EXPRESSION &&
++                          position.kind != JS_DEBUG_POSITION_EXPRESSION;
++        /* two stops at the same pc: the code of the first one is empty
++           (e.g. a block start followed by its first statement): the last
++           one wins */
++        if (same_pc && both_stops) {
++            *last = position;
++            return;
++        }
++        /* nothing new */
++        if (same_pc && last->source_pos == position.source_pos)
++            return;
++        if (position.kind == JS_DEBUG_POSITION_EXPRESSION &&
++            last->source_pos == position.source_pos)
++            return;
++    }
++    if (js_resize_array(s->ctx, (void **)&s->debug_positions,
++                        sizeof(s->debug_positions[0]),
++                        &s->debug_position_size, s->debug_position_count + 1)) {
++        /* out of memory: the debug info is incomplete, the bytecode is
++           not affected */
++        JS_FreeValue(s->ctx, JS_GetException(s->ctx));
++        return;
++    }
++    s->debug_positions[s->debug_position_count++] = position;
++}
++
++/* The peephole optimizations of resolve_variables() and resolve_labels()
++   skip the OP_line_num between the instructions they merge. When a pass
++   jumps from 'start' to 'end' in its input, this returns the last debugger
++   position (statement or return) in between, to put on the next emitted
++   instruction, or 0 if none.
++   A jump that ends on a label (or at the end) is a dead code removal
++   (skip_dead_code): the positions of dead code are dropped. Likewise, a
++   position followed by a label in the range was in dead code. */
++uint32_t js_debug_skipped_marker(const uint8_t *bc_buf, int bc_len, int start, int end)
++{
++    uint32_t marker = 0;
++    int pos = start;
++
++    if (end >= bc_len || bc_buf[end] == OP_label)
++        return 0;
++    while (pos < end) {
++        int op = bc_buf[pos];
++        if (op == OP_line_num) {
++            uint32_t operand = get_u32(bc_buf + pos + 1);
++            if (line_num_kind(operand) != JS_DEBUG_POSITION_EXPRESSION)
++                marker = operand;
++        } else if (op == OP_label) {
++            marker = 0;
++        }
++        pos += opcode_info[op].size;
++    }
++    return marker;
++}
++
++static int js_debug_variable_flags(const JSVarDef *vd)
++{
++    int flags = 0;
++    if (vd->is_lexical)
++        flags |= JS_DEBUG_VARIABLE_LEXICAL;
++    if (vd->is_const)
++        flags |= JS_DEBUG_VARIABLE_CONST;
++    if (vd->is_captured)
++        flags |= JS_DEBUG_VARIABLE_CAPTURED;
++    return flags;
++}
++
++/* TRUE for a reference to a global variable (not a variable of an
++   enclosing function or of the module) */
++static BOOL js_debug_closure_is_global(const JSClosureVar *cv)
++{
++    switch (cv->closure_type) {
++    case JS_CLOSURE_GLOBAL_REF:
++    case JS_CLOSURE_GLOBAL_DECL:
++    case JS_CLOSURE_GLOBAL:
++        return TRUE;
++    default:
++        return FALSE;
++    }
++}
++
++/* Calls the collector for the function being created ('b' has its
++   bytecode and number; the variables are still those of 'fd'). */
++void js_debug_info_collect(JSContext *ctx, JSFunctionDef *fd, JSFunctionBytecode *b)
++{
++    JSRuntime *rt = ctx->rt;
++    JSDebugFunctionInfo info;
++    JSDebugVariable *arguments = NULL;
++    JSDebugVariable *locals = NULL;
++    JSDebugVariable *closures = NULL;
++    JSDebugScope *scopes = NULL;
++    int i;
++
++    if (rt->debug.info_collector == NULL)
++        return;
++
++    memset(&info, 0, sizeof(info));
++    info.function_number = b->function_number;
++    info.name = fd->func_name;
++    info.source_start = fd->source_pos;
++    /* functions without known end (generated ones) end where they start */
++    info.source_end = fd->source_end > fd->source_pos ? fd->source_end : fd->source_pos;
++    info.bytecode_length = b->byte_code_len;
++    info.positions = fd->debug_positions;
++    info.position_count = fd->debug_position_count;
++
++    arguments = js_mallocz(ctx, sizeof(arguments[0]) * max_int(fd->arg_count, 1));
++    locals = js_mallocz(ctx, sizeof(locals[0]) * max_int(fd->var_count, 1));
++    closures = js_mallocz(ctx, sizeof(closures[0]) * max_int(fd->closure_var_count, 1));
++    scopes = js_mallocz(ctx, sizeof(scopes[0]) * max_int(fd->scope_count, 1));
++    if (!arguments || !locals || !closures || !scopes) {
++        JS_FreeValue(ctx, JS_GetException(ctx));   /* out of memory: no debug info */
++        goto done;
++    }
++
++    for (i = 0; i < fd->arg_count; i++) {
++        arguments[i].name = fd->args[i].var_name;
++        arguments[i].scope = -1;
++        arguments[i].flags = js_debug_variable_flags(&fd->args[i]);
++    }
++    for (i = 0; i < fd->var_count; i++) {
++        locals[i].name = fd->vars[i].var_name;
++        locals[i].scope = fd->vars[i].scope_level;
++        locals[i].flags = js_debug_variable_flags(&fd->vars[i]);
++    }
++    for (i = 0; i < fd->closure_var_count; i++) {
++        closures[i].name = fd->closure_var[i].var_name;
++        closures[i].scope = -1;
++        closures[i].flags = 0;
++        if (fd->closure_var[i].is_lexical)
++            closures[i].flags |= JS_DEBUG_VARIABLE_LEXICAL;
++        if (fd->closure_var[i].is_const)
++            closures[i].flags |= JS_DEBUG_VARIABLE_CONST;
++        if (js_debug_closure_is_global(&fd->closure_var[i]))
++            closures[i].flags |= JS_DEBUG_VARIABLE_GLOBAL;
++    }
++    for (i = 0; i < fd->scope_count; i++) {
++        const JSVarScope *scope = &fd->scopes[i];
++        scopes[i].parent = scope->parent;
++        scopes[i].source_start = scope->source_start >= 0 ? (uint32_t)scope->source_start : info.source_start;
++        scopes[i].source_end = scope->source_end >= 0 ? (uint32_t)scope->source_end : info.source_end;
++    }
++
++    info.arguments = arguments;
++    info.argument_count = fd->arg_count;
++    info.locals = locals;
++    info.local_count = fd->var_count;
++    info.closures = closures;
++    info.closure_count = fd->closure_var_count;
++    info.scopes = scopes;
++    info.scope_count = fd->scope_count;
++    rt->debug.info_collector(ctx, &info, rt->debug.info_opaque);
++
++ done:
++    js_free(ctx, arguments);
++    js_free(ctx, locals);
++    js_free(ctx, closures);
++    js_free(ctx, scopes);
++}
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx/compiler/emitter.c
+--- build/qjsx-baseline/compiler/emitter.c	2026-11-11 15:49:05.250686600 +0100
++++ engine/qjsx/compiler/emitter.c	2026-11-10 20:17:22.794174600 +0100
+@@ -57,6 +57,21 @@
+     }
+ }
+ 
++/* espjs: debugger position of the next instruction (see LINE_NUM_KIND_SHIFT).
++   Always emitted, with or without debug info, so that the bytecode does not
++   depend on it. */
++void emit_debug_pos(JSParseState *s, JSDebugPositionKind kind, const uint8_t *source_ptr)
++{
++    JSFunctionDef *fd = s->cur_func;
++    DynBuf *bc = &fd->byte_code;
++    uint32_t source_pos = source_ptr - s->buf_start;
++
++    dbuf_putc(bc, OP_line_num);
++    dbuf_put_u32(bc, ((uint32_t)kind << LINE_NUM_KIND_SHIFT) | line_num_pos(source_pos));
++    /* a plain position at the same place would be redundant */
++    fd->last_opcode_source_ptr = source_ptr;
++}
++
+ void emit_op(JSParseState *s, uint8_t val)
+ {
+     JSFunctionDef *fd = s->cur_func;
+@@ -326,6 +341,9 @@
+         fd->scope_count++;
+         fd->scopes[scope].parent = fd->scope_level;
+         fd->scopes[scope].first = fd->scope_first;
++        /* espjs: the scope starts at the current token (end set by pop_scope) */
++        fd->scopes[scope].source_start = s->token.ptr - s->buf_start;
++        fd->scopes[scope].source_end = -1;
+         emit_op(s, OP_enter_scope);
+         emit_u16(s, scope);
+         return fd->scope_level = scope;
+@@ -351,6 +369,8 @@
+         int scope = fd->scope_level;
+         emit_op(s, OP_leave_scope);
+         emit_u16(s, scope);
++        /* espjs: the scope ends before the current token */
++        fd->scopes[scope].source_end = s->token.ptr - s->buf_start;
+         fd->scope_level = fd->scopes[scope].parent;
+         fd->scope_first = get_first_lexical_var(fd, fd->scope_level);
+     }
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/compiler/eval.c
+--- build/qjsx-baseline/compiler/eval.c	2026-11-11 15:49:05.257871500 +0100
++++ engine/qjsx/compiler/eval.c	2026-11-11 14:52:15.259380400 +0100
+@@ -86,6 +86,8 @@
+     }
+     s->is_module = (m != NULL);
+     s->allow_html_comments = !s->is_module;
++    /* espjs: JS_EVAL_FLAG_NO_DYNAMIC_IMPORT refuses 'import()' */
++    s->no_dynamic_import = (flags & JS_EVAL_FLAG_NO_DYNAMIC_IMPORT) != 0;
+ 
+     push_scope(s); /* body scope */
+     fd->body_scope = fd->scope_level;
+@@ -107,8 +109,10 @@
+         goto fail1;
+     /* Could add a flag to avoid resolution if necessary */
+     if (m) {
++        /* espjs: JS_EVAL_FLAG_NO_RESOLVE leaves the imports unloaded */
++        BOOL resolve = !(flags & JS_EVAL_FLAG_NO_RESOLVE);
+         m->func_obj = fun_obj;
+-        if (js_resolve_module(ctx, m) < 0)
++        if (resolve && js_resolve_module(ctx, m) < 0)
+             goto fail1;
+         fun_obj = JS_NewModuleValue(ctx, m);
+     }
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjsx/compiler/finalize.c
+--- build/qjsx-baseline/compiler/finalize.c	2026-11-11 15:49:05.256876000 +0100
++++ engine/qjsx/compiler/finalize.c	2026-11-10 20:21:36.451964600 +0100
+@@ -444,6 +444,19 @@
+     js_free(ctx, fd->byte_code.buf);
+     fd->byte_code.buf = NULL;
+ 
++    /* espjs: number in compilation order; the children are created before
++       their parent, so the top-level function gets the last number */
++    {
++        JSFunctionDef *root = fd;
++        while (root->parent != NULL) {
++            root = root->parent;
++        }
++        b->function_number = root->function_counter++;
++    }
++    /* espjs: debug info for the sidecar, before the variable names are
++       stripped below */
++    js_debug_info_collect(ctx, fd, b);
++
+     strip_var_debug = fd->strip_debug && !fd->has_eval_call; /* XXX: check */
+     b->func_name = fd->func_name;
+     if (fd->arg_count + fd->var_count > 0) {
+@@ -501,15 +514,16 @@
+ 
+     b->stack_size = stack_size;
+ 
++    /* espjs: the file name is kept even when the debug info is stripped */
++    b->filename = fd->filename;
++
+     if (fd->strip_debug) {
+-        JS_FreeAtom(ctx, fd->filename);
+         dbuf_free(&fd->pc2line);    // probably useless
+     } else {
+         /* XXX: source and pc2line info should be packed at the end of the
+            JSFunctionBytecode structure, avoiding allocation overhead
+          */
+         b->has_debug = 1;
+-        b->debug.filename = fd->filename;
+ 
+         //DynBuf pc2line;
+         //compute_pc2line_info(fd, &pc2line);
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx/compiler/funcdef.c
+--- build/qjsx-baseline/compiler/funcdef.c	2026-11-11 15:49:05.254202000 +0100
++++ engine/qjsx/compiler/funcdef.c	2026-11-10 20:17:22.707496100 +0100
+@@ -59,6 +59,8 @@
+     fd->scope_count = 1;
+     fd->scopes[0].first = -1;
+     fd->scopes[0].parent = -1;
++    fd->scopes[0].source_start = -1;   /* espjs: the whole function */
++    fd->scopes[0].source_end = -1;
+     fd->scope_level = 0;  /* 0: var/arg scope */
+     fd->scope_first = -1;
+     fd->body_scope = -1;
+@@ -92,6 +94,7 @@
+     js_free(ctx, fd->jump_slots);
+     js_free(ctx, fd->label_slots);
+     js_free(ctx, fd->line_number_slots);
++    js_free(ctx, fd->debug_positions);   /* espjs */
+ 
+     for(i = 0; i < fd->cpool_count; i++) {
+         JS_FreeValue(ctx, fd->cpool[i]);
+@@ -509,9 +512,9 @@
+     char atom_buf[ATOM_GET_STR_BUF_SIZE];
+     const char *str;
+ 
+-    if (b->has_debug && b->debug.filename != JS_ATOM_NULL) {
++    if (b->has_debug && b->filename != JS_ATOM_NULL) {   /* espjs: was debug.filename */
+         int line_num, col_num;
+-        str = JS_AtomGetStr(ctx, atom_buf, sizeof(atom_buf), b->debug.filename);
++        str = JS_AtomGetStr(ctx, atom_buf, sizeof(atom_buf), b->filename);
+         line_num = find_line_num(ctx, b, -1, &col_num);
+         printf("%s:%d:%d: ", str, line_num, col_num);
+     }
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-class.c engine/qjsx/compiler/parser-class.c
+--- build/qjsx-baseline/compiler/parser-class.c	2026-11-11 15:49:05.251689900 +0100
++++ engine/qjsx/compiler/parser-class.c	2026-11-10 20:20:17.902515000 +0100
+@@ -52,7 +52,7 @@
+ 
+     fd->func_kind = JS_FUNC_NORMAL;
+     fd->func_type = func_type;
+-    emit_return(s, FALSE);
++    emit_return(s, FALSE, NULL);   /* espjs: generated, no debugger stop */
+ 
+     s->cur_func = fd->parent;
+     if (pfd)
+@@ -564,6 +564,8 @@
+     /* patch the constant pool index for the constructor */
+     put_u32(fd->byte_code.buf + ctor_cpool_offset, ctor_fd->parent_cpool_idx);
+ 
++    /* espjs: the constructor covers the class source */
++    ctor_fd->source_end = s->buf_ptr - s->buf_start;
+     /* store the class source code in the constructor. */
+     if (!fd->strip_source) {
+         js_free(ctx, ctor_fd->source);
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/qjsx/compiler/parser-expr.c
+--- build/qjsx-baseline/compiler/parser-expr.c	2026-11-11 15:49:05.251689900 +0100
++++ engine/qjsx/compiler/parser-expr.c	2026-11-11 15:34:49.600371300 +0100
+@@ -1839,6 +1839,11 @@
+         } else {
+             if (js_parse_postfix_expr(s, 0))
+                 return -1;
++            /* espjs: 'new Function', with or without arguments, compiles
++               a function at run time; reported at the token that follows
++               the name */
++            if (js_last_op_is_scope_var(s->cur_func, JS_ATOM_Function))
++                js_compile_warning(s, JS_COMPILE_WARNING_FUNCTION, s->token.ptr);
+             accept_lparen = TRUE;
+             if (s->token.val != '(') {
+                 /* new operator on an object */
+@@ -1887,6 +1892,10 @@
+             emit_op(s, OP_special_object);
+             emit_u8(s, OP_SPECIAL_OBJECT_IMPORT_META);
+         } else {
++            /* espjs: the token is still the one after 'import', so the
++               error is reported at the '(' of the call */
++            if (s->no_dynamic_import)
++                return js_parse_error(s, "'import()' is not allowed: use a static import");
+             if (js_parse_expect(s, '('))
+                 return -1;
+             if (!accept_lparen)
+@@ -2022,7 +2031,12 @@
+                         if (name == JS_ATOM_eval && call_type == FUNC_CALL_NORMAL && !has_optional_chain) {
+                             /* direct 'eval' */
+                             opcode = OP_eval;
++                            /* espjs: needs the compiler at run time */
++                            js_compile_warning(s, JS_COMPILE_WARNING_EVAL, op_token_ptr);
+                         } else {
++                            /* espjs: Function(...) compiles its arguments */
++                            if (name == JS_ATOM_Function && call_type == FUNC_CALL_NORMAL)
++                                js_compile_warning(s, JS_COMPILE_WARNING_FUNCTION, op_token_ptr);
+                             /* verify if function name resolves to a simple
+                                get_loc/get_arg: a function call inside a `with`
+                                statement can resolve to a method call of the
+@@ -2918,7 +2932,7 @@
+             emit_op(s, OP_nip);
+             emit_op(s, OP_nip);
+             emit_op(s, OP_nip);
+-            emit_return(s, TRUE);
++            emit_return(s, TRUE, NULL);   /* espjs: generator return(), no debugger stop */
+ 
+             /* throw handling */
+             emit_label(s, label_throw);
+@@ -2959,7 +2973,7 @@
+                 emit_op(s, OP_await);
+             emit_op(s, OP_yield);
+             label_next = emit_goto(s, OP_if_false, -1);
+-            emit_return(s, TRUE);
++            emit_return(s, TRUE, NULL);   /* espjs: generator return(), no debugger stop */
+             emit_label(s, label_next);
+         }
+         return 0;
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/qjsx/compiler/parser-func.c
+--- build/qjsx-baseline/compiler/parser-func.c	2026-11-11 15:49:05.256876000 +0100
++++ engine/qjsx/compiler/parser-func.c	2026-11-10 20:20:10.886071600 +0100
+@@ -196,6 +196,7 @@
+     int func_idx, lexical_func_idx = -1;
+     BOOL has_opt_arg;
+     BOOL create_func_var = FALSE;
++    const uint8_t *closing_brace_ptr;   /* espjs */
+ 
+     is_expr = (func_type != JS_PARSE_FUNC_STATEMENT &&
+                func_type != JS_PARSE_FUNC_VAR);
+@@ -577,14 +578,19 @@
+             if (js_parse_function_check_names(s, fd, func_name))
+                 goto fail;
+ 
++            /* espjs: the expression body is a statement for the debugger */
++            emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
+             if (js_parse_assign_expr(s))
+                 goto fail;
+ 
++            /* espjs: return position on the last character of the body */
++            emit_debug_pos(s, JS_DEBUG_POSITION_RETURN, s->last_ptr - 1);
+             if (func_kind != JS_FUNC_NORMAL)
+                 emit_op(s, OP_return_async);
+             else
+                 emit_op(s, OP_return);
+ 
++            fd->source_end = s->last_ptr - s->buf_start;   /* espjs */
+             if (!fd->strip_source) {
+                 /* save the function source code */
+                 /* the end of the function source code is after the last
+@@ -614,6 +620,7 @@
+         if (js_parse_source_element(s))
+             goto fail;
+     }
++    fd->source_end = s->buf_ptr - s->buf_start;   /* espjs: after the '}' */
+     if (!fd->strip_source) {
+         /* save the function source code */
+         fd->source_len = s->buf_ptr - ptr;
+@@ -622,6 +629,8 @@
+             goto fail;
+     }
+ 
++    /* espjs: the implicit return is on the closing brace */
++    closing_brace_ptr = s->token.ptr;
+     if (next_token(s)) {
+         /* consume the '}' */
+         goto fail;
+@@ -629,7 +638,7 @@
+ 
+     /* in case there is no return, add one */
+     if (js_is_live_code(s)) {
+-        emit_return(s, FALSE);
++        emit_return(s, FALSE, closing_brace_ptr);
+     }
+  done:
+     s->cur_func = fd->parent;
+@@ -786,6 +795,7 @@
+         if (js_parse_source_element(s))
+             return -1;
+     }
++    fd->source_end = s->buf_end - s->buf_start;   /* espjs */
+ 
+     if (!s->is_module) {
+         /* return the value of the hidden variable eval_ret_idx  */
+@@ -804,9 +814,9 @@
+             emit_op(s, OP_get_loc);
+             emit_u16(s, fd->eval_ret_idx);
+         }
+-        emit_return(s, TRUE);
++        emit_return(s, TRUE, s->token.ptr);   /* espjs: end of the source */
+     } else {
+-        emit_return(s, FALSE);
++        emit_return(s, FALSE, s->token.ptr);
+     }
+ 
+     return 0;
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/qjsx/compiler/parser-stmt.c
+--- build/qjsx-baseline/compiler/parser-stmt.c	2026-11-11 15:49:05.252689500 +0100
++++ engine/qjsx/compiler/parser-stmt.c	2026-11-10 20:20:31.163321900 +0100
+@@ -83,7 +83,15 @@
+ }
+ 
+ /* execute the finally blocks before return */
+-void emit_return(JSParseState *s, BOOL hasval)
++/* espjs: emits a return opcode, preceded by its debugger position */
++static void emit_return_op(JSParseState *s, int op, const uint8_t *source_ptr)
++{
++    if (source_ptr != NULL)
++        emit_debug_pos(s, JS_DEBUG_POSITION_RETURN, source_ptr);
++    emit_op(s, op);
++}
++
++void emit_return(JSParseState *s, BOOL hasval, const uint8_t *source_ptr)
+ {
+     BlockEnv *top;
+ 
+@@ -164,11 +172,11 @@
+         emit_u16(s, 0);
+ 
+         emit_label(s, label_return);
+-        emit_op(s, OP_return);
++        emit_return_op(s, OP_return, source_ptr);
+     } else if (s->cur_func->func_kind != JS_FUNC_NORMAL) {
+-        emit_op(s, OP_return_async);
++        emit_return_op(s, OP_return_async, source_ptr);
+     } else {
+-        emit_op(s, hasval ? OP_return : OP_return_undef);
++        emit_return_op(s, hasval ? OP_return : OP_return_undef, source_ptr);
+     }
+ }
+ 
+@@ -634,6 +642,9 @@
+         }
+     }
+ 
++    /* espjs: statement start, where the debugger stops */
++    emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
++
+     switch(tok = s->token.val) {
+     case '{':
+         if (js_parse_block(s))
+@@ -657,10 +668,10 @@
+                 if (js_parse_expr(s))
+                     goto fail;
+                 emit_source_pos(s, op_token_ptr);
+-                emit_return(s, TRUE);
++                emit_return(s, TRUE, op_token_ptr);
+             } else {
+                 emit_source_pos(s, op_token_ptr);
+-                emit_return(s, FALSE);
++                emit_return(s, FALSE, op_token_ptr);
+             }
+             if (js_parse_expect_semi(s))
+                 goto fail;
+@@ -751,6 +762,8 @@
+             set_eval_ret_undefined(s);
+ 
+             emit_label(s, label_cont);
++            /* espjs: the loop test is a debugger stop at each iteration */
++            emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
+             if (js_parse_expr_paren(s))
+                 goto fail;
+             emit_goto(s, OP_if_false, label_break);
+@@ -787,6 +800,8 @@
+                 goto fail;
+ 
+             emit_label(s, label_cont);
++            /* espjs: the loop test is a debugger stop at each iteration */
++            emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
+             if (js_parse_expect(s, TOK_WHILE))
+                 goto fail;
+             if (js_parse_expr_paren(s))
+@@ -886,6 +901,8 @@
+                 label_test = label_body;
+             } else {
+                 emit_label(s, label_test);
++                /* espjs: the loop test is a debugger stop at each iteration */
++                emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
+                 if (js_parse_expr(s))
+                     goto fail;
+                 emit_goto(s, OP_if_false, label_break);
+@@ -903,6 +920,9 @@
+ 
+                 pos_cont = s->cur_func->byte_code.size;
+                 emit_label(s, label_cont);
++                /* espjs: the update expression is a debugger stop too (this
++                   code is moved after the loop body, with its position) */
++                emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
+                 if (js_parse_expr(s))
+                     goto fail;
+                 emit_op(s, OP_drop);
+@@ -1106,11 +1126,14 @@
+             }
+ 
+             if (s->token.val == TOK_CATCH) {
++                const uint8_t *catch_ptr = s->token.ptr;   /* espjs */
+                 if (next_token(s))
+                     goto fail;
+ 
+                 push_scope(s);  /* catch variable */
+                 emit_label(s, label_catch);
++                /* espjs: entering the catch clause is a debugger stop */
++                emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, catch_ptr);
+ 
+                 if (s->token.val == '{') {
+                     /* support optional-catch-binding feature */
+@@ -1307,7 +1330,8 @@
+         break;
+ 
+     case TOK_DEBUGGER:
+-        /* currently no debugger, so just skip the keyword */
++        /* espjs: calls the debugger hook (no-op without debugger) */
++        emit_op(s, OP_debugger);
+         if (next_token(s))
+             goto fail;
+         if (js_parse_expect_semi(s))
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engine/qjsx/compiler/resolve-labels.c
+--- build/qjsx-baseline/compiler/resolve-labels.c	2026-11-11 15:49:05.255859900 +0100
++++ engine/qjsx/compiler/resolve-labels.c	2026-11-10 20:35:24.036212300 +0100
+@@ -36,7 +36,10 @@
+             if (pos_next > s->bc_len)
+                 goto done;
+             if (op == OP_line_num) {
+-                line_num = get_u32(tab + pos + 1);
++                /* espjs: debugger positions are skipped too; when a match
++                   consumes one, the pass loop moves it to the next
++                   emitted instruction (js_debug_skipped_marker) */
++                line_num = line_num_pos(get_u32(tab + pos + 1));
+                 pos = pos_next;
+             } else {
+                 break;
+@@ -249,7 +252,10 @@
+         op = bc_buf[pos];
+         len = opcode_info[op].size;
+         if (op == OP_line_num) {
+-            *linep = get_u32(bc_buf + pos + 1);
++            uint32_t operand = get_u32(bc_buf + pos + 1);
++            /* espjs: the debugger positions of dead code are dropped */
++            if (line_num_kind(operand) == JS_DEBUG_POSITION_EXPRESSION)
++                *linep = operand;
+         } else
+         if (op == OP_label) {
+             label = get_u32(bc_buf + pos + 1);
+@@ -365,10 +371,23 @@
+     }
+ 
+     line_num = 0; /* avoid warning */
++    /* espjs: end of the previous instruction; when pos goes further, an
++       optimization consumed several instructions */
++    int natural_pos = 0;
+     for (pos = 0; pos < bc_len; pos = pos_next) {
++        if (pos > natural_pos) {
++            /* espjs: keep a debugger position the optimization consumed */
++            uint32_t marker = js_debug_skipped_marker(bc_buf, bc_len, natural_pos, pos);
++            if (marker != 0) {
++                s->line_number_size++;
++                dbuf_putc(&bc_out, OP_line_num);
++                dbuf_put_u32(&bc_out, marker);
++            }
++        }
+         op = bc_buf[pos];
+         len = opcode_info[op].size;
+         pos_next = pos + len;
++        natural_pos = pos_next;
+         switch(op) {
+         case OP_line_num:
+             line_num = get_u32(bc_buf + pos + 1);
+@@ -677,6 +696,8 @@
+ /* the pc2line table gives a source position for each PC value */
+ static void add_pc2line_info(JSFunctionDef *s, uint32_t pc, uint32_t source_pos)
+ {
++    /* espjs: the same positions go to the debug info (even when stripped) */
++    js_debug_info_add_position(s, pc, source_pos);
+     if (s->line_number_slots != NULL
+     &&  s->line_number_count < s->line_number_size
+     &&  pc >= s->line_number_last_pc
+@@ -801,6 +822,12 @@
+         for (;;) {
+             switch(op = s->byte_code.buf[pos]) {
+             case OP_line_num:
++                /* espjs: a jump to a debugger position keeps its target,
++                   so that the stop is not skipped (e.g. a jump to the
++                   implicit return replaced by a return) */
++                if (line_num_kind(get_u32(s->byte_code.buf + pos + 1)) !=
++                    JS_DEBUG_POSITION_EXPRESSION)
++                    goto done;
+                 if (pline)
+                     *pline = get_u32(s->byte_code.buf + pos + 1);
+                 /* fall thru */
+@@ -1026,17 +1053,35 @@
+         put_short_code(&bc_out, OP_put_loc, s->arg_var_object_idx);
+     }
+ 
++    /* espjs: end of the previous instruction; when pos goes further, an
++       optimization consumed several instructions */
++    int natural_pos = 0;
+     for (pos = 0; pos < bc_len; pos = pos_next) {
+         int val;
++        if (pos > natural_pos) {
++            /* espjs: a debugger position the optimization consumed goes
++               to the next emitted instruction */
++            uint32_t marker = js_debug_skipped_marker(bc_buf, bc_len, natural_pos, pos);
++            if (marker != 0)
++                js_debug_info_add_position(s, bc_out.size, marker);
++        }
+         op = bc_buf[pos];
+         len = opcode_info[op].size;
+         pos_next = pos + len;
++        natural_pos = pos_next;
+         switch(op) {
+         case OP_line_num:
+             /* line number info (for debug). We put it in a separate
+                compressed table to reduce memory usage and get better
+                performance */
+-            line_num = get_u32(bc_buf + pos + 1);
++            {
++                uint32_t operand = get_u32(bc_buf + pos + 1);
++                /* espjs: a debugger position applies to the next emitted
++                   instruction, whose pc is the current output size */
++                if (line_num_kind(operand) != JS_DEBUG_POSITION_EXPRESSION)
++                    js_debug_info_add_position(s, bc_out.size, operand);
++                line_num = line_num_pos(operand);
++            }
+             break;
+ 
+         case OP_label:
+@@ -1072,16 +1117,13 @@
+         case OP_call:
+         case OP_call_method:
+             {
+-                /* detect and transform tail calls */
++                /* espjs: "call; return" is no longer fused into
++                   OP_tail_call(_method): the separate OP_return is where the
++                   debugger stops to show the return value of 'return f()'.
++                   (QuickJS keeps the caller frame during a tail call anyway:
++                   only one dispatch is saved.) */
+                 int argc;
+                 argc = get_u16(bc_buf + pos + 1);
+-                if (code_match(&cc, pos_next, OP_return, -1)) {
+-                    if (cc.line_num >= 0) line_num = cc.line_num;
+-                    add_pc2line_info(s, bc_out.size, line_num);
+-                    put_short_code(&bc_out, op + 1, argc);
+-                    pos_next = skip_dead_code(s, bc_buf, bc_len, cc.pos, &line_num);
+-                    break;
+-                }
+                 add_pc2line_info(s, bc_out.size, line_num);
+                 put_short_code(&bc_out, op, argc);
+                 break;
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/core.h engine/qjsx/core/core.h
+--- build/qjsx-baseline/core/core.h	2026-11-11 15:49:05.272414500 +0100
++++ engine/qjsx/core/core.h	2026-11-10 20:22:27.722389600 +0100
+@@ -543,4 +543,15 @@
+ #endif
+ int JS_AddIntrinsicBasicObjects(JSContext *ctx);
+ 
++/* espjs: debugger support (core/debug.c), called by the interpreter. 'pc'
++   is the address of the instruction where the frame stops. The int
++   functions return -1 when the hook asks to throw. */
++int js_debug_check_stop(JSContext *ctx, JSStackFrame *sf, JSFunctionBytecode *b,
++                        const uint8_t *pc, const JSValue *sp);
++int js_debug_on_debugger_statement(JSContext *ctx, JSStackFrame *sf, const uint8_t *pc);
++void js_debug_on_exception(JSContext *ctx, JSStackFrame *sf, const uint8_t *pc);
++void js_debug_mark_exception_reported(JSContext *ctx);
++void js_debug_exception_caught(JSRuntime *rt, JSFunctionBytecode *b, int handler_offset);
++void js_debug_forget_exception(JSRuntime *rt);
++
+ #endif /* QUICKJS_CORE_H */
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/debug.c engine/qjsx/core/debug.c
+--- build/qjsx-baseline/core/debug.c	1970-01-01 01:00:00.000000000 +0100
++++ engine/qjsx/core/debug.c	2026-11-10 20:53:56.544219000 +0100
+@@ -0,0 +1,581 @@
++/*
++ * QuickJS - core/debug.c
++ *
++ * espjs: debugger support (not part of upstream QuickJS). Public API in
++ * quickjs-debug.h; the interpreter calls the js_debug_* functions below
++ * (core/interpreter.c). See doc/engine-changes.md.
++ */
++
++#include "quickjs-internal.h"
++
++/* ---------------------------------------------------------------------- */
++/* Configuration */
++
++void JS_SetDebugHook(JSRuntime *rt, JSDebugHook *hook, void *opaque)
++{
++    rt->debug.hook = hook;
++    rt->debug.hook_opaque = opaque;
++    if (hook == NULL) {
++        js_debug_forget_exception(rt);
++    }
++}
++
++void JS_DebugSetStepping(JSRuntime *rt, JS_BOOL stepping)
++{
++    rt->debug.stepping = stepping != 0;
++}
++
++void JS_DebugSetExceptionReporting(JSRuntime *rt, JS_BOOL report)
++{
++    rt->debug.report_exceptions = report != 0;
++    if (!report) {
++        js_debug_forget_exception(rt);
++    }
++}
++
++/* ---------------------------------------------------------------------- */
++/* Hook calls from the interpreter */
++
++static BOOL js_debug_hook_callable(JSRuntime *rt)
++{
++    BOOL hook_installed = rt->debug.hook != NULL;
++    BOOL hook_running = rt->debug.paused_frame != NULL;
++    return hook_installed && !hook_running;
++}
++
++static void js_debug_init_event(JSDebugEvent *event, JSDebugReason reason)
++{
++    event->reason = reason;
++    event->exception = JS_UNDEFINED;
++    event->at_return = FALSE;
++    event->return_value = JS_UNDEFINED;
++}
++
++/* 'pc' is the instruction where the frame 'sf' is stopped. */
++static int js_debug_call_hook(JSContext *ctx, JSStackFrame *sf, const uint8_t *pc,
++                              const JSDebugEvent *event)
++{
++    JSRuntime *rt = ctx->rt;
++    int result;
++
++    /* the frame API reads the position of the frame from cur_pc */
++    sf->cur_pc = pc;
++    rt->debug.paused_frame = sf;
++    result = rt->debug.hook(ctx, event, rt->debug.hook_opaque);
++    rt->debug.paused_frame = NULL;
++    return result;
++}
++
++static BOOL bitmap_has(const uint8_t *bitmap, uint32_t offset)
++{
++    if (bitmap == NULL)
++        return FALSE;
++    return (bitmap[offset >> 3] >> (offset & 7)) & 1;
++}
++
++/* Fills the return value of 'event' when the frame stops on a return
++   instruction. 'sp' is the stack pointer of the frame. */
++static void js_debug_set_return_value(JSDebugEvent *event, const uint8_t *pc,
++                                      const JSValue *sp)
++{
++    switch (*pc) {
++    case OP_return:
++    case OP_return_async:
++        event->at_return = TRUE;
++        event->return_value = sp[-1];
++        break;
++    case OP_return_undef:
++        event->at_return = TRUE;
++        event->return_value = JS_UNDEFINED;
++        break;
++    default:
++        break;
++    }
++}
++
++int js_debug_check_stop(JSContext *ctx, JSStackFrame *sf, JSFunctionBytecode *b,
++                        const uint8_t *pc, const JSValue *sp)
++{
++    JSRuntime *rt = ctx->rt;
++    uint32_t offset = pc - b->byte_code_buf;
++    JSDebugEvent event;
++
++    if (!js_debug_hook_callable(rt))
++        return 0;
++    if (bitmap_has(b->debug_breakpoints, offset)) {
++        js_debug_init_event(&event, JS_DEBUG_REASON_BREAKPOINT);
++    } else if (rt->debug.stepping && bitmap_has(b->debug_statements, offset)) {
++        js_debug_init_event(&event, JS_DEBUG_REASON_STEP);
++    } else {
++        return 0;
++    }
++    js_debug_set_return_value(&event, pc, sp);
++    return js_debug_call_hook(ctx, sf, pc, &event);
++}
++
++int js_debug_on_debugger_statement(JSContext *ctx, JSStackFrame *sf, const uint8_t *pc)
++{
++    JSDebugEvent event;
++
++    if (!js_debug_hook_callable(ctx->rt))
++        return 0;
++    js_debug_init_event(&event, JS_DEBUG_REASON_STATEMENT);
++    return js_debug_call_hook(ctx, sf, pc, &event);
++}
++
++/* ---------------------------------------------------------------------- */
++/* Exceptions
++
++   The interpreter goes through its 'exception' label in the frame of the
++   throw, then again in each calling frame while the exception unwinds. The
++   value given to the hook is remembered (rt->debug.reported_exception) so
++   that only the first pass reports it. It is forgotten when a 'catch'
++   clause catches it or when C code takes it (JS_GetException): throwing it
++   again is then a new throw. */
++
++void js_debug_forget_exception(JSRuntime *rt)
++{
++    JS_FreeValueRT(rt, rt->debug.reported_exception);
++    rt->debug.reported_exception = JS_UNINITIALIZED;
++}
++
++/* Remembers the pending exception as already reported. */
++void js_debug_mark_exception_reported(JSContext *ctx)
++{
++    JSRuntime *rt = ctx->rt;
++    JSValue pending = rt->current_exception;
++
++    if (rt->debug.hook == NULL)
++        return;
++    JS_FreeValue(ctx, rt->debug.reported_exception);
++    rt->debug.reported_exception = JS_DupValue(ctx, pending);
++}
++
++void js_debug_on_exception(JSContext *ctx, JSStackFrame *sf, const uint8_t *pc)
++{
++    JSRuntime *rt = ctx->rt;
++    JSValue thrown;
++    JSDebugEvent event;
++
++    if (!rt->debug.report_exceptions || !js_debug_hook_callable(rt))
++        return;
++    /* interruptions (JS_ThrowInterrupted) are not JS throws */
++    if (rt->current_exception_is_uncatchable)
++        return;
++    if (js_same_value(ctx, rt->debug.reported_exception, rt->current_exception))
++        return;
++
++    /* the hook runs without pending exception, so that it can call JS */
++    thrown = rt->current_exception;
++    rt->current_exception = JS_UNINITIALIZED;
++    js_debug_init_event(&event, JS_DEBUG_REASON_EXCEPTION);
++    event.exception = thrown;
++    js_debug_call_hook(ctx, sf, pc, &event);
++    /* an exception left by the hook is dropped: the thrown value goes on */
++    JS_FreeValue(ctx, rt->current_exception);
++    rt->current_exception = thrown;
++    /* marked after the hook: JS_GetException calls made by the hook (for
++       its own evaluations) forget the reported value */
++    js_debug_mark_exception_reported(ctx);
++}
++
++/* The compiler emits "gosub <finally>; throw" as the handler of the try
++   block of a try/finally, and of the catch block of a try/catch: the value
++   is caught, the finally clause runs, then the same value is thrown again.
++   When the finally clause is empty, resolve_labels() removes the gosub and
++   the handler is a plain "throw". */
++static BOOL js_debug_is_rethrow_handler(JSFunctionBytecode *b, int handler_offset)
++{
++    int gosub_size = opcode_info[OP_gosub].size;
++    const uint8_t *handler = b->byte_code_buf + handler_offset;
++    BOOL plain_rethrow = handler[0] == OP_throw;
++    BOOL finally_rethrow = handler_offset + gosub_size < b->byte_code_len &&
++                           handler[0] == OP_gosub && handler[gosub_size] == OP_throw;
++
++    return plain_rethrow || finally_rethrow;
++}
++
++void js_debug_exception_caught(JSRuntime *rt, JSFunctionBytecode *b, int handler_offset)
++{
++    if (JS_IsUninitialized(rt->debug.reported_exception))
++        return;
++    if (js_debug_is_rethrow_handler(b, handler_offset))
++        return;
++    js_debug_forget_exception(rt);
++}
++
++/* ---------------------------------------------------------------------- */
++/* Stops */
++
++/* Function 'number' in the tree of functions whose root is 'b' (the
++   functions defined inside a function are in its constant pool). */
++static JSFunctionBytecode *js_debug_find_in_tree(JSFunctionBytecode *b, int number)
++{
++    int i;
++
++    if (b->function_number == number)
++        return b;
++    for (i = 0; i < b->cpool_count; i++) {
++        JSValue constant = b->cpool[i];
++        if (JS_VALUE_GET_TAG(constant) == JS_TAG_FUNCTION_BYTECODE) {
++            JSFunctionBytecode *child = JS_VALUE_GET_PTR(constant);
++            JSFunctionBytecode *found = js_debug_find_in_tree(child, number);
++            if (found != NULL)
++                return found;
++        }
++    }
++    return NULL;
++}
++
++/* Top-level function of a module: its bytecode until the module function
++   is created, then the function object. */
++static JSFunctionBytecode *js_debug_module_bytecode(JSModuleDef *m)
++{
++    JSValue function = m->func_obj;
++
++    if (JS_VALUE_GET_TAG(function) == JS_TAG_FUNCTION_BYTECODE)
++        return JS_VALUE_GET_PTR(function);
++    if (JS_VALUE_GET_TAG(function) == JS_TAG_OBJECT) {
++        JSObject *p = JS_VALUE_GET_OBJ(function);
++        if (p->class_id == JS_CLASS_BYTECODE_FUNCTION)
++            return p->u.func.function_bytecode;
++    }
++    return NULL;
++}
++
++static JSFunctionBytecode *js_debug_find_function(JSContext *ctx, const char *module_name,
++                                                  int function_number)
++{
++    JSAtom name = JS_NewAtom(ctx, module_name);
++    JSFunctionBytecode *found = NULL;
++    struct list_head *el;
++
++    if (name == JS_ATOM_NULL) {
++        JS_FreeValue(ctx, JS_GetException(ctx));   /* out of memory */
++        return NULL;
++    }
++    list_for_each(el, &ctx->loaded_modules) {
++        JSModuleDef *m = list_entry(el, JSModuleDef, link);
++        JSFunctionBytecode *root;
++        if (m->module_name != name)
++            continue;
++        root = js_debug_module_bytecode(m);
++        if (root != NULL)
++            found = js_debug_find_in_tree(root, function_number);
++        break;
++    }
++    JS_FreeAtom(ctx, name);
++    return found;
++}
++
++int JS_DebugSetStops(JSContext *ctx, const char *module_name, int function_number,
++                     JSDebugStopKind kind, const uint32_t *offsets, int count)
++{
++    JSFunctionBytecode *b = js_debug_find_function(ctx, module_name, function_number);
++    uint8_t **slot;
++    uint8_t *bitmap = NULL;
++    int i;
++
++    if (b == NULL)
++        return -1;
++    for (i = 0; i < count; i++) {
++        if (offsets[i] >= (uint32_t)b->byte_code_len)
++            return -1;
++    }
++    if (count > 0) {
++        size_t bitmap_size = (b->byte_code_len + 7) / 8;
++        bitmap = js_mallocz_rt(ctx->rt, bitmap_size);
++        if (bitmap == NULL)
++            return -1;
++        for (i = 0; i < count; i++) {
++            uint32_t offset = offsets[i];
++            bitmap[offset >> 3] |= 1 << (offset & 7);
++        }
++    }
++    slot = (kind == JS_DEBUG_STOPS_BREAKPOINTS) ? &b->debug_breakpoints : &b->debug_statements;
++    js_free_rt(ctx->rt, *slot);
++    *slot = bitmap;
++    return 0;
++}
++
++static void js_debug_clear_tree_stops(JSRuntime *rt, JSFunctionBytecode *b)
++{
++    int i;
++
++    js_free_rt(rt, b->debug_breakpoints);
++    js_free_rt(rt, b->debug_statements);
++    b->debug_breakpoints = NULL;
++    b->debug_statements = NULL;
++    for (i = 0; i < b->cpool_count; i++) {
++        JSValue constant = b->cpool[i];
++        if (JS_VALUE_GET_TAG(constant) == JS_TAG_FUNCTION_BYTECODE)
++            js_debug_clear_tree_stops(rt, JS_VALUE_GET_PTR(constant));
++    }
++}
++
++void JS_DebugClearAllStops(JSContext *ctx)
++{
++    struct list_head *el;
++
++    list_for_each(el, &ctx->loaded_modules) {
++        JSModuleDef *m = list_entry(el, JSModuleDef, link);
++        JSFunctionBytecode *root = js_debug_module_bytecode(m);
++        if (root != NULL)
++            js_debug_clear_tree_stops(ctx->rt, root);
++    }
++}
++
++/* ---------------------------------------------------------------------- */
++/* Frames and slots */
++
++static JSStackFrame *js_debug_frame_at(JSRuntime *rt, int level)
++{
++    JSStackFrame *sf = rt->debug.paused_frame;
++    int i;
++
++    if (level < 0)
++        return NULL;
++    for (i = 0; sf != NULL && i < level; i++)
++        sf = sf->prev_frame;
++    return sf;
++}
++
++/* Bytecode of the function running in 'sf', NULL for a native function. */
++static JSFunctionBytecode *js_debug_frame_bytecode(JSStackFrame *sf)
++{
++    JSObject *p;
++
++    if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
++        return NULL;
++    p = JS_VALUE_GET_OBJ(sf->cur_func);
++    if (p->class_id != JS_CLASS_BYTECODE_FUNCTION)
++        return NULL;
++    return p->u.func.function_bytecode;
++}
++
++int JS_DebugGetFunctionLocation(JSContext *ctx, JSValueConst function,
++                                JSAtom *module_name, int *function_number)
++{
++    JSObject *p;
++    JSFunctionBytecode *b;
++
++    if (JS_VALUE_GET_TAG(function) != JS_TAG_OBJECT)
++        return -1;
++    p = JS_VALUE_GET_OBJ(function);
++    if (p->class_id != JS_CLASS_BYTECODE_FUNCTION)
++        return -1;
++    b = p->u.func.function_bytecode;
++    *module_name = b->filename;
++    *function_number = b->function_number;
++    return 0;
++}
++
++/* ---------------------------------------------------------------------- */
++/* Objects */
++
++static JSDebugObjectKind js_debug_object_kind(JSContext *ctx, JSObject *p)
++{
++    switch (p->class_id) {
++    case JS_CLASS_ARRAY:
++    case JS_CLASS_ARGUMENTS:
++    case JS_CLASS_MAPPED_ARGUMENTS:
++        return JS_DEBUG_OBJECT_ARRAY;
++    case JS_CLASS_ERROR:
++        return JS_DEBUG_OBJECT_ERROR;
++    case JS_CLASS_DATE:
++        return JS_DEBUG_OBJECT_DATE;
++    case JS_CLASS_REGEXP:
++        return JS_DEBUG_OBJECT_REGEXP;
++    case JS_CLASS_MAP:
++        return JS_DEBUG_OBJECT_MAP;
++    case JS_CLASS_SET:
++        return JS_DEBUG_OBJECT_SET;
++    case JS_CLASS_WEAKMAP:
++        return JS_DEBUG_OBJECT_WEAKMAP;
++    case JS_CLASS_WEAKSET:
++        return JS_DEBUG_OBJECT_WEAKSET;
++    case JS_CLASS_PROMISE:
++        return JS_DEBUG_OBJECT_PROMISE;
++    case JS_CLASS_PROXY:
++        return JS_DEBUG_OBJECT_PROXY;
++    case JS_CLASS_ARRAY_BUFFER:
++    case JS_CLASS_SHARED_ARRAY_BUFFER:
++        return JS_DEBUG_OBJECT_ARRAY_BUFFER;
++    case JS_CLASS_DATAVIEW:
++        return JS_DEBUG_OBJECT_DATAVIEW;
++    case JS_CLASS_GENERATOR:
++    case JS_CLASS_ASYNC_GENERATOR:
++        return JS_DEBUG_OBJECT_GENERATOR;
++    case JS_CLASS_ITERATOR:
++    case JS_CLASS_ITERATOR_CONCAT:
++    case JS_CLASS_ITERATOR_HELPER:
++    case JS_CLASS_ITERATOR_WRAP:
++    case JS_CLASS_MAP_ITERATOR:
++    case JS_CLASS_SET_ITERATOR:
++    case JS_CLASS_ARRAY_ITERATOR:
++    case JS_CLASS_STRING_ITERATOR:
++    case JS_CLASS_REGEXP_STRING_ITERATOR:
++        return JS_DEBUG_OBJECT_ITERATOR;
++    case JS_CLASS_NUMBER:
++    case JS_CLASS_STRING:
++    case JS_CLASS_BOOLEAN:
++    case JS_CLASS_SYMBOL:
++    case JS_CLASS_BIG_INT:
++        return JS_DEBUG_OBJECT_WRAPPER;
++    case JS_CLASS_WEAK_REF:
++        return JS_DEBUG_OBJECT_WEAKREF;
++    default:
++        break;
++    }
++    if (p->class_id >= JS_CLASS_UINT8C_ARRAY && p->class_id <= JS_CLASS_FLOAT64_ARRAY)
++        return JS_DEBUG_OBJECT_TYPED_ARRAY;
++    /* any callable object: functions of every kind, native classes with
++       a call method */
++    if (JS_IsFunction(ctx, JS_MKPTR(JS_TAG_OBJECT, p)))
++        return JS_DEBUG_OBJECT_FUNCTION;
++    return JS_DEBUG_OBJECT_PLAIN;
++}
++
++static int64_t js_debug_object_size(JSObject *p, JSDebugObjectKind kind)
++{
++    switch (kind) {
++    case JS_DEBUG_OBJECT_MAP:
++    case JS_DEBUG_OBJECT_SET:
++        return p->u.map_state->record_count;
++    case JS_DEBUG_OBJECT_TYPED_ARRAY:
++        return p->u.array.count;
++    case JS_DEBUG_OBJECT_ARRAY_BUFFER:
++        return p->u.array_buffer->byte_length;
++    default:
++        return -1;
++    }
++}
++
++int JS_DebugGetObjectInfo(JSContext *ctx, JSValueConst obj, JSDebugObjectInfo *info)
++{
++    JSObject *p;
++
++    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
++        return -1;
++    p = JS_VALUE_GET_OBJ(obj);
++    info->kind = js_debug_object_kind(ctx, p);
++    info->class_name = ctx->rt->class_array[p->class_id].class_name;
++    info->size = js_debug_object_size(p, info->kind);
++    return 0;
++}
++
++JSValue JS_DebugGetInternal(JSContext *ctx, JSValueConst obj, JSDebugInternal which)
++{
++    JSObject *p;
++    JSDebugObjectKind kind;
++
++    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
++        return JS_UNDEFINED;
++    p = JS_VALUE_GET_OBJ(obj);
++    kind = js_debug_object_kind(ctx, p);
++    switch (which) {
++    case JS_DEBUG_INTERNAL_PROXY_TARGET:
++        if (kind != JS_DEBUG_OBJECT_PROXY)
++            return JS_UNDEFINED;
++        return JS_DupValue(ctx, p->u.proxy_data->target);
++    case JS_DEBUG_INTERNAL_PROXY_HANDLER:
++        if (kind != JS_DEBUG_OBJECT_PROXY)
++            return JS_UNDEFINED;
++        return JS_DupValue(ctx, p->u.proxy_data->handler);
++    case JS_DEBUG_INTERNAL_PRIMITIVE_VALUE:
++        if (kind != JS_DEBUG_OBJECT_WRAPPER && kind != JS_DEBUG_OBJECT_DATE)
++            return JS_UNDEFINED;
++        return JS_DupValue(ctx, p->u.object_data);
++    case JS_DEBUG_INTERNAL_BOUND_TARGET:
++        if (p->class_id != JS_CLASS_BOUND_FUNCTION)
++            return JS_UNDEFINED;
++        return JS_DupValue(ctx, p->u.bound_function->func_obj);
++    }
++    return JS_UNDEFINED;
++}
++
++int JS_DebugGetFrame(JSContext *ctx, int level, JSDebugFrame *frame)
++{
++    JSStackFrame *sf = js_debug_frame_at(ctx->rt, level);
++    JSFunctionBytecode *b;
++
++    if (sf == NULL)
++        return -1;
++    memset(frame, 0, sizeof(*frame));
++    frame->id = (uintptr_t)sf;
++    b = js_debug_frame_bytecode(sf);
++    if (b == NULL)
++        return 0;
++    frame->is_bytecode = TRUE;
++    frame->module_name = b->filename;
++    frame->function_number = b->function_number;
++    frame->pc = sf->cur_pc - b->byte_code_buf;
++    frame->argument_count = sf->arg_count;
++    frame->local_count = b->var_count;
++    frame->closure_count = b->closure_var_count;
++    return 0;
++}
++
++JSValue JS_DebugGetFrameFunction(JSContext *ctx, int level)
++{
++    JSStackFrame *sf = js_debug_frame_at(ctx->rt, level);
++
++    if (sf == NULL)
++        return JS_UNDEFINED;
++    return JS_DupValue(ctx, sf->cur_func);
++}
++
++/* Address of a slot of the bytecode frame at 'level', NULL if none. */
++static JSValue *js_debug_slot(JSContext *ctx, int level, JSDebugSlotKind kind, int index)
++{
++    JSStackFrame *sf = js_debug_frame_at(ctx->rt, level);
++    JSFunctionBytecode *b;
++    JSObject *p;
++    JSVarRef *ref;
++
++    if (sf == NULL || index < 0)
++        return NULL;
++    b = js_debug_frame_bytecode(sf);
++    if (b == NULL)
++        return NULL;
++    switch (kind) {
++    case JS_DEBUG_SLOT_ARGUMENT:
++        if (index >= sf->arg_count)
++            return NULL;
++        return &sf->arg_buf[index];
++    case JS_DEBUG_SLOT_LOCAL:
++        if (index >= b->var_count)
++            return NULL;
++        return &sf->var_buf[index];
++    case JS_DEBUG_SLOT_CLOSURE:
++        if (index >= b->closure_var_count)
++            return NULL;
++        p = JS_VALUE_GET_OBJ(sf->cur_func);
++        ref = p->u.func.var_refs[index];
++        if (ref == NULL)
++            return NULL;
++        return ref->pvalue;
++    }
++    return NULL;
++}
++
++JSValue JS_DebugGetSlot(JSContext *ctx, int level, JSDebugSlotKind kind, int index)
++{
++    JSValue *slot = js_debug_slot(ctx, level, kind, index);
++
++    if (slot == NULL)
++        return JS_EXCEPTION;
++    return JS_DupValue(ctx, *slot);
++}
++
++int JS_DebugSetSlot(JSContext *ctx, int level, JSDebugSlotKind kind, int index, JSValue value)
++{
++    JSValue *slot = js_debug_slot(ctx, level, kind, index);
++
++    if (slot == NULL) {
++        JS_FreeValue(ctx, value);
++        return -1;
++    }
++    set_value(ctx, slot, value);
++    return 0;
++}
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core/errors.c
+--- build/qjsx-baseline/core/errors.c	2026-11-11 15:49:05.243692000 +0100
++++ engine/qjsx/core/errors.c	2026-11-10 20:07:04.781772700 +0100
+@@ -30,6 +30,9 @@
+     JSRuntime *rt = ctx->rt;
+     val = rt->current_exception;
+     rt->current_exception = JS_UNINITIALIZED;
++    /* espjs: the exception is handled by C code: if it is thrown again,
++       it is a new throw for the debugger */
++    js_debug_forget_exception(rt);
+     return val;
+ }
+ 
+@@ -250,10 +253,12 @@
+             int line_num1, col_num1;
+ 
+             b = p->u.func.function_bytecode;
+-            if (b->has_debug) {
++            /* espjs: the file name is known without debug info; the line
++               number needs it (find_line_num returns 0 without pc2line) */
++            if (b->filename != JS_ATOM_NULL) {
+                 line_num1 = find_line_num(ctx, b,
+                                           sf->cur_pc - b->byte_code_buf - 1, &col_num1);
+-                atom_str = JS_AtomToCString(ctx, b->debug.filename);
++                atom_str = JS_AtomToCString(ctx, b->filename);
+                 dbuf_printf(&dbuf, " (%s",
+                             atom_str ? atom_str : "<null>");
+                 JS_FreeCString(ctx, atom_str);
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/gc.c engine/qjsx/core/gc.c
+--- build/qjsx-baseline/core/gc.c	2026-11-11 15:49:05.243692000 +0100
++++ engine/qjsx/core/gc.c	2026-11-10 20:06:50.880056700 +0100
+@@ -1281,8 +1281,10 @@
+         JS_FreeContext(b->realm);
+ 
+     JS_FreeAtomRT(rt, b->func_name);
++    JS_FreeAtomRT(rt, b->filename);     /* espjs: no longer in 'debug' */
++    js_free_rt(rt, b->debug_breakpoints);   /* espjs */
++    js_free_rt(rt, b->debug_statements);    /* espjs */
+     if (b->has_debug) {
+-        JS_FreeAtomRT(rt, b->debug.filename);
+         js_free_rt(rt, b->debug.pc2line_buf);
+         js_free_rt(rt, b->debug.source);
+     }
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx/core/interpreter.c
+--- build/qjsx-baseline/core/interpreter.c	2026-11-11 15:49:05.248685400 +0100
++++ engine/qjsx/core/interpreter.c	2026-11-10 20:22:27.845153000 +0100
+@@ -29,8 +29,22 @@
+     JSVarRef **var_refs;
+     size_t alloca_size;
+ 
++    /* espjs: debugger stops. A frame whose function has stops (see
++       js_debug_frame_has_stops) checks them before each instruction. The
++       choice is made again by REFRESH_DEBUG_DISPATCH() when the debugger
++       state may have changed: at 'restart' (entry, resume, catch), after
++       the call opcodes, after the interrupt polls and after a hook call. */
+ #if !DIRECT_DISPATCH
+-#define SWITCH(pc)      switch (opcode = *pc++)
++    /* without computed goto: a test before each instruction */
++    BOOL debug_dispatch = FALSE;
++#define REFRESH_DEBUG_DISPATCH() (debug_dispatch = js_debug_frame_has_stops(rt, b))
++#define SWITCH(pc)                                                  \
++    if (unlikely(debug_dispatch)) {                                 \
++        if (js_debug_check_stop(ctx, sf, b, pc, sp) < 0)                \
++            goto exception;                                         \
++        REFRESH_DEBUG_DISPATCH();                                   \
++    }                                                               \
++    switch (opcode = *pc++)
+ #define CASE(op)        case op
+ #define DEFAULT         default
+ #define BREAK           break
+@@ -45,7 +59,16 @@
+ #include "quickjs-opcode.h"
+         [ OP_COUNT ... 255 ] = &&case_default
+     };
+-#define SWITCH(pc)      goto *dispatch_table[opcode = *pc++];
++    /* with computed goto: a second table sends every opcode to
++       'debug_check', which checks the stops then jumps through
++       'dispatch_table'. 'dispatch' is the table in use. */
++    static const void * const debug_dispatch_table[256] = {
++        [ 0 ... 255 ] = &&debug_check
++    };
++    const void * const *dispatch = dispatch_table;
++#define REFRESH_DEBUG_DISPATCH()                                    \
++    (dispatch = js_debug_frame_has_stops(rt, b) ? debug_dispatch_table : dispatch_table)
++#define SWITCH(pc)      goto *dispatch[opcode = *pc++];
+ #ifdef OPCODE_ASM_LABEL
+ #define CASE(op)        case_ ## op: asm volatile("label_" #op ":\n.globl label_" #op); dummy_case_ ## op
+ #else
+@@ -55,6 +78,18 @@
+ #define BREAK           SWITCH(pc)
+ #endif
+ 
++    /* espjs: polls the interrupt handler like js_poll_interrupts(). When
++       the handler ran, it may have changed the debugger state (pause
++       request, new stops): the dispatch is chosen again. */
++#define POLL_INTERRUPTS()                                           \
++    do {                                                            \
++        if (unlikely(--ctx->interrupt_counter <= 0)) {              \
++            if (__js_poll_interrupts(ctx))                          \
++                goto exception;                                     \
++            REFRESH_DEBUG_DISPATCH();                               \
++        }                                                           \
++    } while (0)
++
+     if (js_poll_interrupts(caller_ctx))
+         return JS_EXCEPTION;
+     if (unlikely(JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)) {
+@@ -75,10 +110,15 @@
+             pc = sf->cur_pc;
+             sf->prev_frame = rt->current_stack_frame;
+             rt->current_stack_frame = sf;
+-            if (s->throw_flag)
++            if (s->throw_flag) {
++                /* espjs: a value thrown into a generator or async function
++                   (rejected await, generator throw()) is not a new throw
++                   for the debugger */
++                js_debug_mark_exception_reported(ctx);
+                 goto exception;
+-            else
++            } else {
+                 goto restart;
++            }
+         } else {
+             goto not_a_function;
+         }
+@@ -142,6 +182,7 @@
+     ctx = b->realm; /* set the current realm */
+ 
+  restart:
++    REFRESH_DEBUG_DISPATCH();   /* espjs */
+     for(;;) {
+         int call_argc;
+         JSValue *call_argv;
+@@ -469,6 +510,7 @@
+                     JS_FreeValue(ctx, call_argv[i]);
+                 sp -= call_argc + 1;
+                 *sp++ = ret_val;
++                REFRESH_DEBUG_DISPATCH();   /* espjs */
+             }
+             BREAK;
+         CASE(OP_call_constructor):
+@@ -486,6 +528,7 @@
+                     JS_FreeValue(ctx, call_argv[i]);
+                 sp -= call_argc + 2;
+                 *sp++ = ret_val;
++                REFRESH_DEBUG_DISPATCH();   /* espjs */
+             }
+             BREAK;
+         CASE(OP_call_method):
+@@ -505,6 +548,7 @@
+                     JS_FreeValue(ctx, call_argv[i]);
+                 sp -= call_argc + 2;
+                 *sp++ = ret_val;
++                REFRESH_DEBUG_DISPATCH();   /* espjs */
+             }
+             BREAK;
+         CASE(OP_array_from):
+@@ -1092,19 +1136,16 @@
+ 
+         CASE(OP_goto):
+             pc += (int32_t)get_u32(pc);
+-            if (unlikely(js_poll_interrupts(ctx)))
+-                goto exception;
++            POLL_INTERRUPTS();
+             BREAK;
+ #if SHORT_OPCODES
+         CASE(OP_goto16):
+             pc += (int16_t)get_u16(pc);
+-            if (unlikely(js_poll_interrupts(ctx)))
+-                goto exception;
++            POLL_INTERRUPTS();
+             BREAK;
+         CASE(OP_goto8):
+             pc += (int8_t)pc[0];
+-            if (unlikely(js_poll_interrupts(ctx)))
+-                goto exception;
++            POLL_INTERRUPTS();
+             BREAK;
+ #endif
+         CASE(OP_if_true):
+@@ -1123,8 +1164,7 @@
+                 if (res) {
+                     pc += (int32_t)get_u32(pc - 4) - 4;
+                 }
+-                if (unlikely(js_poll_interrupts(ctx)))
+-                    goto exception;
++                POLL_INTERRUPTS();
+             }
+             BREAK;
+         CASE(OP_if_false):
+@@ -1144,8 +1184,7 @@
+                 if (!res) {
+                     pc += (int32_t)get_u32(pc - 4) - 4;
+                 }
+-                if (unlikely(js_poll_interrupts(ctx)))
+-                    goto exception;
++                POLL_INTERRUPTS();
+             }
+             BREAK;
+ #if SHORT_OPCODES
+@@ -1165,8 +1204,7 @@
+                 if (res) {
+                     pc += (int8_t)pc[-1] - 1;
+                 }
+-                if (unlikely(js_poll_interrupts(ctx)))
+-                    goto exception;
++                POLL_INTERRUPTS();
+             }
+             BREAK;
+         CASE(OP_if_false8):
+@@ -1185,8 +1223,7 @@
+                 if (!res) {
+                     pc += (int8_t)pc[-1] - 1;
+                 }
+-                if (unlikely(js_poll_interrupts(ctx)))
+-                    goto exception;
++                POLL_INTERRUPTS();
+             }
+             BREAK;
+ #endif
+@@ -2735,6 +2772,12 @@
+ 
+         CASE(OP_nop):
+             BREAK;
++        CASE(OP_debugger):
++            /* espjs: 'debugger;' statement */
++            if (js_debug_on_debugger_statement(ctx, sf, pc - 1) < 0)
++                goto exception;
++            REFRESH_DEBUG_DISPATCH();
++            BREAK;
+         CASE(OP_is_undefined_or_null):
+             if (JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_UNDEFINED ||
+                 JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_NULL) {
+@@ -2786,6 +2829,15 @@
+             goto exception;
+         }
+     }
++#if DIRECT_DISPATCH
++ debug_check:
++    /* espjs: reached through debug_dispatch_table: 'opcode' is read and
++       'pc' points after it */
++    if (js_debug_check_stop(ctx, sf, b, pc - 1, sp) < 0)
++        goto exception;
++    REFRESH_DEBUG_DISPATCH();
++    goto *dispatch_table[opcode];
++#endif
+  exception:
+     if (is_backtrace_needed(ctx, rt->current_exception)) {
+         /* add the backtrace information now (it is not done
+@@ -2794,6 +2846,10 @@
+         sf->cur_pc = pc;
+         build_backtrace(ctx, rt->current_exception, NULL, 0, 0, 0);
+     }
++    /* espjs: report the throw to the debugger (only in the frame of the
++       throw, not again while it unwinds through the calling frames) */
++    if (unlikely(rt->debug.hook != NULL))
++        js_debug_on_exception(ctx, sf, pc);
+     if (!rt->current_exception_is_uncatchable) {
+         while (sp > stack_buf) {
+             JSValue val = *--sp;
+@@ -2806,6 +2862,9 @@
+                     sp--;
+                     JS_IteratorClose(ctx, sp[-1], TRUE);
+                 } else {
++                    /* espjs: a 'catch' clause ends the throw for the
++                       debugger (not a 'finally' clause, which rethrows) */
++                    js_debug_exception_caught(rt, b, pos);
+                     *sp++ = rt->current_exception;
+                     rt->current_exception = JS_UNINITIALIZED;
+                     pc = b->byte_code_buf + pos;
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/iteration.c engine/qjsx/core/iteration.c
+--- build/qjsx-baseline/core/iteration.c	2026-11-11 15:49:05.247685200 +0100
++++ engine/qjsx/core/iteration.c	2026-11-10 19:57:29.362350900 +0100
+@@ -25,8 +25,8 @@
+                                           JSValueConst this_val)
+ {
+     JSFunctionBytecode *b = JS_GetFunctionBytecode(this_val);
+-    if (b && b->has_debug) {
+-        return JS_AtomToString(ctx, b->debug.filename);
++    if (b && b->filename != JS_ATOM_NULL) {   /* espjs: was b->has_debug */
++        return JS_AtomToString(ctx, b->filename);
+     }
+     return JS_UNDEFINED;
+ }
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/modules.c engine/qjsx/core/modules.c
+--- build/qjsx-baseline/core/modules.c	2026-11-11 15:49:05.252689500 +0100
++++ engine/qjsx/core/modules.c	2026-11-11 14:52:15.176607100 +0100
+@@ -1206,9 +1206,11 @@
+             return JS_ATOM_NULL;
+         b = p->u.func.function_bytecode;
+         if (!b->is_direct_or_indirect_eval) {
+-            if (!b->has_debug)
++            /* espjs: the file name no longer depends on the debug info, so
++               import.meta and import() work with fully stripped bytecode */
++            if (b->filename == JS_ATOM_NULL)
+                 return JS_ATOM_NULL;
+-            return JS_DupAtom(ctx, b->debug.filename);
++            return JS_DupAtom(ctx, b->filename);
+         } else {
+             sf = sf->prev_frame;
+             if (!sf)
+@@ -1222,6 +1224,20 @@
+     return JS_DupAtom(ctx, m->module_name);
+ }
+ 
++/* espjs: number of modules asked for by 'm' (import, export ... from) */
++int JS_GetModuleRequestCount(JSModuleDef *m)
++{
++    return m->req_module_entries_count;
++}
++
++/* espjs: name of a module asked for by 'm', as written in its source */
++JSAtom JS_GetModuleRequestName(JSContext *ctx, JSModuleDef *m, int index)
++{
++    if (index < 0 || index >= m->req_module_entries_count)
++        return JS_ATOM_NULL;
++    return JS_DupAtom(ctx, m->req_module_entries[index].module_name);
++}
++
+ JSValue JS_GetImportMeta(JSContext *ctx, JSModuleDef *m)
+ {
+     JSValue obj;
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/core/runtime.c
+--- build/qjsx-baseline/core/runtime.c	2026-11-11 15:49:05.241687200 +0100
++++ engine/qjsx/core/runtime.c	2026-11-11 13:29:47.256848800 +0100
+@@ -617,6 +617,7 @@
+     rt->malloc_ctx.mf = *mf;
+     rt->malloc_ctx.malloc_state = ms;
+     rt->malloc_gc_threshold = 256 * 1024;
++    rt->debug.reported_exception = JS_UNINITIALIZED;   /* espjs: none */
+ 
+     init_list_head(&rt->context_list);
+     init_list_head(&rt->gc_obj_list);
+@@ -680,6 +681,11 @@
+     return 0;
+ #elif defined(__linux__) || defined(__GLIBC__)
+     return malloc_usable_size((void *)ptr);
++#elif defined(__NEWLIB__)
++    /* espjs: newlib (ESP32, RP2350) does not declare malloc_usable_size; the
++       devices give their own allocator (board::jsAllocator), so this default
++       one is not used there */
++    return 0;
+ #else
+     /* change this to `return 0;` if compilation fails */
+     return malloc_usable_size((void *)ptr);
+@@ -914,6 +920,7 @@
+     int i;
+ 
+     JS_FreeValueRT(rt, rt->current_exception);
++    js_debug_forget_exception(rt);   /* espjs */
+ 
+     list_for_each_safe(el, el1, &rt->job_list) {
+         JSJobEntry *e = list_entry(el, JSJobEntry, link);
+@@ -1140,7 +1147,12 @@
+ 
+     if (JS_AddIntrinsicBaseObjects(ctx) ||
+         JS_AddIntrinsicDate(ctx) ||
++#ifndef QJSX_NO_COMPILER
++        /* espjs: an engine built without compiler/ (QJSX_NO_COMPILER, the
++           targets) has no eval: eval(), Function() and JS_Eval() throw
++           "eval is not supported" */
+         JS_AddIntrinsicEval(ctx) ||
++#endif
+         JS_AddIntrinsicStringNormalize(ctx) ||
+         JS_AddIntrinsicRegExp(ctx) ||
+         JS_AddIntrinsicJSON(ctx) ||
+diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/quickjs-debug.h
+--- build/qjsx-baseline/quickjs-debug.h	1970-01-01 01:00:00.000000000 +0100
++++ engine/qjsx/quickjs-debug.h	2026-11-11 15:34:49.362606200 +0100
+@@ -0,0 +1,288 @@
++/*
++ * espjs: debugger support in the QuickJS engine.
++ *
++ * Not part of upstream QuickJS: see doc/engine-changes.md. Implemented in
++ * core/debug.c, with hooks in core/interpreter.c.
++ *
++ * Model
++ * -----
++ * The engine knows nothing about source positions on the target (the
++ * bytecode is stripped): the debugger (the "stub") gives it, per function,
++ * bytecode offsets:
++ *   - breakpoints: offsets where the hook is always called;
++ *   - statements:  offsets of the statement starts, where the hook is called
++ *                  while stepping is on (JS_DebugSetStepping).
++ * A function is identified by its module name and its function number (the
++ * number given by the compiler, in compilation order, stored in the bytecode
++ * and in the debug sidecar).
++ *
++ * The hook is called on the JS thread, inside the interpreter, before the
++ * instruction at the stop offset is executed. While it runs, it may inspect
++ * frames and slots and call JS functions (evaluation): no nested hook call
++ * happens meanwhile. Returning -1 from the hook throws the pending exception
++ * (set by the hook) at the stop position.
++ *
++ * Functions that are not running bytecode with stops pay nothing: a frame
++ * uses the debug dispatch table only when the hook is set and its function
++ * has breakpoints, or has statements while stepping is on.
++ */
++#ifndef QUICKJS_DEBUG_H
++#define QUICKJS_DEBUG_H
++
++#include "quickjs.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef enum JSDebugReason {
++    JS_DEBUG_REASON_BREAKPOINT,  /* a breakpoint offset was reached */
++    JS_DEBUG_REASON_STEP,        /* stepping: a statement start was reached */
++    JS_DEBUG_REASON_STATEMENT,   /* a 'debugger;' statement */
++    JS_DEBUG_REASON_EXCEPTION,   /* a value was thrown, before unwinding */
++} JSDebugReason;
++
++typedef struct JSDebugEvent {
++    JSDebugReason reason;
++    /* JS_DEBUG_REASON_EXCEPTION: the thrown value (borrowed), otherwise
++       JS_UNDEFINED. While the hook runs there is no pending exception: the
++       engine puts it back when the hook returns. */
++    JSValueConst exception;
++    /* TRUE when the frame stops on a return instruction (breakpoint or step
++       on a JS_DEBUG_POSITION_RETURN position): 'return_value' (borrowed) is
++       the value about to be returned. */
++    JS_BOOL at_return;
++    JSValueConst return_value;
++} JSDebugEvent;
++
++/* Returns 0 to continue, -1 to throw the exception pending in 'ctx'
++   (ignored for JS_DEBUG_REASON_EXCEPTION: the exception goes on anyway). */
++typedef int JSDebugHook(JSContext *ctx, const JSDebugEvent *event, void *opaque);
++
++/* Installs the hook (NULL removes it). Without hook, nothing is ever called. */
++void JS_SetDebugHook(JSRuntime *rt, JSDebugHook *hook, void *opaque);
++
++/* Stepping on: the hook is called at every statement start of the
++   functions that have statements (JS_DEBUG_STOPS_STATEMENTS). The hook
++   decides by comparing frames whether it is a stop (step over, out). A
++   pause request is stepping on. */
++void JS_DebugSetStepping(JSRuntime *rt, JS_BOOL stepping);
++
++/* Exceptions reported on: the hook is called once per thrown value, in the
++   frame of the throw. A value rethrown by a 'finally' clause is not
++   reported again. */
++void JS_DebugSetExceptionReporting(JSRuntime *rt, JS_BOOL report);
++
++typedef enum JSDebugStopKind {
++    JS_DEBUG_STOPS_BREAKPOINTS,
++    JS_DEBUG_STOPS_STATEMENTS,
++} JSDebugStopKind;
++
++/* Replaces the stops of one kind of function 'function_number' of the loaded
++   module 'module_name' by the bytecode offsets 'offsets[0..count-1]'
++   (count = 0 removes them). Returns 0, or -1 if the module or the function
++   is not found or an offset is outside the function (nothing changed, no
++   exception thrown). The stops live as long as the function's bytecode:
++   they must be set again when the module is loaded again. */
++int JS_DebugSetStops(JSContext *ctx, const char *module_name, int function_number,
++                     JSDebugStopKind kind, const uint32_t *offsets, int count);
++
++/* Removes the stops of every function of the loaded modules (debugger
++   detached). */
++void JS_DebugClearAllStops(JSContext *ctx);
++
++/* Module name (borrowed atom) and function number of a bytecode function
++   object (for CDP [[FunctionLocation]], or to find the stops of a function).
++   Returns 0, or -1 if 'function' is not a bytecode function. Usable at any
++   time. */
++int JS_DebugGetFunctionLocation(JSContext *ctx, JSValueConst function,
++                                JSAtom *module_name, int *function_number);
++
++/* Objects, described without running any JS code (no getter, no proxy
++   trap): what the debugger shows in previews and the Variables pane. */
++typedef enum JSDebugObjectKind {
++    JS_DEBUG_OBJECT_PLAIN,       /* any other object */
++    JS_DEBUG_OBJECT_FUNCTION,
++    JS_DEBUG_OBJECT_ARRAY,       /* Array, arguments */
++    JS_DEBUG_OBJECT_ERROR,
++    JS_DEBUG_OBJECT_DATE,
++    JS_DEBUG_OBJECT_REGEXP,
++    JS_DEBUG_OBJECT_MAP,
++    JS_DEBUG_OBJECT_SET,
++    JS_DEBUG_OBJECT_WEAKMAP,
++    JS_DEBUG_OBJECT_WEAKSET,
++    JS_DEBUG_OBJECT_PROMISE,
++    JS_DEBUG_OBJECT_PROXY,
++    JS_DEBUG_OBJECT_TYPED_ARRAY,
++    JS_DEBUG_OBJECT_ARRAY_BUFFER,
++    JS_DEBUG_OBJECT_DATAVIEW,
++    JS_DEBUG_OBJECT_GENERATOR,
++    JS_DEBUG_OBJECT_ITERATOR,
++    JS_DEBUG_OBJECT_WRAPPER,     /* Number, String, Boolean, Symbol, BigInt objects */
++    JS_DEBUG_OBJECT_WEAKREF,
++} JSDebugObjectKind;
++
++typedef struct JSDebugObjectInfo {
++    JSDebugObjectKind kind;
++    JSAtom class_name;   /* name of the object's class ("Object", "Map"...), borrowed */
++    /* Map / Set size, typed array length, ArrayBuffer byte length, else -1
++       (the length of an Array is its "length" property) */
++    int64_t size;
++} JSDebugObjectInfo;
++
++/* Returns 0, or -1 if 'obj' is not an object. */
++int JS_DebugGetObjectInfo(JSContext *ctx, JSValueConst obj, JSDebugObjectInfo *info);
++
++typedef enum JSDebugInternal {
++    JS_DEBUG_INTERNAL_PROXY_TARGET,
++    JS_DEBUG_INTERNAL_PROXY_HANDLER,
++    JS_DEBUG_INTERNAL_PRIMITIVE_VALUE,   /* of a wrapper object or a Date (time value) */
++    JS_DEBUG_INTERNAL_BOUND_TARGET,      /* target function of a bound function */
++} JSDebugInternal;
++
++/* An internal slot of an object (new reference), JS_UNDEFINED if the object
++   has no such slot. */
++JSValue JS_DebugGetInternal(JSContext *ctx, JSValueConst obj, JSDebugInternal which);
++
++/* Frames, from the frame where the hook was called (level 0) to the
++   outermost one. Only valid while the hook runs. */
++typedef struct JSDebugFrame {
++    /* identity of the frame, stable while the frame exists: compares frames
++       between two hook calls (stepping). Address of the frame record (on
++       the C stack, or in the state of a generator / async function). */
++    uintptr_t id;
++    JS_BOOL is_bytecode;     /* FALSE: native function, the fields below are 0 */
++    JSAtom module_name;      /* borrowed, JS_ATOM_NULL if unknown */
++    int function_number;
++    /* offset in the bytecode: the instruction about to run at level 0 for a
++       breakpoint, step or 'debugger;'; somewhere inside the throwing
++       instruction for an exception; just after the call instruction for
++       the calling frames (levels > 0). */
++    uint32_t pc;
++    int argument_count;      /* slots of kind JS_DEBUG_SLOT_ARGUMENT */
++    int local_count;         /* slots of kind JS_DEBUG_SLOT_LOCAL */
++    int closure_count;       /* slots of kind JS_DEBUG_SLOT_CLOSURE */
++} JSDebugFrame;
++
++/* Returns 0 and fills 'frame', or -1 if there is no frame at 'level' (or the
++   hook is not running). */
++int JS_DebugGetFrame(JSContext *ctx, int level, JSDebugFrame *frame);
++
++/* The function object of the frame at 'level' (new reference), or
++   JS_UNDEFINED. */
++JSValue JS_DebugGetFrameFunction(JSContext *ctx, int level);
++
++typedef enum JSDebugSlotKind {
++    JS_DEBUG_SLOT_ARGUMENT,  /* argument, by index */
++    JS_DEBUG_SLOT_LOCAL,     /* local variable, by index (var_buf) */
++    JS_DEBUG_SLOT_CLOSURE,   /* variable captured from an enclosing function */
++} JSDebugSlotKind;
++
++/* Value of a slot of the bytecode frame at 'level' (new reference), or
++   JS_EXCEPTION if there is no such frame or slot (no exception thrown).
++   A lexical variable before its declaration gives a value with the tag
++   JS_TAG_UNINITIALIZED (temporal dead zone). */
++JSValue JS_DebugGetSlot(JSContext *ctx, int level, JSDebugSlotKind kind, int index);
++
++/* Replaces the value of a slot (takes ownership of 'value'). Returns 0, or
++   -1 if there is no such frame or slot (value freed, no exception thrown). */
++int JS_DebugSetSlot(JSContext *ctx, int level, JSDebugSlotKind kind, int index, JSValue value);
++
++/* ---------------------------------------------------------------------- */
++/* Debug info of the compiled functions ("sidecar"), for the host compiler.
++
++   When a collector is set, the compiler calls it once per compiled
++   function, children before their parent (the top-level function comes
++   last). The bytecode does not depend on it: the same code is produced
++   with or without collector. Source positions are byte offsets in the
++   compiled source (UTF-8). Everything given to the collector is borrowed
++   and only valid during the call. */
++
++typedef enum JSDebugPositionKind {
++    /* position of an instruction that can throw or call (as in pc2line) */
++    JS_DEBUG_POSITION_EXPRESSION,
++    /* start of a statement, of a 'catch' clause or of a loop test or
++       update: where stepping and breakpoints stop */
++    JS_DEBUG_POSITION_STATEMENT,
++    /* a return instruction (explicit 'return' or end of the function):
++       a stop there shows the returned value */
++    JS_DEBUG_POSITION_RETURN,
++} JSDebugPositionKind;
++
++typedef struct JSDebugPosition {
++    uint32_t pc;          /* bytecode offset of the instruction */
++    uint32_t source_pos;  /* source offset */
++    JSDebugPositionKind kind;
++} JSDebugPosition;
++
++typedef struct JSDebugScope {
++    int parent;               /* index of the enclosing scope, -1 for scope 0 */
++    uint32_t source_start;    /* source range of the scope: [start, end) */
++    uint32_t source_end;
++} JSDebugScope;
++
++#define JS_DEBUG_VARIABLE_LEXICAL   (1 << 0)  /* let, const, class */
++#define JS_DEBUG_VARIABLE_CONST     (1 << 1)
++#define JS_DEBUG_VARIABLE_CAPTURED  (1 << 2)  /* used by an inner function */
++#define JS_DEBUG_VARIABLE_GLOBAL    (1 << 3)  /* closure: a global variable */
++
++typedef struct JSDebugVariable {
++    JSAtom name;   /* internal variables have names like "<ret>" or "this" */
++    int scope;     /* index in 'scopes' (local variables only), else -1 */
++    int flags;     /* JS_DEBUG_VARIABLE_* */
++} JSDebugVariable;
++
++typedef struct JSDebugFunctionInfo {
++    int function_number;
++    JSAtom name;                /* JS_ATOM_NULL if anonymous */
++    uint32_t source_start;      /* source range of the function */
++    uint32_t source_end;
++    uint32_t bytecode_length;
++    /* sorted by pc; several positions may share a pc */
++    const JSDebugPosition *positions;
++    int position_count;
++    /* slot index = index in these arrays (JSDebugSlotKind) */
++    const JSDebugVariable *arguments;
++    int argument_count;
++    const JSDebugVariable *locals;
++    int local_count;
++    const JSDebugVariable *closures;
++    int closure_count;
++    const JSDebugScope *scopes;
++    int scope_count;
++} JSDebugFunctionInfo;
++
++typedef void JSDebugInfoCollector(JSContext *ctx, const JSDebugFunctionInfo *info,
++                                  void *opaque);
++
++/* Sets the collector (NULL: none). */
++void JS_SetDebugInfoCollector(JSRuntime *rt, JSDebugInfoCollector *collector,
++                              void *opaque);
++
++/* Compile warnings: what a program asks of the compiler when it runs, which
++   an engine built without compiler (QJSX_NO_COMPILER: the devices) refuses
++   with "eval is not supported". The handler is called while a source is
++   compiled, with the position of the construct (line and column from 1, as
++   in a SyntaxError).
++
++   The detection is syntactic: a direct call eval(...), and a call or a
++   'new' of the name Function. An indirect use ((0, eval)(x),
++   globalThis.eval, an alias) is not seen; a variable of the program that
++   bears one of these names is reported too. */
++typedef enum {
++    JS_COMPILE_WARNING_EVAL = 1,      /* eval(...) */
++    JS_COMPILE_WARNING_FUNCTION = 2,  /* Function(...), new Function(...) */
++} JSCompileWarningKind;
++
++typedef void JSCompileWarningHandler(JSContext *ctx, JSCompileWarningKind kind,
++                                     int line, int column, void *opaque);
++
++/* Sets the handler (NULL: none). */
++void JS_SetCompileWarningHandler(JSRuntime *rt, JSCompileWarningHandler *handler,
++                                 void *opaque);
++
++#ifdef __cplusplus
++} /* extern "C" */
++#endif
++
++#endif /* QUICKJS_DEBUG_H */
+diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx/quickjs-internal.h
+--- build/qjsx-baseline/quickjs-internal.h	2026-11-11 15:49:05.275405400 +0100
++++ engine/qjsx/quickjs-internal.h	2026-11-11 15:34:49.412510100 +0100
+@@ -30,6 +30,7 @@
+ #include "cutils.h"
+ #include "list.h"
+ #include "quickjs.h"
++#include "quickjs-debug.h"  /* espjs */
+ #include "libregexp.h"
+ #include "libunicode.h"
+ #include "dtoa.h"
+@@ -301,6 +302,28 @@
+ 
+ /* end JS Malloc */
+ 
++/* espjs: state of the debugger support (quickjs-debug.h, core/debug.c) */
++typedef struct JSDebugState {
++    JSDebugHook *hook;           /* NULL: debugging off */
++    void *hook_opaque;
++    BOOL stepping : 8;           /* hook called at statement starts */
++    BOOL report_exceptions : 8;  /* hook called when a value is thrown */
++    /* frame where the running hook was called, NULL outside the hook (no
++       nested hook call while it is set) */
++    struct JSStackFrame *paused_frame;
++    /* last thrown value given to the hook (owned), JS_UNINITIALIZED if none
++       (no JS value is uninitialized, not even 'throw undefined'):
++       the same value unwinding through the calling frames, or rethrown by a
++       'finally' clause, is not reported again */
++    JSValue reported_exception;
++    /* debug info of the compiled functions (compiler/debug-info.c) */
++    JSDebugInfoCollector *info_collector;
++    void *info_opaque;
++    /* compile warnings (compiler/debug-info.c) */
++    JSCompileWarningHandler *warning_handler;
++    void *warning_opaque;
++} JSDebugState;
++
+ struct JSRuntime {
+     JSMallocContext malloc_ctx;
+     const char *rt_info;
+@@ -373,6 +396,7 @@
+     int shape_hash_count; /* number of hashed shapes */
+     JSShape **shape_hash;
+     void *user_opaque;
++    JSDebugState debug; /* espjs */
+ };
+ 
+ struct JSClass {
+@@ -698,10 +722,21 @@
+     JSValue *cpool; /* constant pool (self pointer) */
+     int cpool_count;
+     int closure_var_count;
++    /* espjs: name of the script or module, kept even without debug info
++       (was debug.filename): import.meta, import() and backtraces need it. */
++    JSAtom filename;
++    /* espjs: number of the function in its script, in compilation order
++       (the top-level function has the last number). Serialized. Identifies
++       the function in the debug sidecar and for the debugger. */
++    uint16_t function_number;
++    /* espjs: stops of the debugger (see quickjs-debug.h), bitmaps with one
++       bit per byte of bytecode (bit 'offset & 7' of byte 'offset >> 3'),
++       or NULL if none. Not serialized. */
++    uint8_t *debug_breakpoints;
++    uint8_t *debug_statements;
+     struct {
+         /* debug info, move to separate structure to save memory? */
+-        JSAtom filename;
+-        int source_len; 
++        int source_len;
+         int pc2line_len;
+         uint8_t *pc2line_buf;
+         char *source;
+@@ -1349,7 +1384,10 @@
+     BC_TAG_OBJECT_REFERENCE,
+ } BCTagEnum;
+ 
+-#define BC_VERSION 5
++/* espjs: own value (QuickJS 2026-06-04 uses 5): the format differs
++   (filename always written, function_number), so a bytecode of one is
++   refused by the other instead of being misread. */
++#define BC_VERSION 0x45
+ 
+ #define JS_NEW_CTOR_NO_GLOBAL   (1 << 0) /* don't create a global binding */
+ #define JS_NEW_CTOR_PROTO_CLASS (1 << 1) /* the prototype class is 'class_id' instead of JS_CLASS_OBJECT */
+@@ -1750,6 +1788,18 @@
+     }
+ }
+ 
++/* espjs: TRUE if a frame running 'b' must check the debugger stops before
++   each instruction (debug dispatch table in JS_CallInternal). */
++static inline BOOL js_debug_frame_has_stops(JSRuntime *rt, JSFunctionBytecode *b)
++{
++    BOOL debugging = rt->debug.hook != NULL && rt->debug.paused_frame == NULL;
++    if (likely(!debugging))
++        return FALSE;
++    if (b->debug_breakpoints != NULL)
++        return TRUE;
++    return rt->debug.stepping && b->debug_statements != NULL;
++}
++
+ /* return true if an element can be added to a fast array without further tests */
+ static force_inline BOOL can_extend_fast_array(JSObject *p)
+ {
+diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-opcode.h engine/qjsx/quickjs-opcode.h
+--- build/qjsx-baseline/quickjs-opcode.h	2026-11-11 15:49:05.685200300 +0100
++++ engine/qjsx/quickjs-opcode.h	2026-11-10 20:10:06.813701200 +0100
+@@ -256,6 +256,8 @@
+ DEF(is_undefined_or_null, 1, 1, 1, none)
+ DEF(     private_in, 1, 2, 1, none)
+ DEF(push_bigint_i32, 5, 0, 1, i32)
++/* espjs: 'debugger;' statement, calls the debugger hook if any */
++DEF(       debugger, 1, 0, 0, none)
+ /* must be the last non short and non temporary opcode */
+ DEF(            nop, 1, 0, 0, none)
+ 
+diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.h
+--- build/qjsx-baseline/quickjs.h	2026-11-11 15:49:05.630336400 +0100
++++ engine/qjsx/quickjs.h	2026-11-11 15:34:49.266891400 +0100
+@@ -345,6 +345,14 @@
+ /* allow top-level await in normal script. JS_Eval() returns a
+    promise. Only allowed with JS_EVAL_TYPE_GLOBAL */
+ #define JS_EVAL_FLAG_ASYNC (1 << 7)
++/* espjs: with JS_EVAL_FLAG_COMPILE_ONLY and JS_EVAL_TYPE_MODULE, the
++   imported modules are not loaded (a compiler producing bytecode does not
++   need them). The module must be resolved before it is run. */
++#define JS_EVAL_FLAG_NO_RESOLVE (1 << 8)
++/* espjs: 'import()' is a syntax error, reported at its position. For the
++   programs whose modules must all be known when they are built (espjs
++   build): only static imports are left. */
++#define JS_EVAL_FLAG_NO_DYNAMIC_IMPORT (1 << 9)
+ 
+ typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
+ typedef JSValue JSCFunctionMagic(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic);
+@@ -966,6 +974,14 @@
+ /* return the import.meta object of a module */
+ JSValue JS_GetImportMeta(JSContext *ctx, JSModuleDef *m);
+ JSAtom JS_GetModuleName(JSContext *ctx, JSModuleDef *m);
++/* espjs: the modules a module asks for with 'import' and 'export ... from',
++   as written in its source (not normalized), in source order; the same
++   name may come several times. For a compiler that follows the imports
++   itself (see JS_EVAL_FLAG_NO_RESOLVE).
++   JS_GetModuleRequestName returns JS_ATOM_NULL if 'index' is out of range;
++   the atom must be freed. */
++int JS_GetModuleRequestCount(JSModuleDef *m);
++JSAtom JS_GetModuleRequestName(JSContext *ctx, JSModuleDef *m, int index);
+ JSValue JS_GetModuleNamespace(JSContext *ctx, JSModuleDef *m);
+ 
+ /* JS Job support */
+@@ -994,6 +1010,10 @@
+ #define JS_READ_OBJ_REFERENCE (1 << 3) /* allow object references */
+ JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
+                       int flags);
++/* espjs: version of the bytecode this engine writes and reads (BC_VERSION):
++   JS_ReadObject() refuses any other. For a loader that wants to refuse a
++   program compiled for another engine before it loads anything. */
++int JS_GetBytecodeVersion(void);
+ /* instantiate and evaluate a bytecode function. Only used when
+    reading a script or module with JS_ReadObject() */
+ JSValue JS_EvalFunction(JSContext *ctx, JSValue fun_obj);

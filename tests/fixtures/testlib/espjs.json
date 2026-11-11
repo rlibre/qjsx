@@ -1,0 +1,9 @@
+{
+    "name": "testlib",
+    "version": "1.2.3",
+    "modules": {
+        "greet": "src/greet.js",
+        "words": "src/words.js",
+        "unused": "src/unused.js"
+    }
+}

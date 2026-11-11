@@ -1,0 +1,23 @@
+# espjs on every ESP32 board: what does not depend on the board. Each board
+# adds its own boards/<board>/sdkconfig.board (chip, flash size, partition
+# table, PSRAM), read after this file (CMakeLists.txt, SDKCONFIG_DEFAULTS).
+
+# a custom partition table, chosen by the board among partitions/
+CONFIG_PARTITION_TABLE_CUSTOM=y
+
+# console on UART0 (the boards' USB-serial bridge), fast enough for
+# deployments: the baud rate can only be set in "custom" mode (ESP-IDF v6); no
+# secondary console on a native USB
+CONFIG_ESP_CONSOLE_UART_CUSTOM=y
+CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# speed
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_FREERTOS_HZ=1000
+
+# our C++: no exceptions, no RTTI (the defaults, stated)
+CONFIG_COMPILER_CXX_EXCEPTIONS=n
+CONFIG_COMPILER_CXX_RTTI=n

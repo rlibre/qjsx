@@ -1,0 +1,13 @@
+# Partition table of the 8 MB ESP32 boards, OTA reserved (as 16MB.csv).
+#   otadata        which of ota_0 / ota_1 boots (idf.py flash writes ota_0)
+#   ota_0, ota_1   the firmware, 2.5 MB each (it takes about 0.7 MB)
+#   packages       the installed .qjspkg: two slots of 512 KB (board_esp32.cpp)
+#   data           the program's files (fs), later
+# Name,     Type, SubType, Offset,    Size
+nvs,        data, nvs,     0x9000,    0x6000
+otadata,    data, ota,     0xf000,    0x2000
+phy_init,   data, phy,     0x11000,   0x1000
+ota_0,      app,  ota_0,   0x20000,   0x280000
+ota_1,      app,  ota_1,   0x2a0000,  0x280000
+packages,   data, 0x40,    0x520000,  0x100000
+data,       data, spiffs,  0x620000,  0x1e0000
