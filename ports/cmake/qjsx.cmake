@@ -54,7 +54,6 @@ set(QJSX_INCLUDE_DIRS
 
 set(QJSX_DEFINES
     "CONFIG_VERSION=\"${QJSX_QUICKJS_VERSION}\""
-    "QJSX_NO_COMPILER"
     "QJSX_NO_COMPILER")
 
 # as in premake5.lua (qjsx-engine-target); the engine is upstream code: its warnings

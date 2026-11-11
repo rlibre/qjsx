@@ -20,6 +20,8 @@ import { loadProject, PROJECT_FILE } from "qjsx:project";
 import { Device } from "qjsx:device";
 import { upload, latestPackage } from "qjsx:deploy";
 import { KIND, KEY, STREAM, kindName } from "qjsx:protocol";
+import { PackageIndex } from "qjsx:debuginfo";
+import { CdpServer } from "qjsx:cdp";
 
 const HELP = `usage: qjsx <command> [arguments]
 
@@ -35,6 +37,10 @@ commands:
   monitor [options]                            show the output of the program on a device
       --target, --token, --until-exit
   device <info | run | stop | reset> [--target <target>] [--token <token>]
+  debug [options]                              debugger server for VS Code (CDP, "node" attach)
+      --target, --token
+      --port <port>       default: "debugPort" of qjsx.json (9339)
+      --host <address>    default: 127.0.0.1
   targets                                      list the serial ports
   agent [--host h] [--port p] [--storage dir] [--token t]
                                                desktop device agent (stand-in for an ESP)
@@ -238,7 +244,52 @@ function mklibCommand(args) {
     return 0;
 }
 
+// qjsx debug: the debugger server (CDP) of the project's device, for VS Code.
+// Runs until Ctrl+C or until the device goes away.
+async function debugCommand(args) {
+    const { options, positional } = parseArguments(args, { values: ["target", "token", "port", "host"] });
+    const project = currentProject();
+    if (project === undefined || positional.length > 0) {
+        throw new Error(`usage: qjsx debug [--target <target>] [--port <port>], in a project folder (${PROJECT_FILE})`);
+    }
+
+    // the packages of the project, to find the one the device runs
+    const output = join(project.directory, project.output);
+    const index = new PackageIndex([output], { sourceRoot: project.directory });
+
+    // the device; its program output goes through the server
+    let server = null;
+    let deviceClosed;
+    const closed = new Promise(resolve => {
+        deviceClosed = resolve;
+    });
+    const handlers = {
+        onLog: (stream, text) => server?.output(stream, text),
+        onClose: () => deviceClosed(),
+    };
+    const device = await openDevice(targetOf(options, project), options.token, handlers);
+
+    // the server
+    const host = options.host ?? "127.0.0.1";
+    const port = Number(options.port ?? project.debugPort);
+    server = new CdpServer({
+        device, index, host, port,
+        title: `qjsx ${project.name}`,
+        sourceCache: join(output, "debug-src"),
+        onStatus: status,
+    });
+    server.start();
+    status(`debugger server on ${host}:${server.port()} (VS Code: "node" attach to this port)`);
+
+    // until the device goes away (or Ctrl+C)
+    await closed;
+    status("device connection closed");
+    await server.close();
+    return 1;
+}
+
 const COMMANDS = {
+    debug: debugCommand,
     build: buildCommand,
     mklib: mklibCommand,
     deploy: deployCommand,

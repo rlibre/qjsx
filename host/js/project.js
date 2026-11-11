@@ -14,6 +14,7 @@
 //     "output": "build/packages",     where packages are written
 //     "keep": 10,                     number of packages kept per project
 //     "target": "serial:COM3",        default device (deploy, debug)
+//     "debugPort": 9339,              port of the debugger server (qjsx debug)
 //     "env": { "LOG": "debug" }       process.env of the program on a device
 //                                     (strings only; copied into the manifest)
 //     "libraries": ["libs/sensors.qjslib"]
@@ -44,6 +45,7 @@ const DEFAULTS = {
     output: "build/packages",
     keep: 10,
     target: undefined,
+    debugPort: 9339,
     env: undefined,
     libraries: [],
     version: undefined,
@@ -58,6 +60,7 @@ const TYPES = {
     output: "string",
     keep: "number",
     target: "string",
+    debugPort: "number",
     env: "object",
     libraries: "array",
     version: "string",

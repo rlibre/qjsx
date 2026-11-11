@@ -418,9 +418,12 @@ Existing entry points useful to the debugger (lines of the original `quickjs.c`,
 >   at each `SCRIPT_LOADED` / `STARTED`, stack with names and lines, variables by name,
 >   evaluation as in 3.5, steps). Lines and columns from 0, as in CDP. Tested by
 >   `tests/debuginfo.test.js` and `tests/proxy.test.js` (desktop agent);
-> - **not done**: the CDP server, `qjsx debug`, VS Code, the
->   "uncaught" prediction (3.4), conditional breakpoints (3.6), waiting for the debugger at
->   startup (3.8).
+> - **done, on the host**: the CDP server (2026-11-11): `qjsx debug`, `host/js/websocket.js`
+>   (HTTP + WebSocket) and `host/js/cdp.js` (3.9). Tested by `tests/websocket.test.js` and
+>   `tests/cdp.test.js` (a client that plays js-debug's part; desktop agent and ESP32-S3).
+>   Tried in VS Code itself on 2026-11-11 (desktop agent);
+> - **not done**: the "uncaught" prediction (3.4), conditional breakpoints and logpoints
+>   (3.6: refused by the CDP server until then), waiting for the debugger at startup (3.8).
 
 ### 3.1 Architecture
 
@@ -548,6 +551,61 @@ Conditions, logpoints and hit counts are compiled by the proxy and
 - The setting is remembered by the agent for the next startup.
 - It has a timeout.
 - It is never used on production devices.
+
+### 3.9 The CDP server (`qjsx debug`)
+
+> **Status: done on 2026-11-11** (`host/js/websocket.js`, `host/js/cdp.js`, command in
+> `host/js/cli.js`), tested by a client that plays js-debug's part; not tried in VS Code
+> itself yet.
+
+`qjsx debug [--target t] [--port p] [--host a]`, in a project folder, opens the device and
+listens (default 127.0.0.1:9339, `debugPort` of `qjsx.json`; not Node's 9229, which a Node
+debugging session may use at the same time). VS Code attaches to it as to a Node.js
+inspector (configuration in 6.5).
+
+What js-debug does, read in its sources (main branch, 2026-11-11):
+
+- it asks `GET /json/version` and `GET /json/list` and takes `webSocketDebuggerUrl` (or
+  `websocketAddress` from the configuration), then opens the WebSocket;
+- an error answer to a command is almost never fatal: the commands the server does not
+  serve get "not found" (`-32601`);
+- scripts are expected as `file:///` URLs; with a `hash`, js-debug would compare the local
+  file and show a read-only copy if they differ: no hash is sent;
+- breakpoints come as `Debugger.setBreakpointByUrl` with a JS `urlRegex`, matched against the
+  URL of every module; the answer gives `breakpointId` and `locations`, and
+  `Debugger.breakpointResolved` follows for the modules loaded later;
+- destroying the default execution context closes its session.
+
+What the server does:
+
+- **One client at a time**; a new one replaces the previous one. The device is attached
+  (`DEBUG_ATTACH`) when the client first needs it, and detached when it leaves (stops
+  removed, a paused program resumes).
+- **The session survives the end of the program**: the default context is never destroyed.
+  A new run (redeploy, device restart) clears and recreates the context, announces its
+  scripts again and binds the breakpoints in the new package.
+- **Scripts**: a program module is announced with the URL of its file in the project; a
+  library module with a copy of its source written in `<output>/debug-src/` (a URL without
+  scheme would be taken by js-debug for a Node internal, and skipped).
+- **Identifiers**: `scriptId` per module and per run; `callFrameId` and scope `objectId`
+  carry the number of the pause, so that those of a pause that is over are refused;
+  `objectId` "h:<handle>" for an object of the device.
+- **Commands**: `Runtime.enable` (context 1, `isDefault`), `Debugger.enable`,
+  `setBreakpointByUrl` / `setBreakpoint` / `removeBreakpoint` / `getPossibleBreakpoints` /
+  `getScriptSource`, `pause` / `resume` / `stepInto` / `stepOver` / `stepOut`,
+  `setPauseOnExceptions` ("caught" counts as "all"), `evaluateOnCallFrame`,
+  `Runtime.evaluate`, `Runtime.callFunctionOn` (compiled on the host, loaded once per source
+  text in the persistent group: js-debug's helpers), `Runtime.getProperties` (scopes and
+  objects; getters never called), `Runtime.releaseObject`, `Debugger.setVariableValue`.
+  `returnByValue` goes through `JSON.stringify` on the device. Accepted and ignored:
+  `Profiler.enable`, `NodeWorker.enable`, `setAsyncCallStackDepth`, `setBlackboxPatterns`,
+  `setBreakpointsActive`, `runIfWaitingForDebugger`, the `disable` commands.
+- **A breakpoint with a condition, and a logpoint, are refused** until 3.6 is done (VS Code
+  shows them unbound).
+- **Program output** goes to the debug console as `Runtime.consoleAPICalled`, one message
+  per line; the end of the program as an "info" message.
+- **Not done**: previews of objects, `this` of the frames (always `undefined`), async stack
+  traces, the "global" scope.
 
 ---
 
@@ -1249,10 +1307,28 @@ A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with
 
 ### 6.5 VS Code integration
 
-> **Status: designed, not implemented.**
+> **Status: the attach works through `qjsx debug` (3.9), not tried in VS Code itself yet.
+> `.d.ts` and `--wait-debugger` not done.**
 
-- "attach" configuration. The js-debug target type to use (node or chrome) is
-  **to verify**.
+- "attach" configuration of type **`node`** (not `chrome`: js-debug answers the `Target.*`
+  commands itself for a Node target), in the `.vscode/launch.json` of the project, with
+  `qjsx debug` running in a terminal:
+
+  ```json
+  {
+    "type": "node",
+    "request": "attach",
+    "name": "qjsx: attach",
+    "address": "127.0.0.1",
+    "port": 9339,
+    "autoAttachChildProcesses": false,
+    "attachExistingChildren": false,
+    "skipFiles": [],
+    "sourceMaps": false,
+    "enableContentValidation": false
+  }
+  ```
+
 - The scripts are announced with `file:///` URLs to the local sources.
 - `qjsx build` writes the `.d.ts` of the native modules.
 - The proxy keeps the breakpoints and re-applies them on `SCRIPT_LOADED` and after a device

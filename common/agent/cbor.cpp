@@ -30,6 +30,12 @@ Writer::~Writer() {
  * Appends raw bytes at the end of the buffer, growing it if needed.
  */
 void Writer::append(const uint8_t *data, size_t size) {
+    // nothing to append (an empty writer gives nullptr: memcpy must not see
+    // it, even for 0 bytes)
+    if (size == 0) {
+        return;
+    }
+
     // no room left: grow the buffer, 64 bytes first, then doubled until the
     // new bytes fit
     if (_size + size > _capacity) {
@@ -286,6 +292,12 @@ bool Reader::integer(int64_t *value) {
     int major = 0;
     uint64_t argument = 0;
     if (!head(&major, &argument) || (major != 0 && major != 1)) {
+        return false;
+    }
+
+    // beyond the int64_t range (a value above INT64_MAX, or below
+    // INT64_MIN for a negative one): refused, never wrapped around
+    if (argument > (uint64_t)INT64_MAX) {
         return false;
     }
 

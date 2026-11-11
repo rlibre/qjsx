@@ -5,6 +5,44 @@ one comes first.
 
 ## 2026-11-11
 
+### `onData` callback freed while it runs (`net`, `serial`)
+
+- **Defect.** The `net` and `serial` modules called the `onData` callback straight from
+  their member. A callback that replaces itself (`connection.onData(...)` inside the
+  callback, as the WebSocket handshake does when the socket takes the connection over)
+  freed the running function: the interpreter then read a freed closure (segmentation
+  fault, found by `tests/websocket.test.js`).
+- **Fix.** Both call through a local copy of the callback, which keeps the function alive
+  until the call returns, as `onClose` already did (`host/modules/net.cpp`,
+  `host/modules/serial_module.cpp`).
+- **Verified.** `tests/websocket.test.js`, tests in Debug.
+
+### Minor defects with a local fix
+
+Fixed together, after the review of `new-device.md` (user: "the small cleanups"):
+
+- **Desktop `startLinks()`**: printed nothing when the accept thread could not start; it
+  now says so on stderr, as `board.h` asks.
+- **ESP32 `writeConsole()`**: compares with `rt::OUTPUT_STDERR` instead of the literal `2`.
+- **`manifestMain`**: a "main" that `JS_ToCString` cannot convert (out of JS memory) no
+  longer says "manifest.json has no main".
+- **POSIX `serial`**: `tcgetattr` is checked; one stop bit and no RTS/CTS are set
+  explicitly after `cfmakeraw` (`CRTSCTS` where the system has it); a read or a write
+  interrupted by a signal (`EINTR`) goes on instead of closing the port. Not compiled (no
+  POSIX build here).
+- **Windows `listPorts`**: a registry value too long for the buffers (`ERROR_MORE_DATA`) is
+  skipped; the list goes on.
+- **CBOR `Reader::integer`**: an integer outside the `int64_t` range is refused instead of
+  wrapping around to a negative number.
+- **Agent `Fields`**: a payload with more than 16 pairs is malformed (the request is
+  ignored, like any malformed message) instead of being half read.
+- **CBOR `Writer::append`**: appending 0 bytes no longer calls `memcpy` with the null buffer
+  of an empty writer.
+- Also: stale header comments of `board.h`, `platform.h`, `runner.h` and `agent.h`
+  (`Storage` threads, who gives the `Controller`), and `QJSX_NO_COMPILER` listed twice in
+  `ports/cmake/qjsx.cmake`.
+- **Verified**: tests in Debug on the PC. Not built for the ESP32 yet.
+
 ### Step over / step out stopping in unrelated code
 
 - **Defect.** The debugger stub compared frames by the address of their `JSStackFrame` and by

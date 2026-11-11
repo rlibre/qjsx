@@ -74,6 +74,29 @@ The same program also runs on the PC, without a board:
 qjsx run src/main.js
 ```
 
+To debug it in VS Code, start the debugger server of the project:
+
+```bash
+qjsx debug --target serial:COM3@921600
+```
+
+then attach VS Code to it, with this configuration in `.vscode/launch.json`:
+
+```json
+{
+  "type": "node",
+  "request": "attach",
+  "name": "qjsx: attach",
+  "address": "127.0.0.1",
+  "port": 9339,
+  "autoAttachChildProcesses": false,
+  "attachExistingChildren": false,
+  "skipFiles": [],
+  "sourceMaps": false,
+  "enableContentValidation": false
+}
+```
+
 ## What is inside
 
 - **`qjsx`, a command-line tool**: a single executable to build, send, start, stop and watch a
@@ -100,7 +123,7 @@ engine instead of crashing.
 | Sending and running a program over the serial port | works |
 | Libraries (`.qjslib`) | works |
 | Debugger on the board | works |
-| Debugger in VS Code | to do |
+| Debugger in VS Code (`qjsx debug`) | works (conditional breakpoints and logpoints to do) |
 | Hardware modules (GPIO, I2C, SPI, WiFi…) | to do |
 | Files on the board | to do |
 | Native USB link, WiFi link | to do |

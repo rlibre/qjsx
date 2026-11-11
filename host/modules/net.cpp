@@ -382,10 +382,13 @@ private:
      */
     static void handle(void *opaque, const rt::Message *message) {
         // MESSAGE_DATA: onData with a copy of the block (the loop frees the
-        // block after this call)
+        // block after this call). Called through a local copy of the
+        // callback: the callback may replace itself (connection.onData(...)),
+        // which would free the function while it runs
         Connection *connection = (Connection *)opaque;
         if (message->kind == MESSAGE_DATA) {
-            connection->_dataCallback(js::Buffer::copy(message->data, message->size));
+            js::Function callback = connection->_dataCallback;
+            callback(js::Buffer::copy(message->data, message->size));
             return;
         }
 

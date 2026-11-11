@@ -68,6 +68,7 @@ export class DebugSession {
         this.nextBreakpointId = 1;
         this.appliedStops = new Map();     // module -> Set of the function numbers with breakpoints on the device
         this.paused = null;                // { reason, frames } while the program is paused
+        this.loadedFunctions = new Map();  // callFunction(): source -> handle of the loaded function (this run)
 
         // device events: handled in order, then passed on to the previous handler
         this.events = Promise.resolve();
@@ -160,6 +161,16 @@ export class DebugSession {
 
         this.breakpoints.delete(id);
         await this.applyBreakpoints(breakpoint.module);
+    }
+
+    // { module, location } of a kept breakpoint ('location' null while it is
+    // not resolved), or undefined for an unknown id.
+    breakpointLocation(id) {
+        const breakpoint = this.breakpoints.get(id);
+        if (breakpoint === undefined) {
+            return undefined;
+        }
+        return { module: breakpoint.module, location: breakpoint.location };
     }
 
     // Finds where a breakpoint goes in the current package. False if its
@@ -287,6 +298,7 @@ export class DebugSession {
             // a new run: nothing loaded yet, maybe another package
             this.loadedModules.clear();
             this.appliedStops.clear();
+            this.loadedFunctions.clear();
             this.usePackage(payload.get(KEY.BUILD_ID));
             this.handlers.onStarted?.(this.package, this.buildId);
             break;
@@ -294,6 +306,7 @@ export class DebugSession {
         case KIND.EXITED: {
             this.loadedModules.clear();
             this.appliedStops.clear();
+            this.loadedFunctions.clear();
             this.paused = null;
             this.handlers.onExited?.(payload.get(KEY.CODE));
             break;
@@ -460,6 +473,12 @@ export class DebugSession {
         return { properties, internals };
     }
 
+    // Frees an object of the device kept by its handle (no-op for an unknown
+    // one).
+    async release(handle) {
+        await this.device.request(KIND.RELEASE, { [KEY.HANDLE]: handle });
+    }
+
     // ### Evaluation ##########################################################
 
     // Evaluates an expression on the device: { value } or { exception }.
@@ -469,7 +488,9 @@ export class DebugSession {
     // with their values and 'this'. The parameters are copies: an assignment
     // does not change the variable of the program (setVariable does).
     // Not paused: in the global scope.
-    async evaluate(expression, { level = 0 } = {}) {
+    // 'returnByValue': the result comes back as a plain JS value (through
+    // JSON on the device: { type, value }), not as a handle.
+    async evaluate(expression, { level = 0, returnByValue = false } = {}) {
         const isPaused = this.paused !== null;
         const group = isPaused ? GROUP.PAUSE : GROUP.CONSOLE;
 
@@ -499,7 +520,8 @@ export class DebugSession {
 
         // compile the wrapper here: a syntax error never reaches the device
         // (the line breaks keep a trailing '//' comment out of the code)
-        const source = `(function (${names.join(", ")}) {\nreturn (${expression}\n);\n})`;
+        const result = returnByValue ? `JSON.stringify((${expression}\n))` : `(${expression}\n)`;
+        const source = `(function (${names.join(", ")}) {\nreturn ${result};\n})`;
         let bytecode;
         try {
             bytecode = compile(source, EVALUATION_NAME, { module: false, strip: "all" }).bytecode;
@@ -509,8 +531,46 @@ export class DebugSession {
 
         // load it, then call it with the values
         const loaded = (await this.device.request(KIND.LOAD_FUNCTION, { [KEY.DATA]: bytecode, [KEY.GROUP]: group })).get(KEY.VALUE);
+        const answer = await this.callLoaded(loaded[1], thisValue, argumentValues, group);
+        return returnByValue ? byValue(answer) : answer;
+    }
+
+    // Calls a function given by its source text (a function expression, as
+    // in CDP's Runtime.callFunctionOn) on the device: { value } or
+    // { exception }. 'thisValue' and 'args': values given by the session, or
+    // primitives. The function is compiled and loaded once per source text,
+    // and kept (persistent group) until the run ends. 'returnByValue': as in
+    // evaluate().
+    async callFunction(declaration, { thisValue, args = [], returnByValue = false } = {}) {
+        // the function on the device: loaded before, or compiled and loaded now
+        const cacheKey = `${returnByValue ? "json" : "value"}:${declaration}`;
+        let handle = this.loadedFunctions.get(cacheKey);
+        if (handle === undefined) {
+            const called = `(${declaration}\n).apply(this, arguments)`;
+            const result = returnByValue ? `JSON.stringify(${called})` : called;
+            let bytecode;
+            try {
+                bytecode = compile(`(function () {\nreturn ${result};\n})`, EVALUATION_NAME, { module: false, strip: "all" }).bytecode;
+            } catch (error) {
+                return { exception: localError(error) };
+            }
+
+            const loaded = await this.device.request(KIND.LOAD_FUNCTION, { [KEY.DATA]: bytecode, [KEY.GROUP]: GROUP.PERSISTENT });
+            handle = loaded.get(KEY.VALUE)[1];
+            this.loadedFunctions.set(cacheKey, handle);
+        }
+
+        // call it
+        const group = this.paused !== null ? GROUP.PAUSE : GROUP.CONSOLE;
+        const answer = await this.callLoaded(handle, encodeValue(thisValue), args.map(encodeValue), group);
+        return returnByValue ? byValue(answer) : answer;
+    }
+
+    // CALL of a function loaded on the device: { value } or { exception },
+    // decoded.
+    async callLoaded(handle, thisValue, argumentValues, group) {
         const answer = await this.device.request(KIND.CALL, {
-            [KEY.FUNCTION]: [VALUE.HANDLE, loaded[1]],
+            [KEY.FUNCTION]: [VALUE.HANDLE, handle],
             [KEY.THIS]: thisValue,
             [KEY.ARGUMENTS]: argumentValues,
             [KEY.GROUP]: group,
@@ -583,6 +643,24 @@ export function decodeValue(raw) {
 function objectKindName(kind) {
     const name = Object.keys(OBJECT_KIND).find(key => OBJECT_KIND[key] === kind);
     return name?.toLowerCase() ?? "unknown";
+}
+
+// The answer of a call made with JSON.stringify around the result, back to
+// a plain value: { value: { type, value } }. An exception stays as it is.
+function byValue(answer) {
+    if (answer.exception !== undefined) {
+        return answer;
+    }
+
+    // JSON.stringify gives undefined for undefined and functions
+    const text = answer.value.value;
+    if (answer.value.type !== "string") {
+        return { value: { type: "undefined", value: undefined } };
+    }
+
+    const parsed = JSON.parse(text);
+    const type = parsed === null ? "null" : typeof parsed;
+    return { value: { type, value: parsed } };
 }
 
 function isUninitialized(raw) {

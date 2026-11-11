@@ -15,6 +15,7 @@
 #include "board_esp32.h"
 #include "agent.h"
 #include "memory.h"
+#include "modules.h"
 #include "platform.h"
 
 #include <stdio.h>
@@ -482,7 +483,7 @@ bool startLinks(agent::Agent *agent) {
  * open.
  */
 void writeConsole(int stream, const char *text, size_t length) {
-    FILE *out = stream == 2 ? stderr : stdout;
+    FILE *out = stream == rt::OUTPUT_STDERR ? stderr : stdout;
     fwrite(text, 1, length, out);
     fflush(out);
 }

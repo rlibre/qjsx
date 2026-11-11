@@ -7,9 +7,9 @@
 
 // Device agent: the part of the firmware that talks with the host tool
 // (deploy, run, stop, console; the debugger requests go to the debugger
-// stub, common/agent/debugger.h). Platform
-// independent: the platform gives a Link (serial or TCP), a Storage (flash
-// partition on the ESP, files on the desktop) and a Controller (starts and
+// stub, common/agent/debugger.h). Board independent: the board gives a Link
+// (serial or TCP) and a Storage (flash partition on the ESP, files on the
+// desktop); the runner of agent::runDevice() is the Controller (starts and
 // stops the JS program).
 //
 // Threads: receive() is called by the transport thread; sendLog(),
@@ -28,7 +28,7 @@ namespace agent {
 
 class Debugger;
 
-// Connection to the host (serial port or TCP socket), given by the platform.
+// Connection to the host (serial port or TCP socket), given by the board.
 class Link {
 public:
     /**
@@ -44,7 +44,10 @@ public:
 };
 
 // Where packages are stored (flash partition on the ESP, files on the
-// desktop). Called on the transport thread only, one upload at a time.
+// desktop), given by the board. The upload methods are called on the
+// transport thread, one upload at a time; installed() also on the JS thread
+// (the runner, at boot and at each run): the implementation protects what
+// they share.
 class Storage {
 public:
     /**
@@ -81,7 +84,8 @@ public:
     virtual bool installed(char *buildId, size_t buildIdSize, size_t *packageSize) = 0;
 };
 
-// Starts and stops the JS program, given by the platform.
+// Starts and stops the JS program: the runner of agent::runDevice()
+// (common/agent/runner.cpp), the same on every board.
 class Controller {
 public:
     /**

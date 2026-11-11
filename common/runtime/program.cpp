@@ -151,15 +151,19 @@ JSValue readManifest(JSContext *ctx, const package::Reader *reader) {
  * after printing why.
  */
 char *manifestMain(JSContext *ctx, JSValueConst manifest) {
-    // read "main" as a C string (nullptr if it is not a string)
+    // read "main" as a C string (nullptr if it is not a string, or if the
+    // conversion fails: out of JS memory)
     JSValue main = JS_GetPropertyStr(ctx, manifest, "main");
-    const char *mainName = JS_IsString(main) ? JS_ToCString(ctx, main) : nullptr;
+    bool isString = JS_IsString(main);
+    const char *mainName = isString ? JS_ToCString(ctx, main) : nullptr;
 
-    // copy it out of the JS value, or say it is missing
+    // copy it out of the JS value, or say why there is none
     char *result = nullptr;
     if (mainName != nullptr) {
         result = (char *)memory::allocate(strlen(mainName) + 1);
         strcpy(result, mainName);
+    } else if (isString) {
+        fprintf(stderr, "qjsx: cannot read \"main\" of manifest.json (out of memory)\n");
     } else {
         fprintf(stderr, "qjsx: manifest.json has no \"main\"\n");
     }

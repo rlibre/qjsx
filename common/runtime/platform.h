@@ -6,8 +6,10 @@
  */
 
 // Platform layer of the runtime: the few system services the event loop
-// needs. One implementation per platform (platform_host.cpp for Windows,
-// macOS and Linux; the ESP32 one will use FreeRTOS).
+// needs. One implementation per platform: host/platform/platform_host.cpp
+// (Windows, macOS and Linux); on FreeRTOS, ports/freertos/platform_freertos.cpp
+// (locks, signal, sleep, yield) plus the port's own part (clock, fatal stop,
+// tasks: ports/esp32/main/platform_esp32.cpp).
 #pragma once
 
 #include <stddef.h>

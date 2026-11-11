@@ -8,7 +8,7 @@
 // What the common code needs from a board: the chip and its wiring (memory,
 // flash, links to the host). One implementation per port:
 //   host/platform/board_host.cpp     the desktop agent ("qjsx agent")
-//   ports/esp32/...                  ESP32-S3 (to come)
+//   ports/esp32/main/board_esp32.cpp every ESP32 board (boards/<board>/ describes it)
 //   ports/rp2350/...                 RP2350 (to come)
 // The operating system services (threads, locks, time) are in platform.h.
 #pragma once

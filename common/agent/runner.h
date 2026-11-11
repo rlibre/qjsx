@@ -8,8 +8,9 @@
 // The device side, the same on every board: the agent (protocol), the
 // debugger stub and the runner of the installed package, around board.h.
 //
-//   board::configure...()        the port prepares its board
-//   agent::runDevice(identity)   never returns
+//   (the port prepares its board: ESP-IDF before app_main, the desktop with
+//   board::configureHost())
+//   agent::runDevice(identity)   returns only if the links cannot start
 //
 // Threads: the calling thread becomes the JS thread (it runs the packages);
 // the links of the board call the agent from their own threads.

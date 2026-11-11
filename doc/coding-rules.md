@@ -176,6 +176,32 @@ private:
 
 ## 3. Comments
 
+### File header
+
+Every source file of the project starts with the same header: the name of the project
+drawn in ASCII, the author, the copyright holder and the license (the holder written
+exactly as in `LICENSE`). The comment that describes the file comes after it, separated
+by a blank line. In C, C++ and JS:
+
+```c
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+```
+
+- A block comment, never `//` lines: in C and C++ a `//` line that ends with `\` goes on
+  to the next line (GCC `-Wcomment`, an error with `-Werror`), and the drawing has such
+  lines. The drawing never contains `*/`.
+- Shell, CMake, Perl, PowerShell, `sdkconfig` and partition CSV files: the same lines
+  prefixed with `# ` (after the `#!` line of a script); Lua: `-- `.
+- Not in the files that come from elsewhere: the original notice of their authors stays
+  (in qjsx: the QuickJS files of `engine/`, except the files written for qjsx). Not in
+  JSON (no comments) nor in the documentation.
+- The `SPDX-License-Identifier` line lets the license tools read the license.
+
 ### A comment on every function
 
 Every function and every method has a `/** ... */` block right above it:

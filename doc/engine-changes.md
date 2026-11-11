@@ -471,8 +471,11 @@ is an async function) now use `js_class_has_bytecode()`, as the backtraces do.
 **Tests.** `tests/debugger.test.js` (72 checks), fixture `tests/fixtures/debuggee`: step over
 the end of `first()` reaches the next statement of the module, not `second()`; step over an
 `await` while a timer fires goes on in the same async function; step out of an async function
-resumed by a promise job stops in the next code run. Run in Debug only on 2026-11-11 (user);
-the original QuickJS tests and the microbench are left for the final test.
+resumed by a promise job stops in the next code run. Final test of 2026-11-11: Release and
+Debug, the original QuickJS tests, and on the ESP32-S3 (72/72). Microbench (3 passes per
+version, totals stable within 0.2 %): −3.3 % against the original, `func_call` −8.5 %: the
+store added on the call path costs nothing measurable (table:
+`C:\temp\qjs-engine-test\bench-table-activation.md`).
 
 ## Limits and items not done
 
@@ -516,6 +519,7 @@ Measurements of 2026-11-10:
 | split only (before these changes, quickjs-split-perf.md) | — | — | −3.8% |
 | + A, B, C and two dispatch tables | 4,645.6 | 4,455.6 | −4.1% |
 | + positions (E), final version | 4,665.4 | 4,546.3 | −2.6% |
+| + activation number of the frames (L), 2026-11-11 | 4,637.7 | 4,485.8 | −3.3% |
 
 - The final version costs about 2% more than the version without markers. Part of this
   difference stays within the noise from one pass to the next: `regexp_replace`, purely in C,

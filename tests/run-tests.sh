@@ -37,6 +37,7 @@ check "runtime library" "$BIN/qjsx" run tests/runtime.test.js
 check "tool modules" "$BIN/qjsx" run tests/tools.test.js
 check "protocol (CBOR, COBS, frames)" "$BIN/qjsx" run tests/protocol.test.js
 check "debug info (lines, breakpoints, scopes)" "$BIN/qjsx" run tests/debuginfo.test.js
+check "websocket (sha1, base64, frames, server)" "$BIN/qjsx" run tests/websocket.test.js
 check "net and serial modules" "$BIN/qjsx" run tests/net.test.js
 check "process.exit: qjsx run returns its code, nothing runs after it"     bash -c "out=\$('$BIN/qjsx' run tests/fixtures/exit-async.js 2>&1); test \$? -eq 6 && test -z \"\$out\""
 
@@ -173,6 +174,7 @@ check "PC: process.argv[0] and argv[1] have '/' separators" bash -c "grep '^argv
 # --- debugger stub, through the agent protocol
 check "debugger stub (breakpoints, steps, pause, values)" "$BIN/qjsx" run tests/debugger.test.js "$AGENT_TARGET"
 check "debugger proxy core (lines, names, evaluation)" "$BIN/qjsx" run tests/proxy.test.js "$AGENT_TARGET"
+check "debugger CDP server (as js-debug)" "$BIN/qjsx" run tests/cdp.test.js "$AGENT_TARGET"
 
 kill "$AGENT_PID" 2> /dev/null
 wait "$AGENT_PID" 2> /dev/null

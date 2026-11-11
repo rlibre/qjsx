@@ -284,6 +284,28 @@ export class ScriptInfo {
         return { number: best.info.number, pc: pcs[0], pcs, line: found.line, column: found.column };
     }
 
+    // Where a breakpoint can be in a range of the source: the stop positions
+    // (statement or return) from (startLine, startColumn) included to
+    // (endLine, endColumn) excluded, as [{ line, column }] in source order,
+    // each position once. No end: to the end of the source.
+    breakableLocations(startLine, startColumn, endLine, endColumn) {
+        const start = this.lines.offset(startLine, startColumn);
+        const end = endLine === undefined ? this.lines.byteLength + 1 : this.lines.offset(endLine, endColumn);
+
+        // the offsets of every stop position in the range, once each
+        const offsets = new Set();
+        for (const info of this.functions) {
+            for (const position of positionsOf(info)) {
+                const inRange = position.offset >= start && position.offset < end;
+                if (position.kind !== POSITION_EXPRESSION && inRange) {
+                    offsets.add(position.offset);
+                }
+            }
+        }
+
+        return [...offsets].sort((a, b) => a - b).map(offset => this.lines.position(offset));
+    }
+
     // Stops of SET_STOPS STATEMENTS: every stop position of every function.
     statementStops() {
         return this.functions.map(info => ({
@@ -313,18 +335,24 @@ export class ScriptInfo {
             .filter(({ scope }) => scope.start <= offset && offset < scope.end)
             .sort((a, b) => (b.scope.start - a.scope.start) || (a.scope.end - b.scope.end));
 
+        // the scope of the body: QuickJS gives the body of a function its own
+        // scope, a child of scope 0 ending with the function; its variables
+        // are the function's own ("local", as in V8), not a block
+        const bodyScope = info.scopes.findIndex(scope => scope.parent === 0 && scope.end === info.end);
+        const isFunctionScope = index => index === 0 || index === bodyScope;
+
         // a block scope per containing inner scope, then the function scope
         // with the arguments
         const result = [];
         for (const { index } of containing) {
-            if (index === 0) {
+            if (isFunctionScope(index)) {
                 continue;
             }
             const variables = slotsOf(info.locals, SLOT_LOCAL).filter(variable => variable.scope === index);
             result.push({ kind: "block", variables });
         }
 
-        const functionScope = slotsOf(info.locals, SLOT_LOCAL).filter(variable => variable.scope === 0);
+        const functionScope = slotsOf(info.locals, SLOT_LOCAL).filter(variable => isFunctionScope(variable.scope));
         result.push({ kind: "local", variables: [...slotsOf(info.arguments, SLOT_ARGUMENT), ...functionScope] });
         result.push({ kind: "closure", variables: slotsOf(info.closures, SLOT_CLOSURE) });
 

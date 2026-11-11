@@ -161,11 +161,14 @@ bool Agent::readFields(cbor::Reader *reader, Fields *fields) {
             return false;
         }
 
-        // store the field; pairs beyond the table (16) are dropped
+        // store the field; more pairs than the table holds (16, no request
+        // has that many) make the payload malformed rather than half read
         int capacity = (int)(sizeof(fields->items) / sizeof(fields->items[0]));
-        if (fields->count < capacity) {
-            fields->items[fields->count++] = item;
+        if (fields->count == capacity) {
+            return false;
         }
+
+        fields->items[fields->count++] = item;
     }
 
     return true;

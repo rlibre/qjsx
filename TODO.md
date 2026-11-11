@@ -148,7 +148,14 @@
       au calme, firmware recompilé et debugger sur la carte. Puis le cœur du proxy sans CDP :
       CODÉ le 2026-11-11 (`host/js/debuginfo.js`, `host/js/debugsession.js`, API dans
       CLAUDE.md ; `tests/debuginfo.test.js` 20/20, `tests/proxy.test.js` 30/30, en Debug
-      seulement ; à essayer aussi sur la carte). Ensuite le
+      seulement ; à essayer aussi sur la carte). Ensuite le serveur CDP : CODÉ le 2026-11-11
+      (`qjsx debug`, `host/js/websocket.js`, `host/js/cdp.js`, architecture.md 3.9 ;
+      `crypto.sha1` ; base64 était déjà dans le moteur ; `websocket.test.js` 24/24,
+      `cdp.test.js` 50/50 en Debug). Essayé dans VS Code par l'utilisateur le 2026-11-11
+      (agent de bureau, projet d'essai C:\temp\qjsx-try) : « ça marche super ». Test final
+      du 2026-11-11 : Release et Debug OK, tests d'origine de QuickJS OK, firmware compilé
+      et FLASHÉ, sur la carte debugger 72/72, proxy 30/30, cdp 50/50 ; microbench −3,3 %
+      contre l'original (pas de régression). Ensuite le
       serveur CDP, VS Code. Détail dans `doc/prompt-reprise.md`.
 - [ ] **Diagramme du principe de fonctionnement** (demande de l'utilisateur, 2026-11-11) : un
       diagramme en SVG qui explique le fonctionnement global du système (tout qjsx : PC,
@@ -193,6 +200,13 @@
 
 ## Backlog
 
+- [ ] **Accepter TypeScript** (demande de l'utilisateur, 2026-11-11) : des sources `.ts` dans
+      un projet qjsx. À concevoir avant de coder : qui retire les types (un transpileur
+      embarqué dans l'outil, en JS ou en C, ou un outil externe), ce que deviennent les
+      positions du debugger (les annexes de debug pointent dans le JS produit : il faudrait
+      des source maps, ou garder les lignes et colonnes du `.ts`), les `.d.ts` des modules
+      natifs et des bibliothèques, et la vérification des types (aucune, ou `tsc` à part).
+      Aucun téléchargement sans accord.
 - [ ] Analyse des optimisations possibles du moteur QuickJS (plus tard)
       → point de départ : les écarts de microbench entre original et découpé
         (doc/quickjs-split-perf.md, de -48 % à +27 % selon les tests)

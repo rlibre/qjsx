@@ -52,10 +52,9 @@ by severity. There is no open "serious" defect any more. The fixed defects are i
 
 ## Minor and differences with Node or the web
 
-- **Desktop `startLinks()`** (`host/platform/board_host.cpp`): when the accept thread cannot
-  start, it returns false without printing why, against the contract of `board.h`.
-- **ESP32 `writeConsole()`** (`ports/esp32/main/board_esp32.cpp`): compares `stream` with the
-  literal `2` instead of `rt::OUTPUT_STDERR`, as the desktop board does.
+The local fixes of this section were made on 2026-11-11 (`history.md`); the ones left
+need a decision of the user.
+
 - **Agent upload hash** (`common/agent/agent.cpp`): allocated with `new` / `delete`, outside
   `memory::allocate` / `release` (the allocation rule only names malloc / realloc / free: to
   decide).
@@ -67,12 +66,3 @@ by severity. There is no open "serious" defect any more. The fixed defects are i
   - `resolve("C:foo")` (relative to a drive) is resolved wrongly.
 - **`process.cwd()`** returns `/` on Windows: intended difference (decision of 2026-11-11,
   paths with `/`), noted here for the record.
-- **`manifestMain`** (formerly `readManifestMain`): if `JS_ToCString` fails, the message displayed is misleading.
-- **POSIX `serial`**:
-  - `cfmakeraw` does not reset `CSTOPB` nor `CRTSCTS` to zero;
-  - `tcgetattr` is not checked;
-  - an `EINTR` closes the port.
-- **Windows `listPorts`**: `ERROR_MORE_DATA` stops the list.
-- **`Reader::integer`** (CBOR): it returns the values above INT64_MAX as negative.
-- **`Fields`**: it silently ignores the pairs beyond 16.
-- **`encoded()` on an empty content**: `memcpy(dst, nullptr, 0)`, formally undefined.

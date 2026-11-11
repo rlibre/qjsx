@@ -451,10 +451,15 @@ bool startLinks(agent::Agent *agent) {
     state.connections.agent = agent;
     state.connections.listener = listener;
 
-    // start the accept thread
+    // start the accept thread; without it no host can connect
+    if (!platform::startThread(&acceptThread, nullptr, platform::defaultThreadOptions("agent-accept"))) {
+        fprintf(stderr, "qjsx agent: cannot start the thread that accepts the hosts\n");
+        return false;
+    }
+
     printf("qjsx agent: listening on %s:%d, storage %s\n", state.options.host, port, state.options.storage);
     fflush(stdout);
-    return platform::startThread(&acceptThread, nullptr, platform::defaultThreadOptions("agent-accept"));
+    return true;
 }
 
 /**

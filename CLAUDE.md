@@ -185,6 +185,48 @@ keeps the old name: `C:\Sandbox\espjs`.
     runnable on the board).
   - Not in this step: conditions / logpoints / hit counts, global and script scopes,
     multi-statement evaluation, async stack traces.
+- CDP server (design agreed by the user 2026-11-11, IMPLEMENTED the same day:
+  `host/js/websocket.js`, `host/js/cdp.js`, `qjsx debug`, `doc/architecture.md` 3.9; tested
+  in Debug by `tests/websocket.test.js` and `tests/cdp.test.js`; TRIED IN VS CODE by the
+  user on 2026-11-11 with the desktop agent: "ça marche super"). Final test of 2026-11-11:
+  Release and Debug, original QuickJS tests, firmware built and flashed, on the board
+  debugger 72/72, proxy 30/30, cdp 50/50; microbench −3.3 % against the original (no
+  regression from engine change L). Base64 turned out to be in the engine already (standard
+  `Uint8Array.prototype.toBase64` / `Uint8Array.fromBase64`, `builtins/base64.c`): no
+  module. SHA-1: `common/runtime/sha1.h` + `crypto.sha1`. On top of the proxy core.
+  Facts read in js-debug's sources (main branch, 2026-11-11): attach with `"type": "node"`
+  (not chrome: js-debug answers Target.* itself); it fetches `/json/version` and
+  `/json/list` in parallel and takes `webSocketDebuggerUrl` (or `websocketAddress`); an
+  error answer to a CDP command is almost never fatal; scripts announced with `file:///`
+  URLs and no `hash`; breakpoints by `Debugger.setBreakpointByUrl` with a JS `urlRegex`
+  matched against each script url, answer `breakpointId` + `locations`, later
+  `Debugger.breakpointResolved`; destroying the default execution context closes its
+  session. Decisions:
+  - modules `qjsx:websocket` (HTTP `/json/version`, `/json/list`, `/json` + WebSocket:
+    handshake, masked / fragmented frames, ping / pong, close) and `qjsx:cdp` (CDP methods
+    -> DebugSession, session events -> CDP events); command `qjsx debug [--target t]
+    [--port p] [--host 127.0.0.1]`, one VS Code client at a time;
+  - SHA-1 in the C++ `crypto` module (common/runtime, next to sha256, devices too: "it will
+    be useful"); base64 in C++ too (user, 2026-11-11), a native module for the programs as
+    well (its name and API to propose before coding);
+  - library module sources extracted from the package into `<output>/debug-src/` and
+    announced as `file:///` URLs (a URL without scheme would be a Node internal, skipped);
+  - a breakpoint with a condition, and a logpoint, are REFUSED until step 4 (VS Code shows
+    them unbound);
+  - the end of the program does not end the VS Code session (the default context is never
+    destroyed): a redeploy or a device restart is picked up, breakpoints set again;
+  - default port 9339 (not Node's 9229, which a Node debug session may use at the same
+    time), settable in `qjsx.json`;
+  - VS Code configuration: `node` attach, address 127.0.0.1, port 9339,
+    `autoAttachChildProcesses: false`, `attachExistingChildren: false`, `skipFiles: []`,
+    `sourceMaps: false`, `enableContentValidation: false`;
+  - accepted and ignored for now: Profiler.enable, NodeWorker.enable,
+    setAsyncCallStackDepth, setBlackboxPatterns, runIfWaitingForDebugger; no previews;
+    `Runtime.callFunctionOn` compiled on the host, js-debug's helpers loaded once in the
+    persistent group; program output as `Runtime.consoleAPICalled`;
+  - tests: `tests/websocket.test.js` (SHA-1, base64, frames, handshake), `tests/cdp.test.js`
+    (a JS WebSocket client replays js-debug's startup against `qjsx debug` + desktop agent),
+    then a real try in VS Code by the user.
 - Compiler changes (host compiler, "debug info" option when producing a `.qjspkg`). IMPLEMENTED
   2026-11-10, see `doc/engine-changes.md`; the two deviations below await the user's review:
   - statement / return positions: implemented as a kind in the 2 high bits of the
@@ -349,6 +391,7 @@ in the include path (no two headers share a name; keep it so).
   `tests/native/test_module.cpp`, built only into `qjsx-tests`), `debug.test.js` (engine debugger
   API, through `tests/native/debug_module.cpp` and `tests/fixtures/debug/target.js`),
   `debugger.test.js` (stub), `debuginfo.test.js` and `proxy.test.js` (proxy core),
+  `websocket.test.js` and `cdp.test.js` (CDP server),
   `runtime.test.js`, `tools.test.js`, `protocol.test.js`,
   `net.test.js`, `fixtures/`.
 - `doc/architecture.md` — full design + status of each part (keep it updated);
@@ -423,6 +466,17 @@ in the include path (no two headers share a name; keep it so).
 
 The full rules, with examples, are in `doc/coding-rules.md` (written to be reused in other
 C / C++ projects). Summary of what was agreed:
+
+- File header (user, 2026-11-11, APPLIED to 134 files the same day): every source file of
+  the project starts with the block of `doc/coding-rules.md` 3 ("File header"): "qjsx" in
+  ASCII art, "qjsx - JavaScript for devices", "Author: Etienne Cochard", "Copyright (c) 2026
+  R-LIBRE INGENIERIE" (exactly as in LICENSE), "SPDX-License-Identifier: MIT (see LICENSE)".
+  A `/* */` block in C / C++ / JS (a `//` line ending with `\` would continue the comment);
+  `# ` lines in shell / CMake / Perl / PowerShell / sdkconfig / partition CSV (after `#!`),
+  `-- ` in Lua. Never in `engine/qjs-bellard/` nor in the QuickJS files of `engine/qjsx/`
+  (Bellard's notice stays; only quickjs-debug.h, core/debug.c, compiler/debug-info.c have
+  it), nor in JSON / Markdown. A new file gets it too. The fixtures that tests check by line
+  number moved by 7 lines (run-tests.sh updated).
 
 - Parameters (agreed with the user 2026-11-11): never a non-const reference in our APIs, and no
   const reference either: an input struct goes by value if small (copied, cannot change) or as

@@ -237,6 +237,14 @@ JSValue listPorts(JSContext *ctx) {
         DWORD type = 0;
         LONG result = RegEnumValueA(key, index, valueName, &valueNameSize, nullptr, &type,
                                     (BYTE *)data, &dataSize);
+
+        // a name or a port name too long for the buffers: not a port we
+        // can open, skip it and go on with the next value
+        if (result == ERROR_MORE_DATA) {
+            continue;
+        }
+
+        // the end of the values (ERROR_NO_MORE_ITEMS), or a real error
         if (result != ERROR_SUCCESS) {
             break;
         }
@@ -314,11 +322,24 @@ PortHandle openPort(const char *path, int baudRate, int *error) {
         return invalidPort;
     }
 
-    // raw mode at that speed, receiver on, modem lines ignored; reads return
-    // what is there, or nothing after 100 ms (VMIN 0, VTIME 1)
+    // the current settings of the port, the base of the new ones
     struct termios settings;
-    tcgetattr(handle, &settings);
+    if (tcgetattr(handle, &settings) != 0) {
+        *error = errno;
+        close(handle);
+        return invalidPort;
+    }
+
+    // raw mode at that speed, 8N1 (cfmakeraw leaves the stop bits and the
+    // hardware flow control as they were: one stop bit, no RTS/CTS), receiver
+    // on, modem lines ignored; reads return what is there, or nothing after
+    // 100 ms (VMIN 0, VTIME 1)
     cfmakeraw(&settings);
+    settings.c_cflag &= ~CSTOPB;
+#ifdef CRTSCTS
+    // not POSIX: Linux and macOS have it
+    settings.c_cflag &= ~CRTSCTS;
+#endif
     cfsetispeed(&settings, speed);
     cfsetospeed(&settings, speed);
     settings.c_cflag |= CLOCAL | CREAD;
@@ -339,15 +360,26 @@ PortHandle openPort(const char *path, int baudRate, int *error) {
  */
 int readPort(PortHandle handle, uint8_t *buffer, size_t size) {
     ssize_t received = read(handle, buffer, size);
+
+    // a signal interrupted the wait: nothing read, the port stays open
+    if (received < 0 && errno == EINTR) {
+        return 0;
+    }
+
     return received < 0 ? -1 : (int)received;
 }
 
 /**
- * Writes everything, looping on partial writes. False on error.
+ * Writes everything, looping on partial writes and on writes interrupted by
+ * a signal. False on error.
  */
 bool writePort(PortHandle handle, const uint8_t *data, size_t size) {
     while (size > 0) {
         ssize_t written = write(handle, data, size);
+        if (written < 0 && errno == EINTR) {
+            continue;
+        }
+
         if (written <= 0) {
             return false;
         }
@@ -605,10 +637,13 @@ private:
      */
     static void onMessage(void *opaque, const rt::Message *message) {
         // MESSAGE_DATA: onData with a copy of the block (the loop frees the
-        // block after this call)
+        // block after this call). Called through a local copy of the
+        // callback: the callback may replace itself (port.onData(...)), which
+        // would free the function while it runs
         SerialPort *port = (SerialPort *)opaque;
         if (message->kind == MESSAGE_DATA) {
-            port->_dataCallback(js::Buffer::copy(message->data, message->size));
+            js::Function callback = port->_dataCallback;
+            callback(js::Buffer::copy(message->data, message->size));
             return;
         }
 
