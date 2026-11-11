@@ -1,1271 +1,1271 @@
-# espjs : conception et référence
+# qjsx: design and reference
 
-Ce document décrit l'architecture d'espjs : un runtime JavaScript fondé sur QuickJS, pour le
-poste de développement (Windows, macOS, Linux) et pour des devices (voir ci-dessous), accompagné d'un
-debugger utilisable depuis VS Code.
+This document describes the architecture of qjsx: a JavaScript runtime based on QuickJS, for the
+development machine (Windows, macOS, Linux) and for devices (see below), together with a
+debugger usable from VS Code.
 
-Il rassemble les décisions prises (consignées dans [`CLAUDE.md`](../CLAUDE.md)), la description
-du moteur découpé ([quickjs-map.md](quickjs-map.md)), les mesures
-([quickjs-split-perf.md](quickjs-split-perf.md)), le générateur
-([tools/quickjs-split](../tools/quickjs-split/README.md)) et la liste des tâches
-([`TODO.md`](../TODO.md)). En cas de désaccord entre ce document et `CLAUDE.md`, `CLAUDE.md`
-fait foi.
+It gathers the decisions taken (recorded in [`CLAUDE.md`](../CLAUDE.md)), the description
+of the split engine ([quickjs-map.md](quickjs-map.md)), the measurements
+([quickjs-split-perf.md](quickjs-split-perf.md)), the generator
+([tools/quickjs-split](../tools/quickjs-split/README.md)) and the task list
+([`TODO.md`](../TODO.md)). If this document and `CLAUDE.md` disagree, `CLAUDE.md`
+prevails.
 
-**Device.** Dans ce document, un *device* est une carte cible qui exécute les programmes
-(bytecode précompilé, agent de debug et de déploiement, pas de compilateur). Aujourd'hui :
+**Device.** In this document, a *device* is a target board that runs the programs
+(precompiled bytecode, debug and deployment agent, no compiler). Today:
 
-- l'**ESP32** (ESP32-S3, carte YD avec module WROOM-1, PSRAM) ;
-- le **RP2350** (Olimex PICO2-XXL, RP2350B, 8 Mo de PSRAM).
+- the **ESP32** (ESP32-S3, YD board with a WROOM-1 module, PSRAM);
+- the **RP2350** (Olimex PICO2-XXL, RP2350B, 8 MB of PSRAM).
 
-Cette liste est amenée à grandir : ce qui est dit d'un device vaut pour toute nouvelle cible
-(un port de plus dans `ports/`, une implémentation de `board.h`). Une puce n'est nommée que
-pour ce qui lui est propre (ESP-IDF, `esp_partition_mmap`, boot ROM du RP2350…).
+This list will grow: what is said of a device holds for any new target
+(one more port in `ports/`, one implementation of `board.h`). A chip is named only
+for what is specific to it (ESP-IDF, `esp_partition_mmap`, RP2350 boot ROM…).
 
-## Comment lire ce document
+## How to read this document
 
-Chaque section porte un statut explicite :
+Each section carries an explicit status:
 
-| Statut | Signification |
+| Status | Meaning |
 |---|---|
-| **réalisé** | le code existe dans le dépôt et a été testé ou mesuré |
-| **en cours d'implémentation** | la conception est arrêtée et le code est en train d'être écrit ; au moment de la rédaction, aucun fichier correspondant n'est encore présent dans le dépôt |
-| **conçu, non implémenté** | la décision est prise, aucun code n'existe |
-| **à vérifier** | point que les sources marquent explicitement comme restant à confirmer |
+| **done** | the code exists in the repository and has been tested or measured |
+| **being implemented** | the design is settled and the code is being written; at the time of writing, no corresponding file is in the repository yet |
+| **designed, not implemented** | the decision is taken, no code exists |
+| **to verify** | a point that the sources explicitly mark as still to be confirmed |
 
-Les décisions marquées comme prises dans `CLAUDE.md` ne se rediscutent pas sans l'auteur du
-projet.
+The decisions marked as taken in `CLAUDE.md` are not reopened without the author of the
+project.
 
-## Sommaire
+## Contents
 
-1. [Vue d'ensemble](#1-vue-densemble)
-2. [Le moteur QuickJS](#2-le-moteur-quickjs)
-3. [Le debugger](#3-le-debugger)
-4. [Formats et protocole](#4-formats-et-protocole)
-5. [Le runtime](#5-le-runtime)
-6. [L'outil hôte `espjs`](#6-loutil-hôte-espjs)
-7. [Points ouverts et à vérifier](#7-points-ouverts-et-à-vérifier)
-8. [Annexes](#8-annexes)
+1. [Overview](#1-overview)
+2. [The QuickJS engine](#2-the-quickjs-engine)
+3. [The debugger](#3-the-debugger)
+4. [Formats and protocol](#4-formats-and-protocol)
+5. [The runtime](#5-the-runtime)
+6. [The host tool `qjsx`](#6-the-host-tool-qjsx)
+7. [Open points and points to verify](#7-open-points-and-points-to-verify)
+8. [Appendices](#8-appendices)
 
 ---
 
-## 1. Vue d'ensemble
+## 1. Overview
 
-> **Statut : conçu, non implémenté** pour l'ensemble de la chaîne. Seul le moteur (section 2)
-> existe aujourd'hui, sous forme d'original intact et de version découpée.
+> **Status: designed, not implemented** for the whole chain. Only the engine (section 2)
+> exists today, as the untouched original and as the split version.
 
-### 1.1 Objectifs
+### 1.1 Goals
 
-- Exécuter du JavaScript moderne (promesses, `async`/`await`, classes, modules) avec QuickJS,
-  sur le poste de développement et sur les devices.
-- Déboguer depuis VS Code le code qui tourne sur un device : points d'arrêt, pas-à-pas,
-  inspection des variables, évaluation d'expressions, arrêt sur exception.
-- Déployer le code compilé sur le device par le même canal que le debug.
-- Écrire facilement des modules natifs (C++) visibles depuis JavaScript.
+- Run modern JavaScript (promises, `async`/`await`, classes, modules) with QuickJS,
+  on the development machine and on the devices.
+- Debug from VS Code the code that runs on a device: breakpoints, stepping,
+  variable inspection, expression evaluation, pause on exceptions.
+- Deploy the compiled code to the device through the same channel as debugging.
+- Write native modules (C++) visible from JavaScript easily.
 
-Le debug « poste de développement seul » n'est pas un objectif : l'architecture vise une cible
-distante.
+"Development machine only" debugging is not a goal: the architecture aims at a remote
+target.
 
-### 1.2 Cibles
+### 1.2 Targets
 
-| Cible | Rôle |
+| Target | Role |
 |---|---|
-| Poste de développement (Windows, macOS, Linux) | exécute l'outil hôte `espjs` (compilation, paquet, déploiement, proxy de debug) ; peut aussi exécuter des scripts |
-| Device (ESP32, RP2350…) | exécute le bytecode précompilé, l'agent du device (debug et déploiement) ; pas de compilateur, pas d'`eval` |
+| Development machine (Windows, macOS, Linux) | runs the host tool `qjsx` (compilation, package, deployment, debug proxy); can also run scripts |
+| Device (ESP32, RP2350…) | runs the precompiled bytecode, the device agent (debug and deployment); no compiler, no `eval` |
 
-### 1.3 Composants
+### 1.3 Components
 
-| Composant | Où il tourne | Rôle |
+| Component | Where it runs | Role |
 |---|---|---|
-| Moteur QuickJS | hôte et device | interpréteur ; le compilateur n'existe que sur l'hôte |
-| Outil hôte `espjs` | hôte | un exécutable unique : QuickJS hôte + modules C (boucle d'événements, sockets, port série, SHA-256, API de compilation) ; ses commandes sont écrites en JS, précompilées et embarquées |
-| Firmware + agent du device | device | exécute les scripts ; l'agent (« device agent ») contient le stub de debug et reçoit les déploiements |
-| Proxy de debug | hôte, dans `espjs debug` | adaptateur CDP écrit en JS ; traduit CDP en messages de l'agent ; compile les expressions à évaluer |
-| VS Code + js-debug | hôte | client du debugger, intégré à VS Code, parle CDP |
+| QuickJS engine | host and device | interpreter; the compiler exists only on the host |
+| Host tool `qjsx` | host | a single executable: host QuickJS + C modules (event loop, sockets, serial port, SHA-256, compile API); its commands are written in JS, precompiled and embedded |
+| Firmware + device agent | device | runs the scripts; the agent ("device agent") contains the debug stub and receives the deployments |
+| Debug proxy | host, in `qjsx debug` | CDP adapter written in JS; translates CDP into agent messages; compiles the expressions to evaluate |
+| VS Code + js-debug | host | debugger client, built into VS Code, speaks CDP |
 
-### 1.4 Le flux de bout en bout
+### 1.4 The end-to-end flow
 
-1. Le développeur écrit ses sources JavaScript dans un projet décrit par `espjs.json`.
-2. `espjs build` compile les sources avec le compilateur hôte (option « debug info »), et
-   produit un paquet `.qjspkg` : bytecode, annexes de debug, copie des sources, manifeste. Il
-   écrit aussi les typages `.d.ts` des modules natifs pour VS Code.
-3. `espjs deploy` envoie au device, par l'agent, un paquet réduit (même extension, le manifeste
-   indique le contenu) qui est écrit en flash.
-4. Le device exécute le bytecode, sans compilation sur la cible.
-5. `espjs debug` lance le proxy : il ouvre un serveur CDP pour VS Code (via js-debug) et parle
-   à l'agent du device par liaison série ou TCP. Il retrouve les annexes de debug grâce aux
-   identifiants de build que l'agent lui communique.
+1. The developer writes JavaScript sources in a project described by `qjsx.json`.
+2. `qjsx build` compiles the sources with the host compiler ("debug info" option), and
+   produces a `.qjspkg` package: bytecode, debug sidecars, copy of the sources, manifest. It
+   also writes the `.d.ts` typings of the native modules for VS Code.
+3. `qjsx deploy` sends to the device, through the agent, a reduced package (same extension, the
+   manifest says what it contains) which is written to flash.
+4. The device runs the bytecode, with no compilation on the target.
+5. `qjsx debug` starts the proxy: it opens a CDP server for VS Code (through js-debug) and talks
+   to the device agent over a serial or TCP link. It finds the debug sidecars thanks to the
+   build ids that the agent reports to it.
 
 ```mermaid
 flowchart LR
-    SRC[Sources JS + espjs.json] -->|espjs build| PKG[Paquet .qjspkg]
-    PKG -->|espjs deploy| AG[Agent du device]
-    AG --> RUN[Exécution du bytecode]
-    VSC[VS Code / js-debug] <-->|CDP| PROXY[espjs debug : proxy]
-    PROXY <-->|protocole de l'agent : série ou TCP| AG
-    PKG -.->|annexes de debug, sources| PROXY
+    SRC[JS sources + qjsx.json] -->|qjsx build| PKG[Package .qjspkg]
+    PKG -->|qjsx deploy| AG[Device agent]
+    AG --> RUN[Bytecode execution]
+    VSC[VS Code / js-debug] <-->|CDP| PROXY[qjsx debug: proxy]
+    PROXY <-->|agent protocol: serial or TCP| AG
+    PKG -.->|debug sidecars, sources| PROXY
 ```
 
-### 1.5 Liaisons entre l'hôte et le device
+### 1.5 Links between the host and the device
 
-Trois liaisons sont prévues : série (UART, COM/USB), WiFi et réseau filaire (TCP). Le protocole
-de debug est indépendant du transport : le même cadrage s'applique partout (section 4.3).
+Three links are planned: serial (UART, COM/USB), WiFi and wired network (TCP). The debug
+protocol is independent of the transport: the same framing applies everywhere (section 4.3).
 
 ---
 
-## 2. Le moteur QuickJS
+## 2. The QuickJS engine
 
-### 2.1 Version et choix
+### 2.1 Version and choices
 
-> **Statut : réalisé.**
+> **Status: done.**
 
-- Moteur : QuickJS de Fabrice Bellard, version **2026-06-04** (`engine/qjs-bellard/VERSION`). Ce n'est
-  pas quickjs-ng.
-- mquickjs a été évalué et écarté : c'est un sous-ensemble ES5 (pas de `Promise`/`async`, pas de
-  classes, pas de modules…).
-- `engine/qjs-bellard/` contient le moteur amont, non modifié. Les correctifs locaux de 2021 ont été
-  abandonnés.
+- Engine: QuickJS by Fabrice Bellard, version **2026-06-04** (`engine/qjs-bellard/VERSION`). It is
+  not quickjs-ng.
+- mquickjs was evaluated and rejected: it is an ES5 subset (no `Promise`/`async`, no
+  classes, no modules…).
+- `engine/qjs-bellard/` contains the upstream engine, unmodified. The local patches of 2021 were
+  dropped.
 
-`quickjs.c` fait 61 197 lignes : 1 562 fonctions, 142 types, 97 tables de données. La carte des
-modules de ce fichier (plages de lignes, dépendances) est dans [quickjs-map.md](quickjs-map.md),
-et la liste de chaque élément dans [quickjs-items.csv](quickjs-items.csv).
+`quickjs.c` is 61,197 lines long: 1,562 functions, 142 types, 97 data tables. The map of the
+modules of this file (line ranges, dependencies) is in [quickjs-map.md](quickjs-map.md),
+and the list of every item in [quickjs-items.csv](quickjs-items.csv).
 
-### 2.2 La version découpée (`engine/qjsx/`)
+### 2.2 The split engine (`engine/qjsx/`)
 
-> **Statut : réalisé.** Généré automatiquement ; testé et mesuré (section 2.4).
+> **Status: done.** Generated automatically; tested and measured (section 2.4).
 
-`engine/qjsx/` contient le même moteur découpé en **55 fichiers sources**. Chaque fichier
-indique en tête les lignes de `quickjs.c` dont il provient (par exemple `builtins/json.c` :
-« Lines of quickjs.c: 23156-23360, 49092-50177 »).
+`engine/qjsx/` contains the same engine split into **55 source files**. Each file
+states at its top the lines of `quickjs.c` it comes from (for example `builtins/json.c`:
+"Lines of quickjs.c: 23156-23360, 49092-50177").
 
-#### Dossiers
+#### Folders
 
-| Dossier | Rôle | Fichiers |
+| Folder | Role | Files |
 |---|---|---|
-| `core/` | toujours compilé | 18 fichiers : atoms, bigint-arith, cfunc, closures, conversions, errors, gc, generators, interpreter, intrinsics, iteration, modules, objects, operators, print, properties, runtime, strings |
-| `bytecode/` | chargement et sauvegarde du bytecode | opcodes, reader, writer |
-| `builtins/` | objets standard, un fichier par objet | 22 fichiers : array, arraybuffer, atomics, base64, bigint, dataview, date, function, global, iterator, json, mapset, math, number, object, promise, proxy, regexp, string, symbol, typedarray, weakref |
-| `compiler/` | le compilateur, absent d'une build sans `eval` | 12 fichiers : emitter, eval, finalize, funcdef, parser-class, parser-expr, parser-func, parser-module, parser-stmt, resolve-labels, resolve-vars, tokenizer |
+| `core/` | always compiled | 18 files: atoms, bigint-arith, cfunc, closures, conversions, errors, gc, generators, interpreter, intrinsics, iteration, modules, objects, operators, print, properties, runtime, strings |
+| `bytecode/` | loading and saving bytecode | opcodes, reader, writer |
+| `builtins/` | standard objects, one file per object | 22 files: array, arraybuffer, atomics, base64, bigint, dataview, date, function, global, iterator, json, mapset, math, number, object, promise, proxy, regexp, string, symbol, typedarray, weakref |
+| `compiler/` | the compiler, absent from a build without `eval` | 12 files: emitter, eval, finalize, funcdef, parser-class, parser-expr, parser-func, parser-module, parser-stmt, resolve-labels, resolve-vars, tokenizer |
 
-Les autres fichiers du moteur (`cutils`, `dtoa`, `libregexp`, `libunicode`, `list.h`,
-`quickjs.h`, `quickjs-atom.h`, `quickjs-opcode.h`, `LICENSE`, `VERSION`) sont copiés tels quels à
-la racine de `engine/qjsx/`.
+The other files of the engine (`cutils`, `dtoa`, `libregexp`, `libunicode`, `list.h`,
+`quickjs.h`, `quickjs-atom.h`, `quickjs-opcode.h`, `LICENSE`, `VERSION`) are copied as they are to
+the root of `engine/qjsx/`.
 
-L'interpréteur (`JS_CallInternal`, dispatch par « computed goto », `DIRECT_DISPATCH`) est dans
-`core/interpreter.c`. Les frames (`JSStackFrame`) sont chaînées depuis
+The interpreter (`JS_CallInternal`, "computed goto" dispatch, `DIRECT_DISPATCH`) is in
+`core/interpreter.c`. The frames (`JSStackFrame`) are chained from
 `rt->current_stack_frame`.
 
 #### Headers
 
-- **`quickjs-internal.h`**, inclus par tous les fichiers. Ses parties, dans l'ordre, sont
-  séparées par des commentaires repères :
-  1. le prélude de `quickjs.c` (lignes 1 à 1415 : options, `JSRuntime`, `JSContext`, `JSObject`,
-     `JSFunctionBytecode`, `JSStackFrame`…) sans ses prototypes ;
-  2. `/* ---- macros and types shared between files ---- */` ;
-  3. `/* ---- prototypes and shared data ---- */` : inclusion de `core/core.h`,
-     `bytecode/bytecode.h`, `builtins/builtins.h` ;
+- **`quickjs-internal.h`**, included by every file. Its parts, in order, are
+  separated by marker comments:
+  1. the prelude of `quickjs.c` (lines 1 to 1415: options, `JSRuntime`, `JSContext`, `JSObject`,
+     `JSFunctionBytecode`, `JSStackFrame`…) without its prototypes;
+  2. `/* ---- macros and types shared between files ---- */`;
+  3. `/* ---- prototypes and shared data ---- */`: inclusion of `core/core.h`,
+     `bytecode/bytecode.h`, `builtins/builtins.h`;
   4. `/* ---- inline functions shared between files ---- */`.
-- **`core/core.h`, `bytecode/bytecode.h`, `builtins/builtins.h`** : prototypes des fonctions et
-  déclarations `extern` des tables partagées entre fichiers.
-- **`compiler/compiler.h`** : types (`JSFunctionDef`, `JSToken`, `JSParseState`, `BlockEnv`,
-  `JSVarDef`…, énumération `TOK_*`), macros et prototypes privés du compilateur. Seuls les
-  fichiers de `compiler/` l'incluent. Rien en dehors de `compiler/` n'appelle le compilateur
-  directement, sauf `JS_NewContext` (dans `core/runtime.c`) qui appelle `JS_AddIntrinsicEval`
-  (dans `compiler/eval.c`) au travers de l'API publique.
+- **`core/core.h`, `bytecode/bytecode.h`, `builtins/builtins.h`**: prototypes of the functions and
+  `extern` declarations of the tables shared between files.
+- **`compiler/compiler.h`**: types (`JSFunctionDef`, `JSToken`, `JSParseState`, `BlockEnv`,
+  `JSVarDef`…, `TOK_*` enumeration), macros and prototypes private to the compiler. Only the
+  files of `compiler/` include it. Nothing outside `compiler/` calls the compiler
+  directly, except `JS_NewContext` (in `core/runtime.c`) which calls `JS_AddIntrinsicEval`
+  (in `compiler/eval.c`) through the public API.
 
-#### Règles du découpage
+#### Rules of the split
 
-- Seules les fonctions et tables utilisées dans plusieurs fichiers ont perdu `static`
-  (688 fonctions, 48 tables) ; les autres restent `static` dans leur fichier.
-- La taille des tables partagées est écrite dans leur déclaration `extern`, pour que `countof()`
-  fonctionne ailleurs. Si une table change de taille sans mise à jour du header, la compilation
-  échoue.
-- Une macro définie dans une fonction et utilisée ailleurs (par exemple `JS_THROW_VAR_RO` dans
-  `JS_CallInternal`) est recopiée à l'identique dans un header.
-- Quelques éléments sont placés hors de leur plage de lignes d'origine :
+- Only the functions and tables used in several files lost `static`
+  (688 functions, 48 tables); the others stay `static` in their file.
+- The size of the shared tables is written in their `extern` declaration, so that `countof()`
+  works elsewhere. If a table changes size without the header being updated, the compilation
+  fails.
+- A macro defined inside a function and used elsewhere (for example `JS_THROW_VAR_RO` in
+  `JS_CallInternal`) is copied identically into a header.
+- A few items are placed outside their original line range:
 
-| Élément | Destination | Raison |
+| Item | Destination | Reason |
 |---|---|---|
-| `free_function_bytecode`, `free_bytecode_atoms` | `core/gc.c` | libèrent du bytecode à l'exécution, appelés par le GC |
-| `JSOpCode`, `opcode_info` | `bytecode/opcodes.c` | utilisés par le lecteur et l'écrivain de bytecode (et plus tard le debugger) |
-| `JS_EvalFunction` et la répartition de l'eval | `core/interpreter.c` | exécutent du bytecode déjà compilé |
-| `__JS_EvalInternal` | `compiler/eval.c` | unique entrée vers le compilateur |
+| `free_function_bytecode`, `free_bytecode_atoms` | `core/gc.c` | free bytecode at run time, called by the GC |
+| `JSOpCode`, `opcode_info` | `bytecode/opcodes.c` | used by the bytecode reader and writer (and later the debugger) |
+| `JS_EvalFunction` and the eval dispatch | `core/interpreter.c` | run bytecode that is already compiled |
+| `__JS_EvalInternal` | `compiler/eval.c` | single entry point to the compiler |
 | `JS_ResolveModule` | `core/modules.c` | |
 | `ident_realloc` | `core/strings.c` | |
 | `get_line_col` | `core/errors.c` | |
 | `js_get_prototype_from_ctor` | `core/objects.c` | |
-| `add_export_entry` | `compiler/parser-module.c` | voir la modification 2 ci-dessous |
+| `add_export_entry` | `compiler/parser-module.c` | see change 2 below |
 
-#### Le générateur
+#### The generator
 
-Le découpage est produit par `tools/quickjs-split/split.js` (Node), piloté par
-`tools/quickjs-split/split-config.js`, et lancé par `tools/quickjs-split/regen.sh`.
+The split is produced by `tools/quickjs-split/split.js` (Node), driven by
+`tools/quickjs-split/split-config.js`, and started by `tools/quickjs-split/regen.sh`.
 
-Étapes de `split.js` :
+Steps of `split.js`:
 
-1. découper `quickjs.c` en unités de premier niveau (fonctions, données, types, macros,
-   prototypes), chacune mémorisant le contexte `#if/#elif/#else` où elle se trouve ;
-2. appliquer les correctifs convenus (état du parseur JSON, exports de module) ;
-3. affecter chaque unité à un fichier de sortie (plages de lignes + exceptions par nom) ;
-4. calculer ce qui est partagé entre fichiers : les fonctions et données partagées perdent
-   `static` et reçoivent une déclaration dans un header ; les types, macros et fonctions inline
-   partagés vont dans un header ;
-5. écrire les fichiers et afficher un rapport (nombre de fichiers, fonctions et données
-   partagées, fonctions du compilateur utilisées hors de `compiler/`, unités non affectées).
+1. cut `quickjs.c` into top-level units (functions, data, types, macros,
+   prototypes), each one remembering the `#if/#elif/#else` context it is in;
+2. apply the agreed patches (JSON parser state, module exports);
+3. assign each unit to an output file (line ranges + exceptions by name);
+4. compute what is shared between files: the shared functions and data lose
+   `static` and get a declaration in a header; the shared types, macros and inline functions
+   go into a header;
+5. write the files and print a report (number of files, shared functions and data,
+   compiler functions used outside `compiler/`, unassigned units).
 
-`split-config.js` contient :
+`split-config.js` contains:
 
-- `version` (`2026-06-04`) et `preludeEnd` (1416 : les lignes précédentes deviennent
-  `quickjs-internal.h`) ;
-- `fileRanges` : une liste `[première ligne, fichier]`, chaque plage courant jusqu'à l'entrée
-  suivante ;
-- `overrides` : les éléments placés hors de leur plage (tableau ci-dessus) ;
-- `patches` : les deux correctifs décrits en 2.3.
+- `version` (`2026-06-04`) and `preludeEnd` (1416: the lines before it become
+  `quickjs-internal.h`);
+- `fileRanges`: a list of `[first line, file]`, each range running up to the next
+  entry;
+- `overrides`: the items placed outside their range (table above);
+- `patches`: the two patches described in 2.3.
 
-`regen.sh` vide le contenu de `engine/qjsx/{core,bytecode,builtins,compiler}`, lance
-`split.js` sur `engine/qjs-bellard/quickjs.c`, puis copie les fichiers annexes du moteur.
+`regen.sh` empties the content of `engine/qjsx/{core,bytecode,builtins,compiler}`, runs
+`split.js` on `engine/qjs-bellard/quickjs.c`, then copies the other files of the engine.
 
-**Règles d'usage :**
+**Rules of use:**
 
-- `engine/qjsx/` est **généré** : toute modification manuelle est perdue à la
-  régénération. Il faut demander à l'auteur du projet avant de le modifier à la main ou de le
-  régénérer.
-- Les plages de lignes de `split-config.js` se rapportent au `quickjs.c` de la version
-  2026-06-04. Pour une autre version, elles doivent être revérifiées.
+- `engine/qjsx/` is **generated**: any manual change is lost at the next
+  regeneration. The author of the project must be asked before changing it by hand or
+  regenerating it.
+- The line ranges of `split-config.js` refer to the `quickjs.c` of version
+  2026-06-04. For another version, they must be checked again.
 
-### 2.3 Modifications par rapport à l'original
+### 2.3 Changes from the original
 
-> **Statut : réalisé.** Ce sont les deux seules modifications faites par le générateur. Les
-> modifications à la main pour le debugger (depuis le 2026-11-10) sont décrites dans
-> [engine-changes.md](engine-changes.md) ; leur diff exact est dans
+> **Status: done.** These are the only two changes made by the generator. The
+> changes made by hand for the debugger (since 2026-11-10) are described in
+> [engine-changes.md](engine-changes.md); their exact diff is in
 > [engine-changes.patch](engine-changes.patch).
 
-1. **JSON.parse a son propre état.** Dans l'original, `JS_ParseJSON3` et le tokenizer JSON
-   réutilisent l'état du parseur JavaScript (`JSParseState`, `js_parse_init`, `free_token`,
-   `js_parse_error`, `js_parse_error_pos`). Le correctif ajoute dans `builtins/json.c` un état
-   propre (`JSONParseState`, `JSONToken`, `JSON_TOK_*`, `json_parse_init`, `json_free_token`,
-   `json_parse_error`, `json_parse_error_pos`) et renomme les usages dans les plages JSON. JSON
-   ne dépend donc plus du compilateur.
-2. **Les exports de module sont séparés du parseur.**
-   - `add_export_entry2` (`core/modules.c`) ne reçoit plus de `JSParseState` et lève une
-     `SyntaxError` ordinaire (« duplicate exported name ») ;
-   - `add_export_entry` (`compiler/parser-module.c`) signale le doublon avec la position dans le
-     source, puis appelle `add_export_entry2` ;
-   - l'appel dans `JS_AddModuleExport` est adapté à la nouvelle signature.
+1. **JSON.parse has its own state.** In the original, `JS_ParseJSON3` and the JSON tokenizer
+   reuse the state of the JavaScript parser (`JSParseState`, `js_parse_init`, `free_token`,
+   `js_parse_error`, `js_parse_error_pos`). The patch adds to `builtins/json.c` a state
+   of its own (`JSONParseState`, `JSONToken`, `JSON_TOK_*`, `json_parse_init`, `json_free_token`,
+   `json_parse_error`, `json_parse_error_pos`) and renames the uses in the JSON ranges. JSON
+   therefore no longer depends on the compiler.
+2. **Module exports are separated from the parser.**
+   - `add_export_entry2` (`core/modules.c`) no longer receives a `JSParseState` and throws an
+     ordinary `SyntaxError` ("duplicate exported name");
+   - `add_export_entry` (`compiler/parser-module.c`) reports the duplicate with its position in the
+     source, then calls `add_export_entry2`;
+   - the call in `JS_AddModuleExport` is adapted to the new signature.
 
-Les messages et positions d'erreur de `JSON.parse` et l'erreur d'export en double sont
-identiques entre les deux versions (section 2.4).
+The error messages and positions of `JSON.parse` and the duplicate export error are
+identical in both versions (section 2.4).
 
-### 2.4 Validation et performances du découpage
+### 2.4 Validation and performance of the split
 
-> **Statut : réalisé** (mesures du 2026-11-10, détail dans
+> **Status: done** (measurements of 2026-11-10, details in
 > [quickjs-split-perf.md](quickjs-split-perf.md)).
 
-Conditions : Windows, gcc 13.1.0 mingw64, `-O2 -fwrapv`, sans LTO, 20 threads ; les deux
-`qjs.exe` sont construits avec les mêmes `qjs.c`, `quickjs-libc.c` et `repl.c` de Bellard.
+Conditions: Windows, gcc 13.1.0 mingw64, `-O2 -fwrapv`, no LTO, 20 threads; both
+`qjs.exe` are built with the same `qjs.c`, `quickjs-libc.c` and `repl.c` by Bellard.
 
-- **Tests** : les tests de Bellard passent avec les deux versions (`test_closure`,
-  `test_language`, `test_builtin` avec `--std`, `test_loop`, `test_bigint`,
+- **Tests**: Bellard's tests pass with both versions (`test_closure`,
+  `test_language`, `test_builtin` with `--std`, `test_loop`, `test_bigint`,
   `test_cyclic_import`, `test_worker`).
-- **Compilation** : 47,4 s pour l'original quel que soit le nombre de threads ; 7,4 s pour la
-  version découpée sur 20 threads. Une modification de `json.c` se recompile en 1,6 s (contre
-  42,7 s), une modification de `quickjs-internal.h` en 6,7 s.
-- **Taille** : code machine 1 000 ko contre 1 112 ko ; `qjs.exe` sans symboles 1 143 ko contre
-  1 256 ko.
-- **Vitesse** (`tests/microbench.js`) : −3,8 % sur le total, avec des écarts par test de −48,4 %
-  (`array_read`) à +27,5 % (`prop_clone`). L'explication avancée (gcc n'intègre plus entre
-  fichiers les fonctions `static` appelées une fois) est une **hypothèse non vérifiée**.
+- **Compilation**: 47.4 s for the original whatever the number of threads; 7.4 s for the
+  split version on 20 threads. A change to `json.c` recompiles in 1.6 s (against
+  42.7 s), a change to `quickjs-internal.h` in 6.7 s.
+- **Size**: machine code 1,000 KB against 1,112 KB; `qjs.exe` without symbols 1,143 KB against
+  1,256 KB.
+- **Speed** (`tests/microbench.js`): −3.8% on the total, with per-test differences from −48.4%
+  (`array_read`) to +27.5% (`prop_clone`). The explanation put forward (gcc no longer inlines
+  across files the `static` functions called once) is an **unverified hypothesis**.
 
-Les tests demandent une version extraite de QuickJS 2026-06-04
-(https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz) pour `qjs.c`, `qjsc.c`,
-`quickjs-libc.c`, `repl.js` et `tests/`. La procédure est dans
+The tests need an extracted release of QuickJS 2026-06-04
+(https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz) for `qjs.c`, `qjsc.c`,
+`quickjs-libc.c`, `repl.js` and `tests/`. The procedure is in
 [tools/quickjs-split/README.md](../tools/quickjs-split/README.md).
 
-### 2.5 Retrait du compilateur sur le device
+### 2.5 Removing the compiler on the device
 
-> **Statut : moteur sans compilateur réalisé et validé sur PC le 2026-11-11** (modification H de
-> [engine-changes.md](engine-changes.md) : `qjsx-target`, `espjs-target`, fixture
-> `nocompiler`), puis construit pour l'ESP32-S3. Le firmware n'embarque plus aucun JS : les
-> modules de bibliothèque écrits en JS (`stdlib/path`) voyagent en bytecode dans le paquet du
-> programme (bibliothèques `.qjslib`, section 4.5).
+> **Status: engine without compiler done and validated on the PC on 2026-11-11** (change H of
+> [engine-changes.md](engine-changes.md): `qjsx-engine-target`, `qjsx-target`, fixture
+> `nocompiler`), then built for the ESP32-S3. The firmware no longer embeds any JS: the
+> library modules written in JS (`stdlib/path`) travel as bytecode in the program's
+> package (`.qjslib` libraries, section 4.5).
 
-Décision : **aucun `eval` sur le device, y compris en build de debug.** Le dossier `compiler/` n'est
-pas compilé pour le device. Le code JS arrive sur la cible déjà compilé par le poste de
-développement. Tout ce que le debugger évalue (`Runtime.evaluate`, `evaluateOnCallFrame`,
-`callFunctionOn`) est compilé sur l'hôte et envoyé en bytecode.
+Decision: **no `eval` on the device, debug builds included.** The `compiler/` folder is not
+compiled for the device. The JS code arrives on the target already compiled by the development
+machine. Everything the debugger evaluates (`Runtime.evaluate`, `evaluateOnCallFrame`,
+`callFunctionOn`) is compiled on the host and sent as bytecode.
 
-Ce que le découpage permet déjà :
+What the split already allows:
 
-- le compilateur (environ 13 300 lignes, 22 % de `quickjs.c`) est isolé dans `compiler/` avec
-  son header privé ;
-- il est déjà derrière une indirection : `ctx->eval_internal`, rempli uniquement par
-  `JS_AddIntrinsicEval` avec `__JS_EvalInternal`. Si le pointeur est NULL, `JS_EvalInternal` lève
-  une `TypeError` « eval is not supported » ; c'est le chemin de `JS_Eval`, `JS_EvalThis`,
-  `JS_EvalObject`, de l'eval global, du constructeur `Function` et de l'eval direct ;
-- `JS_NewContext` appelle `JS_AddIntrinsicEval` ; une build sans compilateur doit partir de
-  `JS_NewContextRaw` et n'ajouter que les intrinsèques voulus ;
-- les couplages identifiés dans [quickjs-map.md](quickjs-map.md) (JSON, `free_function_bytecode`,
-  `opcode_info`, `js_parse_error` dans les exports, rôles mêlés de l'`eval-api`, types du
-  compilateur) sont traités par le découpage (sections 2.2 et 2.3).
+- the compiler (about 13,300 lines, 22% of `quickjs.c`) is isolated in `compiler/` with
+  its private header;
+- it is already behind an indirection: `ctx->eval_internal`, filled only by
+  `JS_AddIntrinsicEval` with `__JS_EvalInternal`. If the pointer is NULL, `JS_EvalInternal` throws
+  a `TypeError` "eval is not supported"; this is the path of `JS_Eval`, `JS_EvalThis`,
+  `JS_EvalObject`, of the global eval, of the `Function` constructor and of the direct eval;
+- `JS_NewContext` calls `JS_AddIntrinsicEval`; a build without compiler must start from
+  `JS_NewContextRaw` and add only the intrinsics it wants;
+- the couplings identified in [quickjs-map.md](quickjs-map.md) (JSON, `free_function_bytecode`,
+  `opcode_info`, `js_parse_error` in the exports, mixed roles of the `eval-api`, compiler
+  types) are handled by the split (sections 2.2 and 2.3).
 
-Aucune build pour un device sans `compiler/` n'a encore été réalisée.
+No build for a device without `compiler/` has been made yet.
 
-### 2.6 Modifications du compilateur
+### 2.6 Compiler changes
 
-> **Statut : réalisé le 2026-11-10, avec deux écarts.** Description à jour, fichiers touchés et
-> tests dans [engine-changes.md](engine-changes.md). Le texte ci-dessous est la conception
-> d'origine. Écarts :
-> - les positions passent par l'opérande de `OP_line_num` (deux bits de nature), pas par un
->   nouvel opcode ;
-> - les portées sont des plages **source**, pas des plages de pc ;
-> - pas de build id dans le bytecode ni de table par script dans le lecteur : un script est
->   identifié par le build id du paquet et le nom du module, désormais toujours présent.
+> **Status: done on 2026-11-10, with two deviations.** Up-to-date description, files touched and
+> tests in [engine-changes.md](engine-changes.md). The text below is the original
+> design. Deviations:
+> - the positions go through the operand of `OP_line_num` (two bits for the kind), not through a
+>   new opcode;
+> - the scopes are **source** ranges, not pc ranges;
+> - no build id in the bytecode and no per-script table in the reader: a script is
+>   identified by the build id of the package and the module name, which is now always present.
 
-- **Positions de début d'instruction.** Aujourd'hui, une entrée `pc2line` n'est enregistrée que
-  lorsque `resolve_labels` émet des instructions (`add_pc2line_info`). Un opcode temporaire
-  `OP_stmt_pos <offset>` sera émis :
-  - au début de chaque instruction (statement) ;
-  - à chaque clause `catch` ;
-  - à l'entrée du corps de fonction ;
-  - à chaque `return` et au retour implicite ;
-  - à chaque condition de boucle.
+- **Statement start positions.** Today, a `pc2line` entry is recorded only
+  when `resolve_labels` emits instructions (`add_pc2line_info`). A temporary opcode
+  `OP_stmt_pos <offset>` will be emitted:
+  - at the start of each statement;
+  - at each `catch` clause;
+  - at the entry of the function body;
+  - at each `return` and at the implicit return;
+  - at each loop condition.
 
-  `resolve_labels` le rattache inconditionnellement à l'instruction émise suivante. Chaque
-  position porte une nature : instruction, retour ou expression.
-- **Portées des variables.** Des marqueurs d'entrée et de sortie de portée (sans code) sont
-  transmis jusqu'à `resolve_labels`, pour obtenir les pc finaux et donc la plage de visibilité de
-  chaque variable. Les variables internes sont marquées ; les emplacements en zone morte
-  temporelle (TDZ) sont signalés comme tels.
-- **Numéro de fonction.** Chaque `JSFunctionBytecode` reçoit un numéro sur 16 bits (ordre de
-  création), sérialisé : le numéro de version du format de bytecode change.
-- **Build id.** La fonction de premier niveau porte un identifiant de build, calculé par le
-  packer sur le bytecode sérialisé avec ce champ mis à zéro.
-- **Table des fonctions à la lecture.** Le lecteur de bytecode construit, par script, un
-  enregistrement (build id + numéro → table des fonctions, entrée effacée quand la fonction est
-  libérée) utilisé par le stub.
-- **`debugger;`** compile vers un nouvel opcode `OP_debugger` (sans effet sans debugger
-  attaché). Aujourd'hui, le mot-clé est ignoré par le parseur (« currently no debugger »).
-- **Appels terminaux toujours désactivés**, en debug comme en production : même bytecode dans les
-  deux cas, piles d'appels complètes.
-- **Collecte de l'annexe de debug** dans `js_create_function`, avant le retrait des
-  informations ; le compilateur hôte renvoie `{ bytecode, debug }` au JS hôte, qui écrit le JSON,
-  le manifeste et le zip (CRC32 calculé en JS).
+  `resolve_labels` attaches it unconditionally to the next emitted instruction. Each
+  position carries a kind: statement, return or expression.
+- **Variable scopes.** Scope entry and exit markers (without code) are
+  passed down to `resolve_labels`, to get the final pcs and therefore the visibility range of
+  each variable. Internal variables are flagged; slots in the temporal dead zone
+  (TDZ) are reported as such.
+- **Function number.** Each `JSFunctionBytecode` gets a 16-bit number (creation
+  order), serialized: the version number of the bytecode format changes.
+- **Build id.** The top-level function carries a build id, computed by the
+  packer on the serialized bytecode with this field set to zero.
+- **Function table at read time.** The bytecode reader builds, per script, a
+  record (build id + number → function table, entry cleared when the function is
+  freed) used by the stub.
+- **`debugger;`** compiles to a new opcode `OP_debugger` (no effect without a debugger
+  attached). Today, the keyword is ignored by the parser ("currently no debugger").
+- **Tail calls always disabled**, in debug as in production: same bytecode in
+  both cases, complete call stacks.
+- **Collection of the debug sidecar** in `js_create_function`, before the information is
+  stripped; the host compiler returns `{ bytecode, debug }` to the host JS, which writes the JSON,
+  the manifest and the zip (CRC32 computed in JS).
 
-### 2.7 Modifications de l'interpréteur
+### 2.7 Interpreter changes
 
-> **Statut : réalisé le 2026-11-10, sauf `sf->call_sp`** (prédiction des exceptions non
-> rattrapées, non faite). API publique dans `engine/qjsx/quickjs-debug.h`, détail dans
-> [engine-changes.md](engine-changes.md), section F. Le stub qui s'en sert n'est pas encore
-> écrit.
+> **Status: done on 2026-11-10, except `sf->call_sp`** (prediction of uncaught
+> exceptions, not done). Public API in `engine/qjsx/quickjs-debug.h`, details in
+> [engine-changes.md](engine-changes.md), section F. The stub that uses it is not written
+> yet.
 
-- **Deux tables de dispatch** (option C) : une table normale et une table de debug. La table de
-  debug consulte un bitmap, par fonction, des positions d'arrêt. Quand le « computed goto » n'est
-  pas disponible, un test par opcode sert de solution de repli. Détail en 3.2.
-- **`sf->call_sp`** : un nouveau champ de `JSStackFrame`, sauvegardé avant chaque appel, pour
-  la prédiction des exceptions non rattrapées (3.4). Le champ existant `cur_sp` ne convient pas :
-  il a déjà un sens pour les générateurs.
-- **`OP_debugger`** à exécuter (voir 2.6).
+- **Two dispatch tables** (option C): a normal table and a debug table. The debug
+  table checks a per-function bitmap of the stop positions. When "computed goto" is
+  not available, a per-opcode test is the fallback. Details in 3.2.
+- **`sf->call_sp`**: a new field of `JSStackFrame`, saved before each call, for
+  the prediction of uncaught exceptions (3.4). The existing field `cur_sp` does not fit:
+  it already has a meaning for generators.
+- **`OP_debugger`** to execute (see 2.6).
 
-Points d'entrée existants utiles au debugger (lignes de `quickjs.c` d'origine, voir
-[quickjs-map.md](quickjs-map.md)) : `JS_CallInternal` (hooks), `JSStackFrame`, `find_line_num`
-(décodage `pc2line`), `build_backtrace`, `compute_pc2line_info`, `js_poll_interrupts` et
+Existing entry points useful to the debugger (lines of the original `quickjs.c`, see
+[quickjs-map.md](quickjs-map.md)): `JS_CallInternal` (hooks), `JSStackFrame`, `find_line_num`
+(`pc2line` decoding), `build_backtrace`, `compute_pc2line_info`, `js_poll_interrupts` and
 `JS_SetInterruptHandler`.
 
-### 2.8 Construction
+### 2.8 Build
 
-> **Statut : réalisé pour le build de test du découpage ; build du projet à mettre à jour.**
+> **Status: done for the test build of the split; project build to be updated.**
 
-- Chaîne d'outils : Windows, gcc 13.1 mingw64, premake5 5.0.0, node 26. Les makefiles sont
-  générés avec `premake5 gmake --cc=gcc --shell=posix`.
-- Le `premake5.lua` / `qjs.make` du projet construisent encore `engine/qjs-bellard` et ne sont pas à
-  jour pour 2026-06-04 : il faut ajouter `dtoa.c` (régénérer `qjs.make`) et définir
-  `CONFIG_VERSION` (`-DCONFIG_VERSION="2026-06-04"`).
-- Le build de test (original et découpé) est dans `tools/quickjs-split/test/`.
+- Toolchain: Windows, gcc 13.1 mingw64, premake5 5.0.0, node 26. The makefiles are
+  generated with `premake5 gmake --cc=gcc --shell=posix`.
+- The project's `premake5.lua` / `qjs.make` still build `engine/qjs-bellard` and are not up to
+  date for 2026-06-04: `dtoa.c` must be added (regenerate `qjs.make`) and
+  `CONFIG_VERSION` defined (`-DCONFIG_VERSION="2026-06-04"`).
+- The test build (original and split) is in `tools/quickjs-split/test/`.
 
 ---
 
-## 3. Le debugger
+## 3. The debugger
 
-> **Statut de toute la section : conçu, non implémenté.**
+> **Status of the whole section: designed, not implemented.**
 
 ### 3.1 Architecture
 
-- **Client** : VS Code, au travers de son debugger intégré js-debug. Le protocole côté VS Code
-  est donc **CDP** (Chrome DevTools Protocol), pas DAP.
-- **Stub C sur la cible** : minimal, il expose des primitives (frames, emplacements de
-  variables, propriétés, chargement et appel de bytecode). Il fait partie de l'agent de
-  le device, qui gère aussi le déploiement.
-- **Proxy sur l'hôte** : l'adaptateur CDP est écrit en JavaScript et s'exécute dans le QuickJS
-  hôte (l'exécutable `espjs`, pas Node). Ce QuickJS hôte embarque le compilateur : il compile les
-  expressions évaluées et produit le bytecode et les annexes de debug des scripts.
-- **Modules C nécessaires à l'hôte** : `quickjs-libc` n'a pas de sockets et sa boucle
-  d'événements Windows n'attend que stdin, les timers et les workers. L'hôte a donc besoin de
-  modules C pour une boucle d'événements, les sockets TCP et le port série (section 5).
-- **Informations de debug déportées** (« split debug info ») : comme le code arrive précompilé,
-  les informations de debug vivent sur l'hôte, à côté du proxy, dans une annexe indexée par le
-  build id stocké dans le bytecode, et non dans le bytecode de la cible.
+- **Client**: VS Code, through its built-in debugger js-debug. The protocol on the VS Code
+  side is therefore **CDP** (Chrome DevTools Protocol), not DAP.
+- **C stub on the target**: minimal, it exposes primitives (frames, variable
+  slots, properties, loading and calling bytecode). It is part of the
+  device agent, which also handles deployment.
+- **Proxy on the host**: the CDP adapter is written in JavaScript and runs in the host
+  QuickJS (the `qjsx` executable, not Node). This host QuickJS embeds the compiler: it compiles the
+  evaluated expressions and produces the bytecode and the debug sidecars of the scripts.
+- **C modules the host needs**: `quickjs-libc` has no sockets and its Windows event
+  loop only waits on stdin, timers and workers. The host therefore needs
+  C modules for an event loop, TCP sockets and the serial port (section 5).
+- **Split debug info**: since the code arrives precompiled,
+  the debug info lives on the host, next to the proxy, in a sidecar indexed by the
+  build id stored in the bytecode, and not in the target's bytecode.
 
-Répartition des rôles :
+Division of roles:
 
-| Rôle | Stub (device) | Proxy (hôte) |
+| Role | Stub (device) | Proxy (host) |
 |---|---|---|
-| Arrêt sur point d'arrêt, pas-à-pas | détecte les arrêts (tables de dispatch, bitmap) | traduit lignes/colonnes en positions, calcule les bitmaps |
-| Noms de variables, portées | ne les connaît pas | les lit dans l'annexe de debug |
-| Évaluation d'expressions | exécute le bytecode reçu | compile l'expression enveloppée |
-| Conditions, logpoints, compteurs | évalue sur place | compile |
-| Points d'arrêt persistants | | les garde et les réapplique |
+| Stopping on a breakpoint, stepping | detects the stops (dispatch tables, bitmap) | translates lines/columns into positions, computes the bitmaps |
+| Variable names, scopes | does not know them | reads them in the debug sidecar |
+| Expression evaluation | runs the bytecode it receives | compiles the wrapped expression |
+| Conditions, logpoints, counters | evaluates on the spot | compiles |
+| Persistent breakpoints | | keeps them and re-applies them |
 
-### 3.2 Points d'arrêt
+### 3.2 Breakpoints
 
-**Décision : deux tables de dispatch (option C).**
+**Decision: two dispatch tables (option C).**
 
-- L'interpréteur dispose d'une table de dispatch normale et d'une table de debug. La table de
-  debug vérifie, pour la fonction en cours, un **bitmap des positions d'arrêt**.
-- Sans « computed goto », un test par opcode sert de repli.
-- Le patch d'opcodes (remplacer une instruction par une instruction d'arrêt) a été **écarté** :
-  le bytecode peut être en ROM, et le patch complique le pas-à-pas.
-- Les positions d'arrêt possibles sont les positions de début d'instruction produites par le
-  compilateur (2.6).
-- Le proxy envoie les positions d'arrêt par le message `SetStopPoints`. Il garde la liste des
-  points d'arrêt et les réapplique à chaque `ScriptLoaded` et après un redémarrage du device.
+- The interpreter has a normal dispatch table and a debug table. The debug
+  table checks, for the current function, a **bitmap of the stop positions**.
+- Without "computed goto", a per-opcode test is the fallback.
+- Opcode patching (replacing an instruction with a stop instruction) was **rejected**:
+  the bytecode may be in ROM, and patching complicates stepping.
+- The possible stop positions are the statement start positions produced by the
+  compiler (2.6).
+- The proxy sends the stop positions with the `SetStopPoints` message. It keeps the list of
+  breakpoints and re-applies them at each `ScriptLoaded` and after a device restart.
 
-Note : une puce de `CLAUDE.md` présente encore la détection des points d'arrêt comme « en
-discussion », alors qu'une autre la donne comme décidée (option C). Voir la section 7.
+Note: one bullet of `CLAUDE.md` still presents breakpoint detection as "under
+discussion", while another gives it as decided (option C). See section 7.
 
-### 3.3 Pas-à-pas
+### 3.3 Stepping
 
-Toutes les règles s'expriment en « prochain début d'instruction » :
+All the rules are expressed as "next statement start":
 
-| Commande | Arrêt au prochain début d'instruction… |
+| Command | Stop at the next statement start… |
 |---|---|
-| over (pas principal) | dans la même frame ou dans une frame appelante |
-| into (entrer) | n'importe où ; les fonctions natives sont passées, les callbacks JS appelés depuis le C sont entrés |
-| out (sortir) | dans une frame appelante |
+| over (main step) | in the same frame or in a calling frame |
+| into (enter) | anywhere; native functions are stepped over, JS callbacks called from C are entered |
+| out (leave) | in a calling frame |
 
-- **Comparaison des frames** : par adresse dans la pile C. Les frames de générateurs et de
-  fonctions `async` sont comparées par leur objet d'état ; ainsi un pas « over » sur un `await`
-  reprend dans la même fonction `async`.
-- **Arrêts supplémentaires** : au début d'une clause `catch`, et en fin de fonction (à chaque
-  `return` et au retour implicite) pour montrer la valeur de retour.
+- **Frame comparison**: by address in the C stack. The frames of generators and of
+  `async` functions are compared by their state object; so a step "over" an `await`
+  resumes in the same `async` function.
+- **Additional stops**: at the start of a `catch` clause, and at function end (at each
+  `return` and at the implicit return) to show the return value.
 
-### 3.4 Arrêt sur exception
+### 3.4 Pause on exceptions
 
-Deux modes, réglés par `SetPauseOnExceptions` :
+Two modes, set by `SetPauseOnExceptions`:
 
-- **« all »** : arrêt au moment du `throw`, avant le déroulement de la pile.
-- **« uncaught »** : la prédiction se fait au moment du `throw`, en parcourant les frames à la
-  recherche d'offsets de `catch`. Ne comptent pas comme gestionnaires :
-  - l'offset 0 (fermeture d'itérateur) ;
-  - un gestionnaire qui commence par `gosub; throw` (relance d'un `finally`).
+- **"all"**: pause at the `throw`, before the stack is unwound.
+- **"uncaught"**: the prediction is made at the `throw`, by scanning the frames
+  for `catch` offsets. The following do not count as handlers:
+  - offset 0 (iterator close);
+  - a handler that starts with `gosub; throw` (rethrow of a `finally`).
 
-  Cette prédiction nécessite le nouveau `sf->call_sp` (2.7).
-- **Frontières asynchrones** : une exception qui traverse la frontière d'une fonction `async`
-  compte comme rattrapée. Les rejets de promesses non gérés sont signalés (console, pile capturée
-  au moment du `throw`) grâce au « promise rejection tracker ».
-- L'agent émet aussi un événement `UncaughtException`.
+  This prediction needs the new `sf->call_sp` (2.7).
+- **Async boundaries**: an exception that crosses the boundary of an `async` function
+  counts as caught. Unhandled promise rejections are reported (console, stack captured
+  at the `throw`) through the "promise rejection tracker".
+- The agent also emits an `UncaughtException` event.
 
-### 3.5 Évaluation d'expressions
+### 3.5 Expression evaluation
 
-- Le proxy enveloppe l'expression dans une fonction dont les paramètres sont les variables
-  visibles à la position d'arrêt (connues par l'annexe de debug), la compile sur l'hôte, puis le
-  stub l'exécute (`LoadFunction` puis `Call`).
-- Cela couvre `Runtime.evaluate`, `Debugger.evaluateOnCallFrame` et `Runtime.callFunctionOn`.
-- Les fonctions d'aide de js-debug sont chargées une seule fois (`LoadFunction`).
-- Les accesseurs (getters) ne sont jamais exécutés implicitement lors d'un `GetProperties`.
-- La modification d'une variable passe par `SetSlot`.
+- The proxy wraps the expression in a function whose parameters are the variables
+  visible at the stop position (known from the debug sidecar), compiles it on the host, then the
+  stub runs it (`LoadFunction` then `Call`).
+- This covers `Runtime.evaluate`, `Debugger.evaluateOnCallFrame` and `Runtime.callFunctionOn`.
+- The js-debug helper functions are loaded only once (`LoadFunction`).
+- Accessors (getters) are never run implicitly during a `GetProperties`.
+- Changing a variable goes through `SetSlot`.
 
-### 3.6 Points d'arrêt conditionnels, logpoints, compteurs de passages
+### 3.6 Conditional breakpoints, logpoints, hit counts
 
-Les conditions, logpoints et compteurs de passages (hit counts) sont compilés par le proxy et
-**évalués sur le device lui-même**, sans aller-retour avec l'hôte à chaque passage.
+Conditions, logpoints and hit counts are compiled by the proxy and
+**evaluated on the device itself**, with no round trip to the host at each hit.
 
-### 3.7 Cohérence source / bytecode / annexe
+### 3.7 Source / bytecode / sidecar consistency
 
-- Chaque script a un build id : le hachage de son bytecode avec le champ d'identifiant mis à
-  zéro. Le stub signale au proxy le build id des scripts chargés (les sources ne disent pas par
-  quel champ de quel message).
-- Le proxy indexe les paquets `.qjspkg` qu'il trouve pour retrouver l'annexe correspondant à un
+- Each script has a build id: the hash of its bytecode with the id field set to
+  zero. The stub reports to the proxy the build id of the loaded scripts (the sources do not say
+  through which field of which message).
+- The proxy indexes the `.qjspkg` packages it finds to find the sidecar that matches a
   build id.
-- Le proxy vérifie la cohérence entre le source, le bytecode et l'annexe (le manifeste contient
-  le hachage du source).
-- Les scripts sont annoncés à VS Code avec des URL `file:///` pointant vers les sources locales.
+- The proxy checks the consistency between the source, the bytecode and the sidecar (the manifest
+  contains the hash of the source).
+- The scripts are announced to VS Code with `file:///` URLs pointing to the local sources.
 
-### 3.8 Attente du debugger au démarrage (`--wait-debugger`)
+### 3.8 Waiting for the debugger at startup (`--wait-debugger`)
 
-- L'agent retient `main` jusqu'à ce que le proxy donne le feu vert, pour pouvoir déboguer le code
-  de démarrage (l'ouverture du port série réinitialise souvent les cartes ESP32).
-- Le réglage est mémorisé par l'agent pour le démarrage suivant.
-- Il a un délai d'expiration.
-- Il n'est jamais utilisé sur des devices de production.
+- The agent holds `main` until the proxy gives the go-ahead, so that the startup code
+  can be debugged (opening the serial port often resets ESP32 boards).
+- The setting is remembered by the agent for the next startup.
+- It has a timeout.
+- It is never used on production devices.
 
 ---
 
-## 4. Formats et protocole
+## 4. Formats and protocol
 
-### 4.1 Le paquet `.qjspkg`
+### 4.1 The `.qjspkg` package
 
-> **Statut : réalisé** (`espjs build`, `host/js/build.js` et `zip.js` ; lecture
-> `common/runtime/package.*`). Contenu actuel :
-> - `manifest.json` : `format` (1), `name`, `buildId`, `created`, `compiler`
->   (`"espjs 0.1.0 / QuickJS 2026-06-04"`), `main`, `scripts[]` avec pour chacun `path`,
->   `module`, `buildId`, `sourceHash`, et les noms de ses entrées `bytecode`, `debug`, `source` ;
->   un module venu d'une bibliothèque porte en plus `library` (section 4.5) ;
-> - `libraries[]` (nom et version des bibliothèques utilisées) et `natives[]` (modules natifs
->   importés, que le firmware doit fournir) ;
-> - `bytecode` : le numéro de version du bytecode du paquet (voir « Paquet compilé pour un
->   autre moteur » ci-dessous) ;
-> - `bytecode/<chemin>.qbc`, `debug/<chemin>.json`, `src/<chemin>` ;
-> - identifiants : build id d'un script = 32 premiers chiffres hexadécimaux du SHA-256 de son
->   bytecode ; `sourceHash` = SHA-256 du source ; build id du paquet = SHA-256 des
->   identifiants des scripts et du module principal ; fichier `<nom>-<12 chiffres>.qjspkg` ;
-> - zip à entrées stockées, dates fixes (1980-01-01) : même contenu, même archive.
+> **Status: done** (`qjsx build`, `host/js/build.js` and `zip.js`; reading
+> `common/runtime/package.*`). Current content:
+> - `manifest.json`: `format` (1), `name`, `buildId`, `created`, `compiler`
+>   (`"qjsx 0.1.0 / QuickJS 2026-06-04"`), `main`, `scripts[]` with, for each one, `path`,
+>   `module`, `buildId`, `sourceHash`, and the names of its `bytecode`, `debug`, `source` entries;
+>   a module that comes from a library also carries `library` (section 4.5);
+> - `libraries[]` (name and version of the libraries used) and `natives[]` (native modules
+>   imported, which the firmware must provide);
+> - `bytecode`: the bytecode version number of the package (see "Package compiled for
+>   another engine" below);
+> - `bytecode/<path>.qbc`, `debug/<path>.json`, `src/<path>`;
+> - ids: build id of a script = first 32 hexadecimal digits of the SHA-256 of its
+>   bytecode; `sourceHash` = SHA-256 of the source; build id of the package = SHA-256 of the
+>   ids of the scripts and of the main module; file `<name>-<12 digits>.qjspkg`;
+> - zip with stored entries, fixed dates (1980-01-01): same content, same archive.
 >
-> Écart provisoire : le bytecode est compilé avec `JS_STRIP_SOURCE` (sans le texte source, mais
-> avec positions, nom de fichier et noms de variables). Le retrait complet (`JS_STRIP_DEBUG`)
-> casse `import.meta` et `import()` dynamique : QuickJS retrouve le module courant par le nom
-> de fichier des infos de debug (`JS_GetScriptOrModuleName`, commentaire « XXX » de Bellard).
-> La correction (une référence au script dans chaque fonction) fait partie des modifications du
-> moteur pour le debugger. L'identifiant de build n'est pas encore écrit dans le bytecode
-> lui-même (même étape).
+> Temporary deviation: the bytecode is compiled with `JS_STRIP_SOURCE` (without the source text, but
+> with positions, file name and variable names). Full stripping (`JS_STRIP_DEBUG`)
+> breaks `import.meta` and dynamic `import()`: QuickJS finds the current module by the file
+> name of the debug info (`JS_GetScriptOrModuleName`, Bellard's "XXX" comment).
+> The fix (a reference to the script in each function) is part of the engine changes
+> for the debugger. The build id is not yet written in the bytecode
+> itself (same step).
 
-- **Un zip par build**, extension `.qjspkg`. La même extension sert pour le paquet complet et
-  pour le paquet réduit envoyé au device ; le manifeste indique ce qu'il contient.
-- **Entrées stockées sans compression** : pas de dépendance à une bibliothèque de compression, et
-  le device peut exécuter le bytecode sur place depuis la flash, avec `JS_READ_OBJ_ROM_DATA`
-  (sur l'ESP32 via `esp_partition_mmap`). **Ce dernier point est à vérifier.**
-- Le zip (avec son CRC32) est écrit par le JS hôte.
+- **One zip per build**, extension `.qjspkg`. The same extension is used for the full package and
+  for the reduced package sent to the device; the manifest says what it contains.
+- **Entries stored without compression**: no dependency on a compression library, and
+  the device can execute the bytecode in place from flash, with `JS_READ_OBJ_ROM_DATA`
+  (on the ESP32 through `esp_partition_mmap`). **This last point is to verify.**
+- The zip (with its CRC32) is written by the host JS.
 
-Contenu :
+Content:
 
-| Entrée | Contenu |
+| Entry | Content |
 |---|---|
-| `manifest.json` | version du format, build id, identifiant du compilateur, liste des scripts (chemin, build id du script, hachage du source) |
-| `bytecode/` | le bytecode, c'est-à-dire ce qui part sur le device |
-| `debug/` | une annexe de debug JSON par script |
-| `src/` | copie exacte des sources compilées |
+| `manifest.json` | format version, build id, compiler id, list of the scripts (path, script build id, source hash) |
+| `bytecode/` | the bytecode, that is, what goes to the device |
+| `debug/` | one JSON debug sidecar per script |
+| `src/` | exact copy of the compiled sources |
 
-Les noms exacts des champs du manifeste et l'algorithme de hachage du source ne sont pas fixés
-dans les sources.
+The exact names of the manifest fields and the hash algorithm of the source are not fixed
+in the sources.
 
-**Paquet compilé pour un autre moteur** (réalisé le 2026-11-11). Un moteur ne lit que le
-bytecode de sa propre version (`BC_VERSION` de QuickJS, `0x45` aujourd'hui, donné par
-`JS_GetBytecodeVersion()`). `espjs build` écrit ce numéro dans le manifeste (`bytecode`), et
-il est contrôlé à deux endroits :
+**Package compiled for another engine** (done on 2026-11-11). An engine only reads the
+bytecode of its own version (QuickJS's `BC_VERSION`, `0x45` today, given by
+`JS_GetBytecodeVersion()`). `qjsx build` writes this number in the manifest (`bytecode`), and
+it is checked in two places:
 
-1. **À l'envoi.** `espjs deploy` le met dans `UPLOAD_BEGIN`. L'agent le compare au sien et
-   refuse aussitôt s'il diffère : rien n'est écrit, le paquet installé reste en place, et
-   l'outil affiche le message du device (« the package holds bytecode version 70, this device
-   reads version 69: rebuild the package, or flash a firmware that matches espjs »).
-2. **Au lancement.** Le chargeur (`startPackage`, `common/runtime/program.cpp`) relit le
-   numéro dans le manifeste avant de charger le moindre module. Ce contrôle ne dépend pas de
-   ce que dit l'hôte, et couvre `espjs run paquet.qjspkg` sur le PC.
+1. **When sending.** `qjsx deploy` puts it in `UPLOAD_BEGIN`. The agent compares it to its own and
+   refuses at once if it differs: nothing is written, the installed package stays in place, and
+   the tool prints the device's message ("the package holds bytecode version 70, this device
+   reads version 69: rebuild the package, or flash a firmware that matches qjsx").
+2. **When starting.** The loader (`startPackage`, `common/runtime/program.cpp`) reads the
+   number again in the manifest before loading any module. This check does not depend on
+   what the host says, and covers `qjsx run package.qjspkg` on the PC.
 
-Un paquet sans champ `bytecode` (construit par un `espjs` plus ancien) est refusé de la même
-façon. Le numéro n'a de valeur que si `BC_VERSION` augmente à chaque changement du moteur qui
-touche le bytecode : c'est une règle de `engine-changes.md` (section K).
+A package without a `bytecode` field (built by an older `qjsx`) is refused in the same
+way. The number is only worth something if `BC_VERSION` increases at each engine change that
+touches the bytecode: this is a rule of `engine-changes.md` (section K).
 
-**Avertissements `eval` et `Function`** (réalisé le 2026-11-11). Sur un device, `eval(...)`
-et le constructeur `Function` lèvent « eval is not supported » ; sur le PC ils marchent.
-`espjs build` et `espjs mklib` préviennent donc, sans échouer :
+**`eval` and `Function` warnings** (done on 2026-11-11). On a device, `eval(...)`
+and the `Function` constructor throw "eval is not supported"; on the PC they work.
+`qjsx build` and `qjsx mklib` therefore warn, without failing:
 
 ```
 src/main.js:46:29: warning: eval() needs the compiler, which a device does not have: it throws there
 ```
 
-La détection est faite par le compilateur (modification K) et elle est syntaxique : l'appel
-direct `eval(...)`, l'appel `Function(...)` et `new Function`. Un usage indirect
-(`(0, eval)(x)`, `globalThis.eval`, un alias) n'est pas vu ; l'erreur à l'exécution reste le
-filet. Un module pris tel quel dans une bibliothèque n'est pas recompilé : ses avertissements
-ont été donnés par `espjs mklib`.
+The detection is done by the compiler (change K) and it is syntactic: the direct
+call `eval(...)`, the call `Function(...)` and `new Function`. An indirect use
+(`(0, eval)(x)`, `globalThis.eval`, an alias) is not seen; the run-time error remains the
+safety net. A module taken as it is from a library is not recompiled: its warnings
+were given by `qjsx mklib`.
 
-### 4.2 L'annexe de debug
+### 4.2 The debug sidecar
 
-> **Statut : réalisé** (format 2, 2026-11-10). Détail dans
+> **Status: done** (format 2, 2026-11-10). Details in
 > [engine-changes.md](engine-changes.md), section E.
 
-Une annexe JSON par script, dans `debug/`, collectée par le compilateur avant le retrait des
-informations : `format`, `path`, `buildId`, `sourceHash`, et `functions`. L'indice d'une
-fonction dans `functions` est son numéro de fonction. Chaque fonction porte :
+One JSON sidecar per script, in `debug/`, collected by the compiler before the information is
+stripped: `format`, `path`, `buildId`, `sourceHash`, and `functions`. The index of a
+function in `functions` is its function number. Each function carries:
 
-- son nom, sa plage source et la taille de son bytecode ;
-- `positions` : des triplets `pc, offset source, nature`, triés par pc. La nature vaut 0 pour
-  une expression (les positions du pc2line d'origine), 1 pour un début d'instruction et 2 pour
-  un retour ;
-- `arguments`, `locals` (avec leur portée), `closures` : noms et drapeaux (lexicale, const,
-  capturée, globale). L'indice d'une variable est son emplacement dans la frame ;
-- `scopes` : parent et **plage source** de chaque portée. Écart par rapport à la conception
-  d'origine, qui prévoyait des plages de pc : le proxy passe du pc de l'arrêt à une position
-  source, puis aux portées qui la contiennent. Les variables internes se reconnaissent à leur
-  nom (`<ret>`, `this`, …). Une variable en TDZ se lit avec le tag `JS_TAG_UNINITIALIZED`.
+- its name, its source range and the size of its bytecode;
+- `positions`: triplets `pc, source offset, kind`, sorted by pc. The kind is 0 for
+  an expression (the positions of the original pc2line), 1 for a statement start and 2 for
+  a return;
+- `arguments`, `locals` (with their scope), `closures`: names and flags (lexical, const,
+  captured, global). The index of a variable is its slot in the frame;
+- `scopes`: parent and **source range** of each scope. Deviation from the original
+  design, which planned pc ranges: the proxy goes from the pc of the stop to a source
+  position, then to the scopes that contain it. Internal variables are recognized by their
+  name (`<ret>`, `this`, …). A variable in the TDZ reads with the tag `JS_TAG_UNINITIALIZED`.
 
-Les positions sont des **offsets en octets dans le source**. Le proxy en déduit les lignes et
-les colonnes UTF-16 attendues par CDP.
+The positions are **byte offsets in the source**. The proxy derives from them the lines and
+the UTF-16 columns that CDP expects.
 
-Le lien avec le bytecode passe par le build id du script (4.1, 3.7). Les noms de variables ne
-voyagent jamais vers ou depuis le device : ils sont lus dans l'annexe.
+The link with the bytecode goes through the build id of the script (4.1, 3.7). Variable names
+never travel to or from the device: they are read in the sidecar.
 
-### 4.3 Le protocole de l'agent du device
+### 4.3 The device agent protocol
 
-> **Statut : réalisé pour le déploiement** (la partie debug viendra avec le debugger). Deux
-> implémentations qui doivent rester équivalentes : JS côté hôte (`host/js/cbor.js`,
-> `frames.js`, `protocol.js`, `device.js`, `deploy.js`) et C++ côté device (`common/agent/` :
-> `cbor`, `frames`, `protocol.h`, `agent` — code portable, pour le device et pour l'agent desktop
-> `espjs agent`). Testé de bout en bout entre les deux (`tests/run-tests.sh`).
+> **Status: done for deployment** (the debug part will come with the debugger). Two
+> implementations that must stay equivalent: JS on the host side (`host/js/cbor.js`,
+> `frames.js`, `protocol.js`, `device.js`, `deploy.js`) and C++ on the device side (`common/agent/`:
+> `cbor`, `frames`, `protocol.h`, `agent` — portable code, for the device and for the desktop agent
+> `qjsx agent`). Tested end to end between the two (`tests/run-tests.sh`).
 >
-> Points fixés à l'implémentation :
-> - **trame** : `0x00 | COBS(0xE5 | version 1 | CRC-16/CCITT-FALSE du message, 2 octets
->   big-endian | message) | 0x00` ; sur une liaison série, un segment qui ne se décode pas en
->   trame valide est du texte de console ;
-> - **message** : tableau CBOR `[type, id, contenu]` ; `id` > 0 pour une requête et sa réponse,
->   0 pour un événement ; contenu = map à clés entières (ou `null`) ;
-> - **types** : `RESPONSE` 1, `ERROR` 2 (`{MESSAGE}`), `HELLO` 10 (`{PROTOCOL, TOKEN?}` →
+> Points fixed at implementation time:
+> - **frame**: `0x00 | COBS(0xE5 | version 1 | CRC-16/CCITT-FALSE of the message, 2 bytes
+>   big-endian | message) | 0x00`; on a serial link, a segment that does not decode as a
+>   valid frame is console text;
+> - **message**: CBOR array `[type, id, content]`; `id` > 0 for a request and its response,
+>   0 for an event; content = integer-keyed map (or `null`);
+> - **types**: `RESPONSE` 1, `ERROR` 2 (`{MESSAGE}`), `HELLO` 10 (`{PROTOCOL, TOKEN?}` →
 >   `{PROTOCOL, AGENT, ENGINE, MAX_MESSAGE}`), `INFO` 11 (→ `{RUNNING, BUILD_ID, PACKAGE_SIZE}`),
->   `UPLOAD_BEGIN` 20 (`{SIZE, SHA256, BUILD_ID, BYTECODE}`, refusé si le numéro de bytecode
->   n'est pas celui du moteur du device), `UPLOAD_CHUNK` 21 (`{OFFSET, DATA}`, 2 048
->   octets, dans l'ordre), `UPLOAD_END` 22 (vérifie taille et SHA-256, installe), `RUN` 23,
->   `STOP` 24, `RESET` 25 ; événements `LOG` 30 (`{STREAM, TEXT}`), `EXITED` 31 (`{CODE}`),
->   `STARTED` 32 (`{BUILD_ID}`). Valeurs des clés : `common/agent/protocol.h` ;
-> - **session** : toute requête autre que `HELLO` est refusée avant `HELLO` ; pendant la
->   session, la console du programme (`console.*`, exceptions non rattrapées) part en `LOG` ;
-> - **réémission** : l'hôte renvoie une requête sans réponse après 3 s (3 essais) avec le même
->   id ; l'agent renvoie alors la réponse mémorisée sans réexécuter ;
-> - **jeton** : si l'agent est lancé avec un jeton, `HELLO` doit le fournir.
+>   `UPLOAD_BEGIN` 20 (`{SIZE, SHA256, BUILD_ID, BYTECODE}`, refused if the bytecode number
+>   is not that of the device's engine), `UPLOAD_CHUNK` 21 (`{OFFSET, DATA}`, 2,048
+>   bytes, in order), `UPLOAD_END` 22 (checks size and SHA-256, installs), `RUN` 23,
+>   `STOP` 24, `RESET` 25; events `LOG` 30 (`{STREAM, TEXT}`), `EXITED` 31 (`{CODE}`),
+>   `STARTED` 32 (`{BUILD_ID}`). Key values: `common/agent/protocol.h`;
+> - **session**: any request other than `HELLO` is refused before `HELLO`; during the
+>   session, the program's console (`console.*`, uncaught exceptions) goes out as `LOG`;
+> - **retransmission**: the host resends a request without a response after 3 s (3 tries) with the same
+>   id; the agent then resends the remembered response without executing again;
+> - **token**: if the agent is started with a token, `HELLO` must provide it.
 >
-> **Partie debug : réalisée côté device le 2026-11-10** (stub, `common/agent/debugger.*`). Les
-> messages et l'encodage des valeurs sont décrits en tête de `host/js/protocol.js`.
-> - **requêtes** : `DEBUG_ATTACH` 40 à `RELEASE` 54. On y trouve la pause, la reprise, les pas,
->   les arrêts par fonction, le mode exceptions, la liste des modules, la pile, la lecture et
->   l'écriture des emplacements, les propriétés et emplacements internes, le chargement d'une
->   fonction compilée sur l'hôte, l'appel et la libération des poignées ;
-> - **événements** : `PAUSED` 60, `RESUMED` 61, `SCRIPT_LOADED` 62. Après `SCRIPT_LOADED`,
->   le device attend `RESUME` : l'hôte pose d'abord les arrêts du module ;
-> - **valeurs** : primitives en CBOR direct, objets derrière des poignées regroupées (groupe
->   `PAUSE` libéré à la reprise, `CONSOLE`, `PERSISTENT`). Les objets sont décrits sans
->   exécuter de JS ;
-> - **taille maximale d'un message** : 64 ko (fonctions compilées par le proxy). Le CBOR C++
->   lit et écrit maintenant les flottants et `undefined` ;
-> - **threads** : les requêtes arrivent sur le thread de transport et s'exécutent sur le
->   thread JS :
->   - en pause, dans la boucle de pause ;
->   - au repos, via un message de la boucle d'événements ;
->   - pendant l'exécution de JS, depuis le gestionnaire d'interruption, et seulement les
->     requêtes qui n'exécutent pas de JS (`PAUSE`, `SET_STOPS`…) ;
-> - **testé** par `tests/debugger.test.js` à travers l'agent desktop (52 vérifications :
->   points d'arrêt, pas into / over / out, pause d'une boucle infinie, variables et closures
->   modifiées, appel de fonctions compilées sur l'hôte, exceptions, `debugger;`) ;
-> - **pas encore fait** : la prédiction « non rattrapée » (le mode `UNCAUGHT` ne met pas en
->   pause), `[[Entries]]` des Map/Set, `--wait-debugger`, les points d'arrêt conditionnels.
+> **Debug part: done on the device side on 2026-11-10** (stub, `common/agent/debugger.*`). The
+> messages and the encoding of values are described at the top of `host/js/protocol.js`.
+> - **requests**: `DEBUG_ATTACH` 40 to `RELEASE` 54. They include pause, resume, the steps,
+>   the stops per function, the exceptions mode, the list of modules, the stack, reading and
+>   writing the slots, the properties and internal slots, loading a
+>   function compiled on the host, calling, and releasing handles;
+> - **events**: `PAUSED` 60, `RESUMED` 61, `SCRIPT_LOADED` 62. After `SCRIPT_LOADED`,
+>   the device waits for `RESUME`: the host first sets the stops of the module;
+> - **values**: primitives in direct CBOR, objects behind grouped handles (group
+>   `PAUSE` released on resume, `CONSOLE`, `PERSISTENT`). Objects are described without
+>   running JS;
+> - **maximum size of a message**: 64 KB (functions compiled by the proxy). The C++ CBOR
+>   now reads and writes floats and `undefined`;
+> - **threads**: requests arrive on the transport thread and run on the
+>   JS thread:
+>   - while paused, in the pause loop;
+>   - when idle, through a message of the event loop;
+>   - while JS is running, from the interrupt handler, and only the
+>     requests that run no JS (`PAUSE`, `SET_STOPS`…);
+> - **tested** by `tests/debugger.test.js` through the desktop agent (52 checks:
+>   breakpoints, step into / over / out, pausing an infinite loop, variables and closures
+>   modified, calling functions compiled on the host, exceptions, `debugger;`);
+> - **not done yet**: the "uncaught" prediction (the `UNCAUGHT` mode does not
+>   pause), `[[Entries]]` of Map/Set, `--wait-debugger`, conditional breakpoints.
 
-Le protocole entre le stub et le proxy s'appelle « device agent » : il sert au debug **et** au
-déploiement.
+The protocol between the stub and the proxy is called "device agent": it serves debug **and**
+deployment.
 
-#### Cadrage
+#### Framing
 
-Sur toutes les liaisons (série et TCP), une trame a la forme :
+On every link (serial and TCP), a frame has the form:
 
 `0x00 | COBS(magic | version | CRC-16 | message) | 0x00`
 
-- COBS garantit l'absence d'octet `0x00` à l'intérieur de la trame ; `0x00` délimite les trames.
-- Une trame dont le CRC est faux est ignorée.
-- Sur liaison série, les octets qui ne se décodent pas en trame valide sont du texte de console.
-  Pendant une session, le stub enveloppe la console, `printf` et les journaux ESP-IDF dans des
-  messages `Log`.
+- COBS guarantees that there is no `0x00` byte inside the frame; `0x00` delimits the frames.
+- A frame whose CRC is wrong is ignored.
+- On a serial link, bytes that do not decode as a valid frame are console text.
+  During a session, the stub wraps the console, `printf` and the ESP-IDF logs into
+  `Log` messages.
 
-La valeur et la taille exactes du marqueur magique, ainsi que la variante du CRC-16, ne sont pas
-précisées dans les sources.
+The exact value and size of the magic marker, and the CRC-16 variant, are not
+specified in the sources.
 
-#### Encodage
+#### Encoding
 
-Un sous-ensemble de **CBOR** écrit à la main : entiers, flottants, chaînes, octets, tableaux et
-maps à clés entières.
+A hand-written subset of **CBOR**: integers, floats, strings, bytes, arrays and
+integer-keyed maps.
 
-#### Objets, poignées et groupes
+#### Objects, handles and groups
 
-- Les objets restent sur la cible, derrière des **poignées** (handles), regroupées comme les
-  groupes d'objets CDP :
-  - `pause` : libéré à la reprise ;
-  - `console` ;
+- Objects stay on the target, behind **handles**, grouped like
+  CDP object groups:
+  - `pause`: released on resume;
+  - `console`;
   - `persistent`.
-- Les valeurs primitives voyagent en ligne.
-- Les noms ne voyagent jamais : ils viennent de l'annexe de debug.
-- `Release` libère des poignées.
+- Primitive values travel inline.
+- Names never travel: they come from the debug sidecar.
+- `Release` releases handles.
 
-#### Robustesse
+#### Robustness
 
-- Les requêtes sont numérotées : un doublon reçoit à nouveau la même réponse, sans être
-  réexécuté.
-- La taille maximale d'un message est négociée dans `Hello`.
-- Les gros contenus sont découpés (`Upload Begin` / `Chunk` / `End`).
+- Requests are numbered: a duplicate gets the same response again, without being
+  executed again.
+- The maximum size of a message is negotiated in `Hello`.
+- Big payloads are chunked (`Upload Begin` / `Chunk` / `End`).
 
 #### Messages
 
-| Catégorie | Messages |
+| Category | Messages |
 |---|---|
-| Ouverture | `Hello` (taille maximale, jeton en TCP) |
-| Contrôle de l'exécution | `Pause`, `Resume`, `Step`, `SetStopPoints`, `SetPauseOnExceptions` |
+| Opening | `Hello` (maximum size, token over TCP) |
+| Execution control | `Pause`, `Resume`, `Step`, `SetStopPoints`, `SetPauseOnExceptions` |
 | Scripts | `ListScripts` |
-| Inspection | `GetStack`, `GetFrameSlots`, `GetProperties` (sans exécuter les getters), `GetInternals` |
+| Inspection | `GetStack`, `GetFrameSlots`, `GetProperties` (without running getters), `GetInternals` |
 | Modification | `SetSlot` |
-| Exécution de code | `LoadFunction`, `Call` |
-| Poignées | `Release` |
-| Événements (agent → proxy) | `Paused`, `Resumed`, `ScriptLoaded`, `Log`, `UncaughtException` |
-| Déploiement | écrire un `.qjspkg` en flash (via `Upload Begin`/`Chunk`/`End`), lister les fichiers, redémarrer |
+| Code execution | `LoadFunction`, `Call` |
+| Handles | `Release` |
+| Events (agent → proxy) | `Paused`, `Resumed`, `ScriptLoaded`, `Log`, `UncaughtException` |
+| Deployment | write a `.qjspkg` to flash (through `Upload Begin`/`Chunk`/`End`), list files, restart |
 
-Les noms des messages de déploiement autres que l'upload, et le détail des champs de chaque
-message, ne sont pas encore fixés dans les sources.
+The names of the deployment messages other than the upload, and the details of the fields of each
+message, are not fixed in the sources yet.
 
-#### Sécurité en TCP
+#### Security over TCP
 
-En TCP, le stub est **désactivé par défaut**, et un **jeton** est exigé dans `Hello`.
+Over TCP, the stub is **disabled by default**, and a **token** is required in `Hello`.
 
-### 4.4 Nature des positions
+### 4.4 Position kinds
 
-> **Statut : conçu, non implémenté.**
+> **Status: designed, not implemented.**
 
-Chaque position enregistrée par le compilateur porte une nature :
+Each position recorded by the compiler carries a kind:
 
-| Nature | Origine |
+| Kind | Origin |
 |---|---|
-| instruction | début d'instruction, clause `catch`, entrée du corps de fonction, condition de boucle |
-| retour | chaque `return` et le retour implicite (permet de montrer la valeur de retour) |
-| expression | nature prévue ; son usage précis n'est pas détaillé dans les sources |
+| statement | statement start, `catch` clause, entry of the function body, loop condition |
+| return | each `return` and the implicit return (lets the return value be shown) |
+| expression | planned kind; its precise use is not detailed in the sources |
 
-### 4.5 Les bibliothèques `.qjslib`
+### 4.5 The `.qjslib` libraries
 
-> **Statut : réalisé le 2026-11-11** (`espjs mklib`, `host/js/library.js`, `compile.js`,
-> `build.js` ; modification J du moteur). Testé par `run-tests.sh` (fixtures `testlib`,
-> `uselib`, `dynamicimport`, `nolibrary`) et `tests/tools.test.js`. Non fait : la vérification
-> des modules natifs contre le firmware, les `.d.ts`.
+> **Status: done on 2026-11-11** (`qjsx mklib`, `host/js/library.js`, `compile.js`,
+> `build.js`; engine change J). Tested by `run-tests.sh` (fixtures `testlib`,
+> `uselib`, `dynamicimport`, `nolibrary`) and `tests/tools.test.js`. Not done: checking
+> the native modules against the firmware, the `.d.ts`.
 
-**Le problème.** Un device n'a pas de compilateur : un module écrit en JS et embarqué en
-source dans le firmware (c'était le cas de `path`) ne peut pas s'y charger. Et un firmware
-générique ne doit pas grossir avec du JS que la plupart des programmes n'utilisent pas.
+**The problem.** A device has no compiler: a module written in JS and embedded as
+source in the firmware (this was the case of `path`) cannot load there. And a generic
+firmware must not grow with JS that most programs do not use.
 
-**La réponse.** Le firmware ne contient aucun JS, seulement des modules natifs. Les modules JS
-réutilisables vivent dans des bibliothèques, des fichiers `.qjslib`. `espjs build` copie dans
-le paquet du programme les modules de bibliothèque qu'il importe ; le device les y trouve
-comme n'importe quel autre module, sans rien savoir des bibliothèques.
+**The answer.** The firmware contains no JS, only native modules. Reusable JS
+modules live in libraries, `.qjslib` files. `qjsx build` copies into
+the program's package the library modules it imports; the device finds them there
+like any other module, knowing nothing about libraries.
 
-**Noms.** Tout module d'une bibliothèque s'appelle `<bibliothèque>/<module>`, et s'importe
-sous ce nom, sur le modèle de `node:path` :
+**Names.** Every module of a library is called `<library>/<module>`, and is imported
+under that name, on the model of `node:path`:
 
 ```js
 import { join } from "stdlib/path";
 import { read } from "sensors/bme280";
 ```
 
-- La bibliothèque standard s'appelle `stdlib` (`stdlib.qjslib`).
-- Les modules natifs gardent leurs noms courts (`fs`, `crypto`…).
-- Deux bibliothèques ne peuvent pas porter le même nom, donc leurs modules ne se heurtent
-  jamais.
-- Dans une bibliothèque, un module importe ses voisins par leur nom complet ou en relatif :
-  `"./filter"` depuis `sensors/bme280` désigne `sensors/filter`.
+- The standard library is called `stdlib` (`stdlib.qjslib`).
+- Native modules keep their short names (`fs`, `crypto`…).
+- Two libraries cannot have the same name, so their modules never
+  collide.
+- Inside a library, a module imports its neighbours by their full name or relatively:
+  `"./filter"` from `sensors/bme280` means `sensors/filter`.
 
-**Le fichier `.qjslib`.** Un zip à entrées stockées, organisé comme un `.qjspkg` :
+**The `.qjslib` file.** A zip with stored entries, laid out like a `.qjspkg`:
 
-| Entrée | Contenu |
+| Entry | Content |
 |---|---|
 | `manifest.json` | `format` (1), `kind` (`"library"`), `name`, `version`, `created`, `compiler`, `bytecode`, `natives[]`, `modules[]` |
-| `bytecode/<module>.qbc` | bytecode du module : un cache, utilisé seulement par un build dont le compilateur est celui qui l'a produit |
-| `debug/<module>.json` | son annexe de debug (même condition) |
-| `src/<module>.js` | son source : ce qu'un build fait avec un autre compilateur recompile, et ce que montre le debugger |
+| `bytecode/<module>.qbc` | bytecode of the module: a cache, used only by a build whose compiler is the one that produced it |
+| `debug/<module>.json` | its debug sidecar (same condition) |
+| `src/<module>.js` | its source: what a build made with another compiler recompiles, and what the debugger shows |
 
-Chaque élément de `modules[]` donne `name` (`"sensors/bme280"`), `buildId`, `sourceHash`, les
-noms de ses trois entrées et `imports` (les noms des modules qu'il importe).
+Each item of `modules[]` gives `name` (`"sensors/bme280"`), `buildId`, `sourceHash`, the
+names of its three entries and `imports` (the names of the modules it imports).
 
-**Fabriquer une bibliothèque : `espjs mklib [dossier] [--output fichier]`.** La commande sert
-aussi bien à `stdlib` qu'aux bibliothèques d'un utilisateur. Le dossier contient un
-`espjs.json` de bibliothèque (section 6.4) : `name`, `version` et `modules`, qui associe chaque
-nom de module à son fichier source. Elle compile chaque module sous son nom complet, vérifie
-qu'un import vers la bibliothèque elle-même désigne bien un de ses modules, note les modules
-natifs importés, et écrit `<output>/<name>.qjslib`.
+**Making a library: `qjsx mklib [directory] [--output <file>]`.** The command serves
+`stdlib` as well as a user's libraries. The folder contains a library
+`qjsx.json` (section 6.4): `name`, `version` and `modules`, which maps each
+module name to its source file. It compiles each module under its full name, checks
+that an import to the library itself does name one of its modules, notes the native
+modules imported, and writes `<output>/<name>.qjslib`.
 
-**La bibliothèque standard.** Ses sources sont dans `lib/stdlib/` (aujourd'hui `path`). Le
-build d'`espjs` fabrique `stdlib.qjslib` à côté de l'exécutable, avec l'outil qu'il vient de
-lier ; c'est ce fichier qui est livré, pas les sources. L'outil le trouve dans le dossier de
-son exécutable (`process.argv[0]` est le chemin complet de l'exécutable, comme dans Node).
+**The standard library.** Its sources are in `lib/stdlib/` (today `path`). The
+build of `qjsx` makes `stdlib.qjslib` next to the executable, with the tool it has just
+linked; this file is what is shipped, not the sources. The tool finds it in the folder of
+its executable (`process.argv[0]` is the full path of the executable, as in Node).
 
-Les mêmes sources sont aussi embarquées dans l'exécutable hôte, sous les mêmes noms
-(`stdlib/path`) : l'outil en a besoin pour ses propres commandes, dont `mklib`, avant que
-`stdlib.qjslib` existe, et `espjs run script.js` s'en sert pour un script lancé sans build.
+The same sources are also embedded in the host executable, under the same names
+(`stdlib/path`): the tool needs them for its own commands, `mklib` among them, before
+`stdlib.qjslib` exists, and `qjsx run script.js` uses them for a script started without a build.
 
-**Ce que fait `espjs build`.**
+**What `qjsx build` does.**
 
-1. Il compile les modules du programme (les fichiers de `sources`).
-2. Il lit les bibliothèques : `stdlib.qjslib`, puis celles de `libraries` dans `espjs.json`.
-3. Il suit les imports de chaque module. Un nom qui n'est pas un module du programme est :
-   - un module d'une bibliothèque connue : il est ajouté au paquet, en entier, et ses propres
-     imports sont suivis à leur tour ;
-   - un nom sans `/` : un module natif, inscrit dans `natives` du manifeste ;
-   - sinon une erreur, qui nomme le module qui importe (import relatif introuvable,
-     bibliothèque non déclarée, module absent de la bibliothèque).
-4. Il écrit dans le paquet le bytecode, l'annexe de debug et le source de chaque module, ceux
-   des bibliothèques sous `bytecode/<bibliothèque>/<module>.qbc`. Un module de bibliothèque
-   que personne n'importe n'est pas copié ; il n'y a pas de tri plus fin (fonction par
-   fonction).
+1. It compiles the modules of the program (the files of `sources`).
+2. It reads the libraries: `stdlib.qjslib`, then those of `libraries` in `qjsx.json`.
+3. It follows the imports of each module. A name that is not a module of the program is:
+   - a module of a known library: it is added to the package, whole, and its own
+     imports are followed in turn;
+   - a name without `/`: a native module, recorded in `natives` of the manifest;
+   - otherwise an error, which names the importing module (relative import not found,
+     library not declared, module missing from the library).
+4. It writes into the package the bytecode, the debug sidecar and the source of each module, those
+   of the libraries under `bytecode/<library>/<module>.qbc`. A library module
+   that nobody imports is not copied; there is no finer sorting (function by
+   function).
 
-Le debugger voit les modules de bibliothèque comme les autres : leur annexe et leur source
-sont dans le paquet.
+The debugger sees library modules like the others: their sidecar and their source
+are in the package.
 
-**Bibliothèque faite par un autre compilateur.** Le build compare l'identifiant du
-compilateur et le numéro de bytecode de la bibliothèque (`compiler`, `bytecode` de son
-manifeste) aux siens. S'ils diffèrent, la bibliothèque n'est pas refusée, puisqu'elle contient
-ses sources : ses modules sont recompilés, et le build le dit (« library 'testlib' (...) was
-made by another compiler (...): its modules were compiled again from their sources »).
+**Library made by another compiler.** The build compares the compiler
+id and the bytecode number of the library (`compiler`, `bytecode` of its
+manifest) to its own. If they differ, the library is not refused, since it contains
+its sources: its modules are recompiled, and the build says so ("library 'testlib' (...) was
+made by another compiler (...): its modules were compiled again from their sources").
 
-**`import()` est interdit** dans un programme construit par `espjs build`, et dans une
-bibliothèque : le nom d'un module chargé par `import()` n'est connu qu'à l'exécution, donc le
-build ne pourrait pas l'emporter. Le compilateur le refuse comme une erreur de syntaxe, avec
-sa position (modification J du moteur). Le JS de l'outil lui-même n'est pas concerné.
+**`import()` is forbidden** in a program built by `qjsx build`, and in a
+library: the name of a module loaded by `import()` is known only at run time, so the
+build could not take it along. The compiler refuses it as a syntax error, with
+its position (engine change J). The JS of the tool itself is not concerned.
 
-**Limites.**
+**Limits.**
 
-- `espjs run script.js` (sans build) ne connaît que la copie embarquée de `stdlib` : un script
-  qui importe une autre bibliothèque doit être construit, puis lancé par
-  `espjs run paquet.qjspkg`.
-- Une faute de frappe dans le nom d'un module natif (`"cryto"`) n'est vue qu'au chargement du
-  programme : le build ne connaît pas la liste des modules natifs d'un firmware. Il est prévu
-  que le firmware la donne dans `Hello` et que `espjs deploy` la compare à `natives`.
-- Si seul `lib/stdlib/espjs.json` change, `make` ne refait pas `stdlib.qjslib` (il le refait
-  quand l'exécutable est relié, donc dès qu'un source de `stdlib` change).
+- `qjsx run script.js` (without a build) only knows the embedded copy of `stdlib`: a script
+  that imports another library must be built, then started with
+  `qjsx run package.qjspkg`.
+- A typo in the name of a native module (`"cryto"`) is only seen when the
+  program is loaded: the build does not know the list of the native modules of a firmware. It is planned
+  that the firmware gives it in `Hello` and that `qjsx deploy` compares it to `natives`.
+- If only `lib/stdlib/qjsx.json` changes, `make` does not remake `stdlib.qjslib` (it remakes it
+  when the executable is relinked, so as soon as a source of `stdlib` changes).
 
 ---
 
-## 5. Le runtime
+## 5. The runtime
 
-### 5.1 Boucle d'événements
+### 5.1 Event loop
 
-> **Statut : réalisé pour l'hôte** (`common/runtime/loop.h`, `loop.cpp`, `platform_host.cpp` pour
-> Windows et POSIX) et testé (`tests/runtime.test.js`). Version device (file FreeRTOS) non
-> implémentée. Sur l'hôte, une exception non rattrapée arrête la boucle avec le code 1
-> (`setExitOnUncaught`), comme Node ; le device l'affichera et continuera.
+> **Status: done for the host** (`common/runtime/loop.h`, `loop.cpp`, `platform_host.cpp` for
+> Windows and POSIX) and tested (`tests/runtime.test.js`). Device version (FreeRTOS queue) not
+> implemented. On the host, an uncaught exception stops the loop with code 1
+> (`setExitOnUncaught`), like Node; the device will print it and continue.
 
-Même modèle sur toutes les plateformes (hôte et device) :
+Same model on every platform (host and device):
 
-- **un seul thread JS** ;
-- des **producteurs d'événements** (pilotes, threads d'E/S, ISR sur le device) postent des messages
-  dans **une seule file bornée** : file FreeRTOS sur le device, mutex + condition/événement sur
-  l'hôte ;
-- la boucle vide les jobs de promesses, attend le prochain message ou timer, puis le traite sur
-  le thread JS ;
-- les messages portent un **identifiant de source + une génération**, jamais de pointeur brut
-  vers un objet ;
-- la boucle d'événements de `quickjs-libc` n'est pas utilisée ;
-- le transport du stub de debug est un producteur de plus ; pendant une pause, une mini-boucle
-  ne traite que les messages du debugger.
+- **a single JS thread**;
+- **event producers** (drivers, I/O threads, ISRs on the device) post messages
+  into **a single bounded queue**: FreeRTOS queue on the device, mutex + condition/event on
+  the host;
+- the loop drains the promise jobs, waits for the next message or timer, then handles it on
+  the JS thread;
+- messages carry a **source id + a generation**, never a raw pointer
+  to an object;
+- the event loop of `quickjs-libc` is not used;
+- the transport of the debug stub is one more producer; during a pause, a mini-loop
+  only handles the debugger's messages.
 
-Une exception JS non rattrapée dans un callback sur le device est affichée, puis l'exécution
-continue ; redémarrer reste une option.
+An uncaught JS exception in a callback on the device is printed, then execution
+continues; restarting remains an option.
 
-### 5.2 Styles asynchrones
+### 5.2 Async styles
 
-> **Statut : conçu, non implémenté.**
+> **Status: designed, not implemented.**
 
-- **Callbacks** pour les événements spontanés : `uart.onData(fn)`.
-- **Promesses** pour les opérations lancées par le script :
+- **Callbacks** for spontaneous events: `uart.onData(fn)`.
+- **Promises** for operations started by the script:
   `await uart.readLine({ timeout })`.
-- Un module peut proposer les deux.
-- L'itération asynchrone (`for await`) viendra peut-être plus tard, construite sur les promesses.
+- A module may offer both.
+- Async iteration (`for await`) may come later, built on promises.
 
-### 5.3 Bibliothèque de liaison C++ ↔ JS
+### 5.3 C++ ↔ JS binding library
 
-> **Statut : réalisé** dans `common/jsbind/` (headers seuls) et testé par `tests/jsbind.test.js`
-> avec le module natif `tests/native/test_module.cpp` (42 vérifications, sans fuite en build
-> Debug). Elle remplace le code `uart`/`console` de `legacy/devices/` (qui contenait des bugs,
-> `console.cpp` ne compilait pas). Elle répond à la tâche « faciliter l'écriture d'objets C
-> visibles en JS » de `TODO.md`. Non réalisé : la génération des `.d.ts`.
+> **Status: done** in `common/jsbind/` (headers only) and tested by `tests/jsbind.test.js`
+> with the native module `tests/native/test_module.cpp` (42 checks, no leak in a Debug
+> build). It replaces the `uart`/`console` code of `legacy/devices/` (which had bugs,
+> `console.cpp` did not compile). It answers the task "make it easier to write C objects
+> visible in JS" of `TODO.md`. Not done: the generation of the `.d.ts`.
 >
-> Écarts par rapport à la conception :
-> - dans une fonction `void`, C++ interdit `return <valeur>` : on écrit
->   `return (void)js::fail(...);` (ou `js::fail(...); return;`) ;
-> - un module se déclare par un corps de fonction : `JS_MODULE(fs, m) { JS_FUNCTION(m, readFileSync); JS_ADD_CLASS(m, Stats); }`,
->   les globaux par `JS_GLOBALS(nom, g) { ... }` ; `JS_FUNCTION_AS(m, fonctionCpp, "nomJs")`
->   quand le nom C++ entre en conflit (par exemple `log` de `<math.h>`) ;
-> - types en plus : `js::Optional<T>`, `js::Args` (arguments restants), `js::Created<T>` /
->   `js::create<T>()` pour créer depuis C++ un objet d'une classe liée ;
-> - un pointeur vers une classe liée (`Device *`) est accepté en argument et renvoyé tel quel
->   (même objet JS) ;
-> - les noms d'erreur incluent le propriétaire : `UART.open: argument 1, field 'speed': ...`,
+> Deviations from the design:
+> - in a `void` function, C++ forbids `return <value>`: one writes
+>   `return (void)js::fail(...);` (or `js::fail(...); return;`);
+> - a module is declared by a function body: `JS_MODULE(fs, m) { JS_FUNCTION(m, readFileSync); JS_ADD_CLASS(m, Stats); }`,
+>   the globals by `JS_GLOBALS(name, g) { ... }`; `JS_FUNCTION_AS(m, cppFunction, "jsName")`
+>   when the C++ name clashes (for example `log` of `<math.h>`);
+> - additional types: `js::Optional<T>`, `js::Args` (remaining arguments), `js::Created<T>` /
+>   `js::create<T>()` to create from C++ an object of a bound class;
+> - a pointer to a bound class (`Device *`) is accepted as an argument and returned as it is
+>   (same JS object);
+> - error names include the owner: `UART.open: argument 1, field 'speed': ...`,
 >   `fs.readFileSync: ...`.
 
-#### Contraintes
+#### Constraints
 
-C++17, header-only, **aucun `std::`**, pas d'exceptions C++, pas de RTTI.
+C++17, header-only, **no `std::` at all**, no C++ exceptions, no RTTI.
 
-#### Erreurs : « la première erreur gagne »
+#### Errors: "first error wins"
 
-- Chaque appel a un emplacement d'erreur ; la première erreur enregistrée gagne.
-- `return js::fail(...)` est convertible vers n'importe quel type de retour.
-- Variantes : `js::fail<js::RangeError>()`, `js::failSystem()`.
-- Les exceptions JS levées dans des callbacks sont capturées automatiquement.
-- C'est la frontière entre C++ et JS qui lève l'exception JS.
-- Les erreurs système portent un `code` à la manière de Node (`"ENOENT"`).
+- Each call has an error slot; the first error recorded wins.
+- `return js::fail(...)` is convertible to any return type.
+- Variants: `js::fail<js::RangeError>()`, `js::failSystem()`.
+- JS exceptions thrown in callbacks are captured automatically.
+- It is the boundary between C++ and JS that throws the JS exception.
+- System errors carry a Node-like `code` (`"ENOENT"`).
 
-#### Contraintes portées par les types
+#### Constraints carried by types
 
-- `js::Range<int, a, b>` : entier borné.
-- `JS_ENUM(Name, a, b)` : énumération, passée en chaîne depuis JS.
-- `JS_STRUCT(Options, fields...)` : objet d'options, avec valeurs par défaut C++ ; les champs
-  inconnus sont refusés.
+- `js::Range<int, a, b>`: bounded integer.
+- `JS_ENUM(Name, a, b)`: enumeration, passed as a string from JS.
+- `JS_STRUCT(Options, fields...)`: options object, with C++ default values; unknown
+  fields are rejected.
 
-#### Types propres
+#### Own types
 
 `js::Str`, `js::Bytes`, `js::Buffer`, `js::Function`, `js::Value`.
 
-#### Classes et modules
+#### Classes and modules
 
-- `JS_CLASS(Name)` dans la classe, et un marqueur `JS_EXPORT(member)` avant chaque méthode ou
-  champ exposé. Le mécanisme repose sur `__COUNTER__` et des enregistreurs statiques surchargés ;
-  les emplacements 0 à 63 sont parcourus à la compilation.
-- Le constructeur JS correspond à une méthode `init(...)` facultative ; le constructeur C++ n'a
-  pas d'argument.
-- Les champs deviennent des propriétés, en lecture seule s'ils sont `const`.
-- `JS_MODULE(name, classes...)` déclare un module.
+- `JS_CLASS(Name)` inside the class, and a `JS_EXPORT(member)` marker before each exposed method or
+  field. The mechanism relies on `__COUNTER__` and overloaded static registrars;
+  slots 0 to 63 are scanned at compile time.
+- The JS constructor corresponds to an optional `init(...)` method; the C++ constructor has
+  no arguments.
+- Fields become properties, read-only if they are `const`.
+- `JS_MODULE(name, classes...)` declares a module.
 
-#### Durée de vie et GC
+#### Lifetime and GC
 
-- Le destructeur n'est qu'un **filet de sécurité** : il est appelé par le finaliseur, et aucun
-  code JS n'y est permis. La fermeture explicite passe par `close()`.
-- Les membres `js::Value` s'enregistrent automatiquement pour le marquage du GC (enregistrement
-  pendant la construction de l'objet).
-- `js::keepAlive(bool)` maintient un objet vivant tant qu'il a des E/S en cours (comme Node).
+- The destructor is only a **safety net**: it is called by the finalizer, and no
+  JS code is allowed in it. Explicit closing goes through `close()`.
+- `js::Value` members register automatically for GC marking (registered
+  while the object is being constructed).
+- `js::keepAlive(bool)` keeps an object alive as long as it has pending I/O (like Node).
 
-#### Typages
+#### Typings
 
-Des typages `.d.ts` pour VS Code peuvent être générés à partir des déclarations ; `espjs build`
-les écrit (section 6).
+`.d.ts` typings for VS Code can be generated from the declarations; `qjsx build`
+writes them (section 6).
 
-### 5.4 Bibliothèque standard
+### 5.4 Standard library
 
-> **Statut : réalisé en partie pour l'hôte** (`common/runtime/modules/`), testé par
-> `tests/runtime.test.js` (46 vérifications) :
-> - globaux : `console` (`log`, `info`, `debug`, `warn`, `error`), `setTimeout`, `setInterval`,
->   `clearTimeout`, `clearInterval`, `TextEncoder` / `TextDecoder` (UTF-8 seulement), `process`
->   (`argv`, `env`, `platform`, `exit`, `cwd`), global comme dans Node ; sur un device (agent),
->   `argv` vaut `["espjs", module principal]`, `env` vient de la section `env` d'espjs.json (via
->   le manifeste), `cwd()` est le dossier de données de la carte (`board::dataDirectory()`,
->   `<stockage>/data` pour l'agent de bureau) et `fs` y résout les chemins relatifs ;
->   `process.exit` termine le programme, jamais le processus (l'agent survit) ;
-> - `fs` : `readFileSync`, `writeFileSync`, `existsSync`, `statSync`, `readdirSync`,
->   `mkdirSync` (`recursive`), `rmSync` (`recursive`, `force`), `renameSync`, `unlinkSync` ;
->   chemins UTF-8 (API larges sous Windows) ;
-> - `stdlib/path` : écrit en JS, dans la bibliothèque standard (`lib/stdlib`, section 4.5) ;
->   sémantique de `path.posix` de Node, plus les lettres de lecteur et `\` en entrée sous
->   Windows ; résultats toujours avec `/` (Node sous Windows produit `\`) ;
-> - `crypto` : `sha256(chaîne ou octets)` → `Uint8Array`.
+> **Status: partly done for the host** (`common/runtime/modules/`), tested by
+> `tests/runtime.test.js` (46 checks):
+> - globals: `console` (`log`, `info`, `debug`, `warn`, `error`), `setTimeout`, `setInterval`,
+>   `clearTimeout`, `clearInterval`, `TextEncoder` / `TextDecoder` (UTF-8 only), `process`
+>   (`argv`, `env`, `platform`, `exit`, `cwd`), global as in Node; on a device (agent),
+>   `argv` is `["qjsx", main module]`, `env` comes from the `env` section of qjsx.json (through
+>   the manifest), `cwd()` is the data folder of the board (`board::dataDirectory()`,
+>   `<storage>/data` for the desktop agent) and `fs` resolves relative paths against it;
+>   `process.exit` ends the program, never the process (the agent survives);
+> - `fs`: `readFileSync`, `writeFileSync`, `existsSync`, `statSync`, `readdirSync`,
+>   `mkdirSync` (`recursive`), `rmSync` (`recursive`, `force`), `renameSync`, `unlinkSync`;
+>   UTF-8 paths (wide APIs on Windows);
+> - `stdlib/path`: written in JS, in the standard library (`lib/stdlib`, section 4.5);
+>   semantics of Node's `path.posix`, plus drive letters and `\` as input on
+>   Windows; results always with `/` (Node on Windows produces `\`);
+> - `crypto`: `sha256(string or bytes)` → `Uint8Array`.
 >
-> - `net` : `connect({host, port})` → promesse d'une connexion, `listen({host, port},
->   onConnection)` → serveur (`port()`, `close()`) ; connexion : `onData`, `onClose`,
->   `write(texte ou octets)`, `close()`, `remoteAddress()`, `remotePort()`. Un thread de
->   lecture par connexion ; `listen` écoute sur 127.0.0.1 par défaut (testé, `tests/net.test.js`) ;
-> - `serial` (hôte) : `list()`, `open(port, {baudRate})` → `onData`, `onClose`, `write`,
->   `close`, 8N1. Liste testée ; ouverture et échanges **non testés faute de matériel** ;
+> - `net`: `connect({host, port})` → promise of a connection, `listen({host, port},
+>   onConnection)` → server (`port()`, `close()`); connection: `onData`, `onClose`,
+>   `write(text or bytes)`, `close()`, `remoteAddress()`, `remotePort()`. One read
+>   thread per connection; `listen` listens on 127.0.0.1 by default (tested, `tests/net.test.js`);
+> - `serial` (host): `list()`, `open(port, {baudRate})` → `onData`, `onClose`, `write`,
+>   `close`, 8N1. List tested; opening and exchanges **not tested for lack of hardware**;
 > - `process.stdout.write` / `process.stderr.write`.
 >
-> Sur le device, sans compilateur, un module écrit en JS comme `stdlib/path` arrive en bytecode
-> dans le paquet du programme (section 4.5).
+> On the device, without a compiler, a module written in JS such as `stdlib/path` arrives as bytecode
+> in the program's package (section 4.5).
 >
-> Infrastructure : les threads d'E/S postent dans une « boîte aux lettres » à compteur de
-> références (`rt::Mailbox`), qui survit à la boucle : un thread qui poste après la destruction
-> d'un runtime voit son message ignoré. La boucle est détruite après `JS_FreeRuntime`
-> (`Loop::shutdown()` libère avant sa partie JS), car les finaliseurs retirent leurs sources.
+> Infrastructure: the I/O threads post into a reference-counted "mailbox"
+> (`rt::Mailbox`), which outlives the loop: a thread that posts after a runtime was
+> destroyed has its message ignored. The loop is destroyed after `JS_FreeRuntime`
+> (`Loop::shutdown()` frees its JS part before), because the finalizers remove their sources.
 
-Elle remplace `quickjs-libc`, est écrite avec la bibliothèque de liaison, et est partagée avec
-le device quand cela a du sens.
+It replaces `quickjs-libc`, is written with the binding library, and is shared with
+the device where it makes sense.
 
-**Globaux :**
+**Globals:**
 
-- `console` ;
-- `setTimeout`, `setInterval`, `clearTimeout` ;
-- `TextEncoder`, `TextDecoder` ;
-- `Uint8Array` pour les octets (pas de `Buffer` à la Node).
+- `console`;
+- `setTimeout`, `setInterval`, `clearTimeout`;
+- `TextEncoder`, `TextDecoder`;
+- `Uint8Array` for bytes (no Node-style `Buffer`).
 
-**Modules :**
+**Modules:**
 
-| Module | Plateforme | Description |
+| Module | Platform | Description |
 |---|---|---|
-| `fs` | hôte, et device selon pertinence | fichiers, synchrone |
-| `stdlib/path` | toutes (bibliothèque standard, en JS) | chemins |
-| `process` | hôte | |
-| `net` | | TCP, asynchrone |
-| `serial` | hôte | port série ; sur le device, l'équivalent est `uart` |
+| `fs` | host, and device where relevant | files, synchronous |
+| `stdlib/path` | all (standard library, in JS) | paths |
+| `process` | host | |
+| `net` | | TCP, asynchronous |
+| `serial` | host | serial port; on the device, the equivalent is `uart` |
 | `crypto` | | `sha256` |
-| `compiler` | hôte | API de compilation |
+| `compiler` | host | compile API |
 
-Les sources ne précisent pas la plateforme de `net` et `crypto` au-delà de la règle
-« partagée avec le device quand cela a du sens ».
+The sources do not specify the platform of `net` and `crypto` beyond the rule
+"shared with the device where it makes sense".
 
-**Règle de nommage :**
+**Naming rule:**
 
-- quand une fonction se comporte exactement comme celle de Node, elle porte le nom de Node
-  (`fs.readFileSync`, `path.join`, `process.argv`…) ;
-- sinon, des noms courts propres au projet, en suivant les règles asynchrones de 5.2 (callbacks
-  pour les événements, promesses pour les opérations).
+- when a function behaves exactly like Node's, it has Node's name
+  (`fs.readFileSync`, `path.join`, `process.argv`…);
+- otherwise, short names of the project's own, following the async rules of 5.2 (callbacks
+  for events, promises for operations).
 
-### 5.5 Ports des devices
+### 5.5 Device ports
 
-> **Statut : ESP32-S3 réalisé le 2026-11-11** (ESP-IDF v6.1, firmware de 700 Ko, sans aucun
-> JS), flashé et essayé sur la carte YD : agent par UART0, déploiement et exécution sur place,
-> debugger 52/52, programme utilisant des bibliothèques `.qjslib`.
-> RP2350 : conçu, non implémenté.
+> **Status: ESP32-S3 done on 2026-11-11** (ESP-IDF v6.1, 700 KB firmware, with no
+> JS at all), flashed and tried on the YD board: agent over UART0, deployment and execution in place,
+> debugger 52/52, program using `.qjslib` libraries.
+> RP2350: designed, not implemented.
 
-Un firmware par carte, générique : tout ce que la puce sait faire, flashé une fois ; les
-programmes arrivent ensuite en paquets. Chaque port fournit trois choses autour du code commun,
-identique sur toutes les cartes (`agent::runDevice()`) :
+One firmware per board, generic: everything the chip can do, flashed once; the
+programs then arrive as packages. Each port provides three things around the common code,
+identical on every board (`agent::runDevice()`):
 
-| Partie | Rôle | ESP32 |
+| Part | Role | ESP32 |
 |---|---|---|
-| `ports/cmake/espjs.cmake` | sources communes (moteur sans compilateur, runtime, agent), options du moteur | partagé avec le RP2350 |
-| `platform.h` | horloge, arrêt fatal, tâches, verrous, signal, pause périodique du thread JS | `ports/freertos/` (verrous, signal, `sleepMs`, `yieldIfDue`) + `platform_esp32.cpp` (`esp_timer`, `esp_system_abort`, tâches épinglées) |
-| `board.h` | identité, tas JS, pile JS, stockage des paquets, liaisons, console | `board_esp32.cpp` |
-| point d'entrée | crée la tâche JS, qui appelle `agent::runDevice()` | `main.cpp` (tâche de 48 Ko sur le cœur 1) |
+| `ports/cmake/qjsx.cmake` | common sources (engine without compiler, runtime, agent), engine options | shared with the RP2350 |
+| `platform.h` | clock, fatal stop, tasks, locks, signal, periodic pause of the JS thread | `ports/freertos/` (locks, signal, `sleepMs`, `yieldIfDue`) + `platform_esp32.cpp` (`esp_timer`, `esp_system_abort`, pinned tasks) |
+| `board.h` | identity, JS heap, JS stack, package storage, links, console | `board_esp32.cpp` |
+| entry point | creates the JS task, which calls `agent::runDevice()` | `main.cpp` (48 KB task on core 1) |
 
-**Une description par carte.** `ports/esp32` sert toutes les cartes ESP32 ; ce qui change d'une
-carte à l'autre est dans `boards/<carte>/` : `sdkconfig.board` (puce, taille de flash, table de
-`partitions/`, mode de la PSRAM) et `board_config.h` (nom, plus tard liaisons et broches). La
-carte se choisit au build (`ESPJS_BOARD`), chacune dans son dossier `build-<carte>`. Les tables
-de partitions vont par taille de flash (4, 8, 16 Mo), pas par carte.
+**One description per board.** `ports/esp32` serves every ESP32 board; what changes from one
+board to another is in `boards/<board>/`: `sdkconfig.board` (chip, flash size, table from
+`partitions/`, PSRAM mode) and `board_config.h` (name, later links and pins). The
+board is chosen at build time (`QJSX_BOARD`), each one in its `build-<board>` folder. The partition
+tables go by flash size (4, 8, 16 MB), not by board.
 
-**Calcul long et chien de garde** (décidé, codé et vérifié sur la carte YD le 2026-11-11 :
-pendant la boucle sans fin de `tests/fixtures/debuggee`, aucun message « task_wdt » en 17 s
-d'écoute de la console, contre un toutes les 5 s auparavant).
+**Long computation and watchdog** (decided, coded and verified on the YD board on 2026-11-11:
+during the endless loop of `tests/fixtures/debuggee`, no "task_wdt" message in 17 s
+of listening to the console, against one every 5 s before).
 
-- *Le problème.* Sur un RTOS, la tâche JS a une priorité supérieure à celle de la tâche idle.
-  Un programme qui calcule sans rendre la main à la boucle d'événements affame donc l'idle de
-  son cœur. Sous ESP-IDF, le chien de garde des tâches le signale (« task_wdt ... IDLE1 »
-  toutes les 5 s, sans redémarrage), et l'idle ne fait plus son ménage (libérer les tâches
-  supprimées).
-- *La réponse.* `platform::yieldIfDue()`, appelée par le gestionnaire d'interruption du runtime
-  (`Runner::interrupt`, `common/agent/runner.cpp`), donc régulièrement tant que du JS
-  s'exécute. Toutes les 100 ms (`YIELD_PERIOD_MS`, `ports/freertos/platform_freertos.cpp`),
-  elle bloque la tâche JS jusqu'au tick suivant (`vTaskDelay(1)`) ; le reste du temps elle
-  sort tout de suite. Coût : 1 % du temps de calcul au plus avec un tick de 1 ms
-  (`CONFIG_FREERTOS_HZ=1000`). Sur le PC, la fonction est vide.
-- *Ce que le chien de garde détecte encore.* Son critère devient : « le thread JS n'est pas
-  repassé par le point d'interruption du moteur depuis 5 s ».
-  - Un script qui boucle (`while (true) {}`) passe par ce point : le chien de garde ne dit
-    rien. C'est voulu : on ne peut pas décider si un calcul long est voulu ou coincé, et le
-    device reste pilotable depuis le PC par ce même point (pause du debugger, arrêt,
-    redéploiement).
-  - Du code natif qui tourne en rond (attente active dans un pilote, boucle dans un module C)
-    n'y passe plus : le message apparaît, et ni la pause ni l'arrêt ne sont possibles. C'est
-    un défaut du firmware, pas du script.
-  - Un interblocage (thread JS endormi sur un verrou) n'affame pas l'idle : il n'est pas vu.
-- *Options écartées.* Ne plus surveiller l'idle du cœur 1
-  (`CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n`) : on perd la détection du code natif qui
-  tourne en rond. Tâche JS en priorité 0 : elle serait préemptée par toutes les autres tâches.
-- *Non traité.* Un device autonome qui se rattrape seul d'un script coincé : ce serait un
-  budget de temps choisi par l'auteur du programme (« la boucle d'événements doit reprendre
-  la main toutes les N secondes »), suspendu pendant une pause du debugger. À discuter.
+- *The problem.* On an RTOS, the JS task has a higher priority than the idle task.
+  A program that computes without yielding to the event loop therefore starves the idle task of
+  its core. Under ESP-IDF, the task watchdog reports it ("task_wdt ... IDLE1"
+  every 5 s, without a restart), and the idle task no longer does its housekeeping (freeing
+  deleted tasks).
+- *The answer.* `platform::yieldIfDue()`, called by the interrupt handler of the runtime
+  (`Runner::interrupt`, `common/agent/runner.cpp`), so regularly as long as JS
+  is running. Every 100 ms (`YIELD_PERIOD_MS`, `ports/freertos/platform_freertos.cpp`),
+  it blocks the JS task until the next tick (`vTaskDelay(1)`); the rest of the time it
+  returns at once. Cost: 1% of the computing time at most with a 1 ms tick
+  (`CONFIG_FREERTOS_HZ=1000`). On the PC, the function is empty.
+- *What the watchdog still detects.* Its criterion becomes: "the JS thread has not
+  gone through the engine's interrupt point for 5 s".
+  - A script that loops (`while (true) {}`) goes through this point: the watchdog says
+    nothing. This is intended: one cannot decide whether a long computation is intended or stuck, and the
+    device stays controllable from the PC through this same point (debugger pause, stop,
+    redeployment).
+  - Native code that spins (busy wait in a driver, loop in a C module)
+    no longer goes through it: the message appears, and neither pause nor stop is possible. This is
+    a defect of the firmware, not of the script.
+  - A deadlock (JS thread asleep on a lock) does not starve the idle task: it is not seen.
+- *Rejected options.* No longer watching the idle task of core 1
+  (`CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n`): the detection of native code that
+  spins is lost. JS task at priority 0: it would be preempted by every other task.
+- *Not handled.* A standalone device that recovers by itself from a stuck script: this would be a
+  time budget chosen by the author of the program ("the event loop must get control
+  back every N seconds"), suspended during a debugger pause. To be discussed.
 
-**ESP32-S3** (carte YD, WROOM-1 N16R8 : 16 Mo de flash, 8 Mo de PSRAM octale) :
+**ESP32-S3** (YD board, WROOM-1 N16R8: 16 MB of flash, 8 MB of octal PSRAM):
 
-- **Mémoire** : le tas JS est en PSRAM (`heap_caps_malloc`), la pile JS en RAM interne ;
-  `board::jsStackSize()` donne à QuickJS une limite sous la pile de la tâche (un débordement
-  devient une `RangeError`).
-- **Partitions** (16 Mo) : deux emplacements firmware de 3 Mo réservés pour l'OTA (encore à
-  décider), paquets 2 Mo, données 7,9 Mo pour un futur `fs`. Sur 4 Mo : pas d'OTA.
-- **Paquets** : deux emplacements, chacun la moitié de la partition. Un upload va dans celui qui n'est pas installé ; son
-  en-tête (taille, séquence, build id) est écrit en dernier. Un upload interrompu laisse donc le
-  paquet installé intact, et le programme en cours, projeté depuis son emplacement par
-  `esp_partition_mmap`, n'est jamais effacé sous lui.
-- **Liaisons** : la carte démarre toutes celles qu'elle sait gérer ; l'hôte choisit la sienne, et
-  la liaison qui reçoit le `Hello` porte la session. Aujourd'hui UART0 (port COM, CH343) : le
-  pilote UART sert aussi la console (`uart_vfs`), une écriture par appel, donc une trame n'est
-  jamais coupée par du texte. À venir : USB natif, TCP sur WiFi.
-- **Console** : pendant une session, la sortie du programme part en messages `Log` sur la liaison
-  de la session ; sinon elle va sur la console ESP-IDF (UART0, 921600 bauds).
-- **Moteur** : deux changements pour newlib (`engine-changes.md`, I) ; options de compilation
-  pour GCC 15 en 32 bits (`int32_t` est un `long`).
-- **Bibliothèques** : un programme qui importe `stdlib/path` et une bibliothèque d'essai
-  (`tests/fixtures/uselib`) donne sur la carte la même sortie que sur le PC (2026-11-11) ;
-  les modules viennent de son paquet (section 4.5).
-- **Limites** : pas encore de `fs` (`cwd()` vaut `"/"`), pas de `net`.
+- **Memory**: the JS heap is in PSRAM (`heap_caps_malloc`), the JS stack in internal RAM;
+  `board::jsStackSize()` gives QuickJS a limit below the stack of the task (an overflow
+  becomes a `RangeError`).
+- **Partitions** (16 MB): two 3 MB firmware slots reserved for OTA (still to be
+  decided), packages 2 MB, data 7.9 MB for a future `fs`. On 4 MB: no OTA.
+- **Packages**: two slots, each one half of the partition. An upload goes into the one that is
+  not installed; its header (size, sequence, build id) is written last. An interrupted upload
+  therefore leaves the installed package intact, and the running program, mapped from its slot by
+  `esp_partition_mmap`, is never erased under it.
+- **Links**: the board starts all those it can handle; the host chooses its own, and
+  the link that receives the `Hello` carries the session. Today UART0 (COM port, CH343): the
+  UART driver also serves the console (`uart_vfs`), one write per call, so a frame is
+  never cut by text. To come: native USB, TCP over WiFi.
+- **Console**: during a session, the program's output goes out as `Log` messages on the link
+  of the session; otherwise it goes to the ESP-IDF console (UART0, 921600 baud).
+- **Engine**: two changes for newlib (`engine-changes.md`, I); compile options
+  for GCC 15 on 32 bits (`int32_t` is a `long`).
+- **Libraries**: a program that imports `stdlib/path` and a test library
+  (`tests/fixtures/uselib`) gives on the board the same output as on the PC (2026-11-11);
+  the modules come from its package (section 4.5).
+- **Limits**: no `fs` yet (`cwd()` is `"/"`), no `net`.
 
 ---
 
-## 6. L'outil hôte `espjs`
+## 6. The host tool `qjsx`
 
-> **Statut : en cours.** Réalisé (`host/`) :
-> - `espjs run <fichier.js | paquet.qjspkg> [arguments]` : un script est exécuté comme module
->   ES ; un paquet est exécuté depuis son bytecode, comme le fera le device (lecteur de paquet
->   `common/runtime/package.*`, sans copie, partagé avec le device). Chargeur de modules : natifs,
->   bytecode du paquet, JS embarqués, fichiers ;
-> - `espjs build [dossier]` : compile le projet (`espjs.json`) en `.qjspkg` (voir 4.1), avec
->   les modules de bibliothèque qu'il importe (4.5) ;
-> - `espjs mklib [dossier] [--output fichier]` : compile un projet de bibliothèque en `.qjslib`
->   (4.5) ;
-> - `espjs deploy [paquet] --target T [--token X] [--no-run] [--monitor [--until-exit]]`,
->   `espjs monitor`, `espjs device info|run|stop|reset`, `espjs targets` ; les messages d'état
->   vont sur stderr, stdout ne porte que la sortie du programme ;
-> - `espjs agent [--host] [--port 5555] [--storage build/agent] [--token]` : l'agent de
->   le device sur le desktop (`host/agent_command.cpp`), qui remplace une carte pour
->   développer et tester ; même code d'agent que le firmware ; programme installé lancé au
->   démarrage ; arrêt d'un programme même bloqué dans une boucle (gestionnaire d'interruption) ;
->   une exception non rattrapée est affichée et le programme continue, comme sur le device ;
-> - `espjs help`, `espjs --version`.
+> **Status: in progress.** Done (`host/`):
+> - `qjsx run <file.js | package.qjspkg> [arguments]`: a script is run as an ES
+>   module; a package is run from its bytecode, as the device will do (package reader
+>   `common/runtime/package.*`, without copying, shared with the device). Module loader: native,
+>   bytecode of the package, embedded JS, files;
+> - `qjsx build [directory]`: compiles the project (`qjsx.json`) into a `.qjspkg` (see 4.1), with
+>   the library modules it imports (4.5);
+> - `qjsx mklib [directory] [--output <file>]`: compiles a library project into a `.qjslib`
+>   (4.5);
+> - `qjsx deploy [package] --target T [--token X] [--no-run] [--monitor [--until-exit]]`,
+>   `qjsx monitor`, `qjsx device info|run|stop|reset`, `qjsx targets`; the status messages
+>   go to stderr, stdout only carries the program's output;
+> - `qjsx agent [--host] [--port 5555] [--storage build/agent] [--token]`: the
+>   device agent on the desktop (`host/agent_command.cpp`), which stands in for a board to
+>   develop and test; same agent code as the firmware; installed program started at
+>   startup; stopping a program even when it is stuck in a loop (interrupt handler);
+>   an uncaught exception is printed and the program continues, as on the device;
+> - `qjsx help`, `qjsx --version`.
 >
-> Les commandes autres que `run` et `--version` sont écrites en JS (`host/js/`), embarquées
-> dans l'exécutable comme modules `espjs:<nom>` par une règle premake
-> (`tools/embed-js.lua`). Module natif `compiler` (hôte) : `compile(source, nom, { module,
+> The commands other than `run` and `--version` are written in JS (`host/js/`), embedded
+> in the executable as modules `qjsx:<name>` by a premake rule
+> (`tools/embed-js.lua`). Native module `compiler` (host): `compile(source, name, { module,
 > strip: "none" | "source" | "all", debug, dynamicImport })` → `{ bytecode, debug, imports,
-> warnings }`, plus `quickjsVersion`, `espjsVersion` et `bytecodeVersion`.
-> Tests : `tests/run-tests.sh [Release|Debug]` (liaison, runtime, modules de l'outil, paquet
-> exécuté à l'identique des sources, zip lisible par un outil externe, build reproductible,
-> erreur de syntaxe localisée). Construction : `premake5 gmake --cc=gcc --shell=posix` puis
-> `make -C build config=release` ; exécutables dans `bin/Release/` (`espjs`, et `espjs-tests`
-> qui ajoute le module de test). Les autres commandes ne sont pas encore implémentées. L'ancien
-> programme (`legacy/main.cpp`, `legacy/devices/`) n'est plus construit mais reste sur le disque.
+> warnings }`, plus `quickjsVersion`, `qjsxVersion` and `bytecodeVersion`.
+> Tests: `tests/run-tests.sh [Release|Debug]` (binding, runtime, tool modules, package
+> run exactly like the sources, zip readable by an external tool, reproducible build,
+> syntax error with its location). Build: `premake5 gmake --cc=gcc --shell=posix` then
+> `make -C build config=release`; executables in `bin/Release/` (`qjsx`, and `qjsx-tests`
+> which adds the test module). The other commands are not implemented yet. The old
+> program (`legacy/main.cpp`, `legacy/devices/`) is no longer built but stays on the disk.
 
 ### 6.1 Composition
 
-Un exécutable unique :
+A single executable:
 
-- QuickJS hôte, avec compilateur ;
-- modules C : boucle d'événements, sockets, port série, SHA-256, API de compilation ;
-- commandes écrites en JS, précompilées et embarquées.
+- host QuickJS, with the compiler;
+- C modules: event loop, sockets, serial port, SHA-256, compile API;
+- commands written in JS, precompiled and embedded.
 
-### 6.2 Commandes
+### 6.2 Commands
 
-| Commande | Rôle |
+| Command | Role |
 |---|---|
-| `build` | compile le projet, produit le `.qjspkg` et les `.d.ts` des modules natifs |
-| `mklib` | compile un projet de bibliothèque, produit le `.qjslib` (section 4.5) |
-| `deploy` | envoie le paquet au device par l'agent |
-| `debug` | lance le proxy : serveur CDP pour VS Code |
+| `build` | compiles the project, produces the `.qjspkg` and the `.d.ts` of the native modules |
+| `mklib` | compiles a library project, produces the `.qjslib` (section 4.5) |
+| `deploy` | sends the package to the device through the agent |
+| `debug` | starts the proxy: CDP server for VS Code |
 | `monitor` | |
 | `targets` | |
-| `device ls` / `device reset` / `device info` | opérations sur le device ; d'après leurs noms et les messages de déploiement : lister les fichiers, redémarrer, informations |
+| `device ls` / `device reset` / `device info` | operations on the device; from their names and the deployment messages: list files, restart, information |
 | `trace` | |
 | `run` | |
 
-Seuls les noms de `monitor`, `targets`, `trace` et `run` figurent dans les sources ; leur
-comportement n'est pas décrit.
+Only the names of `monitor`, `targets`, `trace` and `run` appear in the sources; their
+behaviour is not described.
 
-### 6.3 Cibles
+### 6.3 Targets
 
-Une cible désigne la liaison vers un device :
+A target names the link to a device:
 
-| Exemple | Liaison |
+| Example | Link |
 |---|---|
-| `serial:COM3` | port série Windows |
-| `serial:/dev/ttyUSB0@921600` | port série Unix, avec débit |
-| `tcp:esp.local:5555` | TCP (WiFi ou filaire) |
+| `serial:COM3` | Windows serial port |
+| `serial:/dev/ttyUSB0@921600` | Unix serial port, with baud rate |
+| `tcp:esp.local:5555` | TCP (WiFi or wired) |
 
-### 6.4 Fichier de projet `espjs.json`
+### 6.4 Project file `qjsx.json`
 
-À la racine du projet (réalisé, `host/js/project.js`). Clés, toutes facultatives ; une clé
-inconnue ou d'un mauvais type est une erreur :
+At the root of the project (done, `host/js/project.js`). Keys, all optional; an unknown
+key or one of the wrong type is an error:
 
-| Clé | Défaut | Rôle |
+| Key | Default | Role |
 |---|---|---|
-| `name` | nom du dossier | nom du paquet (lettres, chiffres, `.`, `_`, `-`) |
-| `main` | `"src/main.js"` | module exécuté au démarrage |
-| `sources` | `["src/**/*.js"]` | modules compilés dans le paquet (globs `*`, `?`, `**/`) |
-| `exclude` | `[]` | motifs retirés de `sources` |
-| `output` | `"build/packages"` | dossier des paquets |
-| `keep` | `10` | nombre de paquets conservés pour le projet |
-| `target` | — | device par défaut (pas encore utilisé) |
-| `env` | — | `process.env` du programme sur un device (chaînes seulement) |
-| `libraries` | `[]` | chemins des `.qjslib` que le programme peut importer, en plus de `stdlib` |
+| `name` | name of the folder | name of the package (letters, digits, `.`, `_`, `-`) |
+| `main` | `"src/main.js"` | module run at startup |
+| `sources` | `["src/**/*.js"]` | modules compiled into the package (globs `*`, `?`, `**/`) |
+| `exclude` | `[]` | patterns removed from `sources` |
+| `output` | `"build/packages"` | folder of the packages |
+| `keep` | `10` | number of packages kept for the project |
+| `target` | — | default device (not used yet) |
+| `env` | — | `process.env` of the program on a device (strings only) |
+| `libraries` | `[]` | paths of the `.qjslib` files the program may import, in addition to `stdlib` |
 
-Un projet de bibliothèque (`espjs mklib`, section 4.5) remplace `main` et `sources` par :
+A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with:
 
-| Clé | Rôle |
+| Key | Role |
 |---|---|
-| `name` | nom de la bibliothèque : ses modules s'importent sous `<name>/<module>` |
-| `version` | version de la bibliothèque, obligatoire |
-| `modules` | objet « nom de module → fichier source » ; un nom peut contenir des `/` (`"drivers/bme280"`) |
-| `output` | dossier où `<name>.qjslib` est écrit |
+| `name` | name of the library: its modules are imported under `<name>/<module>` |
+| `version` | version of the library, mandatory |
+| `modules` | object "module name → source file"; a name may contain `/` (`"drivers/bme280"`) |
+| `output` | folder where `<name>.qjslib` is written |
 
-### 6.5 Intégration VS Code
+### 6.5 VS Code integration
 
-- Configuration de type « attach ». Le type de cible js-debug à utiliser (node ou chrome) est
-  **à vérifier**.
-- Les scripts sont annoncés avec des URL `file:///` vers les sources locales.
-- `espjs build` écrit les `.d.ts` des modules natifs.
-- Le proxy garde les points d'arrêt et les réapplique sur `ScriptLoaded` et après un redémarrage
-  du device.
-- `--wait-debugger` : voir 3.8.
+- "attach" configuration. The js-debug target type to use (node or chrome) is
+  **to verify**.
+- The scripts are announced with `file:///` URLs to the local sources.
+- `qjsx build` writes the `.d.ts` of the native modules.
+- The proxy keeps the breakpoints and re-applies them on `ScriptLoaded` and after a device
+  restart.
+- `--wait-debugger`: see 3.8.
 
 ---
 
-## 7. Points ouverts et à vérifier
+## 7. Open points and points to verify
 
-### 7.1 À vérifier (signalé comme tel dans les sources)
+### 7.1 To verify (flagged as such in the sources)
 
-- Exécution du bytecode sur place depuis la flash (`esp_partition_mmap` +
-  `JS_READ_OBJ_ROM_DATA`) avec un `.qjspkg` stocké sans compression.
-- Type de cible js-debug pour la configuration « attach » : node ou chrome.
-- L'explication des écarts du microbench (intégration des fonctions `static` par gcc) est une
-  hypothèse non vérifiée.
+- Execution of the bytecode in place from flash (`esp_partition_mmap` +
+  `JS_READ_OBJ_ROM_DATA`) with a `.qjspkg` stored without compression.
+- js-debug target type for the "attach" configuration: node or chrome.
+- The explanation of the microbench differences (inlining of `static` functions by gcc) is an
+  unverified hypothesis.
 
-### 7.2 Tâches ouvertes (`TODO.md`)
+### 7.2 Open tasks (`TODO.md`)
 
-| Tâche | État |
+| Task | State |
 |---|---|
-| Analyser les optimisations possibles du moteur (plus tard), en partant des écarts du microbench (−48 % à +27 %) | ouvert |
-| Envoyer des sources JS (fichiers, dossiers) vers la cible | décidé : l'agent envoie un `.qjspkg` en flash ; non implémenté |
-| Faciliter l'écriture d'objets C visibles en JS | réponse : bibliothèque de liaison (5.3), en cours |
-| Décider ce qu'on retire de `quickjs-libc` | décidé : remplacée par les modules du projet (5.4) ; non implémenté |
+| Analyze the possible optimizations of the engine (later), starting from the microbench differences (−48% to +27%) | open |
+| Send JS sources (files, folders) to the target | decided: the agent sends a `.qjspkg` to flash; not implemented |
+| Make it easier to write C objects visible in JS | answer: binding library (5.3), in progress |
+| Decide what to remove from `quickjs-libc` | decided: replaced by the project's modules (5.4); not implemented |
 
-### 7.3 Points non précisés par les sources
+### 7.3 Points the sources do not specify
 
-- Valeur et taille du marqueur magique, variante du CRC-16, détail des champs de chaque message
-  de l'agent, noms des messages de déploiement.
-- Algorithme de hachage du build id et du hachage des sources (SHA-256 est disponible côté hôte,
-  mais son usage pour ces identifiants n'est pas écrit).
-- Noms des clés de `espjs.json` et des champs de `manifest.json`.
-- Comportement des commandes `monitor`, `targets`, `trace` et `run`.
-- Usage de la nature de position « expression ».
-- Écriture en retour des variables modifiées par une expression évaluée (la fonction enveloppe
-  reçoit les variables en paramètres ; seul `SetSlot` est décrit pour modifier une variable).
-### 7.4 Incohérences entre sources
+- Value and size of the magic marker, CRC-16 variant, details of the fields of each agent
+  message, names of the deployment messages.
+- Hash algorithm of the build id and of the source hash (SHA-256 is available on the host side,
+  but its use for these ids is not written down).
+- Names of the keys of `qjsx.json` and of the fields of `manifest.json`.
+- Behaviour of the `monitor`, `targets`, `trace` and `run` commands.
+- Use of the "expression" position kind.
+- Writing back the variables modified by an evaluated expression (the wrapper function
+  receives the variables as parameters; only `SetSlot` is described for changing a variable).
+### 7.4 Inconsistencies between sources
 
-Les incohérences relevées à la rédaction de ce document ont été corrigées dans les sources :
-- la détection des points d'arrêt par deux tables de dispatch est bien la décision retenue ;
-- le bytecode du device est privé de positions, de sources et de noms de variables, identique en
-  debug et en production : toutes les informations de debug sont dans l'annexe côté hôte ;
-- aucune build pour un device ne contient le compilateur, même en debug ([quickjs-map.md](quickjs-map.md)
-  a été mis à jour).
+The inconsistencies noticed when this document was written have been fixed in the sources:
+- breakpoint detection by two dispatch tables is indeed the decision taken;
+- the device's bytecode is stripped of positions, sources and variable names, identical in
+  debug and in production: all the debug info is in the host-side sidecar;
+- no build for a device contains the compiler, even in debug ([quickjs-map.md](quickjs-map.md)
+  has been updated).
 
 ---
 
-## 8. Annexes
+## 8. Appendices
 
-### 8.1 Documents et outils liés
+### 8.1 Related documents and tools
 
-| Document | Contenu |
+| Document | Content |
 |---|---|
-| [`CLAUDE.md`](../CLAUDE.md) | liste de référence des décisions prises, organisation du dépôt, build |
-| [`TODO.md`](../TODO.md) | tâches de l'auteur du projet |
-| [quickjs-map.md](quickjs-map.md) | carte de `quickjs.c` (modules, dépendances, couplages du compilateur, points d'entrée du debugger) et description de la version découpée |
-| [quickjs-items.csv](quickjs-items.csv) | chaque élément de `quickjs.c` : module, nature, nom, lignes |
-| [quickjs-split-perf.md](quickjs-split-perf.md) | original contre découpé : tests, tailles, temps de compilation, microbench |
-| [tools/quickjs-split/README.md](../tools/quickjs-split/README.md) | générateur du découpage, régénération, tests |
-| [`tools/quickjs-split/split-config.js`](../tools/quickjs-split/split-config.js) | plages de lignes, exceptions, correctifs |
-| [`tools/quickjs-split/split.js`](../tools/quickjs-split/split.js) | le générateur |
-| [`tools/quickjs-split/regen.sh`](../tools/quickjs-split/regen.sh) | régénération de `engine/qjsx/` |
+| [`CLAUDE.md`](../CLAUDE.md) | reference list of the decisions taken, repository layout, build |
+| [`TODO.md`](../TODO.md) | tasks of the author of the project |
+| [quickjs-map.md](quickjs-map.md) | map of `quickjs.c` (modules, dependencies, compiler couplings, debugger entry points) and description of the split version |
+| [quickjs-items.csv](quickjs-items.csv) | every item of `quickjs.c`: module, kind, name, lines |
+| [quickjs-split-perf.md](quickjs-split-perf.md) | original against split: tests, sizes, compile times, microbench |
+| [tools/quickjs-split/README.md](../tools/quickjs-split/README.md) | generator of the split, regeneration, tests |
+| [`tools/quickjs-split/split-config.js`](../tools/quickjs-split/split-config.js) | line ranges, exceptions, patches |
+| [`tools/quickjs-split/split.js`](../tools/quickjs-split/split.js) | the generator |
+| [`tools/quickjs-split/regen.sh`](../tools/quickjs-split/regen.sh) | regeneration of `engine/qjsx/` |
 
-### 8.2 Organisation du dépôt
+### 8.2 Repository layout
 
-| Chemin | Contenu |
+| Path | Content |
 |---|---|
-| `engine/qjs-bellard/` | QuickJS 2026-06-04 amont, non modifié |
-| `engine/qjsx/` | le même moteur découpé en 55 fichiers, généré |
-| `tools/quickjs-split/` | générateur, configuration, build de test (`test/premake5.lua`), tests et microbench (`test/run.sh`, `test/bench-table.js`) |
+| `engine/qjs-bellard/` | upstream QuickJS 2026-06-04, unmodified |
+| `engine/qjsx/` | the same engine split into 55 files, generated |
+| `tools/quickjs-split/` | generator, configuration, test build (`test/premake5.lua`), tests and microbench (`test/run.sh`, `test/bench-table.js`) |
 | `doc/` | documentation |
-| `legacy/main.cpp`, `legacy/devices/` | programme hôte existant (modules uart et console), appelé à être remplacé |
-| `premake5.lua`, `qjs.make` | build du projet (à mettre à jour, voir 2.8) |
+| `legacy/main.cpp`, `legacy/devices/` | existing host program (uart and console modules), meant to be replaced |
+| `premake5.lua`, `qjs.make` | project build (to be updated, see 2.8) |
 
-### 8.3 Glossaire
+### 8.3 Glossary
 
-| Terme | Sens |
+| Term | Meaning |
 |---|---|
-| Agent du device (device agent) | logiciel embarqué sur le device qui contient le stub de debug et gère le déploiement |
-| Annexe de debug (sidecar) | fichier JSON par script contenant les informations de debug, gardé sur l'hôte |
-| Build id | identifiant d'un script : hachage de son bytecode, champ d'identifiant mis à zéro |
-| CDP | Chrome DevTools Protocol, parlé par js-debug |
-| COBS | Consistent Overhead Byte Stuffing : encodage qui supprime les octets `0x00` d'une trame |
-| Proxy | adaptateur CDP sur l'hôte, entre VS Code et l'agent |
-| Stub | partie minimale du debugger sur la cible, qui expose des primitives |
-| TDZ | zone morte temporelle d'une variable `let`/`const` avant son initialisation |
+| Device agent | software embedded on the device that contains the debug stub and handles deployment |
+| Debug sidecar | one JSON file per script holding the debug info, kept on the host |
+| Build id | id of a script: hash of its bytecode, id field set to zero |
+| CDP | Chrome DevTools Protocol, spoken by js-debug |
+| COBS | Consistent Overhead Byte Stuffing: an encoding that removes the `0x00` bytes from a frame |
+| Proxy | CDP adapter on the host, between VS Code and the agent |
+| Stub | minimal part of the debugger on the target, which exposes primitives |
+| TDZ | temporal dead zone of a `let`/`const` variable before its initialization |

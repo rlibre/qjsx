@@ -39,7 +39,7 @@ static int getTimezoneOffset(int64_t time)
         }
     }
     ti = time;
-    /* espjs: newlib (ESP32, RP2350) has no tm_gmtoff: it takes the Windows
+    /* qjsx: newlib (ESP32, RP2350) has no tm_gmtoff: it takes the Windows
        way, gmtime + localtime + mktime, which is plain C */
 #if defined(_WIN32) || defined(__NEWLIB__)
     {

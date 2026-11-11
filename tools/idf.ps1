@@ -1,5 +1,5 @@
 # Loads the ESP-IDF v6.1 environment (the user's IDF PowerShell profile), then
-# runs, in the espjs ESP32 project (ports/esp32), for one board:
+# runs, in the qjsx ESP32 project (ports/esp32), for one board:
 #   [board=NAME] ninja ...     ninja itself (e.g. "ninja -k 0": every error in one pass)
 #   [board=NAME] esptool ...   esptool (e.g. "esptool -p COM11 flash-id": flash and PSRAM)
 #   [board=NAME] ...           idf.py with the given arguments ("build", "-p COM11 flash")
@@ -29,7 +29,7 @@ if ($tool -eq 'ninja') {
 } elseif ($tool -eq 'esptool') {
     python -m esptool @rest 2>&1 | Tee-Object -FilePath 'C:\temp\idf-build.log'
 } else {
-    idf.py -B $buildDir -D "ESPJS_BOARD=$board" @words 2>&1 | Tee-Object -FilePath 'C:\temp\idf-build.log'
+    idf.py -B $buildDir -D "QJSX_BOARD=$board" @words 2>&1 | Tee-Object -FilePath 'C:\temp\idf-build.log'
 }
 
 Set-Content -Path 'C:\temp\idf-status.txt' -Value $LASTEXITCODE

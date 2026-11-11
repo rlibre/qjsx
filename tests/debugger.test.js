@@ -1,18 +1,18 @@
 // Tests of the debugger stub (common/agent/debugger.*) through the desktop
 // agent: builds tests/fixtures/debuggee, installs it, debugs it with the
 // agent protocol (no CDP: that is the proxy's job).
-// Run with: bin/Release/espjs run tests/debugger.test.js tcp:127.0.0.1:<port>
-// (an "espjs agent" must listen there; tests/run-tests.sh starts one).
+// Run with: bin/Release/qjsx run tests/debugger.test.js tcp:127.0.0.1:<port>
+// (an "qjsx agent" must listen there; tests/run-tests.sh starts one).
 import * as fs from "fs";
 import { compile } from "compiler";
-import { build } from "espjs:build";
-import { readZip } from "espjs:zip";
-import { Device } from "espjs:device";
-import { upload } from "espjs:deploy";
+import { build } from "qjsx:build";
+import { readZip } from "qjsx:zip";
+import { Device } from "qjsx:device";
+import { upload } from "qjsx:deploy";
 import {
     KIND, KEY, VALUE, OBJECT_KIND, STEP_KIND, STOP_KIND, EXCEPTION_MODE, SLOT_KIND, GROUP,
     PAUSE_REASON, encodeStops,
-} from "espjs:protocol";
+} from "qjsx:protocol";
 import { check, equal, report } from "./assert.js";
 
 const TARGET = process.argv[2];

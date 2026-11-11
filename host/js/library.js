@@ -1,8 +1,8 @@
-// Libraries of JS modules: .qjslib files, made by 'espjs mklib' and used by
-// 'espjs build'.
+// Libraries of JS modules: .qjslib files, made by 'qjsx mklib' and used by
+// 'qjsx build'.
 //
 // A device has no compiler and its firmware embeds no JS: a program brings
-// the library modules it imports in its own package. 'espjs build' copies
+// the library modules it imports in its own package. 'qjsx build' copies
 // them there, whole, from the libraries.
 //
 // Names: every module of the library "sensors" is named "sensors/<module>",
@@ -27,10 +27,10 @@
 // name without '/' that is not a module of a library.
 import * as fs from "fs";
 import { join, dirname } from "stdlib/path";
-import { writeZip, readZip } from "espjs:zip";
-import { loadProject, PROJECT_FILE } from "espjs:project";
-import { encodeText } from "espjs:util";
-import { compileModule, compilerId, BYTECODE_VERSION } from "espjs:compile";
+import { writeZip, readZip } from "qjsx:zip";
+import { loadProject, PROJECT_FILE } from "qjsx:project";
+import { encodeText } from "qjsx:util";
+import { compileModule, compilerId, BYTECODE_VERSION } from "qjsx:compile";
 
 export const LIBRARY_FORMAT = 1;
 export const LIBRARY_EXTENSION = ".qjslib";
@@ -52,11 +52,11 @@ export function libraryOf(moduleName) {
     return slash < 0 ? undefined : moduleName.slice(0, slash);
 }
 
-// Compiles the modules of a library project (espjs.json with 'modules') and
+// Compiles the modules of a library project (qjsx.json with 'modules') and
 // writes its .qjslib file: 'outputFile', or <output>/<name>.qjslib in the
 // project. Returns { file, name, version, moduleCount, size, warnings };
 // 'warnings' has one { file, kind, line, column } per use of eval() or of the
-// Function constructor in the sources (espjs:compile, warningText).
+// Function constructor in the sources (qjsx:compile, warningText).
 export function makeLibrary(directory, outputFile) {
     const project = loadProject(directory);
     const projectFile = join(directory, PROJECT_FILE);
@@ -149,7 +149,7 @@ export function readLibrary(file) {
         throw new Error(`${file}: not a library (its manifest is not of kind "library")`);
     }
     if (manifest.format !== LIBRARY_FORMAT) {
-        throw new Error(`${file}: library format ${manifest.format} is not supported (this espjs reads format ${LIBRARY_FORMAT})`);
+        throw new Error(`${file}: library format ${manifest.format} is not supported (this qjsx reads format ${LIBRARY_FORMAT})`);
     }
 
     const modules = new Map(manifest.modules.map(module => [module.name, module]));
@@ -184,7 +184,7 @@ export function madeByThisCompiler(library) {
 // plus the source text. The bytecode and the sidecar stored in the library
 // are only valid for the compiler that made them (madeByThisCompiler): with
 // another one, the module is compiled again from its source. A stored module
-// gives no warning: 'espjs mklib' gave them when the library was made.
+// gives no warning: 'qjsx mklib' gave them when the library was made.
 export function libraryModule(library, name) {
     const record = library.modules.get(name);
     const source = decoder.decode(entryOf(library, record.source));

@@ -1,46 +1,46 @@
-# QuickJS découpé : performances et compilation
+# Split QuickJS: performance and compilation
 
-Comparaison entre `engine/qjs-bellard/quickjs.c` (QuickJS 2026-06-04, un seul fichier)
-et `engine/qjsx/` (même code découpé en 55 fichiers), mesurée le 2026-11-10.
+Comparison between `engine/qjs-bellard/quickjs.c` (QuickJS 2026-06-04, a single file)
+and `engine/qjsx/` (same code split into 55 files), measured on 2026-11-10.
 
-Conditions : Windows, gcc 13.1.0 mingw64, `-O2 -fwrapv`, sans LTO, 20 threads.
-Les deux `qjs.exe` sont construits avec le même `qjs.c`, `quickjs-libc.c` et `repl.c`
-de la distribution de Bellard.
+Conditions: Windows, gcc 13.1.0 mingw64, `-O2 -fwrapv`, without LTO, 20 threads.
+Both `qjs.exe` are built with the same `qjs.c`, `quickjs-libc.c` and `repl.c`
+from Bellard's distribution.
 
-## Tests de non-régression
+## Regression tests
 
-Les tests de Bellard passent avec les deux versions : `test_closure`, `test_language`,
+Bellard's tests pass with both versions: `test_closure`, `test_language`,
 `test_builtin` (`--std`), `test_loop`, `test_bigint`, `test_cyclic_import`, `test_worker`.
-Les messages et positions d'erreur de `JSON.parse` et l'erreur d'export en double sont
-identiques entre les deux versions.
+The error messages and positions of `JSON.parse` and the duplicate export error are
+identical between the two versions.
 
-## Compilation et taille
+## Compilation and size
 
-| Mesure | Original | Découpé |
+| Measure | Original | Split |
 |---|---:|---:|
-| Compilation complète du moteur, 1 thread | 47,4 s | 45,5 s |
-| Compilation complète du moteur, 20 threads | 47,4 s | 7,4 s |
-| Recompilation après modification de `json.c` | 42,7 s | 1,6 s |
-| Recompilation après modification de `interpreter.c` | 42,7 s | 2,7 s |
-| Recompilation après modification de `parser-expr.c` | 42,7 s | 1,7 s |
-| Recompilation après modification de `quickjs-internal.h` | — | 6,7 s |
-| Code machine du moteur (section text) | 1 112 ko | 1 000 ko |
-| `qjs.exe` sans symboles | 1 256 ko | 1 143 ko |
+| Full compilation of the engine, 1 thread | 47.4 s | 45.5 s |
+| Full compilation of the engine, 20 threads | 47.4 s | 7.4 s |
+| Recompilation after a change to `json.c` | 42.7 s | 1.6 s |
+| Recompilation after a change to `interpreter.c` | 42.7 s | 2.7 s |
+| Recompilation after a change to `parser-expr.c` | 42.7 s | 1.7 s |
+| Recompilation after a change to `quickjs-internal.h` | — | 6.7 s |
+| Machine code of the engine (text section) | 1,112 kB | 1,000 kB |
+| `qjs.exe` without symbols | 1,256 kB | 1,143 kB |
 
-(1 ko = 1 000 octets)
+(1 kB = 1,000 bytes)
 
-## Vitesse (tests/microbench.js)
+## Speed (tests/microbench.js)
 
-Temps par opération en nanosecondes, moyenne de deux passes par version.
-D'une passe à l'autre, l'écart médian est de 0,5 % : les gros écarts ci-dessous viennent
-du code généré, pas du bruit de mesure.
+Time per operation in nanoseconds, average of two passes per version.
+From one pass to the next, the median difference is 0.5 %: the big differences below come
+from the generated code, not from measurement noise.
 
-Hypothèse non vérifiée : dans un seul fichier, gcc intègre (inline) les fonctions `static`
-appelées une seule fois, ce qui grossit `JS_CallInternal`. Découpées, ces fonctions ne
-peuvent plus être intégrées entre fichiers : code plus petit, et interpréteur parfois plus
-rapide, parfois plus lent.
+Unverified hypothesis: in a single file, gcc inlines the `static` functions
+called only once, which makes `JS_CallInternal` bigger. Once split, these functions can
+no longer be inlined across files: smaller code, and an interpreter sometimes
+faster, sometimes slower.
 
-| Test | Original (ns) | Découpé (ns) | Écart |
+| Test | Original (ns) | Split (ns) | Difference |
 |---|---:|---:|---:|
 | empty_loop | 8.98 | 9.02 | +0.4 % |
 | empty_down_loop | 17.66 | 13.14 | -25.6 % |
@@ -116,17 +116,17 @@ rapide, parfois plus lent.
 | sort_bench | 16.48 | 17.10 | +3.7 % |
 | **total** | 4697.55 | 4520.19 | -3.8 % |
 
-## Moteur modifié pour le debugger (2026-11-10)
+## Engine modified for the debugger (2026-11-10)
 
-Même méthode, 3 passes par version, aucun debugger branché. Les modifications sont décrites dans
-[engine-changes.md](engine-changes.md). Colonnes :
+Same method, 3 passes per version, no debugger attached. The changes are described in
+[engine-changes.md](engine-changes.md). Columns:
 
-- **Original** : `quickjs.c` de Bellard (mesure du 2026-11-10, même session que « Debugger ») ;
-- **Découpé** : le découpage seul, tableau ci-dessus ;
-- **Debugger** : le découpage avec les modifications du debugger (version finale) ;
-- les deux écarts comparent « Debugger » à l'original et au découpage seul. Négatif = plus rapide.
+- **Original**: Bellard's `quickjs.c` (measured on 2026-11-10, same session as "Debugger");
+- **Split**: the split alone, table above;
+- **Debugger**: the split with the debugger changes (final version);
+- the two differences compare "Debugger" to the original and to the split alone. Negative = faster.
 
-| Test | Original (ns) | Découpé (ns) | Debugger (ns) | vs original | vs découpé |
+| Test | Original (ns) | Split (ns) | Debugger (ns) | vs original | vs split |
 |---|---:|---:|---:|---:|---:|
 | empty_loop | 9.04 | 9.02 | 8.64 | -4.4 % | -4.2 % |
 | empty_down_loop | 17.34 | 13.14 | 13.20 | -23.9 % | +0.5 % |
@@ -202,29 +202,29 @@ Même méthode, 3 passes par version, aucun debugger branché. Les modifications
 | sort_bench | 15.96 | 17.10 | 16.02 | +0.4 % | -6.3 % |
 | **total** | 4665.36 | 4520.19 | 4546.30 | -2.6 % | +0.6 % |
 
-### Gains et pertes à analyser plus tard
+### Gains and losses to analyze later
 
-Rien de ce qui suit n'est expliqué : ce sont des pistes pour l'analyse des optimisations du
-moteur (TODO.md).
+Nothing of what follows is explained: these are leads for the analysis of the engine
+optimizations (TODO.md).
 
-- **Le découpage accélère les lectures** : `array_read` −45 %, `prop_read` −43 %,
+- **The split speeds up reads**: `array_read` −45 %, `prop_read` −43 %,
   `typed_array_read` −41 %, `array_length_read` −32 %, `array_for` −29 %, `prop_write` −28 %,
-  et toutes les boucles vides (−20 à −24 %, sauf `empty_loop`). Ces gains existaient déjà avec le
-  découpage seul ; les modifications du debugger ne les changent pas.
-- **Il ralentit quelques opérations** : `prop_clone` +20 %, `prop_update` +14 %,
+  and all the empty loops (−20 to −24 %, except `empty_loop`). These gains already existed with
+  the split alone; the debugger changes do not change them.
+- **It slows down a few operations**: `prop_clone` +20 %, `prop_update` +14 %,
   `string_to_int` +14 %, `array_hole_length_decr` +11 %, `regexp_utf16` +10 %, `prop_delete`
-  +10 %. Elles aussi étaient déjà là avec le découpage seul.
-- **Les modifications du debugger** coûtent +0,6 % sur le total par rapport au découpage seul
-  (de −10 % pour `string_to_float` à +5 % par test, plus `regexp_replace` +13 %, qui est du
-  bruit : voir plus bas). La double table de dispatch seule
-  (sans les marqueurs de position) mesurait −4,1 % sur le total contre l'original, la version
-  finale −2,6 %.
-- **Bruit de mesure** : les tests qui passent surtout du temps en C (expressions régulières,
-  conversions) varient jusqu'à ±10 % d'une passe à l'autre. `regexp_replace` a mesuré 528 ns
-  puis 605 ns pour le même binaire.
-- **Hypothèse à vérifier** (déjà notée plus haut) : l'intégration des fonctions `static` change
-  avec le découpage, ce qui modifie la taille de `JS_CallInternal` et le placement du code.
-  Vérifications possibles :
-  - comparer le code machine des cas d'opcode concernés ;
-  - mesurer avec LTO ;
-  - regarder si l'ordre ou l'alignement des cas de dispatch joue (TODO.md).
+  +10 %. They too were already there with the split alone.
+- **The debugger changes** cost +0.6 % on the total compared to the split alone
+  (from −10 % for `string_to_float` to +5 % per test, plus `regexp_replace` +13 %, which is
+  noise: see below). The double dispatch table alone
+  (without the position markers) measured −4.1 % on the total against the original, the final
+  version −2.6 %.
+- **Measurement noise**: the tests that spend most of their time in C (regular expressions,
+  conversions) vary by up to ±10 % from one pass to the next. `regexp_replace` measured 528 ns
+  then 605 ns for the same binary.
+- **Hypothesis to check** (already noted above): the inlining of `static` functions changes
+  with the split, which changes the size of `JS_CallInternal` and the placement of the code.
+  Possible checks:
+  - compare the machine code of the opcode cases concerned;
+  - measure with LTO;
+  - see whether the order or the alignment of the dispatch cases matters (TODO.md).

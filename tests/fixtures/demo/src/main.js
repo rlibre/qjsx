@@ -5,7 +5,7 @@ import { add } from "./lib/math/add.js";
 import { join } from "stdlib/path";
 import { sha256 } from "crypto";
 
-console.log(greet("espjs"));
+console.log(greet("qjsx"));
 console.log("main module:", import.meta.main);
 console.log("2 + 3 =", add(2, 3));
 console.log("sha256 prefix:", Array.from(sha256("x").subarray(0, 4)).join(","));

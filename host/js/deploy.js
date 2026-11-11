@@ -1,8 +1,8 @@
 // Sends a package to a device and starts it.
 import * as fs from "fs";
 import { sha256 } from "crypto";
-import { readZip } from "espjs:zip";
-import { KIND, KEY, UPLOAD_CHUNK } from "espjs:protocol";
+import { readZip } from "qjsx:zip";
+import { KIND, KEY, UPLOAD_CHUNK } from "qjsx:protocol";
 
 // The manifest of a package (its manifest.json, parsed).
 export function packageManifest(packageBytes) {

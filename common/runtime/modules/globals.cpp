@@ -212,7 +212,7 @@ void clearInterval(js::Value id) {
  * process.exit(code = 0): ends the PROGRAM, never the process. The loop stops
  * with 'code' (no timer, callback or promise job runs any more), the JS code
  * running now is unwound at once, and the runtime is then freed normally (the
- * device agent sends EXITED and stays alive; `espjs run` returns the code).
+ * device agent sends EXITED and stays alive; `qjsx run` returns the code).
  */
 void processExit(js::Optional<int> code) {
     // what was written so far comes out before the program ends

@@ -12,7 +12,7 @@ int runFile(const char *path, int argumentCount, char **arguments);
 
 /**
  * Runs the command-line tool: main(process.argv.slice(1)) of the embedded module
- * "espjs:cli". Returns the exit code. process.argv = [executable, arguments...]
+ * "qjsx:cli". Returns the exit code. process.argv = [executable, arguments...]
  */
 int runCommand(int argumentCount, char **arguments);
 

@@ -12,7 +12,7 @@ namespace platform {
  * system catches it).
  */
 void fatal(const char *message) {
-    fprintf(stderr, "espjs: fatal: %s\n", message);
+    fprintf(stderr, "qjsx: fatal: %s\n", message);
     fflush(stderr);
     abort();
 }

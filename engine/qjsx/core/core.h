@@ -543,7 +543,7 @@ JSValue js_get_prototype_from_ctor(JSContext *ctx, JSValueConst ctor,
 #endif
 int JS_AddIntrinsicBasicObjects(JSContext *ctx);
 
-/* espjs: debugger support (core/debug.c), called by the interpreter. 'pc'
+/* qjsx: debugger support (core/debug.c), called by the interpreter. 'pc'
    is the address of the instruction where the frame stops. The int
    functions return -1 when the hook asks to throw. */
 int js_debug_check_stop(JSContext *ctx, JSStackFrame *sf, JSFunctionBytecode *b,

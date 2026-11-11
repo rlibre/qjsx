@@ -256,7 +256,7 @@ DEF(             or, 1, 2, 1, none)
 DEF(is_undefined_or_null, 1, 1, 1, none)
 DEF(     private_in, 1, 2, 1, none)
 DEF(push_bigint_i32, 5, 0, 1, i32)
-/* espjs: 'debugger;' statement, calls the debugger hook if any */
+/* qjsx: 'debugger;' statement, calls the debugger hook if any */
 DEF(       debugger, 1, 0, 0, none)
 /* must be the last non short and non temporary opcode */
 DEF(            nop, 1, 0, 0, none)

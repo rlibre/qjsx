@@ -1,4 +1,4 @@
-// espjs build: compiles the project into a .qjspkg package.
+// qjsx build: compiles the project into a .qjspkg package.
 //
 // Package content (zip, entries stored):
 //   manifest.json          format, name, buildId, created, compiler, bytecode
@@ -14,11 +14,11 @@
 //     in the project ("src/main.js");
 //   - the library modules they import ("stdlib/path"), and those these
 //     import in turn, each one whole, taken from the .qjslib libraries (the
-//     standard one and those of 'libraries', see espjs:library). A device has
+//     standard one and those of 'libraries', see qjsx:library). A device has
 //     no compiler and no JS in its firmware: it finds them in the package
 //     like any other module.
 // Every import is followed when the package is built, which is why 'import()'
-// is refused (espjs:compile). A name that is neither a module of the program
+// is refused (qjsx:compile). A name that is neither a module of the program
 // nor of a library is a native module: it is listed in manifest.natives and
 // must exist in the firmware.
 //
@@ -27,19 +27,19 @@
 // reads. A library made by another compiler is not refused: it holds its
 // sources, so its modules are compiled again (a note says so).
 //
-// Identifiers (those of a script are in espjs:compile):
+// Identifiers (those of a script are in qjsx:compile):
 //   package buildId = first 32 hex digits of sha256 over the scripts' ids and the main module
 import * as fs from "fs";
 import { join, resolve } from "stdlib/path";
 import { sha256 } from "crypto";
-import { writeZip } from "espjs:zip";
-import { matchFiles } from "espjs:glob";
-import { loadProject, PROJECT_FILE } from "espjs:project";
-import { hex, encodeText } from "espjs:util";
-import { compileModule, compilerId, BYTECODE_VERSION } from "espjs:compile";
+import { writeZip } from "qjsx:zip";
+import { matchFiles } from "qjsx:glob";
+import { loadProject, PROJECT_FILE } from "qjsx:project";
+import { hex, encodeText } from "qjsx:util";
+import { compileModule, compilerId, BYTECODE_VERSION } from "qjsx:compile";
 import {
     readLibrary, libraryModule, libraryOf, madeByThisCompiler, standardLibraryFile, STANDARD_LIBRARY,
-} from "espjs:library";
+} from "qjsx:library";
 
 export const PACKAGE_FORMAT = 1;
 
@@ -92,7 +92,7 @@ function packagedLibraryModule(library, name) {
 }
 
 // The libraries the program may import, Map(name -> library): the standard
-// one, when its file is there, then those of 'libraries' in espjs.json.
+// one, when its file is there, then those of 'libraries' in qjsx.json.
 function loadLibraries(project) {
     const files = project.libraries.map(path => resolve(project.directory, path));
     const standard = standardLibraryFile();
@@ -163,14 +163,14 @@ function prune(output, name, keep, current) {
 // Builds the package of the project in 'directory'. Returns { file, buildId,
 // scriptCount, size, warnings, notes }:
 //   - 'warnings' has one { file, kind, line, column } per use of eval() or of
-//     the Function constructor in a compiled module (espjs:compile,
+//     the Function constructor in a compiled module (qjsx:compile,
 //     warningText);
 //   - 'notes' are sentences about what the build did besides compiling (a
 //     library compiled again because another compiler made it).
 export function build(directory) {
     const project = loadProject(directory);
     if (project.modules !== undefined) {
-        throw new Error(`${join(directory, PROJECT_FILE)} describes a library ('modules'): use 'espjs mklib'`);
+        throw new Error(`${join(directory, PROJECT_FILE)} describes a library ('modules'): use 'qjsx mklib'`);
     }
     const sources = matchFiles(directory, project.sources, project.exclude);
     if (!sources.includes(project.main)) {

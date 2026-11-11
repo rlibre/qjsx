@@ -1,9 +1,9 @@
 // Tests of the protocol modules: CBOR, COBS, CRC-16, frames, messages.
-// Run with: bin/Release/espjs run tests/protocol.test.js
-import { encode, decode } from "espjs:cbor";
-import { crc16, cobsEncode, cobsDecode, encodeFrame, FrameParser } from "espjs:frames";
-import { KIND, KEY, encodeMessage, decodeMessage } from "espjs:protocol";
-import { hex } from "espjs:util";
+// Run with: bin/Release/qjsx run tests/protocol.test.js
+import { encode, decode } from "qjsx:cbor";
+import { crc16, cobsEncode, cobsDecode, encodeFrame, FrameParser } from "qjsx:frames";
+import { KIND, KEY, encodeMessage, decodeMessage } from "qjsx:protocol";
+import { hex } from "qjsx:util";
 import { check, equal, throws, report } from "./assert.js";
 
 const bytes = (...values) => new Uint8Array(values);

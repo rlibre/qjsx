@@ -420,7 +420,7 @@ void Agent::handleUploadBegin(int64_t id, const Fields *fields) {
         char message[160];
         snprintf(message, sizeof(message),
                  "the package holds bytecode version %d, this device reads version %d: "
-                 "rebuild the package, or flash a firmware that matches espjs",
+                 "rebuild the package, or flash a firmware that matches qjsx",
                  (int)bytecode, _identity.bytecode);
         respondError(id, message);
         return;

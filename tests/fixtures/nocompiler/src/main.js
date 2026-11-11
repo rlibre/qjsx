@@ -1,5 +1,5 @@
-// Run by tests/run-tests.sh with espjs (engine with compiler) and with
-// espjs-target (engine without compiler, like the ESP32 / RP2350 targets):
+// Run by tests/run-tests.sh with qjsx (engine with compiler) and with
+// qjsx-target (engine without compiler, like the ESP32 / RP2350 targets):
 // the outputs must be the same, except the last line (eval).
 import { Shape, Rectangle } from "./shapes.js";
 

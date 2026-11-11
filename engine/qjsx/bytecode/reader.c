@@ -427,7 +427,7 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
     bc.js_mode = v8;
     if (bc_get_atom(s, &bc.func_name))  //@ atom leak if failure
         goto fail;
-    /* espjs: read even without debug info */
+    /* qjsx: read even without debug info */
     if (bc_get_atom(s, &bc.filename))
         goto fail;
     if (bc_get_leb128_u16(s, &bc.function_number))
@@ -1074,7 +1074,7 @@ static JSValue JS_ReadObjectRec(BCReaderState *s)
     return obj;
 }
 
-/* espjs: the bytecode version checked by JS_ReadObjectAtoms() below */
+/* qjsx: the bytecode version checked by JS_ReadObjectAtoms() below */
 int JS_GetBytecodeVersion(void)
 {
     return BC_VERSION;

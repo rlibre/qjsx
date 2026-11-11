@@ -1,4 +1,4 @@
-// Command line of espjs (the commands not handled in C++: everything except
+// Command line of qjsx (the commands not handled in C++: everything except
 // 'run', 'agent' and '--version').
 //
 // Status messages go to stderr; stdout only carries the program output
@@ -6,22 +6,22 @@
 import * as fs from "fs";
 import { join } from "stdlib/path";
 import { list as listSerialPorts } from "serial";
-import { build } from "espjs:build";
-import { warningText } from "espjs:compile";
-import { makeLibrary } from "espjs:library";
-import { loadProject, PROJECT_FILE } from "espjs:project";
-import { Device } from "espjs:device";
-import { upload, latestPackage } from "espjs:deploy";
-import { KIND, KEY, STREAM, kindName } from "espjs:protocol";
+import { build } from "qjsx:build";
+import { warningText } from "qjsx:compile";
+import { makeLibrary } from "qjsx:library";
+import { loadProject, PROJECT_FILE } from "qjsx:project";
+import { Device } from "qjsx:device";
+import { upload, latestPackage } from "qjsx:deploy";
+import { KIND, KEY, STREAM, kindName } from "qjsx:protocol";
 
-const HELP = `usage: espjs <command> [arguments]
+const HELP = `usage: qjsx <command> [arguments]
 
 commands:
   run <file.js | package.qjspkg> [arguments]   run a script, or a package like the ESP does
-  build [directory]                            compile the project (espjs.json) into a .qjspkg
+  build [directory]                            compile the project (qjsx.json) into a .qjspkg
   mklib [directory] [--output <file>]          compile a library project into a .qjslib
   deploy [package] [options]                   send a package to a device and start it
-      --target <target>   device (default: "target" of espjs.json)
+      --target <target>   device (default: "target" of qjsx.json)
       --token <token>     token of a network agent
       --no-run            install without starting
       --monitor           then show the program output (--until-exit: stop when it ends)
@@ -32,7 +32,7 @@ commands:
   agent [--host h] [--port p] [--storage dir] [--token t]
                                                desktop device agent (stand-in for an ESP)
   help                                         this help
-  --version                                    versions of espjs and QuickJS
+  --version                                    versions of qjsx and QuickJS
 
 targets: tcp:<host>:<port>   serial:<port>[@<baud rate>]   e.g. serial:COM3, tcp:esp.local:5555`;
 
@@ -74,7 +74,7 @@ function targetOf(options, project) {
 }
 
 function status(text) {
-    console.error(`espjs: ${text}`);
+    console.error(`qjsx: ${text}`);
 }
 
 // Opens the device and the session. 'monitor' gets the program output.
@@ -132,7 +132,7 @@ async function deployCommand(args) {
     const target = targetOf(options, project);
     const packagePath = positional[0] ?? (project && latestPackage(join(project.directory, project.output), project.name));
     if (packagePath === undefined) {
-        throw new Error("no package: give its path or run 'espjs build' first");
+        throw new Error("no package: give its path or run 'qjsx build' first");
     }
     const bytes = fs.readFileSync(packagePath);
     const monitor = monitorHandlers(true);
@@ -172,7 +172,7 @@ async function deviceCommand(args) {
     const action = positional[0];
     const requests = { info: KIND.INFO, run: KIND.RUN, stop: KIND.STOP, reset: KIND.RESET };
     if (requests[action] === undefined || positional.length !== 1) {
-        throw new Error("usage: espjs device <info | run | stop | reset> [--target <target>]");
+        throw new Error("usage: qjsx device <info | run | stop | reset> [--target <target>]");
     }
     const device = await openDevice(targetOf(options, currentProject()), options.token, {});
     const answer = await device.request(requests[action]);
@@ -207,7 +207,7 @@ function printWarnings(warnings) {
 
 function buildCommand(args) {
     if (args.length > 1) {
-        throw new Error("usage: espjs build [directory]");
+        throw new Error("usage: qjsx build [directory]");
     }
     const result = build(args[0] ?? ".");
     printWarnings(result.warnings);
@@ -222,7 +222,7 @@ function buildCommand(args) {
 function mklibCommand(args) {
     const { options, positional } = parseArguments(args, { values: ["output"] });
     if (positional.length > 1) {
-        throw new Error("usage: espjs mklib [directory] [--output <file>]");
+        throw new Error("usage: qjsx mklib [directory] [--output <file>]");
     }
     const result = makeLibrary(positional[0] ?? ".", options.output);
     printWarnings(result.warnings);
@@ -249,12 +249,12 @@ export async function main(args) {
     try {
         const run = COMMANDS[command];
         if (run === undefined) {
-            throw new Error(`unknown command '${command}' (see 'espjs help')`);
+            throw new Error(`unknown command '${command}' (see 'qjsx help')`);
         }
         const code = await run(rest);
         process.exit(code ?? 0);
     } catch (error) {
-        console.error(`espjs: ${error.message}`);
+        console.error(`qjsx: ${error.message}`);
         // A syntax error of a compiled module: the stack gives file:line:column.
         if (error instanceof SyntaxError && error.stack) {
             console.error(error.stack.trimEnd());

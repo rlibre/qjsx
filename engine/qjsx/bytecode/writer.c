@@ -444,7 +444,7 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
     bc_put_u16(s, flags);
     bc_put_u8(s, b->js_mode);
     bc_put_atom(s, b->func_name);
-    /* espjs: written even without debug info */
+    /* qjsx: written even without debug info */
     bc_put_atom(s, b->filename);
     bc_put_leb128(s, b->function_number);
 

@@ -1,4 +1,4 @@
-// Connection to a device agent (an ESP, or "espjs agent" on the desktop).
+// Connection to a device agent (an ESP, or "qjsx agent" on the desktop).
 //
 //   const device = await Device.open("tcp:127.0.0.1:5555", { onLog, onEvent, onText });
 //   const info = await device.hello();
@@ -8,8 +8,8 @@
 // Targets:  tcp:<host>:<port>   serial:<port>[@<baud rate>]   (COM3, /dev/ttyUSB0...)
 import { connect } from "net";
 import { open as openSerial } from "serial";
-import { encodeFrame, FrameParser } from "espjs:frames";
-import { KIND, KEY, PROTOCOL_VERSION, encodeMessage, decodeMessage, kindName } from "espjs:protocol";
+import { encodeFrame, FrameParser } from "qjsx:frames";
+import { KIND, KEY, PROTOCOL_VERSION, encodeMessage, decodeMessage, kindName } from "qjsx:protocol";
 
 const DEFAULT_TIMEOUT = 3000;
 const DEFAULT_ATTEMPTS = 3;

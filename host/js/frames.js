@@ -5,7 +5,7 @@
 //   MAGIC    0xE5
 //   VERSION  1
 //   CRC-16   CRC-16/CCITT-FALSE of 'message', 2 bytes, big endian
-//   message  CBOR (see espjs:protocol)
+//   message  CBOR (see qjsx:protocol)
 //
 // COBS removes every 0x00 from the frame, so 0x00 delimits frames and a
 // receiver resynchronizes on the next 0x00 after an error. On a serial link

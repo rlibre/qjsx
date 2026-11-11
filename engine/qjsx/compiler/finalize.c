@@ -444,7 +444,7 @@ JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     js_free(ctx, fd->byte_code.buf);
     fd->byte_code.buf = NULL;
 
-    /* espjs: number in compilation order; the children are created before
+    /* qjsx: number in compilation order; the children are created before
        their parent, so the top-level function gets the last number */
     {
         JSFunctionDef *root = fd;
@@ -453,7 +453,7 @@ JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
         }
         b->function_number = root->function_counter++;
     }
-    /* espjs: debug info for the sidecar, before the variable names are
+    /* qjsx: debug info for the sidecar, before the variable names are
        stripped below */
     js_debug_info_collect(ctx, fd, b);
 
@@ -514,7 +514,7 @@ JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
 
     b->stack_size = stack_size;
 
-    /* espjs: the file name is kept even when the debug info is stripped */
+    /* qjsx: the file name is kept even when the debug info is stripped */
     b->filename = fd->filename;
 
     if (fd->strip_debug) {

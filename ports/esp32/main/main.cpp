@@ -1,5 +1,5 @@
 // Entry point of the ESP32 firmware: starts the JS task, which runs the
-// device (agent, debugger stub, installed package), as `espjs agent` does on
+// device (agent, debugger stub, installed package), as `qjsx agent` does on
 // the desktop.
 #include "board_esp32.h"
 #include "platform.h"
@@ -17,11 +17,11 @@ namespace {
  */
 void jsTask(void *) {
     // the agent's identity in HELLO; no token on a serial link
-    agent::Identity identity = { "espjs " CONFIG_IDF_TARGET, CONFIG_VERSION, nullptr, JS_GetBytecodeVersion() };
+    agent::Identity identity = { "qjsx " CONFIG_IDF_TARGET, CONFIG_VERSION, nullptr, JS_GetBytecodeVersion() };
     agent::runDevice(identity);
 
     // runDevice returns only if the links could not start
-    printf("espjs: the device could not start\n");
+    printf("qjsx: the device could not start\n");
 }
 
 } // namespace
@@ -33,6 +33,6 @@ void jsTask(void *) {
 extern "C" void app_main(void) {
     platform::ThreadOptions options = { "js", board::JS_TASK_STACK, board::JS_TASK_PRIORITY, board::JS_TASK_CORE };
     if (!platform::startThread(&jsTask, nullptr, options)) {
-        printf("espjs: cannot start the JS task\n");
+        printf("qjsx: cannot start the JS task\n");
     }
 }

@@ -1,31 +1,31 @@
-# Carte de quickjs.c
+# Map of quickjs.c
 
-> Le découpage réalisé à partir de cette carte est décrit à la fin, section
-> [Version découpée](#version-découpée-srcquickjs-split).
+> The split made from this map is described at the end, in the section
+> [Split version](#split-version-engineqjsx).
 
-Version cartographiée : QuickJS 2026-06-04 de Fabrice Bellard, `engine/qjs-bellard/quickjs.c`.
-Le fichier fait 61 197 lignes : 1 562 fonctions, 142 types, 97 tables de données.
-Les numéros de ligne renvoient à cette version.
+Mapped version: QuickJS 2026-06-04 by Fabrice Bellard, `engine/qjs-bellard/quickjs.c`.
+The file is 61,197 lines long: 1,562 functions, 142 types, 97 data tables.
+Line numbers refer to this version.
 
-La liste complète des éléments (module, nature, nom, lignes) est dans [quickjs-items.csv](quickjs-items.csv).
+The complete list of items (module, kind, name, lines) is in [quickjs-items.csv](quickjs-items.csv).
 
-## Méthode et limites
+## Method and limits
 
-- Les éléments de premier niveau (fonctions, types, tables) sont extraits en suivant les accolades,
-  après suppression des commentaires et des chaînes.
-- Un élément « référence » un autre si son nom apparaît dans son corps : appel, prise d'adresse,
-  usage d'un type. Les compteurs du tableau sont des nombres de références, pas d'appels.
-- Les références faites à travers une macro ne sont pas vues. Exemple : `short_opcode_info(op)`
-  cache un accès à `opcode_info`.
-- Les frontières entre modules ont été choisies à la main, en lisant la liste ordonnée des fonctions.
-  Un module peut occuper plusieurs plages : le fichier n'est pas toujours rangé par thème.
-- `prelude` regroupe les lignes 1 à 1415 : options, structures centrales (`JSRuntime`, `JSContext`,
-  `JSObject`, `JSFunctionBytecode`, `JSStackFrame`…) et prototypes. Il est utilisé par tout le monde
-  et n'apparaît pas dans les colonnes de dépendances.
+- Top-level items (functions, types, tables) are extracted by following the braces,
+  after removing comments and strings.
+- An item "references" another one if its name appears in its body: call, address taken,
+  use of a type. The counters in the table are numbers of references, not of calls.
+- References made through a macro are not seen. Example: `short_opcode_info(op)`
+  hides an access to `opcode_info`.
+- The boundaries between modules were chosen by hand, by reading the ordered list of functions.
+  A module may occupy several ranges: the file is not always organized by topic.
+- `prelude` groups lines 1 to 1415: options, central structures (`JSRuntime`, `JSContext`,
+  `JSObject`, `JSFunctionBytecode`, `JSStackFrame`…) and prototypes. It is used by everything
+  and does not appear in the dependency columns.
 
 ## Modules
 
-| Module | Lignes de quickjs.c | Lignes | Fonctions | Dépend surtout de | Utilisé surtout par |
+| Module | Lines of quickjs.c | Lines | Functions | Depends mostly on | Used mostly by |
 |---|---|---:|---:|---|---|
 | prelude | 1-1415 | 1415 | 0 | | builtins/typedarray (105), properties (98), gc (74), modules (64) |
 | malloc | 1416-1956 | 541 | 32 | errors (4), gc (1) | gc (27), compiler/passes (24), shapes (21), runtime (20) |
@@ -76,128 +76,128 @@ La liste complète des éléments (module, nature, nom, lignes) est dans [quickj
 | intrinsics | 56152-56511 | 360 | 2 | builtins/iterator (9), cfunc-lists (5), objects (5), builtins/object (5) | builtins/typedarray (17), builtins/atomics (5), runtime (2), print (1) |
 | builtins/typedarray | 56512-60298 | 3787 | 116 | errors (40), properties (30), conversions (30), malloc (17) | builtins/atomics (22), bytecode-io (6), builtins/array (5), runtime (3) |
 | builtins/atomics | 60299-60912 | 614 | 12 | builtins/typedarray (22), errors (6), conversions (6), operators (6) | builtins/weakref (4), runtime (1) |
-| builtins/weakref | 60913-fin | 285 | 12 | builtins/mapset (14), properties (9), malloc (7), runtime (6) | gc (2), runtime (1) |
+| builtins/weakref | 60913-end | 285 | 12 | builtins/mapset (14), properties (9), malloc (7), runtime (6) | gc (2), runtime (1) |
 
-Plus grosses fonctions : `JS_CallInternal` (2 823 lignes, ligne 17772), `resolve_labels` (902),
+Biggest functions: `JS_CallInternal` (2,823 lines, line 17772), `resolve_labels` (902),
 `js_parse_statement_or_decl` (761), `js_parse_postfix_expr` (667), `js_parse_function_decl2` (567),
 `js_parse_class` (511), `resolve_scope_var` (480), `js_parse_destructuring_element` (468),
 `next_token` (441), `resolve_variables` (358).
 
-## Le compilateur (retrait de l'eval)
+## The compiler (removing eval)
 
-Le compilateur occupe environ 13 300 lignes, soit 22 % du fichier : `compiler/tokenizer`,
-`compiler/emitter`, `compiler/parser`, `compiler/passes` et la partie compilation de `eval-api`.
+The compiler takes about 13,300 lines, that is 22 % of the file: `compiler/tokenizer`,
+`compiler/emitter`, `compiler/parser`, `compiler/passes` and the compilation part of `eval-api`.
 
-### Il est déjà derrière une indirection
+### It is already behind an indirection
 
-- Le contexte a un pointeur `ctx->eval_internal` (ligne 555).
-- Seul `JS_AddIntrinsicEval` (ligne 55947) le remplit avec `__JS_EvalInternal` (ligne 37071),
-  qui est l'unique entrée vers le compilateur.
-- Tout le reste passe par `JS_EvalInternal` (ligne 37187), qui lève une `TypeError`
-  « eval is not supported » si le pointeur est NULL. C'est le cas de `JS_Eval`, `JS_EvalThis`,
-  `JS_EvalObject`, de l'eval global (`js_global_eval`), du constructeur `Function`
-  (`js_function_constructor`) et de l'eval direct dans l'interpréteur (`JS_CallInternal` →
+- The context has a pointer `ctx->eval_internal` (line 555).
+- Only `JS_AddIntrinsicEval` (line 55947) fills it, with `__JS_EvalInternal` (line 37071),
+  which is the only entry into the compiler.
+- Everything else goes through `JS_EvalInternal` (line 37187), which throws a `TypeError`
+  "eval is not supported" if the pointer is NULL. This is the case of `JS_Eval`, `JS_EvalThis`,
+  `JS_EvalObject`, of the global eval (`js_global_eval`), of the `Function` constructor
+  (`js_function_constructor`) and of the direct eval in the interpreter (`JS_CallInternal` →
   `JS_EvalObject`).
-- `JS_NewContext` appelle `JS_AddIntrinsicEval`. Une build sans compilateur doit partir de
-  `JS_NewContextRaw` et n'ajouter que les intrinsèques voulus.
+- `JS_NewContext` calls `JS_AddIntrinsicEval`. A build without the compiler must start from
+  `JS_NewContextRaw` and add only the intrinsics wanted.
 
-### Couplages à couper pour sortir le compilateur de la build
+### Couplings to cut to take the compiler out of the build
 
-1. **JSON.parse utilise l'état du parseur.** `JS_ParseJSON3` utilise `JSParseState`,
-   `js_parse_init`, `free_token` et `js_parse_error`. Le tokenizer JSON (`json_parse_*`,
-   `json_next_token`, lignes 23156-23529) utilise `ident_realloc`, `js_parse_error`,
-   `js_parse_error_pos` et `free_token`. Il faut un petit socle commun « tokenizer » partagé par
-   le JSON et le compilateur, ou un état propre au JSON.
-2. **`free_function_bytecode`** (ligne 36166) est rangé parmi les passes du compilateur, mais il
-   libère du bytecode à l'exécution et le GC l'appelle (`free_gc_object`). Il va côté runtime.
-3. **`opcode_info` et `short_opcode_info`** (lignes 22035-22068) sont définis dans la zone du
-   compilateur, mais le lecteur et l'écrivain de bytecode s'en servent (`bc_byte_swap`,
-   `JS_WriteFunctionBytecode`, `JS_ReadFunctionBytecode`). À partager. Le debugger en aura aussi
-   besoin pour parcourir le bytecode.
-4. **`js_parse_error`** est appelé par `add_export_entry2` dans le module `modules` (ligne 29680).
-5. **`eval-api` mélange deux rôles.** `JS_EvalFunction` / `JS_EvalFunctionInternal` exécutent du
-   bytecode déjà compilé (les modules s'en servent) et restent côté runtime. `__JS_EvalInternal`
-   et ses appelants relèvent du compilateur.
-6. **Les types du compilateur** (`JSFunctionDef`, `JSToken`, `JSParseState`, `BlockEnv`,
-   `JSVarDef`…, lignes 21668-22057) forment un header privé du compilateur, sauf ce que le JSON
-   garde en commun (point 1).
+1. **JSON.parse uses the parser state.** `JS_ParseJSON3` uses `JSParseState`,
+   `js_parse_init`, `free_token` and `js_parse_error`. The JSON tokenizer (`json_parse_*`,
+   `json_next_token`, lines 23156-23529) uses `ident_realloc`, `js_parse_error`,
+   `js_parse_error_pos` and `free_token`. A small common "tokenizer" base shared by
+   JSON and the compiler is needed, or a state specific to JSON.
+2. **`free_function_bytecode`** (line 36166) is placed among the compiler passes, but it
+   frees bytecode at run time and the GC calls it (`free_gc_object`). It goes to the runtime side.
+3. **`opcode_info` and `short_opcode_info`** (lines 22035-22068) are defined in the compiler
+   area, but the bytecode reader and writer use them (`bc_byte_swap`,
+   `JS_WriteFunctionBytecode`, `JS_ReadFunctionBytecode`). To be shared. The debugger will also
+   need them to walk the bytecode.
+4. **`js_parse_error`** is called by `add_export_entry2` in the `modules` module (line 29680).
+5. **`eval-api` mixes two roles.** `JS_EvalFunction` / `JS_EvalFunctionInternal` run
+   already compiled bytecode (the modules use them) and stay on the runtime side.
+   `__JS_EvalInternal` and its callers belong to the compiler.
+6. **The compiler types** (`JSFunctionDef`, `JSToken`, `JSParseState`, `BlockEnv`,
+   `JSVarDef`…, lines 21668-22057) form a header private to the compiler, except what JSON
+   keeps in common (point 1).
 
-### Conséquence pour le debugger
+### Consequence for the debugger
 
-`Runtime.evaluate` et `Debugger.evaluateOnCallFrame` ont besoin du compilateur. Décision prise
-depuis : aucune build ESP ne contient le compilateur, même en debug. Les expressions sont
-compilées sur l'hôte et envoyées à l'ESP en bytecode (voir `doc/architecture.md`).
+`Runtime.evaluate` and `Debugger.evaluateOnCallFrame` need the compiler. Decision taken
+since then: no ESP build contains the compiler, even in debug. Expressions are
+compiled on the host and sent to the ESP as bytecode (see `doc/architecture.md`).
 
-## Points d'intérêt pour le debugger
+## Points of interest for the debugger
 
-- **Interpréteur** : `JS_CallInternal`, lignes 17772-20599. Une seule fonction, c'est là que
-  vont les hooks.
-- **Frames** : `JSStackFrame` (ligne 407), chaînées depuis `rt->current_stack_frame`.
-- **Positions** : `find_line_num` (ligne 7435) décode la table `pc2line`, `build_backtrace`
-  (ligne 7538) parcourt les frames. La table est produite à la compilation par
-  `compute_pc2line_info` (ligne 34450).
-- **Mot-clé `debugger`** : il est toujours ignoré par le parseur (ligne 29507, « currently no
-  debugger »).
-- **Interruption** : `js_poll_interrupts` (ligne 7877) et `JS_SetInterruptHandler` (ligne 2236).
+- **Interpreter**: `JS_CallInternal`, lines 17772-20599. A single function, this is where
+  the hooks go.
+- **Frames**: `JSStackFrame` (line 407), chained from `rt->current_stack_frame`.
+- **Positions**: `find_line_num` (line 7435) decodes the `pc2line` table, `build_backtrace`
+  (line 7538) walks the frames. The table is produced at compile time by
+  `compute_pc2line_info` (line 34450).
+- **`debugger` keyword**: it is always ignored by the parser (line 29507, "currently no
+  debugger").
+- **Interruption**: `js_poll_interrupts` (line 7877) and `JS_SetInterruptHandler` (line 2236).
 
-## Version découpée (engine/qjsx)
+## Split version (engine/qjsx)
 
-`engine/qjsx/` contient le même moteur découpé en 55 fichiers sources. `engine/qjs-bellard/`
-reste intact. Chaque fichier indique en tête les lignes de `quickjs.c` dont il provient.
-Performances, tailles et temps de compilation : [quickjs-split-perf.md](quickjs-split-perf.md).
-Le découpage est produit par le générateur de [tools/quickjs-split](../tools/quickjs-split/README.md),
-qui fournit aussi le build de test et la comparaison de performances.
+`engine/qjsx/` contains the same engine split into 55 source files. `engine/qjs-bellard/`
+stays untouched. Each file states at its top the lines of `quickjs.c` it comes from.
+Performance, sizes and compile times: [quickjs-split-perf.md](quickjs-split-perf.md).
+The split is produced by the generator of [tools/quickjs-split](../tools/quickjs-split/README.md),
+which also provides the test build and the performance comparison.
 
-### Fichiers
+### Files
 
-| Dossier | Rôle | Fichiers (lignes) |
+| Folder | Role | Files (lines) |
 |---|---|---|
-| `core/` | toujours compilé | atoms (936), bigint-arith (1470), cfunc (366), closures (761), conversions (1089), errors (552), gc (1296), generators (860), interpreter (3117), intrinsics (363), iteration (890), modules (1934), objects (982), operators (1562), print (872), properties (3177), runtime (1458), strings (1196) |
-| `bytecode/` | chargement et sauvegarde du bytecode | opcodes (21), reader (1158), writer (956) |
-| `builtins/` | objets standard, un fichier par objet | array (1964), arraybuffer (637), atomics (541), base64 (764), bigint (206), dataview (396), date (1255), function (560), global (329), iterator (1095), json (1577), mapset (1643), math (537), number (372), object (1150), promise (1368), proxy (1165), regexp (1766), string (1753), symbol (133), typedarray (2108), weakref (302) |
-| `compiler/` | le compilateur, absent d'une build sans eval | emitter (632), eval (134), finalize (582), funcdef (607), parser-class (686), parser-expr (3140), parser-func (831), parser-module (486), parser-stmt (1346), resolve-labels (1828), resolve-vars (1173), tokenizer (1202) |
+| `core/` | always compiled | atoms (936), bigint-arith (1470), cfunc (366), closures (761), conversions (1089), errors (552), gc (1296), generators (860), interpreter (3117), intrinsics (363), iteration (890), modules (1934), objects (982), operators (1562), print (872), properties (3177), runtime (1458), strings (1196) |
+| `bytecode/` | loading and saving of the bytecode | opcodes (21), reader (1158), writer (956) |
+| `builtins/` | standard objects, one file per object | array (1964), arraybuffer (637), atomics (541), base64 (764), bigint (206), dataview (396), date (1255), function (560), global (329), iterator (1095), json (1577), mapset (1643), math (537), number (372), object (1150), promise (1368), proxy (1165), regexp (1766), string (1753), symbol (133), typedarray (2108), weakref (302) |
+| `compiler/` | the compiler, absent from a build without eval | emitter (632), eval (134), finalize (582), funcdef (607), parser-class (686), parser-expr (3140), parser-func (831), parser-module (486), parser-stmt (1346), resolve-labels (1828), resolve-vars (1173), tokenizer (1202) |
 
-Les autres fichiers du moteur (`cutils`, `dtoa`, `libregexp`, `libunicode`, `quickjs.h`…)
-sont copiés tels quels à la racine de `engine/qjsx/`.
+The other files of the engine (`cutils`, `dtoa`, `libregexp`, `libunicode`, `quickjs.h`…)
+are copied as they are to the root of `engine/qjsx/`.
 
 ### Headers
 
-- `quickjs-internal.h`, inclus par tous les fichiers. Dans l'ordre :
-  - le prélude de `quickjs.c` sans ses prototypes ;
-  - les macros et types partagés entre fichiers ;
-  - les headers de prototypes ;
-  - les fonctions inline partagées.
-- `core/core.h`, `bytecode/bytecode.h`, `builtins/builtins.h` : prototypes des fonctions et
-  déclarations `extern` des tables partagées entre fichiers. Inclus par `quickjs-internal.h`.
-- `compiler/compiler.h` : types, macros et prototypes privés du compilateur. Seuls les
-  fichiers de `compiler/` l'incluent. Aucun autre fichier ne dépend du compilateur, sauf
-  `JS_NewContext`, qui appelle `JS_AddIntrinsicEval` de l'API publique.
+- `quickjs-internal.h`, included by every file. In order:
+  - the prelude of `quickjs.c` without its prototypes;
+  - the macros and types shared between files;
+  - the prototype headers;
+  - the shared inline functions.
+- `core/core.h`, `bytecode/bytecode.h`, `builtins/builtins.h`: prototypes of the functions and
+  `extern` declarations of the tables shared between files. Included by `quickjs-internal.h`.
+- `compiler/compiler.h`: types, macros and prototypes private to the compiler. Only the
+  files of `compiler/` include it. No other file depends on the compiler, except
+  `JS_NewContext`, which calls `JS_AddIntrinsicEval` of the public API.
 
-### Règles du découpage
+### Rules of the split
 
-- **Fonctions et tables** : seules celles utilisées dans plusieurs fichiers ont perdu
-  `static` (688 fonctions, 48 tables). Les autres restent `static` dans leur fichier.
-- **Taille des tables partagées** : elle est écrite dans leur déclaration `extern`, pour que
-  `countof()` fonctionne ailleurs. Si une table change de taille sans mise à jour du header,
-  la compilation échoue.
-- **Macros définies dans une fonction** : quand elles sont utilisées ailleurs (par exemple
-  `JS_THROW_VAR_RO` dans `JS_CallInternal`), une copie identique est placée dans un header.
-- **Éléments déplacés hors de leur zone de lignes** :
-  - `free_function_bytecode` et `free_bytecode_atoms` vont dans `core/gc.c` ;
-  - `opcode_info` va dans `bytecode/opcodes.c` ;
-  - `JS_EvalFunction` et la répartition de l'eval vont dans `core/interpreter.c` ;
-  - `JS_ResolveModule` va dans `core/modules.c` ;
-  - `ident_realloc` va dans `core/strings.c` et `get_line_col` dans `core/errors.c` ;
-  - `js_get_prototype_from_ctor` va dans `core/objects.c`.
+- **Functions and tables**: only those used in several files lost
+  `static` (688 functions, 48 tables). The others stay `static` in their file.
+- **Size of the shared tables**: it is written in their `extern` declaration, so that
+  `countof()` works elsewhere. If a table changes size without the header being updated,
+  the compilation fails.
+- **Macros defined inside a function**: when they are used elsewhere (for example
+  `JS_THROW_VAR_RO` in `JS_CallInternal`), an identical copy is placed in a header.
+- **Items moved out of their line area**:
+  - `free_function_bytecode` and `free_bytecode_atoms` go to `core/gc.c`;
+  - `opcode_info` goes to `bytecode/opcodes.c`;
+  - `JS_EvalFunction` and the eval dispatch go to `core/interpreter.c`;
+  - `JS_ResolveModule` goes to `core/modules.c`;
+  - `ident_realloc` goes to `core/strings.c` and `get_line_col` to `core/errors.c`;
+  - `js_get_prototype_from_ctor` goes to `core/objects.c`.
 
-### Modifications du code par rapport à quickjs.c
+### Code changes compared to quickjs.c
 
-1. **JSON.parse a son propre état** (`JSONParseState`, `JSONToken`, `JSON_TOK_*`, dans
-   `builtins/json.c`), au lieu de réutiliser celui du parseur JavaScript.
-2. **Les exports de module sont séparés du parseur** :
-   - `add_export_entry2` (`core/modules.c`) ne reçoit plus de `JSParseState` et lève une
-     `SyntaxError` ordinaire ;
-   - `add_export_entry` (`compiler/parser-module.c`) signale le doublon avec la position
-     dans le source, puis l'appelle.
+1. **JSON.parse has its own state** (`JSONParseState`, `JSONToken`, `JSON_TOK_*`, in
+   `builtins/json.c`), instead of reusing that of the JavaScript parser.
+2. **Module exports are separated from the parser**:
+   - `add_export_entry2` (`core/modules.c`) no longer receives a `JSParseState` and throws an
+     ordinary `SyntaxError`;
+   - `add_export_entry` (`compiler/parser-module.c`) reports the duplicate with its position
+     in the source, then calls it.
 
-Rien d'autre n'a changé dans le code des fonctions.
+Nothing else changed in the code of the functions.

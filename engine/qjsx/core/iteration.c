@@ -25,7 +25,7 @@ JSValue js_function_proto_fileName(JSContext *ctx,
                                           JSValueConst this_val)
 {
     JSFunctionBytecode *b = JS_GetFunctionBytecode(this_val);
-    if (b && b->filename != JS_ATOM_NULL) {   /* espjs: was b->has_debug */
+    if (b && b->filename != JS_ATOM_NULL) {   /* qjsx: was b->has_debug */
         return JS_AtomToString(ctx, b->filename);
     }
     return JS_UNDEFINED;

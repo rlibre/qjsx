@@ -219,7 +219,7 @@ void endLink(TcpLink *link, const char *reason) {
     if (stillCurrent) {
         state.connections.agent->attach(nullptr);
         state.connections.current = nullptr;
-        printf("espjs agent: %s\n", reason);
+        printf("qjsx agent: %s\n", reason);
         fflush(stdout);
     }
 
@@ -286,7 +286,7 @@ void acceptThread(void *) {
 
         // start the reader thread of the new link, which owns it from then on;
         // if it cannot start, nothing would ever read the link: end it now
-        printf("espjs agent: host connected\n");
+        printf("qjsx agent: host connected\n");
         fflush(stdout);
         if (!platform::startThread(&readerThread, link, platform::defaultThreadOptions("agent-reader"))) {
             endLink(link, "host dropped: cannot start a reader thread");
@@ -336,7 +336,7 @@ bool configureHost(HostOptions options) {
 
     // create the directory (and its parents)
     if (!files::makeDirectories(options.storage)) {
-        fprintf(stderr, "espjs agent: cannot create %s: %s\n", options.storage, strerror(errno));
+        fprintf(stderr, "qjsx agent: cannot create %s: %s\n", options.storage, strerror(errno));
         return false;
     }
 
@@ -345,7 +345,7 @@ bool configureHost(HostOptions options) {
     state.dataDirectory = absoluteDataDirectory(options.storage);
     bool created = state.dataDirectory != nullptr && files::makeDirectories(state.dataDirectory);
     if (!created) {
-        fprintf(stderr, "espjs agent: cannot create the data directory in %s: %s\n", options.storage, strerror(errno));
+        fprintf(stderr, "qjsx agent: cannot create the data directory in %s: %s\n", options.storage, strerror(errno));
         return false;
     }
 
@@ -363,7 +363,7 @@ const char *dataDirectory() {
  * The desktop: no flash or PSRAM size to report.
  */
 void identity(Identity *identity) {
-    *identity = Identity{ "desktop", "espjs agent", 0, 0 };
+    *identity = Identity{ "desktop", "qjsx agent", 0, 0 };
 }
 
 /**
@@ -435,7 +435,7 @@ bool startLinks(agent::Agent *agent) {
     int error = 0;
     sockets::Socket listener = sockets::listenOn(state.options.host, state.options.port, &port, &error);
     if (listener == sockets::invalidSocket) {
-        fprintf(stderr, "espjs agent: cannot listen on %s:%d: %s\n", state.options.host, state.options.port,
+        fprintf(stderr, "qjsx agent: cannot listen on %s:%d: %s\n", state.options.host, state.options.port,
                 strerror(error));
         return false;
     }
@@ -445,7 +445,7 @@ bool startLinks(agent::Agent *agent) {
     state.connections.listener = listener;
 
     // start the accept thread
-    printf("espjs agent: listening on %s:%d, storage %s\n", state.options.host, port, state.options.storage);
+    printf("qjsx agent: listening on %s:%d, storage %s\n", state.options.host, port, state.options.storage);
     fflush(stdout);
     return platform::startThread(&acceptThread, nullptr, platform::defaultThreadOptions("agent-accept"));
 }

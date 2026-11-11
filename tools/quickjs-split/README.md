@@ -2,7 +2,7 @@
 
 Generates `engine/qjsx/` (QuickJS split into 55 source files) from
 `engine/qjs-bellard/quickjs.c`, and checks that the result behaves like the original.
-The split itself is described in `doc/quickjs-map.md`, section "Version découpée".
+The split itself is described in `doc/quickjs-map.md`, section "Split version".
 
 ## Files
 

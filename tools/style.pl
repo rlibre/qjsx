@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# Style pass of the espjs C++ sources (rules of CLAUDE.md, "Coding rules"):
+# Style pass of the qjsx C++ sources (rules of CLAUDE.md, "Coding rules"):
 #   1. a lone "{" after a function signature (or a constructor initializer
 #      list) goes up on the line before: "void f() {";
 #   2. a block of "//" comment lines right above a function (declaration or

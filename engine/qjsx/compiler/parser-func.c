@@ -196,7 +196,7 @@ __exception int js_parse_function_decl2(JSParseState *s,
     int func_idx, lexical_func_idx = -1;
     BOOL has_opt_arg;
     BOOL create_func_var = FALSE;
-    const uint8_t *closing_brace_ptr;   /* espjs */
+    const uint8_t *closing_brace_ptr;   /* qjsx */
 
     is_expr = (func_type != JS_PARSE_FUNC_STATEMENT &&
                func_type != JS_PARSE_FUNC_VAR);
@@ -578,19 +578,19 @@ __exception int js_parse_function_decl2(JSParseState *s,
             if (js_parse_function_check_names(s, fd, func_name))
                 goto fail;
 
-            /* espjs: the expression body is a statement for the debugger */
+            /* qjsx: the expression body is a statement for the debugger */
             emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
             if (js_parse_assign_expr(s))
                 goto fail;
 
-            /* espjs: return position on the last character of the body */
+            /* qjsx: return position on the last character of the body */
             emit_debug_pos(s, JS_DEBUG_POSITION_RETURN, s->last_ptr - 1);
             if (func_kind != JS_FUNC_NORMAL)
                 emit_op(s, OP_return_async);
             else
                 emit_op(s, OP_return);
 
-            fd->source_end = s->last_ptr - s->buf_start;   /* espjs */
+            fd->source_end = s->last_ptr - s->buf_start;   /* qjsx */
             if (!fd->strip_source) {
                 /* save the function source code */
                 /* the end of the function source code is after the last
@@ -620,7 +620,7 @@ __exception int js_parse_function_decl2(JSParseState *s,
         if (js_parse_source_element(s))
             goto fail;
     }
-    fd->source_end = s->buf_ptr - s->buf_start;   /* espjs: after the '}' */
+    fd->source_end = s->buf_ptr - s->buf_start;   /* qjsx: after the '}' */
     if (!fd->strip_source) {
         /* save the function source code */
         fd->source_len = s->buf_ptr - ptr;
@@ -629,7 +629,7 @@ __exception int js_parse_function_decl2(JSParseState *s,
             goto fail;
     }
 
-    /* espjs: the implicit return is on the closing brace */
+    /* qjsx: the implicit return is on the closing brace */
     closing_brace_ptr = s->token.ptr;
     if (next_token(s)) {
         /* consume the '}' */
@@ -795,7 +795,7 @@ __exception int js_parse_program(JSParseState *s)
         if (js_parse_source_element(s))
             return -1;
     }
-    fd->source_end = s->buf_end - s->buf_start;   /* espjs */
+    fd->source_end = s->buf_end - s->buf_start;   /* qjsx */
 
     if (!s->is_module) {
         /* return the value of the hidden variable eval_ret_idx  */
@@ -814,7 +814,7 @@ __exception int js_parse_program(JSParseState *s)
             emit_op(s, OP_get_loc);
             emit_u16(s, fd->eval_ret_idx);
         }
-        emit_return(s, TRUE, s->token.ptr);   /* espjs: end of the source */
+        emit_return(s, TRUE, s->token.ptr);   /* qjsx: end of the source */
     } else {
         emit_return(s, FALSE, s->token.ptr);
     }

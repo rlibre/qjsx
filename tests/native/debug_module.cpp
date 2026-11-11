@@ -1,5 +1,5 @@
 // Native module "debug_test": exposes the debugger API of the engine
-// (quickjs-debug.h) to tests/debug.test.js. Only built into espjs-tests.
+// (quickjs-debug.h) to tests/debug.test.js. Only built into qjsx-tests.
 //
 //   setHook(callback | null)   callback(event) is called for each stop, with
 //                              { reason, exception, atReturn, returnValue };

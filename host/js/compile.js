@@ -1,5 +1,5 @@
-// Compilation of one module, shared by 'espjs build' (packages) and
-// 'espjs mklib' (libraries): bytecode, debug sidecar, identifiers and the
+// Compilation of one module, shared by 'qjsx build' (packages) and
+// 'qjsx mklib' (libraries): bytecode, debug sidecar, identifiers and the
 // modules it imports.
 //
 // Identifiers:
@@ -11,15 +11,15 @@
 // host/modules/compiler_module.cpp and quickjs-debug.h). Positions are byte
 // offsets in the source; the debugger proxy converts them into lines and
 // UTF-16 columns.
-import { compile, quickjsVersion, espjsVersion, bytecodeVersion } from "compiler";
+import { compile, quickjsVersion, qjsxVersion, bytecodeVersion } from "compiler";
 import { sha256 } from "crypto";
-import { hex } from "espjs:util";
+import { hex } from "qjsx:util";
 
 export const SIDECAR_FORMAT = 2;   // 2: with 'functions'
 
 // Identifies the compiler: bytecode is only valid for the engine that made it.
 export function compilerId() {
-    return `espjs ${espjsVersion} / QuickJS ${quickjsVersion}`;
+    return `qjsx ${qjsxVersion} / QuickJS ${quickjsVersion}`;
 }
 
 // Version of the bytecode this compiler writes: an engine only reads the

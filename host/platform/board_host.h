@@ -1,11 +1,11 @@
-// The desktop "board" of "espjs agent" (board.h): packages in files, a TCP
+// The desktop "board" of "qjsx agent" (board.h): packages in files, a TCP
 // link (one host at a time), the console on stdout / stderr.
 #pragma once
 
 namespace board {
 
 /**
- * Options of the desktop board, given by "espjs agent".
+ * Options of the desktop board, given by "qjsx agent".
  */
 struct HostOptions {
     const char *host;      // address to listen on

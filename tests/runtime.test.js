@@ -1,5 +1,5 @@
 // Tests of the runtime library: globals, fs, path, crypto, timers.
-// Run with: bin/Release/espjs run tests/runtime.test.js
+// Run with: bin/Release/qjsx run tests/runtime.test.js
 import * as fs from "fs";
 import path from "stdlib/path";
 import { join, dirname, basename, extname, relative, normalize, isAbsolute, resolve } from "stdlib/path";

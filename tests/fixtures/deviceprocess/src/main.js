@@ -1,7 +1,7 @@
 // What process looks like to a program: on a device (the desktop agent) argv
-// is ["espjs", main module], env comes from espjs.json, cwd is the data
+// is ["qjsx", main module], env comes from qjsx.json, cwd is the data
 // directory of the board and fs resolves relative paths against it. Run on
-// the PC (espjs run), argv and env are the real ones.
+// the PC (qjsx run), argv and env are the real ones.
 import * as fs from "fs";
 
 console.log(`argv ${JSON.stringify(process.argv)}`);

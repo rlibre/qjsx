@@ -1,7 +1,7 @@
 /*
  * QuickJS - core/debug.c
  *
- * espjs: debugger support (not part of upstream QuickJS). Public API in
+ * qjsx: debugger support (not part of upstream QuickJS). Public API in
  * quickjs-debug.h; the interpreter calls the js_debug_* functions below
  * (core/interpreter.c). See doc/engine-changes.md.
  */

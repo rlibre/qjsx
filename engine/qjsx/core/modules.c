@@ -1206,7 +1206,7 @@ JSAtom JS_GetScriptOrModuleName(JSContext *ctx, int n_stack_levels)
             return JS_ATOM_NULL;
         b = p->u.func.function_bytecode;
         if (!b->is_direct_or_indirect_eval) {
-            /* espjs: the file name no longer depends on the debug info, so
+            /* qjsx: the file name no longer depends on the debug info, so
                import.meta and import() work with fully stripped bytecode */
             if (b->filename == JS_ATOM_NULL)
                 return JS_ATOM_NULL;
@@ -1224,13 +1224,13 @@ JSAtom JS_GetModuleName(JSContext *ctx, JSModuleDef *m)
     return JS_DupAtom(ctx, m->module_name);
 }
 
-/* espjs: number of modules asked for by 'm' (import, export ... from) */
+/* qjsx: number of modules asked for by 'm' (import, export ... from) */
 int JS_GetModuleRequestCount(JSModuleDef *m)
 {
     return m->req_module_entries_count;
 }
 
-/* espjs: name of a module asked for by 'm', as written in its source */
+/* qjsx: name of a module asked for by 'm', as written in its source */
 JSAtom JS_GetModuleRequestName(JSContext *ctx, JSModuleDef *m, int index)
 {
     if (index < 0 || index >= m->req_module_entries_count)

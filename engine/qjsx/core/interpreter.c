@@ -29,7 +29,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     JSVarRef **var_refs;
     size_t alloca_size;
 
-    /* espjs: debugger stops. A frame whose function has stops (see
+    /* qjsx: debugger stops. A frame whose function has stops (see
        js_debug_frame_has_stops) checks them before each instruction. The
        choice is made again by REFRESH_DEBUG_DISPATCH() when the debugger
        state may have changed: at 'restart' (entry, resume, catch), after
@@ -78,7 +78,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 #define BREAK           SWITCH(pc)
 #endif
 
-    /* espjs: polls the interrupt handler like js_poll_interrupts(). When
+    /* qjsx: polls the interrupt handler like js_poll_interrupts(). When
        the handler ran, it may have changed the debugger state (pause
        request, new stops): the dispatch is chosen again. */
 #define POLL_INTERRUPTS()                                           \
@@ -111,7 +111,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             sf->prev_frame = rt->current_stack_frame;
             rt->current_stack_frame = sf;
             if (s->throw_flag) {
-                /* espjs: a value thrown into a generator or async function
+                /* qjsx: a value thrown into a generator or async function
                    (rejected await, generator throw()) is not a new throw
                    for the debugger */
                 js_debug_mark_exception_reported(ctx);
@@ -182,7 +182,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     ctx = b->realm; /* set the current realm */
 
  restart:
-    REFRESH_DEBUG_DISPATCH();   /* espjs */
+    REFRESH_DEBUG_DISPATCH();   /* qjsx */
     for(;;) {
         int call_argc;
         JSValue *call_argv;
@@ -510,7 +510,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                     JS_FreeValue(ctx, call_argv[i]);
                 sp -= call_argc + 1;
                 *sp++ = ret_val;
-                REFRESH_DEBUG_DISPATCH();   /* espjs */
+                REFRESH_DEBUG_DISPATCH();   /* qjsx */
             }
             BREAK;
         CASE(OP_call_constructor):
@@ -528,7 +528,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                     JS_FreeValue(ctx, call_argv[i]);
                 sp -= call_argc + 2;
                 *sp++ = ret_val;
-                REFRESH_DEBUG_DISPATCH();   /* espjs */
+                REFRESH_DEBUG_DISPATCH();   /* qjsx */
             }
             BREAK;
         CASE(OP_call_method):
@@ -548,7 +548,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                     JS_FreeValue(ctx, call_argv[i]);
                 sp -= call_argc + 2;
                 *sp++ = ret_val;
-                REFRESH_DEBUG_DISPATCH();   /* espjs */
+                REFRESH_DEBUG_DISPATCH();   /* qjsx */
             }
             BREAK;
         CASE(OP_array_from):
@@ -2773,7 +2773,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         CASE(OP_nop):
             BREAK;
         CASE(OP_debugger):
-            /* espjs: 'debugger;' statement */
+            /* qjsx: 'debugger;' statement */
             if (js_debug_on_debugger_statement(ctx, sf, pc - 1) < 0)
                 goto exception;
             REFRESH_DEBUG_DISPATCH();
@@ -2831,7 +2831,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     }
 #if DIRECT_DISPATCH
  debug_check:
-    /* espjs: reached through debug_dispatch_table: 'opcode' is read and
+    /* qjsx: reached through debug_dispatch_table: 'opcode' is read and
        'pc' points after it */
     if (js_debug_check_stop(ctx, sf, b, pc - 1, sp) < 0)
         goto exception;
@@ -2846,7 +2846,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         sf->cur_pc = pc;
         build_backtrace(ctx, rt->current_exception, NULL, 0, 0, 0);
     }
-    /* espjs: report the throw to the debugger (only in the frame of the
+    /* qjsx: report the throw to the debugger (only in the frame of the
        throw, not again while it unwinds through the calling frames) */
     if (unlikely(rt->debug.hook != NULL))
         js_debug_on_exception(ctx, sf, pc);
@@ -2862,7 +2862,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                     sp--;
                     JS_IteratorClose(ctx, sp[-1], TRUE);
                 } else {
-                    /* espjs: a 'catch' clause ends the throw for the
+                    /* qjsx: a 'catch' clause ends the throw for the
                        debugger (not a 'finally' clause, which rethrows) */
                     js_debug_exception_caught(rt, b, pos);
                     *sp++ = rt->current_exception;

@@ -1,7 +1,7 @@
-// espjs: host tool of the project.
-//   espjs run <file.js | package.qjspkg> [arguments...]
-//   espjs --version
-//   espjs <command> ...   other commands, written in JS (host/js/cli.js)
+// qjsx: host tool of the project.
+//   qjsx run <file.js | package.qjspkg> [arguments...]
+//   qjsx --version
+//   qjsx <command> ...   other commands, written in JS (host/js/cli.js)
 #include <stdio.h>
 #include <string.h>
 
@@ -27,13 +27,13 @@ JSModuleDef *jsNewModule_net(JSContext *ctx, const char *moduleName);
 JSModuleDef *jsNewModule_serial(JSContext *ctx, const char *moduleName);
 
 /**
- * "espjs agent ..." (agent_command.cpp). Returns the exit code.
+ * "qjsx agent ..." (agent_command.cpp). Returns the exit code.
  */
 int runAgentCommand(int argc, char **argv);
 
-#ifdef ESPJS_TESTS
+#ifdef QJSX_TESTS
 /**
- * Registers the native test modules (tests/native, built into espjs-tests only).
+ * Registers the native test modules (tests/native, built into qjsx-tests only).
  */
 void registerTestModules();
 #endif
@@ -41,8 +41,8 @@ void registerTestModules();
 namespace {
 
 /**
- * "espjs run <path> [arguments...]": runs the file with process.argv =
- * [espjs, path, arguments...], like "node path arguments...". Returns the exit code.
+ * "qjsx run <path> [arguments...]": runs the file with process.argv =
+ * [qjsx, path, arguments...], like "node path arguments...". Returns the exit code.
  */
 int runScript(int argc, char **argv) {
     // the script's path, process.argv[1], with '/' separators like argv[0]
@@ -89,20 +89,20 @@ int main(int argc, char **argv) {
     files::useSlashes(argv[0]);
 
     // register the native modules of the host, before any JS runtime is
-    // created (espjs-target is linked with the engine without compiler,
-    // premake5.lua; the test modules exist in espjs-tests only)
-#ifndef ESPJS_NO_COMPILER
+    // created (qjsx-target is linked with the engine without compiler,
+    // premake5.lua; the test modules exist in qjsx-tests only)
+#ifndef QJSX_NO_COMPILER
     rt::registerNativeModule("compiler", &jsNewModule_compiler);
 #endif
     rt::registerNativeModule("net", &jsNewModule_net);
     rt::registerNativeModule("serial", &jsNewModule_serial);
-#ifdef ESPJS_TESTS
+#ifdef QJSX_TESTS
     registerTestModules();
 #endif
 
     // commands written in C++: --version
     if (argc >= 2 && strcmp(argv[1], "--version") == 0) {
-        printf("espjs %s (QuickJS %s)\n", ESPJS_VERSION, CONFIG_VERSION);
+        printf("qjsx %s (QuickJS %s)\n", QJSX_VERSION, CONFIG_VERSION);
         return 0;
     }
 
@@ -117,6 +117,6 @@ int main(int argc, char **argv) {
     }
 
     // every other command (build, help...) is handled by the JS part of the
-    // tool ("espjs:cli")
+    // tool ("qjsx:cli")
     return host::runCommand(argc, argv);
 }

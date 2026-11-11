@@ -3,7 +3,7 @@
 /build/
 /bin/
 
-# What espjs itself builds in a project: packages and libraries, in the
+# What qjsx itself builds in a project: packages and libraries, in the
 # "build" folder of the project (tests/fixtures/*/build, lib/*/build)
 build/
 *.qjspkg

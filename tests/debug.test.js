@@ -1,7 +1,7 @@
 // Tests of the debugger support of the engine (quickjs-debug.h): stops,
 // stepping, 'debugger;', exceptions, frames and slots, checked against the
 // debug info (sidecar) given by the compiler.
-// Run with: bin/Release/espjs-tests run tests/debug.test.js
+// Run with: bin/Release/qjsx-tests run tests/debug.test.js
 import * as fs from "fs";
 import { compile } from "compiler";
 import * as debug from "debug_test";

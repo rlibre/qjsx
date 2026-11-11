@@ -189,13 +189,13 @@ typedef enum JSParseExportEnum {
 typedef struct JSVarScope {
     int parent;  /* index into fd->scopes of the enclosing scope */
     int first;   /* index into fd->vars of the last variable in this scope */
-    /* espjs: source range of the scope, for the debug info. -1: from the
+    /* qjsx: source range of the scope, for the debug info. -1: from the
        start / to the end of the function */
     int source_start;
     int source_end;
 } JSVarScope;
 
-/* espjs: debugger positions are carried by OP_line_num, whose operand is a
+/* qjsx: debugger positions are carried by OP_line_num, whose operand is a
    source offset: its two high bits give the kind (JSDebugPositionKind).
    Plain positions (kind 0) are those of upstream QuickJS. The others are
    emitted by emit_debug_pos() and recorded by resolve_labels() at the pc
@@ -241,7 +241,7 @@ typedef struct JSVarDef {
 typedef struct JSFunctionDef {
     JSContext *ctx;
     struct JSFunctionDef *parent;
-    /* espjs: in the root function only: next JSFunctionBytecode.function_number */
+    /* qjsx: in the root function only: next JSFunctionBytecode.function_number */
     int function_counter;
     int parent_cpool_idx; /* index in the constant pool of the parent
                              or -1 if none */
@@ -351,7 +351,7 @@ typedef struct JSFunctionDef {
     char *source;  /* raw source, utf-8 encoded */
     int source_len;
 
-    /* espjs: debug info (compiler/debug-info.c), only filled when a debug
+    /* qjsx: debug info (compiler/debug-info.c), only filled when a debug
        info collector is set */
     uint32_t source_end;            /* end of the function source */
     JSDebugPosition *debug_positions;
@@ -400,7 +400,7 @@ typedef struct JSParseState {
     BOOL is_module; /* parsing a module */
     BOOL allow_html_comments;
     BOOL ext_json; /* JSON parsing: true if accepting JSON superset */
-    /* espjs: 'import()' is a syntax error (JS_EVAL_FLAG_NO_DYNAMIC_IMPORT) */
+    /* qjsx: 'import()' is a syntax error (JS_EVAL_FLAG_NO_DYNAMIC_IMPORT) */
     BOOL no_dynamic_import;
     GetLineColCache get_line_col_cache;
 } JSParseState;
@@ -498,7 +498,7 @@ void emit_u16(JSParseState *s, uint16_t val);
 void emit_u32(JSParseState *s, uint32_t val);
 void emit_source_pos(JSParseState *s, const uint8_t *source_ptr);
 void emit_debug_pos(JSParseState *s, JSDebugPositionKind kind, const uint8_t *source_ptr);
-/* espjs: compiler/debug-info.c */
+/* qjsx: compiler/debug-info.c */
 void js_debug_info_add_position(JSFunctionDef *s, uint32_t pc, uint32_t operand);
 uint32_t js_debug_skipped_marker(const uint8_t *bc_buf, int bc_len, int start, int end);
 void js_debug_info_collect(JSContext *ctx, JSFunctionDef *fd, JSFunctionBytecode *b);
@@ -572,7 +572,7 @@ void push_break_entry(JSFunctionDef *fd, BlockEnv *be,
                              int label_break, int label_cont,
                              int drop_count);
 void pop_break_entry(JSFunctionDef *fd);
-/* espjs: 'source_ptr' is the debugger position of the return instruction
+/* qjsx: 'source_ptr' is the debugger position of the return instruction
    (JS_DEBUG_POSITION_RETURN), NULL for a return the debugger does not stop
    at (code generated for generators and default constructors) */
 void emit_return(JSParseState *s, BOOL hasval, const uint8_t *source_ptr);

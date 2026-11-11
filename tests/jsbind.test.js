@@ -1,5 +1,5 @@
 // Tests of the binding library through the native module "jsbind_test".
-// Run with: bin/Release/espjs-tests run tests/jsbind.test.js
+// Run with: bin/Release/qjsx-tests run tests/jsbind.test.js
 import { Device, add, gc, destroyedCount } from "jsbind_test";
 import { check, equal, throws, rejects, report } from "./assert.js";
 

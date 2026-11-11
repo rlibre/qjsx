@@ -1,5 +1,5 @@
 // process.exit inside an async function: no catch, no rejection handler, no
-// timer runs afterwards, and `espjs run` returns the code (6).
+// timer runs afterwards, and `qjsx run` returns the code (6).
 (async () => {
     await null;
     try {

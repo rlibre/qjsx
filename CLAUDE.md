@@ -1,7 +1,13 @@
-# espjs
+# qjsx
 
 JavaScript runtime based on QuickJS (Fabrice Bellard), targeting desktop (Windows, macOS, Linux)
 and ESP32 with PSRAM. Current work: a QuickJS debugger usable from VS Code.
+
+Name (user, 2026-11-11): the project, the tool and its command are called `qjsx` (formerly
+`espjs`): `qjsx build`, `qjsx.json`, embedded modules `qjsx:name`, engine comments marked
+`qjsx:`, defines `QJSX_*`. The engine keeps its folder `engine/qjsx`; its libraries are the
+premake projects `qjsx-engine` and `qjsx-engine-target`. Only the working folder on the disk
+keeps the old name: `C:\Sandbox\espjs`.
 
 ## Decisions taken (do not reopen without the user)
 
@@ -55,7 +61,7 @@ and ESP32 with PSRAM. Current work: a QuickJS debugger usable from VS Code.
     compiler, natives, modules with their imports; `src/`, `debug/`, `bytecode/` as a cache);
     it always contains its sources (user: the FILE is what is delivered, not the source
     folder). `.d.ts`: not done;
-  - `espjs mklib [dir] [--output file]` makes one from a library project (`espjs.json` with
+  - `qjsx mklib [dir] [--output file]` makes one from a library project (`qjsx.json` with
     `name`, `version`, `modules`: module name -> source file); a public command, for the
     users' own libraries too (`host/js/library.js`);
   - the standard library: sources in `lib/stdlib/` (`path`, later the JS layers of the
@@ -63,34 +69,34 @@ and ESP32 with PSRAM. Current work: a QuickJS debugger usable from VS Code.
     post-build step running the tool just linked); the tool finds it from `process.argv[0]`,
     now the full path of the executable (`host/platform/executable_path.cpp`). The host
     executable ALSO embeds the same sources under the same names, for its own commands
-    (`mklib` runs before `stdlib.qjslib` exists) and for `espjs run script.js`;
-  - other libraries are declared in `espjs.json` (`"libraries"`: paths of `.qjslib` files);
-  - `espjs build` follows the static imports of every module of the program and copies into
+    (`mklib` runs before `stdlib.qjslib` exists) and for `qjsx run script.js`;
+  - other libraries are declared in `qjsx.json` (`"libraries"`: paths of `.qjslib` files);
+  - `qjsx build` follows the static imports of every module of the program and copies into
     the `.qjspkg` every library module used, WHOLE (no function-level tree shaking),
     transitively; the bytecode of the `.qjslib` is used when the compiler id matches, else
     the module is recompiled from its source; the debugger sees them (sidecar and source in
     the package). A name without `/` that is no module of the program is a native module,
     listed in `natives` of the manifest;
   - the firmware contains no JS at all, only native modules; the device loader finds library
-    modules in the package like any other. NOT DONE: `espjs deploy` checking `natives`
+    modules in the package like any other. NOT DONE: `qjsx deploy` checking `natives`
     against a list the firmware would give in `Hello`;
-  - dynamic `import()` is FORBIDDEN in programs built by `espjs build` and in libraries (PC
+  - dynamic `import()` is FORBIDDEN in programs built by `qjsx build` and in libraries (PC
     and devices alike), so the dependency graph is complete at build time: a compiler flag
     (`JS_EVAL_FLAG_NO_DYNAMIC_IMPORT`, engine change J) makes it a syntax error with its
-    position. The tool's own JS (`espjs:*`) is not concerned.
+    position. The tool's own JS (`qjsx:*`) is not concerned.
 - Package of another engine (agreed and IMPLEMENTED 2026-11-11; `doc/architecture.md` 4.1,
   engine change K). The manifest of a package records `bytecode`, the bytecode version of the
   compiler (`JS_GetBytecodeVersion()` = BC_VERSION, 0x45 today; NOT the compiler id text, which
-  changes with every espjs version). Checked twice: the agent refuses `UPLOAD_BEGIN` when the
+  changes with every qjsx version). Checked twice: the agent refuses `UPLOAD_BEGIN` when the
   number is not its own (nothing written, the installed package stays); the loader
-  (`startPackage`) refuses to run such a package, on a device and with `espjs run`. A package
+  (`startPackage`) refuses to run such a package, on a device and with `qjsx run`. A package
   without the field is refused too. RULE: every engine change that alters the bytecode
   (opcodes, serialization) bumps BC_VERSION. A `.qjslib` records it too: a library made by
   another compiler is NOT refused (it holds its sources), its modules are compiled again and
   the build says so. Proposed, not done: a test that fails when the bytecode of a reference
   source changes (reminder to bump BC_VERSION).
-- Compile warnings (agreed and IMPLEMENTED 2026-11-11, engine change K): `espjs build` and
-  `espjs mklib` print `file:line:column: warning: ...` (in ENGLISH, user) for a direct
+- Compile warnings (agreed and IMPLEMENTED 2026-11-11, engine change K): `qjsx build` and
+  `qjsx mklib` print `file:line:column: warning: ...` (in ENGLISH, user) for a direct
   `eval(...)`, `Function(...)` and `new Function`, which throw on a device; a warning, not an
   error (the build succeeds). Syntactic detection in the compiler
   (`JS_SetCompileWarningHandler`); indirect uses are not seen.
@@ -138,7 +144,9 @@ and ESP32 with PSRAM. Current work: a QuickJS debugger usable from VS Code.
   - statement / return positions: implemented as a kind in the 2 high bits of the
     `OP_line_num` operand (not a new opcode), emitted at each statement start, catch clause,
     loop test and update, each `return` + implicit return; resolve_labels records them at the
-    next emitted instruction; peephole optimizations do not cross them. Positions carry a kind
+    next emitted instruction; peephole optimizations DO cross them (forbidding it cost 60 % on
+    a microbench test: a marker skipped by a merge is emitted again or recorded,
+    `js_debug_skipped_marker`, see `doc/engine-changes.md` E). Positions carry a kind
     (expression, statement, return).
   - DEVIATION: scopes are recorded as SOURCE ranges (push_scope / pop_scope), not pc ranges;
     the proxy maps the pause pc to a source position, then to the scopes containing it.
@@ -152,20 +160,20 @@ and ESP32 with PSRAM. Current work: a QuickJS debugger usable from VS Code.
   - tail calls are ALWAYS disabled (same bytecode in debug and production). Note: QuickJS
     tail calls never dropped the caller frame; the separate OP_return is the return stop.
   - sidecar collected in js_create_function before stripping (JS_SetDebugInfoCollector); the
-    host `compile(..., { debug: true })` returns `{ bytecode, debug }`, `espjs build` writes it
+    host `compile(..., { debug: true })` returns `{ bytecode, debug }`, `qjsx build` writes it
     as `functions` in the sidecar JSON (format 2).
 - Interpreter (implemented, `quickjs-debug.h`, `core/debug.c`): debug dispatch table chosen per
   frame, JS_SetDebugHook, stepping flag, breakpoint/statement bitmaps, frame and slot access,
   exception reporting once per thrown value. NOT DONE: caught/uncaught prediction
   (`sf->call_sp`).
-- Host tool `espjs`: a single executable (host QuickJS + C modules: event loop, sockets, serial,
+- Host tool `qjsx`: a single executable (host QuickJS + C modules: event loop, sockets, serial,
   SHA-256, compile API; commands written in JS, precompiled and embedded). Commands: build,
   deploy, debug (proxy, CDP server for VS Code), monitor, targets, device ls|reset|info, trace,
   run. Targets: `serial:COM3`, `serial:/dev/ttyUSB0@921600`, `tcp:esp.local:5555`.
-  Project file `espjs.json` at the project root (name, main module, source folders + globs,
+  Project file `qjsx.json` at the project root (name, main module, source folders + globs,
   default target, output folder, number of packages kept, `env` of the program on a device). VS Code: attach configuration
   (js-debug target type to verify: node vs chrome), scripts announced with `file:///` URLs of
-  local sources, `.d.ts` of native modules written by `espjs build`; breakpoints kept by the
+  local sources, `.d.ts` of native modules written by `qjsx build`; breakpoints kept by the
   proxy and re-applied on ScriptLoaded and after an ESP restart.
   "Wait for debugger at boot" (`--wait-debugger`, remembered by the agent for the next boot,
   with a timeout, never on production devices): the agent holds `main` until the proxy says go,
@@ -186,11 +194,11 @@ and ESP32 with PSRAM. Current work: a QuickJS debugger usable from VS Code.
     loop drops it silently once exit was asked and runs no more job, timer or callback;
     `evaluateMain` accepts it. The runtime is freed, `runPackage` returns the code, the agent
     sends EXITED(code) and stays alive. No automatic restart (a program exiting at boot would
-    loop); restart will be an explicit function. Same on the PC: `espjs run` returns the code.
-  - `argv` = `["espjs", "<main module from the manifest>"]`, `env` = the strings of the
-    optional `env` object of `espjs.json` (validated, copied into the manifest by `espjs
+    loop); restart will be an explicit function. Same on the PC: `qjsx run` returns the code.
+  - `argv` = `["qjsx", "<main module from the manifest>"]`, `env` = the strings of the
+    optional `env` object of `qjsx.json` (validated, copied into the manifest by `qjsx
     build`, part of the build id), `{}` without one; never the PC's environment. Set by
-    `startPackage` when `RunHooks::device` is true (the agent's runner). `espjs run` of a
+    `startPackage` when `RunHooks::device` is true (the agent's runner). `qjsx run` of a
     package on the PC keeps the real argv and environment.
   - `cwd()` = `board::dataDirectory()` (desktop agent: absolute `<storage>/data`; a target:
     e.g. `/data`, a LittleFS partition), set by `runDevice` with `rt::setDataDirectory`; no
@@ -226,14 +234,14 @@ Top level: `engine/` (QuickJS), `common/` (portable code built for the host AND 
 `host/` (the desktop tool only), `ports/` (device firmwares), `tests/`, `tools/`, `doc/`,
 `legacy/`.
 
-- `ports/cmake/espjs.cmake` — what every device port builds (engine without compiler, common
+- `ports/cmake/qjsx.cmake` — what every device port builds (engine without compiler, common
   runtime and agent), sources / includes / defines / engine options (incl. GCC 14+ on 32 bits:
   `-Wno-incompatible-pointer-types`, `-Wno-format`, `-std=gnu11`).
 - `ports/freertos/platform_freertos.cpp` — platform.h parts shared by the FreeRTOS ports
   (recursive Mutex, Signal = mutex + binary semaphore, sleepMs).
 - `ports/esp32/` — ESP-IDF project, one firmware per BOARD (agreed 2026-11-11). FLASHED and
   TESTED on the YD board 2026-11-11: agent over UART0, deploy + run in place, debugger 52/52.
-  `CMakeLists.txt` picks the board (`-D ESPJS_BOARD=<folder of boards/>`, default
+  `CMakeLists.txt` picks the board (`-D QJSX_BOARD=<folder of boards/>`, default
   `yd-esp32-s3-n16r8`), stacks `sdkconfig.defaults` (common: console UART0 921600 "custom"
   mode, no secondary console, 240 MHz) + `boards/<board>/sdkconfig.board` (chip, flash size,
   table from `partitions/`, PSRAM mode), sdkconfig per build folder `build-<board>/`.
@@ -248,10 +256,10 @@ in the include path (no two headers share a name; keep it so).
 
 - `engine/qjs-bellard/` — upstream QuickJS 2026-06-04 by Bellard, unmodified (reference, base of
   the engine diff).
-- `engine/qjsx/` — the engine actually built ("qjsx", premake project `qjsx`): QuickJS split into
+- `engine/qjsx/` — the engine actually built (premake project `qjsx-engine`): QuickJS split into
   files (`core/`, `bytecode/`, `builtins/`, `compiler/`) by `tools/quickjs-split/regen.sh` from
   `engine/qjs-bellard/`, then MODIFIED BY HAND for the debugger (since 2026-11-10): every change
-  is commented `espjs:`, described in `doc/engine-changes.md`, exact diff in
+  is commented `qjsx:`, described in `doc/engine-changes.md`, exact diff in
   `doc/engine-changes.patch` (refresh it with `bash tools/quickjs-split/engine-diff.sh` after any
   engine change). `regen.sh` refuses to overwrite it without `--force` (ask the user before
   regenerating or editing it outside the debugger work). New files: `quickjs-debug.h` (public
@@ -264,7 +272,7 @@ in the include path (no two headers share a name; keep it so).
   (`memory.*`), UTF-8 file primitives (`files.*`), package reader (`package.*`, reads packages
   in place), SHA-256, modules (`modules/`: globals, fs, crypto; no JS: `path` moved to
   `lib/stdlib/`).
-- `lib/stdlib/` — sources of the standard library (`espjs.json` + `src/*.js`), compiled into
+- `lib/stdlib/` — sources of the standard library (`qjsx.json` + `src/*.js`), compiled into
   `bin/<config>/stdlib.qjslib` by the build and embedded in the host executable as
   `stdlib/<name>`.
 - `common/board/board.h` — what the common code needs from a board (identity, restart, JS
@@ -277,22 +285,22 @@ in the include path (no two headers share a name; keep it so).
   context, loop, module loader: native, package bytecode, embedded JS, then a hook; host
   adds the files on disk in `host/host.cpp`). `common/agent/runner.{h,cpp}` —
   `agent::runDevice()`: agent + debugger stub + runner of the installed package, the same on
-  every board (`espjs agent` = `host/agent_command.cpp` + the desktop board).
+  every board (`qjsx agent` = `host/agent_command.cpp` + the desktop board).
 - `common/agent/` — the device agent, portable C++ (protocol: cbor, frames, protocol.h which must
   match host/js/protocol.js; agent core with Link / Storage / Controller interfaces) and the
   debugger stub (`debugger.{h,cpp}`, `debugger_values.cpp`: on the JS thread, requests queued
   from the transport thread; tested by `tests/debugger.test.js` through the desktop agent,
   fixture `tests/fixtures/debuggee`). The host side of the debugger (proxy, CDP) is not
   written yet.
-- `host/` — the `espjs` executable: `main.cpp`, `host.*` (runtime + module loader, `RunHooks`),
-  `agent_command.cpp` (`espjs agent`, desktop stand-in for an ESP), `platform/platform_host.cpp`,
+- `host/` — the `qjsx` executable: `main.cpp`, `host.*` (runtime + module loader, `RunHooks`),
+  `agent_command.cpp` (`qjsx agent`, desktop stand-in for an ESP), `platform/platform_host.cpp`,
   `modules/` (host-only native modules: net + sockets, serial, compiler), `js/*.js` = the tool
-  commands written in JS, embedded as modules `espjs:<name>` by a premake build rule
+  commands written in JS, embedded as modules `qjsx:<name>` by a premake build rule
   (`tools/embed-js.lua`).
 - Packages are compiled fully stripped (`strip: "all"`): the engine keeps the module name
   outside the debug info, so import.meta / dynamic import still work.
 - `tests/` — `run-tests.sh`, `assert.js`, `jsbind.test.js` (binding library, through
-  `tests/native/test_module.cpp`, built only into `espjs-tests`), `debug.test.js` (engine debugger
+  `tests/native/test_module.cpp`, built only into `qjsx-tests`), `debug.test.js` (engine debugger
   API, through `tests/native/debug_module.cpp` and `tests/fixtures/debug/target.js`),
   `debugger.test.js` (stub), `runtime.test.js`, `tools.test.js`, `protocol.test.js`,
   `net.test.js`, `fixtures/`.
@@ -315,11 +323,12 @@ in the include path (no two headers share a name; keep it so).
 - Toolchain: Windows, gcc 13.1 mingw64, premake5 5.0.0, node 26. Makefiles are generated with
   `premake5 gmake --cc=gcc --shell=posix` (the user's "unix makefiles").
 - Project build: `premake5 gmake --cc=gcc --shell=posix` then `make -C build config=release`
-  (or `config=debug`). Projects: `qjsx` (engine/qjsx), `qjsx-target` (the same
-  without compiler/, QJSX_NO_COMPILER: no eval, like the targets), `espjs`, `espjs-tests`,
-  `espjs-target` (espjs without its compiler module, linked with qjsx-target: runs packages like a
+  (or `config=debug`). Projects: `qjsx-engine` (engine/qjsx), `qjsx-engine-target`
+  (the same without compiler/, QJSX_NO_COMPILER: no eval, like the targets), `qjsx` (the
+  tool), `qjsx-tests`, `qjsx-target` (qjsx without its compiler module, linked with
+  qjsx-engine-target: runs packages like a
   target; checked by run-tests.sh with tests/fixtures/nocompiler). JS modules embedded as
-  source (`espjs:*`, `stdlib/*`) only work on the host; a target gets library modules as
+  source (`qjsx:*`, `stdlib/*`) only work on the host; a target gets library modules as
   bytecode in the package (`.qjslib`).
   Executables in `bin/Release/` and `bin/Debug/`.
 - Tests: `bash tests/run-tests.sh Release` (and `Debug`: JS_FreeRuntime asserts that no JS
@@ -423,7 +432,8 @@ C / C++ projects). Summary of what was agreed:
 ## Working notes
 
 - Git (2026-11-11): the repository is https://github.com/rlibre/qjsx.git (remote `origin`,
-  local branch `master`, created by the user). `.gitignore` leaves out the build outputs
+  branch `main`, NOT `master`: before giving a push command, check the name of the local
+  branch against the default branch of the remote). `.gitignore` leaves out the build outputs
   (`build/`, `bin/`, `ports/esp32/build-*/`, any project's `build/`, `*.qjspkg`, `*.qjslib`),
   `legacy/` and `doc/prompt-reprise.md` (kept on disk, not published: user);
   `.gitattributes` keeps LF line endings everywhere (shell scripts, and the
@@ -434,6 +444,10 @@ C / C++ projects). Summary of what was agreed:
   messages, questions and their choices (AskUserQuestion), task list items, wrap-up recaps and
   questions, the `description` of every command (Bash, PowerShell), terminal tab titles, agent
   briefs' summaries relayed to the user. Code, comments and these notes stay in English.
+- DOCUMENTATION IN ENGLISH (user, 2026-11-11): `README.md` and every file of `doc/` are
+  written in English (they were translated that day), like the messages the tool prints.
+  `TODO.md` (the user's backlog) and `doc/prompt-reprise.md` (personal, not in git) stay in
+  French. Only the conversation with the user is in French.
 - quickjs.c is ~61k lines: search it with Grep and read ranges; `doc/quickjs-map.md` gives the
   line ranges of each module.
 - Interpreter: `JS_CallInternal` in `engine/qjsx/core/interpreter.c` (computed-goto

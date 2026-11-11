@@ -59,7 +59,7 @@ JSFunctionDef *js_new_function_def(JSContext *ctx,
     fd->scope_count = 1;
     fd->scopes[0].first = -1;
     fd->scopes[0].parent = -1;
-    fd->scopes[0].source_start = -1;   /* espjs: the whole function */
+    fd->scopes[0].source_start = -1;   /* qjsx: the whole function */
     fd->scopes[0].source_end = -1;
     fd->scope_level = 0;  /* 0: var/arg scope */
     fd->scope_first = -1;
@@ -94,7 +94,7 @@ void js_free_function_def(JSContext *ctx, JSFunctionDef *fd)
     js_free(ctx, fd->jump_slots);
     js_free(ctx, fd->label_slots);
     js_free(ctx, fd->line_number_slots);
-    js_free(ctx, fd->debug_positions);   /* espjs */
+    js_free(ctx, fd->debug_positions);   /* qjsx */
 
     for(i = 0; i < fd->cpool_count; i++) {
         JS_FreeValue(ctx, fd->cpool[i]);
@@ -512,7 +512,7 @@ __maybe_unused void js_dump_function_bytecode(JSContext *ctx, JSFunctionBytecode
     char atom_buf[ATOM_GET_STR_BUF_SIZE];
     const char *str;
 
-    if (b->has_debug && b->filename != JS_ATOM_NULL) {   /* espjs: was debug.filename */
+    if (b->has_debug && b->filename != JS_ATOM_NULL) {   /* qjsx: was debug.filename */
         int line_num, col_num;
         str = JS_AtomGetStr(ctx, atom_buf, sizeof(atom_buf), b->filename);
         line_num = find_line_num(ctx, b, -1, &col_num);

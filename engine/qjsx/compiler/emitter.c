@@ -57,7 +57,7 @@ void emit_source_pos(JSParseState *s, const uint8_t *source_ptr)
     }
 }
 
-/* espjs: debugger position of the next instruction (see LINE_NUM_KIND_SHIFT).
+/* qjsx: debugger position of the next instruction (see LINE_NUM_KIND_SHIFT).
    Always emitted, with or without debug info, so that the bytecode does not
    depend on it. */
 void emit_debug_pos(JSParseState *s, JSDebugPositionKind kind, const uint8_t *source_ptr)
@@ -341,7 +341,7 @@ int push_scope(JSParseState *s) {
         fd->scope_count++;
         fd->scopes[scope].parent = fd->scope_level;
         fd->scopes[scope].first = fd->scope_first;
-        /* espjs: the scope starts at the current token (end set by pop_scope) */
+        /* qjsx: the scope starts at the current token (end set by pop_scope) */
         fd->scopes[scope].source_start = s->token.ptr - s->buf_start;
         fd->scopes[scope].source_end = -1;
         emit_op(s, OP_enter_scope);
@@ -369,7 +369,7 @@ void pop_scope(JSParseState *s) {
         int scope = fd->scope_level;
         emit_op(s, OP_leave_scope);
         emit_u16(s, scope);
-        /* espjs: the scope ends before the current token */
+        /* qjsx: the scope ends before the current token */
         fd->scopes[scope].source_end = s->token.ptr - s->buf_start;
         fd->scope_level = fd->scopes[scope].parent;
         fd->scope_first = get_first_lexical_var(fd, fd->scope_level);

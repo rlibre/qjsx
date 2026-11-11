@@ -36,7 +36,7 @@ static BOOL code_match(CodeContext *s, int pos, ...)
             if (pos_next > s->bc_len)
                 goto done;
             if (op == OP_line_num) {
-                /* espjs: debugger positions are skipped too; when a match
+                /* qjsx: debugger positions are skipped too; when a match
                    consumes one, the pass loop moves it to the next
                    emitted instruction (js_debug_skipped_marker) */
                 line_num = line_num_pos(get_u32(tab + pos + 1));
@@ -253,7 +253,7 @@ static int skip_dead_code(JSFunctionDef *s, const uint8_t *bc_buf, int bc_len,
         len = opcode_info[op].size;
         if (op == OP_line_num) {
             uint32_t operand = get_u32(bc_buf + pos + 1);
-            /* espjs: the debugger positions of dead code are dropped */
+            /* qjsx: the debugger positions of dead code are dropped */
             if (line_num_kind(operand) == JS_DEBUG_POSITION_EXPRESSION)
                 *linep = operand;
         } else
@@ -371,12 +371,12 @@ __exception int resolve_variables(JSContext *ctx, JSFunctionDef *s)
     }
 
     line_num = 0; /* avoid warning */
-    /* espjs: end of the previous instruction; when pos goes further, an
+    /* qjsx: end of the previous instruction; when pos goes further, an
        optimization consumed several instructions */
     int natural_pos = 0;
     for (pos = 0; pos < bc_len; pos = pos_next) {
         if (pos > natural_pos) {
-            /* espjs: keep a debugger position the optimization consumed */
+            /* qjsx: keep a debugger position the optimization consumed */
             uint32_t marker = js_debug_skipped_marker(bc_buf, bc_len, natural_pos, pos);
             if (marker != 0) {
                 s->line_number_size++;
@@ -696,7 +696,7 @@ __exception int resolve_variables(JSContext *ctx, JSFunctionDef *s)
 /* the pc2line table gives a source position for each PC value */
 static void add_pc2line_info(JSFunctionDef *s, uint32_t pc, uint32_t source_pos)
 {
-    /* espjs: the same positions go to the debug info (even when stripped) */
+    /* qjsx: the same positions go to the debug info (even when stripped) */
     js_debug_info_add_position(s, pc, source_pos);
     if (s->line_number_slots != NULL
     &&  s->line_number_count < s->line_number_size
@@ -822,7 +822,7 @@ static int find_jump_target(JSFunctionDef *s, int label0, int *pop, int *pline)
         for (;;) {
             switch(op = s->byte_code.buf[pos]) {
             case OP_line_num:
-                /* espjs: a jump to a debugger position keeps its target,
+                /* qjsx: a jump to a debugger position keeps its target,
                    so that the stop is not skipped (e.g. a jump to the
                    implicit return replaced by a return) */
                 if (line_num_kind(get_u32(s->byte_code.buf + pos + 1)) !=
@@ -1053,13 +1053,13 @@ __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
         put_short_code(&bc_out, OP_put_loc, s->arg_var_object_idx);
     }
 
-    /* espjs: end of the previous instruction; when pos goes further, an
+    /* qjsx: end of the previous instruction; when pos goes further, an
        optimization consumed several instructions */
     int natural_pos = 0;
     for (pos = 0; pos < bc_len; pos = pos_next) {
         int val;
         if (pos > natural_pos) {
-            /* espjs: a debugger position the optimization consumed goes
+            /* qjsx: a debugger position the optimization consumed goes
                to the next emitted instruction */
             uint32_t marker = js_debug_skipped_marker(bc_buf, bc_len, natural_pos, pos);
             if (marker != 0)
@@ -1076,7 +1076,7 @@ __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
                performance */
             {
                 uint32_t operand = get_u32(bc_buf + pos + 1);
-                /* espjs: a debugger position applies to the next emitted
+                /* qjsx: a debugger position applies to the next emitted
                    instruction, whose pc is the current output size */
                 if (line_num_kind(operand) != JS_DEBUG_POSITION_EXPRESSION)
                     js_debug_info_add_position(s, bc_out.size, operand);
@@ -1117,7 +1117,7 @@ __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
         case OP_call:
         case OP_call_method:
             {
-                /* espjs: "call; return" is no longer fused into
+                /* qjsx: "call; return" is no longer fused into
                    OP_tail_call(_method): the separate OP_return is where the
                    debugger stops to show the return value of 'return f()'.
                    (QuickJS keeps the caller frame during a tail call anyway:

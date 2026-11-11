@@ -30,7 +30,7 @@ JSValue JS_GetException(JSContext *ctx)
     JSRuntime *rt = ctx->rt;
     val = rt->current_exception;
     rt->current_exception = JS_UNINITIALIZED;
-    /* espjs: the exception is handled by C code: if it is thrown again,
+    /* qjsx: the exception is handled by C code: if it is thrown again,
        it is a new throw for the debugger */
     js_debug_forget_exception(rt);
     return val;
@@ -253,7 +253,7 @@ void build_backtrace(JSContext *ctx, JSValueConst error_obj,
             int line_num1, col_num1;
 
             b = p->u.func.function_bytecode;
-            /* espjs: the file name is known without debug info; the line
+            /* qjsx: the file name is known without debug info; the line
                number needs it (find_line_num returns 0 without pc2line) */
             if (b->filename != JS_ATOM_NULL) {
                 line_num1 = find_line_num(ctx, b,

@@ -1281,9 +1281,9 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
         JS_FreeContext(b->realm);
 
     JS_FreeAtomRT(rt, b->func_name);
-    JS_FreeAtomRT(rt, b->filename);     /* espjs: no longer in 'debug' */
-    js_free_rt(rt, b->debug_breakpoints);   /* espjs */
-    js_free_rt(rt, b->debug_statements);    /* espjs */
+    JS_FreeAtomRT(rt, b->filename);     /* qjsx: no longer in 'debug' */
+    js_free_rt(rt, b->debug_breakpoints);   /* qjsx */
+    js_free_rt(rt, b->debug_statements);    /* qjsx */
     if (b->has_debug) {
         js_free_rt(rt, b->debug.pc2line_buf);
         js_free_rt(rt, b->debug.source);

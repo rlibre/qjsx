@@ -1,13 +1,13 @@
--- espjs build (desktop).
+-- qjsx build (desktop).
 --   premake5 gmake --cc=gcc --shell=posix
 --   make -C build config=release        (or config=debug)
 --
 -- Projects:
---   qjsx         the engine (engine/qjsx: QuickJS split and modified for espjs), static library
---   qjsx-target  the same without compiler (no eval), like on the targets
---   espjs        the host tool
---   espjs-tests  espjs + the native test modules (tests/native)
---   espjs-target espjs without the compiler module, linked with qjsx-target
+--   qjsx-engine         the engine (engine/qjsx: QuickJS split and modified for qjsx), static library
+--   qjsx-engine-target  the same without compiler (no eval), like on the targets
+--   qjsx                the host tool
+--   qjsx-tests          qjsx + the native test modules (tests/native)
+--   qjsx-target         qjsx without the compiler module, linked with qjsx-engine-target
 --
 -- Folders: engine/ (QuickJS), common/ (portable code, also built for the
 -- ESP: jsbind, runtime, agent), host/ (the desktop tool only).
@@ -18,7 +18,7 @@ local QJSX = "engine/qjsx"
 local QUICKJS_VERSION = io.readfile(QJSX .. "/VERSION"):gsub("%s+", "")
 local EMBED_TOOL = path.getabsolute("tools/embed-js.lua")
 
-workspace "espjs"
+workspace "qjsx"
     configurations { "Debug", "Release" }
     location "build"
     targetdir "bin/%{cfg.buildcfg}"
@@ -65,8 +65,8 @@ local function engineLibrary(name, withCompiler)
         filter {}
 end
 
-engineLibrary("qjsx", true)
-engineLibrary("qjsx-target", false)
+engineLibrary("qjsx-engine", true)
+engineLibrary("qjsx-engine-target", false)
 
 -- 'engine': the engine library linked; 'excludedFiles': sources left out.
 local function hostApplication(name, engine, extraFiles, excludedFiles, extraDefines)
@@ -111,12 +111,12 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
         links { engine }
 
         -- The JS modules of the tool (host/js/name.js) are embedded in the
-        -- executable as the modules "espjs:name".
+        -- executable as the modules "qjsx:name".
         filter "files:host/js/*.js"
             buildmessage "embedding %{file.name}"
             buildcommands {
                 'premake5 --file="' .. EMBED_TOOL .. '" embed-js --input="%{file.abspath}"'
-                    .. ' --output="%{cfg.objdir}/%{file.basename}.js.cpp" --name="espjs:%{file.basename}"',
+                    .. ' --output="%{cfg.objdir}/%{file.basename}.js.cpp" --name="qjsx:%{file.basename}"',
             }
             buildoutputs { "%{cfg.objdir}/%{file.basename}.js.cpp" }
             buildinputs { EMBED_TOOL }   -- regenerate when the tool changes
@@ -124,7 +124,7 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
 
         -- The modules of the standard library (lib/stdlib/src/name.js) are
         -- embedded too, as "stdlib/name": the tool needs them for its own
-        -- commands and for "espjs run script.js". A program built by "espjs
+        -- commands and for "qjsx run script.js". A program built by "qjsx
         -- build" gets them from stdlib.qjslib instead (see below).
         filter "files:lib/stdlib/src/*.js"
             buildmessage "embedding stdlib/%{file.name}"
@@ -143,19 +143,19 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
         filter {}
 end
 
-hostApplication("espjs", "qjsx", {}, {}, {})
+hostApplication("qjsx", "qjsx-engine", {}, {}, {})
     -- The standard library is delivered as a file next to the executable
     -- (stdlib.qjslib): the tool just linked makes it from lib/stdlib. Every
-    -- executable of the folder finds it there (espjs-tests, espjs-target).
+    -- executable of the folder finds it there (qjsx-tests, qjsx-target).
     postbuildmessage "making stdlib.qjslib"
     postbuildcommands {
         '"%{cfg.buildtarget.abspath}" mklib "' .. path.getabsolute("lib/stdlib")
             .. '" --output "%{cfg.targetdir}/stdlib.qjslib"',
     }
 
-hostApplication("espjs-tests", "qjsx", { "tests/native/*.cpp" }, {}, { "ESPJS_TESTS" })
+hostApplication("qjsx-tests", "qjsx-engine", { "tests/native/*.cpp" }, {}, { "QJSX_TESTS" })
 -- The tool linked with the engine without compiler: checks that everything
 -- but the "compiler" module builds without it, and runs packages like a
 -- target (tests/run-tests.sh). Its commands written in JS cannot run (they
 -- are embedded as source).
-hostApplication("espjs-target", "qjsx-target", {}, { "host/modules/compiler_module.cpp" }, { "ESPJS_NO_COMPILER" })
+hostApplication("qjsx-target", "qjsx-engine-target", {}, { "host/modules/compiler_module.cpp" }, { "QJSX_NO_COMPILER" })

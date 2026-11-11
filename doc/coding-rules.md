@@ -1,36 +1,36 @@
-# Règles d'écriture du code C / C++
+# C / C++ coding rules
 
-Règles établies sur le projet espjs (novembre 2026), écrites pour être reprises telles quelles
-dans un autre projet en C ou en C++. Elles servent aussi de consignes pour un assistant de
-code : on peut copier ce fichier dans le projet et y faire référence depuis son `CLAUDE.md`.
+Rules established on the qjsx project (November 2026), written to be reused as they are in
+another C or C++ project. They also serve as instructions for a coding assistant: this file
+can be copied into the project and referenced from its `CLAUDE.md`.
 
-**Principe : la lisibilité et la maintenabilité passent avant tout.** Le code se lit plus
-souvent qu'il ne s'écrit. Chaque règle ci-dessous sert ce but : voir d'un coup d'œil ce que
-fait une fonction, ce qu'elle modifie, et dans quel ordre.
+**Principle: readability and maintainability come first.** Code is read more often than it is
+written. Every rule below serves this goal: seeing at a glance what a function does, what it
+modifies, and in what order.
 
-Sommaire :
+Contents:
 
-1. [Écriture du code](#1-écriture-du-code)
-2. [Mise en page](#2-mise-en-page)
-3. [Commentaires](#3-commentaires)
-4. [Paramètres et types](#4-paramètres-et-types)
-5. [Nommage](#5-nommage)
-6. [Mémoire et pile](#6-mémoire-et-pile)
-7. [Contrôles](#7-contrôles)
-8. [Résumé](#8-résumé)
+1. [Writing the code](#1-writing-the-code)
+2. [Layout](#2-layout)
+3. [Comments](#3-comments)
+4. [Parameters and types](#4-parameters-and-types)
+5. [Naming](#5-naming)
+6. [Memory and stack](#6-memory-and-stack)
+7. [Checks](#7-checks)
+8. [Summary](#8-summary)
 
 ---
 
-## 1. Écriture du code
+## 1. Writing the code
 
-- **Une idée par ligne.** Un calcul compliqué se découpe en étapes nommées, avec des variables
-  intermédiaires dont le nom dit ce qu'elles contiennent.
+- **One idea per line.** A complicated computation is split into named steps, with
+  intermediate variables whose names say what they hold.
 
   ```c
-  // non
+  // no
   if (fields->integer(KEY_SIZE, &size) && size > 0 && size < limit && !uploading) { ... }
 
-  // oui
+  // yes
   bool sizeValid = fields->integer(KEY_SIZE, &size) && size > 0 && size < limit;
   bool canStart = sizeValid && !uploading;
   if (canStart) {
@@ -38,19 +38,19 @@ Sommaire :
   }
   ```
 
-- **Une condition qui a un sens reçoit un nom** : `bool isDot = ...;` puis `if (isDot)`. On évite
-  la condition en ligne qui oblige à décoder.
-- **Pas d'astuce sans commentaire.** Un calcul de bits, une conversion inhabituelle ou un
-  comportement qui dépend d'un détail de la bibliothèque s'expliquent sur la ligne d'au-dessus.
-- **Pas de duplication.** Un bout de code écrit deux fois devient une fonction.
-- **Pas d'opérateur ternaire imbriqué.** Un ternaire simple est accepté. Dès qu'il contient un
-  appel avec des effets de bord, ou qu'il fait plus d'une ligne, on écrit un `if`.
+- **A condition that has a meaning gets a name**: `bool isDot = ...;` then `if (isDot)`. Avoid
+  the inline condition that has to be decoded.
+- **No trick without a comment.** A bit computation, an unusual conversion or a behavior that
+  depends on a detail of the library is explained on the line above.
+- **No duplication.** A piece of code written twice becomes a function.
+- **No nested ternary operator.** A simple ternary is accepted. As soon as it contains a call
+  with side effects, or takes more than one line, write an `if`.
 
-## 2. Mise en page
+## 2. Layout
 
-### Accolades
+### Braces
 
-- **L'accolade ouvrante est sur la ligne de la signature ou de l'instruction** :
+- **The opening brace is on the line of the signature or of the statement**:
 
   ```c
   int Loop::run() {
@@ -58,17 +58,16 @@ Sommaire :
   }
   ```
 
-- **Accolades systématiques et pas de code sur une ligne.** Le corps d'un `if`, d'une boucle ou
-  d'une fonction est toujours entre accolades et sur ses propres lignes, même s'il ne contient
-  qu'une instruction.
+- **Braces always, and no code on one line.** The body of an `if`, of a loop or of a function
+  is always between braces and on its own lines, even if it contains only one statement.
 
   ```c
-  // non
+  // no
   if (done) return;
   if (done) { return; }
   int size() const { return _size; }
 
-  // oui
+  // yes
   if (done) {
       return;
   }
@@ -78,9 +77,9 @@ Sommaire :
   }
   ```
 
-- **Chaque `case` d'un `switch` a son bloc entre accolades**, avec le `break` à l'intérieur, et
-  les `case` sont indentés d'un niveau sous le `switch`. Une étiquette sans instructions, qui
-  « tombe » sur la suivante, reste nue.
+- **Every `case` of a `switch` has its block between braces**, with the `break` inside, and
+  the `case`s are indented one level under the `switch`. A label without statements, which
+  "falls through" to the next one, stays bare.
 
   ```c
   switch (kind) {
@@ -100,16 +99,16 @@ Sommaire :
   }
   ```
 
-### Lignes vides : une fonction se lit par étapes
+### Blank lines: a function reads step by step
 
-Le corps d'une fonction se découpe en **groupes**, un par étape : préparer, convertir, ouvrir,
-vérifier, boucler, fermer… Une ligne vide sépare deux groupes.
+The body of a function is split into **groups**, one per step: prepare, convert, open, check,
+loop, close… A blank line separates two groups.
 
-- **Une vérification reste collée à l'instruction dont elle teste le résultat.**
-- **Une ligne vide suit un bloc fermé** (`}`), y compris `} while (...);`, sauf si la suite est
-  `}`, `else` ou `catch`.
-- **Une ligne vide précède une boucle** qui suit d'autres instructions.
-- **Jamais deux lignes vides de suite.**
+- **A check stays attached to the statement whose result it tests.**
+- **A blank line follows a closed block** (`}`), `} while (...);` included, unless what follows
+  is `}`, `else` or `catch`.
+- **A blank line precedes a loop** that follows other statements.
+- **Never two blank lines in a row.**
 
 ```c
 bool listDirectory(const char *path, DirectoryVisitor *visit, void *opaque) {
@@ -150,14 +149,14 @@ bool listDirectory(const char *path, DirectoryVisitor *visit, void *opaque) {
 }
 ```
 
-Les méthodes d'une classe sur plusieurs lignes sont aussi séparées par une ligne vide.
+The methods of a class that span several lines are also separated by a blank line.
 
-### Alignement dans les en-têtes
+### Alignment in headers
 
-Dans une classe ou une structure d'un `.h`, les noms des membres et des méthodes sont alignés
-sur une colonne. L'étoile ou l'esperluette d'un pointeur ou d'une référence se place juste
-avant le nom, en débordant à gauche de la colonne. Les types très longs (par exemple les
-templates) ne repoussent pas la colonne : ils gardent une seule espace.
+In a class or a struct of a `.h`, the names of the members and of the methods are aligned in
+one column. The star or the ampersand of a pointer or of a reference goes right before the
+name, hanging to the left of the column. Very long types (templates, for example) do not push
+the column: they keep a single space.
 
 ```c
 class Mailbox {
@@ -175,17 +174,17 @@ private:
 };
 ```
 
-## 3. Commentaires
+## 3. Comments
 
-### Un commentaire sur chaque fonction
+### A comment on every function
 
-Chaque fonction et chaque méthode a un bloc `/** ... */` juste au-dessus d'elle :
-- dans le `.h`, au-dessus de la déclaration ;
-- dans le `.cpp`, au-dessus de la définition, y compris pour les fonctions `static`, les
-  fonctions d'un namespace anonyme, les constructeurs et les destructeurs.
+Every function and every method has a `/** ... */` block right above it:
+- in the `.h`, above the declaration;
+- in the `.cpp`, above the definition, including for `static` functions, the functions of an
+  anonymous namespace, constructors and destructors.
 
-Ce bloc dit **ce que fait** la fonction, en une ou deux lignes. Il ne raconte pas comment elle
-le fait.
+This block says **what** the function **does**, in one or two lines. It does not tell how it
+does it.
 
 ```c
 /**
@@ -194,14 +193,13 @@ le fait.
 void Agent::handleHello(int64_t id, const Fields *fields) {
 ```
 
-Dans un en-tête, on ajoute ce que l'appelant doit savoir : qui possède la mémoire rendue,
-quel thread peut appeler la fonction, ce que vaut le retour en cas d'erreur.
+In a header, add what the caller must know: who owns the returned memory, which thread may
+call the function, what the return value is on error.
 
-**Paramètres et valeur de retour : seulement s'ils ne sont pas évidents.** Pas de liste
-systématique de `@param` / `@return`. On décrit un paramètre quand son nom et son type ne
-suffisent pas (unité, plage, `nullptr` permis, qui le possède, ce qu'une sortie contient en cas
-d'échec), et le retour quand il n'est pas évident (sens d'un `false`, d'un `-1`, d'un
-`nullptr`).
+**Parameters and return value: only if they are not obvious.** No systematic list of
+`@param` / `@return`. A parameter is described when its name and its type are not enough (unit,
+range, `nullptr` allowed, who owns it, what an output holds on failure), and the return value
+when it is not obvious (meaning of a `false`, of a `-1`, of a `nullptr`).
 
 ```c
 /**
@@ -212,11 +210,11 @@ d'échec), et le retour quand il n'est pas évident (sens d'un `false`, d'un `-1
 int receiveBlock(Socket socket, uint8_t **data);
 ```
 
-### Le déroulement va dans le code, en pseudo-code
+### The flow goes in the code, as pseudo-code
 
-Le « comment » s'écrit **dans le corps de la fonction**, à la manière d'un pseudo-code : un
-commentaire court au-dessus de chaque groupe d'instructions (voir les lignes vides). Lus à la
-suite, ces commentaires racontent l'algorithme.
+The "how" is written **in the body of the function**, in the manner of pseudo-code: a short
+comment above each group of statements (see the blank lines). Read in sequence, these comments
+tell the algorithm.
 
 ```c
 void Agent::onMessage(void *opaque, const uint8_t *message, size_t size) {
@@ -237,20 +235,20 @@ void Agent::onMessage(void *opaque, const uint8_t *message, size_t size) {
 }
 ```
 
-- **On commente le pourquoi et le non-évident.** Un commentaire ne répète pas le code (pas de
-  `// increment i` au-dessus de `i++`).
-- **On documente ce qui ne se voit pas** : le thread qui exécute le code, l'ordre imposé entre
-  deux opérations et sa raison, qui libère quoi, ce qui se passe en cas d'échec.
-- **Un commentaire au-dessus de chaque groupe**, même quand il paraît évident : lus à la
-  suite, ils doivent raconter toute la fonction, sans trou.
-- **Une petite fonction sans étapes** n'a besoin que de son bloc d'en-tête.
+- **Comment the why and the non-obvious.** A comment does not repeat the code (no
+  `// increment i` above `i++`).
+- **Document what cannot be seen**: the thread that runs the code, the order imposed between
+  two operations and its reason, who frees what, what happens on failure.
+- **A comment above every group**, even when it seems obvious: read in sequence, they must
+  tell the whole function, with no gap.
+- **A small function without steps** only needs its header block.
 
-### Membres des structures et des classes
+### Members of structs and classes
 
-Chaque membre (donnée) d'une structure ou d'une classe a un commentaire `//` court en fin de
-ligne. Il dit ce qu'il contient, son unité, qui possède la mémoire, quel thread ou quel verrou
-le protège. Les commentaires de membres consécutifs sont alignés sur une colonne. Si le
-commentaire ne tient pas sur la ligne, il passe sur une ligne `//` au-dessus du membre.
+Every member (data) of a struct or of a class has a short `//` comment at the end of the
+line. It says what it holds, its unit, who owns the memory, which thread or which lock
+protects it. The comments of consecutive members are aligned in one column. If the comment
+does not fit on the line, it goes on a `//` line above the member.
 
 ```c
 struct Timer {
@@ -261,11 +259,11 @@ struct Timer {
 };
 ```
 
-### Commentaires de section
+### Section comments
 
-Pour découper un long fichier en parties, on utilise une ligne de dièses, plus visible qu'un
-trait. Elle porte le titre de la partie, ou bien elle est seule pour un simple trait. On la
-complète jusqu'à la colonne 80. On n'utilise pas un bloc `/** */`, réservé aux fonctions.
+To split a long file into parts, use a line of hash signs, more visible than a line of
+dashes. It carries the title of the part, or it stands alone as a plain separator. It is
+filled up to column 80. A `/** */` block is not used: it is reserved for functions.
 
 ```c
 // ### Sending ##################################################################
@@ -273,115 +271,112 @@ complète jusqu'à la colonne 80. On n'utilise pas un bloc `/** */`, réservé a
 // ##############################################################################
 ```
 
-## 4. Paramètres et types
+## 4. Parameters and types
 
-- **Pas de référence dans les API**, ni `T &` ni `const T &`. Elles cachent, à l'appel, qu'une
-  variable peut être modifiée. À la place :
-  - **en entrée**, une petite structure se passe par valeur (copiée : la fonction ne peut pas
-    la modifier), une grosse par `const T *` ;
-  - **en sortie**, on passe un pointeur explicite `T *out` que la fonction remplit. Le `&` qu'on
-    voit à l'appel montre que la variable va changer.
+- **No reference in APIs**, neither `T &` nor `const T &`. At the call, they hide that a
+  variable may be modified. Instead:
+  - **as input**, a small struct is passed by value (copied: the function cannot modify it),
+    a large one as `const T *`;
+  - **as output**, pass an explicit pointer `T *out` that the function fills. The `&` seen at
+    the call shows that the variable is going to change.
 
   ```c
   board::Identity identity;
-  board::identity(&identity);              // remplit identity : le & le montre
+  board::identity(&identity);              // fills identity: the & shows it
 
-  bool startThread(ThreadFunction *run, void *argument, ThreadOptions options);   // copie
+  bool startThread(ThreadFunction *run, void *argument, ThreadOptions options);   // copy
   ```
 
-  Exception possible : les templates internes d'une bibliothèque générique peuvent garder leurs
-  `const T &` pour éviter des copies, tant que l'API visible par l'utilisateur respecte la
-  règle.
+  Possible exception: the internal templates of a generic library may keep their `const T &`
+  to avoid copies, as long as the API visible to the user follows the rule.
 
-- **Casts à la C**, `(T)value`, plutôt que `static_cast<T>(value)`, `reinterpret_cast` ou
-  `const_cast`. Attention à la précédence : quand un membre, un indice ou un appel suit, on
-  met le cast entre parenthèses.
+- **C-style casts**, `(T)value`, rather than `static_cast<T>(value)`, `reinterpret_cast` or
+  `const_cast`. Mind the precedence: when a member, an index or a call follows, put the cast
+  between parentheses.
 
   ```c
-  ((Runner *)opaque)->run();       // oui : on caste opaque, puis on appelle run()
-  (Runner *)opaque->run();         // NON : C++ lit (Runner *)(opaque->run())
+  ((Runner *)opaque)->run();       // yes: opaque is cast, then run() is called
+  (Runner *)opaque->run();         // NO: C++ reads (Runner *)(opaque->run())
   ```
 
-  On ne met pas de parenthèses inutiles : `(char *)malloc(size)`, et non
-  `(char *)(malloc(size))`.
+  No useless parentheses: `(char *)malloc(size)`, and not `(char *)(malloc(size))`.
 
-- **Temps et compteurs** : un temps en millisecondes et un délai sont signés sur 64 bits
-  (`int64_t`). Une échéance moins l'heure courante donne un délai négatif pour un timer déjà
-  échu, et 64 bits ne débordent pas en pratique. On n'utilise pas de compteur 32 bits qui
-  repart à zéro, comme les ticks d'un RTOS.
+- **Times and counters**: a time in milliseconds and a delay are signed on 64 bits
+  (`int64_t`). A deadline minus the current time gives a negative delay for a timer that has
+  already expired, and 64 bits do not overflow in practice. Do not use a 32-bit counter that
+  wraps to zero, like the ticks of an RTOS.
 
-## 5. Nommage
+## 5. Naming
 
-- **Membres privés** : ils commencent par un souligné (`_state`, `_firstRequest`), et non
-  `state_`. Exception : les préfixes collés par une macro (`jsNewModule_##name`).
-- **Types et classes** en `PascalCase`, **fonctions, méthodes et variables** en `camelCase`,
-  **constantes et valeurs d'énumération C** en `MAJUSCULES_SOULIGNÉES` (`KIND_HELLO`,
-  `DEFAULT_STACK`), **valeurs d'un `enum class`** en `PascalCase` (`StepMode::Over`).
-- **Des noms qui disent ce qu'ils contiennent**, sans abréviation obscure : `received`,
-  `packageSize`, `isDebugRequest`, et non `n`, `sz` ou `flag`. Les compteurs de boucle courts
-  (`i`, `j`) sont acceptés.
-- **Les booléens se lisent comme une question** : `isOpen`, `hasWork`, `stillCurrent`,
-  `wanted`.
+- **Private members**: they start with an underscore (`_state`, `_firstRequest`), and not
+  `state_`. Exception: the prefixes pasted by a macro (`jsNewModule_##name`).
+- **Types and classes** in `PascalCase`, **functions, methods and variables** in `camelCase`,
+  **constants and C enumeration values** in `UPPERCASE_UNDERSCORED` (`KIND_HELLO`,
+  `DEFAULT_STACK`), **values of an `enum class`** in `PascalCase` (`StepMode::Over`).
+- **Names that say what they hold**, without obscure abbreviations: `received`,
+  `packageSize`, `isDebugRequest`, and not `n`, `sz` or `flag`. Short loop counters (`i`, `j`)
+  are accepted.
+- **Booleans read like a question**: `isOpen`, `hasWork`, `stillCurrent`, `wanted`.
 
-## 6. Mémoire et pile
+## 6. Memory and stack
 
-- **La pile est petite** sur un système embarqué ou sous RTOS : quelques Ko par tâche. On ne met
-  pas de tableau de plus de 256 octets environ sur la pile. Un tampon d'entrée-sortie va sur le
-  tas.
-- **Les threads d'entrée-sortie lisent directement dans le bloc alloué qu'ils transmettent**
-  (à une file, à une boucle d'événements), réduit ensuite à la taille reçue avec `realloc`. On
-  évite ainsi un tampon sur la pile et une copie. Si les octets sont consommés tout de suite,
-  on utilise un tampon alloué une seule fois au démarrage du thread.
-- **Toutes les allocations passent par un module unique** (par exemple `memory::allocate`,
-  `reallocate`, `release`, `copyText`), jamais par `malloc` / `realloc` / `free` directement.
-  Un manque de mémoire y est fatal : message puis arrêt (abort sur PC, redémarrage sur cible).
-  Ces fonctions ne rendent donc jamais `nullptr` et l'appelant ne teste pas le résultat. Ce
-  point d'entrée unique permet aussi de compter ou de tracer les allocations (profilage). Le
-  tas propre à une bibliothèque (celui du moteur JS, par exemple) garde son allocateur.
-- **La possession de la mémoire est écrite** dans le commentaire de la fonction : « malloc'd,
-  freed by the caller », « borrowed », « the loop owns it ».
+- **The stack is small** on an embedded system or under an RTOS: a few KB per task. Do not put
+  an array of more than about 256 bytes on the stack. An I/O buffer goes on the heap.
+- **I/O threads read directly into the allocated block they pass on** (to a queue, to an
+  event loop), shrunk afterwards to the received size with `realloc`. This avoids a buffer on
+  the stack and a copy. If the bytes are consumed right away, use a buffer allocated only once
+  when the thread starts.
+- **All allocations go through a single module** (for example `memory::allocate`,
+  `reallocate`, `release`, `copyText`), never through `malloc` / `realloc` / `free` directly.
+  Running out of memory is fatal there: message then stop (abort on a PC, restart on a
+  target). So these functions never return `nullptr` and the caller does not test the result.
+  This single entry point also makes it possible to count or trace the allocations
+  (profiling). The heap of a library itself (the one of the JS engine, for example) keeps its
+  allocator.
+- **Memory ownership is written** in the comment of the function: "malloc'd, freed by the
+  caller", "borrowed", "the loop owns it".
 
-## 7. Contrôles
+## 7. Checks
 
-Une partie de ces règles est mécanique et peut être appliquée ou vérifiée par un outil (un
-script, un formateur configuré, une revue automatique) :
+Part of these rules is mechanical and can be applied or checked by a tool (a script, a
+configured formatter, an automatic review):
 
-- remonter l'accolade d'une fonction sur la ligne de sa signature ;
-- éclater le code écrit sur une ligne et ajouter les accolades manquantes, `case` compris ;
-- indenter les `case` sous leur `switch` ;
-- aligner les noms des membres dans les en-têtes ;
-- ajouter une ligne vide après un bloc fermé et avant une boucle ;
-- convertir les casts C++ en casts à la C ;
-- lister les fonctions sans bloc `/** */`.
+- move the brace of a function up to the line of its signature;
+- split the code written on one line and add the missing braces, `case` included;
+- indent the `case`s under their `switch`;
+- align the names of the members in headers;
+- add a blank line after a closed block and before a loop;
+- convert C++ casts into C-style casts;
+- list the functions without a `/** */` block.
 
-Le reste ne s'automatise pas : regrouper les lignes par étapes logiques et écrire le
-pseudo-code se font à la main, en relisant.
+The rest cannot be automated: grouping the lines by logical steps and writing the pseudo-code
+are done by hand, while rereading.
 
-Un outil de mise en forme ne doit jamais toucher au code d'une bibliothèque tierce, ni au
-corps des macros.
+A formatting tool must never touch the code of a third-party library, nor the body of
+macros.
 
-**Vérifier qu'une passe de mise en forme n'a pas changé le code** : on compare les deux versions
-débarrassées de leurs commentaires et de leurs lignes vides (et des accolades, si la passe en a
-ajouté). Elles doivent être identiques. Par exemple :
+**Checking that a formatting pass did not change the code**: compare the two versions
+stripped of their comments and of their blank lines (and of the braces, if the pass added
+some). They must be identical. For example:
 
 ```sh
 strip() { perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' "$1" | grep -v '^\s*$' | tr -d '{} \t\n'; }
 diff <(strip avant.cpp) <(strip apres.cpp)
 ```
 
-Le résultat doit être vide.
+The result must be empty.
 
-## 8. Résumé
+## 8. Summary
 
-| Sujet | Règle |
+| Topic | Rule |
 |---|---|
-| Principe | lisibilité et maintenabilité d'abord ; une idée par ligne ; étapes nommées ; pas de duplication |
-| Accolades | sur la ligne de la signature ; toujours présentes ; jamais de code sur une ligne ; chaque `case` entre accolades, indenté sous son `switch` |
-| Lignes vides | un groupe par étape ; après un bloc fermé ; avant une boucle ; jamais deux de suite |
-| En-têtes | noms des membres et méthodes alignés sur une colonne |
-| Commentaires | `/** */` court (le quoi) sur chaque fonction ; le déroulement en pseudo-code dans le corps |
-| Paramètres | pas de références ; entrée par valeur ou `const T *` ; sortie par `T *out` |
-| Casts | `(T)x` ; `((T *)p)->m` quand un membre suit |
-| Nommage | membres privés `_nom` ; booléens en question ; noms explicites |
-| Pile | pas de tableau de plus de ~256 octets ; tampons d'entrée-sortie sur le tas |
-| Temps | `int64_t` signé en millisecondes, jamais un compteur 32 bits |
+| Principle | readability and maintainability first; one idea per line; named steps; no duplication |
+| Braces | on the line of the signature; always present; never code on one line; every `case` between braces, indented under its `switch` |
+| Blank lines | one group per step; after a closed block; before a loop; never two in a row |
+| Headers | names of the members and methods aligned in one column |
+| Comments | short `/** */` (the what) on every function; the flow as pseudo-code in the body |
+| Parameters | no references; input by value or `const T *`; output through `T *out` |
+| Casts | `(T)x`; `((T *)p)->m` when a member follows |
+| Naming | private members `_name`; booleans as a question; explicit names |
+| Stack | no array of more than ~256 bytes; I/O buffers on the heap |
+| Time | signed `int64_t` in milliseconds, never a 32-bit counter |

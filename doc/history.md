@@ -1,153 +1,152 @@
-# Historique des défauts corrigés
+# History of fixed defects
 
-Un défaut corrigé quitte `known-bugs.md` et arrive ici, avec ce qui a été fait. Le plus
-récent est en premier.
+A fixed defect leaves `known-bugs.md` and arrives here, with what was done. The most recent
+one comes first.
 
 ## 2026-11-11
 
-### Port série très lent sous Windows
+### Very slow serial port on Windows
 
-- **Défaut.** `espjs deploy` mettait 16 à 26 s pour envoyer 47 Ko à la carte à 921600 bauds,
-  et une tentative a dépassé 60 s. Écrire un seul octet prenait de 51 ms à 6 s, toujours par
-  pas d'environ 100 ms. Une requête pouvait dépasser son délai de 3 s et être renvoyée.
-- **Cause.** Dans `host/modules/serial_module.cpp`, le port était ouvert en mode synchrone
-  (`CreateFileA` sans `FILE_FLAG_OVERLAPPED`). Le thread lecteur (`readLoop`) restait bloqué
-  dans `ReadFile` jusqu'à 100 ms (`COMMTIMEOUTS`), puis recommençait aussitôt. Sur un handle
-  synchrone, Windows fait passer les opérations une par une : le `WriteFile` du thread JS
-  attendait la fin du `ReadFile` en cours, et le lecteur lui repassait souvent devant.
-  Pendant un envoi, la carte attend la requête et n'émet rien, donc chaque lecture allait au
-  bout de ses 100 ms. La carte et le protocole n'étaient pas en cause.
-- **Correction.** Le port est ouvert avec `FILE_FLAG_OVERLAPPED` ; chaque lecture et chaque
-  écriture a sa structure `OVERLAPPED` et son événement (`beginOperation`, `endOperation`).
-  Lectures et écritures sont indépendantes. Le reste ne change pas (lecture qui rend la main
-  au bout de 100 ms, drapeau `closing`).
-- **Vérifié.** Sur la carte : une écriture d'un octet prend 0 à 1 ms ; l'envoi de 47 Ko passe
-  de 16–26 s à 1,5 s (50 ms par morceau de 2 Ko, régulier) ; le debugger passe 52/52 en
-  1,7 s. Tests du PC en Release et en Debug.
+- **Defect.** `qjsx deploy` took 16 to 26 s to send 47 KB to the board at 921600 baud, and
+  one attempt exceeded 60 s. Writing a single byte took from 51 ms to 6 s, always in steps of
+  about 100 ms. A request could exceed its 3 s timeout and be sent again.
+- **Cause.** In `host/modules/serial_module.cpp`, the port was opened in synchronous mode
+  (`CreateFileA` without `FILE_FLAG_OVERLAPPED`). The reader thread (`readLoop`) stayed
+  blocked in `ReadFile` for up to 100 ms (`COMMTIMEOUTS`), then started again at once. On a
+  synchronous handle, Windows lets the operations through one by one: the `WriteFile` of the
+  JS thread waited for the end of the `ReadFile` in progress, and the reader often got ahead
+  of it again. During a send, the board waits for the request and emits nothing, so every
+  read went to the end of its 100 ms. The board and the protocol were not at fault.
+- **Fix.** The port is opened with `FILE_FLAG_OVERLAPPED`; every read and every write has its
+  `OVERLAPPED` structure and its event (`beginOperation`, `endOperation`). Reads and writes
+  are independent. The rest does not change (read that returns after 100 ms, `closing`
+  flag).
+- **Verified.** On the board: a one-byte write takes 0 to 1 ms; sending 47 KB goes from
+  16–26 s to 1.5 s (50 ms per 2 KB chunk, regular); the debugger passes 52/52 in 1.7 s. PC
+  tests in Release and in Debug.
 
-### Test du debugger avec un programme déjà en cours
+### Debugger test with a program already running
 
-- **Défaut.** `tests/debugger.test.js` échouait si un programme tournait déjà sur le device
-  quand il se connectait (vu sur la carte, avec `debuggee` installé et sa boucle `spin` en
-  cours). Son `STOP` initial arrêtait ce programme, d'où un événement `EXITED` ; le test
-  attendait ensuite `STARTED` et recevait cet `EXITED` (« program started: expected 32,
-  got 31 »), puis tout se décalait.
-- **Correction.** `expectStarted()` saute les `EXITED` qui précèdent le `STARTED` attendu :
-  le device termine toujours un programme avant de lancer le suivant, donc l'`EXITED` de
-  l'ancien arrive forcément avant. Tout autre événement fait échouer la vérification.
-- **Vérifié.** Tests du PC en Release et en Debug ; sur la carte, 52/52 avec un programme en
-  cours au moment de la connexion.
+- **Defect.** `tests/debugger.test.js` failed if a program was already running on the device
+  when it connected (seen on the board, with `debuggee` installed and its `spin` loop
+  running). Its initial `STOP` stopped this program, hence an `EXITED` event; the test then
+  waited for `STARTED` and received this `EXITED` ("program started: expected 32, got 31"),
+  then everything was shifted.
+- **Fix.** `expectStarted()` skips the `EXITED` events that precede the expected `STARTED`:
+  the device always ends a program before launching the next one, so the `EXITED` of the old
+  one necessarily arrives before. Any other event makes the check fail.
+- **Verified.** PC tests in Release and in Debug; on the board, 52/52 with a program running
+  at the time of the connection.
 
-### Chien de garde pendant un calcul long (ESP32)
+### Watchdog during a long computation (ESP32)
 
-- **Défaut.** Un programme JS qui calculait sans rendre la main affamait la tâche idle du
-  cœur 1 : ESP-IDF affichait « task_wdt ... IDLE1 » toutes les 5 s.
-- **Correction.** `platform::yieldIfDue()`, appelée par `Runner::interrupt` : une pause d'un
-  tick toutes les 100 ms. Explications dans `architecture.md` 5.5.
-- **Vérifié.** Sur la carte, aucun « task_wdt » en 17 s pendant la boucle `spin`.
+- **Defect.** A JS program that computed without yielding starved the idle task of core 1:
+  ESP-IDF printed "task_wdt ... IDLE1" every 5 s.
+- **Fix.** `platform::yieldIfDue()`, called by `Runner::interrupt`: a pause of one tick every
+  100 ms. Explanations in `architecture.md` 5.5.
+- **Verified.** On the board, no "task_wdt" in 17 s during the `spin` loop.
 
-### Défauts « graves » relevés par les agents qui ont documenté le code
+### "Serious" defects recorded by the agents that documented the code
 
-Les tests de `run-tests.sh` passent en Release et en Debug, mais aucun test n'a été écrit pour
-ces défauts en particulier.
+The tests of `run-tests.sh` pass in Release and in Debug, but no test was written for these
+defects in particular.
 
-1. **`fs.rmSync` avec `recursive` suivait les liens symboliques et les jonctions**
+1. **`fs.rmSync` with `recursive` followed symbolic links and junctions**
    (`common/runtime/modules/fs.cpp`, `removeTree`).
-   - Défaut : il utilisait `files::stat`, qui suit les liens. Un lien vers un dossier à
-     l'intérieur de l'arbre faisait effacer le contenu de la cible. Node utilise `lstat` et ne
-     supprime que le lien.
-   - Correction : `removeTree` utilise `files::linkStatus` (lstat ; jonctions et liens Windows
-     par l'attribut point d'analyse). Un lien est supprimé lui-même, jamais le contenu de sa
-     cible.
-2. **`serial`, `SerialPort::write` après `close()`** (`host/modules/serial_module.cpp`).
-   - Défaut : `_state` valait `nullptr` alors que `_open` était encore vrai, d'où un
-     déréférencement de `nullptr`. Après une erreur de lecture, le thread lecteur libérait
-     `PortState` alors que le JS le pointait encore : `write()` et `requestClose()` utilisaient
-     de la mémoire libérée.
-   - Correction : `PortState` est compté par références (côté JS + thread lecteur). Le dernier
-     ferme le port et libère l'état ; `write` refuse un port dont le JS a lâché l'état.
-3. **CBOR : bornes qui débordaient** (`common/agent/cbor.cpp`).
-   - Défaut : `Reader::text`, `Reader::bytes` et `skip` (cas des chaînes) testaient
-     `_position + argument > _size` avec une longueur 64 bits venue de la liaison. Une longueur
-     énorme faisait déborder le test, d'où une lecture hors limites ; sur 32 bits, le cast
-     `(size_t)` tronquait en plus la longueur. `skip` sur une map calculait `argument * 2`, qui
-     pouvait déborder. La récursion de `skip` n'avait pas de limite de profondeur.
-   - Correction : `fits()` borne toute longueur sans débordement ; `skip` est limité à 16
-     niveaux ; les maps se parcourent par paires.
-4. **Paquet zip mal formé** (`common/runtime/package.cpp`, `Reader::open`).
-   - Défaut : les longueurs du nom, de l'extra et du commentaire n'étaient pas bornées par la
-     fin du répertoire ; sur 32 bits, les additions de décalages pouvaient déborder. Résultat :
-     des lectures hors limites, y compris dans `find()` (`memcmp`). Après un `open()` raté, les
-     entrées déjà lues restaient dans la table.
-   - Correction : décalages 64 bits et `within()` ; nom d'entrée borné ; pointeurs calculés
-     après contrôle ; table vidée après un échec.
-5. **Le registre commun enregistrait le module `net`**, qui n'existe que sur l'hôte
-   (`common/runtime/modules/modules.cpp` référençait `jsNewModule_net`).
-   - Défaut : le firmware ne se serait pas lié.
-   - Correction : `net` est enregistré par `host/main.cpp`, plus par le registre commun.
-6. **Débordements de calcul de taille dans le stub** (`common/agent/debugger.cpp`).
-   - Défaut : les multiplications par une valeur venue du réseau pouvaient déborder sur
-     32 bits, d'où un tampon trop petit et une écriture hors tas (`handleSetStops` :
-     `(size_t)count * 4` et `sizeof(uint32_t) * (count + 1)`) ; dans `handleCall`,
-     `argumentCount` n'était pas borné ; le `malloc` n'était pas vérifié.
-   - Correction : le nombre d'offsets est comparé à ce qui reste avant toute multiplication ;
-     `CALL` est limité à 256 arguments.
+   - Defect: it used `files::stat`, which follows links. A link to a folder inside the tree
+     made the content of the target be deleted. Node uses `lstat` and only removes the
+     link.
+   - Fix: `removeTree` uses `files::linkStatus` (lstat; Windows junctions and links through
+     the reparse point attribute). A link is removed itself, never the content of its
+     target.
+2. **`serial`, `SerialPort::write` after `close()`** (`host/modules/serial_module.cpp`).
+   - Defect: `_state` was `nullptr` while `_open` was still true, hence a `nullptr`
+     dereference. After a read error, the reader thread freed `PortState` while the JS still
+     pointed to it: `write()` and `requestClose()` used freed memory.
+   - Fix: `PortState` is reference-counted (JS side + reader thread). The last one closes the
+     port and frees the state; `write` refuses a port whose state the JS has dropped.
+3. **CBOR: bounds that overflowed** (`common/agent/cbor.cpp`).
+   - Defect: `Reader::text`, `Reader::bytes` and `skip` (case of strings) tested
+     `_position + argument > _size` with a 64-bit length coming from the link. A huge length
+     made the test overflow, hence an out-of-bounds read; on 32 bits, the `(size_t)` cast
+     also truncated the length. `skip` on a map computed `argument * 2`, which could
+     overflow. The recursion of `skip` had no depth limit.
+   - Fix: `fits()` bounds any length without overflow; `skip` is limited to 16 levels; maps
+     are walked by pairs.
+4. **Malformed zip package** (`common/runtime/package.cpp`, `Reader::open`).
+   - Defect: the lengths of the name, of the extra and of the comment were not bounded by the
+     end of the directory; on 32 bits, the additions of offsets could overflow. Result:
+     out-of-bounds reads, including in `find()` (`memcmp`). After a failed `open()`, the
+     entries already read stayed in the table.
+   - Fix: 64-bit offsets and `within()`; entry name bounded; pointers computed after the
+     check; table emptied after a failure.
+5. **The common registry registered the `net` module**, which only exists on the host
+   (`common/runtime/modules/modules.cpp` referenced `jsNewModule_net`).
+   - Defect: the firmware would not have linked.
+   - Fix: `net` is registered by `host/main.cpp`, no longer by the common registry.
+6. **Size computation overflows in the stub** (`common/agent/debugger.cpp`).
+   - Defect: the multiplications by a value coming from the network could overflow on
+     32 bits, hence a buffer too small and a write outside the heap (`handleSetStops`:
+     `(size_t)count * 4` and `sizeof(uint32_t) * (count + 1)`); in `handleCall`,
+     `argumentCount` was not bounded; the `malloc` was not checked.
+   - Fix: the number of offsets is compared with what remains before any multiplication;
+     `CALL` is limited to 256 arguments.
 
-### Allocations jamais vérifiées
+### Allocations never checked
 
-- **Défaut.** `malloc` / `realloc` jamais vérifiés (stub, `receiveBlock`, `registerName`...).
-- **Correction.** Tout notre code alloue par `memory::allocate` / `reallocate` / `release`
-  (`common/runtime/memory.h`). Un manque de mémoire y est fatal (`platform::fatal`), donc les
-  `malloc` non vérifiés n'existent plus. Tests OK le 2026-11-11.
+- **Defect.** `malloc` / `realloc` never checked (stub, `receiveBlock`, `registerName`...).
+- **Fix.** All our code allocates through `memory::allocate` / `reallocate` / `release`
+  (`common/runtime/memory.h`). Running out of memory is fatal there (`platform::fatal`), so
+  the unchecked `malloc`s no longer exist. Tests OK on 2026-11-11.
 
-### Défauts « moyens »
+### "Medium" defects
 
-Les tests de `run-tests.sh` passent en Release et en Debug, mais aucun test n'a été écrit pour
-ces défauts en particulier. Les branches POSIX / macOS n'ont été que relues, pas compilées
-(`pthread_condattr_setclock`, `poll`, `fseeko`, `MSG_NOSIGNAL`...). Le pas-à-pas over / out
-n'est pas corrigé : il reste dans `known-bugs.md`.
+The tests of `run-tests.sh` pass in Release and in Debug, but no test was written for these
+defects in particular. The POSIX / macOS branches were only reread, not compiled
+(`pthread_condattr_setclock`, `poll`, `fseeko`, `MSG_NOSIGNAL`...). Step over / step out is
+not fixed: it stays in `known-bugs.md`.
 
-- **Runner et debugger** :
-  - STOP et DEBUG_ATTACH pendant le démarrage ;
-  - PAUSE perdue après SCRIPT_LOADED ;
-  - `hostGone` (`followHost`) ;
-  - requêtes répétées (gardées dans la file pendant leur exécution, dernière réponse séparée
-    agent / debugger) ;
-  - double verrou de `onMessage` (`resendAnswer`) ;
-  - `attach` (`forgetAnswer`) ;
-  - garde `_requestDepth` dans `writeObject` ;
-  - SET_STOPS tronqué (erreur, rien d'appliqué) ;
-  - mode de SET_EXCEPTIONS borné ;
-  - `runDevice` remet la sortie à zéro ;
-  - `formatDate` sans `gmtime` (jours civils de Hinnant) ;
-  - BigInt invalide ;
-  - `flushSegment` sans copie quand il n'y a pas de callback texte.
-- **Runtime et plateforme** :
-  - rejet du dernier timer affiché ;
-  - `net` : état de socket compté par références, `closing` + `shutdown`, threads qui
-    attendent avec `waitReadable`, échec de démarrage d'un thread, `connectDone` ;
-  - `MSG_NOSIGNAL` / `SO_NOSIGPIPE` ;
-  - lien de l'agent sans lecteur (`endLink`) ;
-  - `finishUpload` (ordre décrit dans le code) ;
-  - `Mutex` récursif partout ;
-  - `Signal::wait` sur horloge monotone ;
-  - `files.cpp` : fichier sur le chemin, `errno`, fichiers de plus de 2 Go, racine de disque
-    vide, erreur de `readdir`, `rename` ;
-  - délais des timers (NaN, négatifs, trop grands : 1 ms comme Node) ;
-  - `fs` : `writeFileSync`, getter `encoding`.
-- **jsbind** :
-  - `Resolver` déjà réglé ou vide ;
-  - `js::fail` du constructeur dans `js::create` ;
-  - argument `JS_EXCEPTION` dans `callWith` ;
-  - appels hors d'un appel JS (`detail::propagateException`) ;
-  - `registerName` (noms dédoublonnés, `thread_local`, 32768 au plus) ;
-  - bornes exactes 2^63 / 2^64 ;
-  - `JS_NewObject` vérifié ;
-  - `static_assert` au-delà de 64 `JS_EXPORT`.
+- **Runner and debugger**:
+  - STOP and DEBUG_ATTACH during startup;
+  - PAUSE lost after SCRIPT_LOADED;
+  - `hostGone` (`followHost`);
+  - repeated requests (kept in the queue while they execute, last answer separate for
+    agent / debugger);
+  - double lock of `onMessage` (`resendAnswer`);
+  - `attach` (`forgetAnswer`);
+  - `_requestDepth` guard in `writeObject`;
+  - truncated SET_STOPS (error, nothing applied);
+  - mode of SET_EXCEPTIONS bounded;
+  - `runDevice` resets the exit;
+  - `formatDate` without `gmtime` (Hinnant's civil days);
+  - invalid BigInt;
+  - `flushSegment` without a copy when there is no text callback.
+- **Runtime and platform**:
+  - rejection of the last timer displayed;
+  - `net`: socket state reference-counted, `closing` + `shutdown`, threads that wait with
+    `waitReadable`, failure to start a thread, `connectDone`;
+  - `MSG_NOSIGNAL` / `SO_NOSIGPIPE`;
+  - link of the agent without a reader (`endLink`);
+  - `finishUpload` (order described in the code);
+  - recursive `Mutex` everywhere;
+  - `Signal::wait` on a monotonic clock;
+  - `files.cpp`: file on the path, `errno`, files of more than 2 GB, empty drive root,
+    `readdir` error, `rename`;
+  - timer delays (NaN, negative, too large: 1 ms like Node);
+  - `fs`: `writeFileSync`, `encoding` getter.
+- **jsbind**:
+  - `Resolver` already settled or empty;
+  - `js::fail` of the constructor in `js::create`;
+  - `JS_EXCEPTION` argument in `callWith`;
+  - calls outside a JS call (`detail::propagateException`);
+  - `registerName` (deduplicated names, `thread_local`, 32768 at most);
+  - exact bounds 2^63 / 2^64;
+  - `JS_NewObject` checked;
+  - `static_assert` beyond 64 `JS_EXPORT`.
 
-### Défauts « mineurs »
+### "Minor" defects
 
-- **`process.exit` ne libérait pas le runtime** : il termine maintenant le programme, plus le
-  processus (tests « process.exit » de `run-tests.sh`).
-- **`setImportMeta` gardait les `\` des chemins Windows** dans l'URL `file:///` : corrigé par
+- **`process.exit` did not free the runtime**: it now ends the program, no longer the
+  process ("process.exit" tests of `run-tests.sh`).
+- **`setImportMeta` kept the `\` of Windows paths** in the `file:///` URL: fixed by
   `files::useSlashes`.

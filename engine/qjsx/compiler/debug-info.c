@@ -1,7 +1,7 @@
 /*
  * QuickJS - compiler/debug-info.c
  *
- * espjs: debug info of the compiled functions, given to the collector set by
+ * qjsx: debug info of the compiled functions, given to the collector set by
  * JS_SetDebugInfoCollector() (quickjs-debug.h). Not part of upstream
  * QuickJS: see doc/engine-changes.md.
  *

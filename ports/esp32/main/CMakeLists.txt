@@ -1,21 +1,21 @@
 # The firmware as one component: the sources shared by every device port
-# (ports/cmake/espjs.cmake), the ESP32 board, platform and entry point, and the
-# description of the chosen board (boards/<ESPJS_BOARD>/board_config.h).
-include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/espjs.cmake")
-set(ESPJS_BOARD_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/../boards/${ESPJS_BOARD}")
+# (ports/cmake/qjsx.cmake), the ESP32 board, platform and entry point, and the
+# description of the chosen board (boards/<QJSX_BOARD>/board_config.h).
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/qjsx.cmake")
+set(QJSX_BOARD_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/../boards/${QJSX_BOARD}")
 
 idf_component_register(
     SRCS
-        ${ESPJS_ENGINE_SOURCES}
-        ${ESPJS_COMMON_SOURCES}
-        ${ESPJS_FREERTOS_SOURCES}
+        ${QJSX_ENGINE_SOURCES}
+        ${QJSX_COMMON_SOURCES}
+        ${QJSX_FREERTOS_SOURCES}
         "main.cpp"
         "board_esp32.cpp"
         "platform_esp32.cpp"
     INCLUDE_DIRS
         "."
-        "${ESPJS_BOARD_INCLUDE}"
-        ${ESPJS_INCLUDE_DIRS}
+        "${QJSX_BOARD_INCLUDE}"
+        ${QJSX_INCLUDE_DIRS}
     REQUIRES
         esp_driver_uart
         esp_partition
@@ -24,5 +24,5 @@ idf_component_register(
         spi_flash
         vfs)
 
-target_compile_definitions(${COMPONENT_LIB} PRIVATE ${ESPJS_DEFINES})
-set_source_files_properties(${ESPJS_ENGINE_SOURCES} PROPERTIES COMPILE_OPTIONS "${ESPJS_ENGINE_OPTIONS}")
+target_compile_definitions(${COMPONENT_LIB} PRIVATE ${QJSX_DEFINES})
+set_source_files_properties(${QJSX_ENGINE_SOURCES} PROPERTIES COMPILE_OPTIONS "${QJSX_ENGINE_OPTIONS}")

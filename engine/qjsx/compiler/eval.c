@@ -86,7 +86,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     }
     s->is_module = (m != NULL);
     s->allow_html_comments = !s->is_module;
-    /* espjs: JS_EVAL_FLAG_NO_DYNAMIC_IMPORT refuses 'import()' */
+    /* qjsx: JS_EVAL_FLAG_NO_DYNAMIC_IMPORT refuses 'import()' */
     s->no_dynamic_import = (flags & JS_EVAL_FLAG_NO_DYNAMIC_IMPORT) != 0;
 
     push_scope(s); /* body scope */
@@ -109,7 +109,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
         goto fail1;
     /* Could add a flag to avoid resolution if necessary */
     if (m) {
-        /* espjs: JS_EVAL_FLAG_NO_RESOLVE leaves the imports unloaded */
+        /* qjsx: JS_EVAL_FLAG_NO_RESOLVE leaves the imports unloaded */
         BOOL resolve = !(flags & JS_EVAL_FLAG_NO_RESOLVE);
         m->func_obj = fun_obj;
         if (resolve && js_resolve_module(ctx, m) < 0)

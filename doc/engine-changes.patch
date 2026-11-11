@@ -1,25 +1,25 @@
 diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/date.c engine/qjsx/builtins/date.c
---- build/qjsx-baseline/builtins/date.c	2026-11-11 15:49:05.263397800 +0100
-+++ engine/qjsx/builtins/date.c	2026-11-11 13:26:26.786838400 +0100
+--- build/qjsx-baseline/builtins/date.c	2026-11-11 16:11:32.396773300 +0100
++++ engine/qjsx/builtins/date.c	2026-11-11 16:04:41.500342200 +0100
 @@ -39,7 +39,9 @@
          }
      }
      ti = time;
 -#if defined(_WIN32)
-+    /* espjs: newlib (ESP32, RP2350) has no tm_gmtoff: it takes the Windows
++    /* qjsx: newlib (ESP32, RP2350) has no tm_gmtoff: it takes the Windows
 +       way, gmtime + localtime + mktime, which is plain C */
 +#if defined(_WIN32) || defined(__NEWLIB__)
      {
          struct tm *tm;
          time_t gm_ti, loc_ti;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/bytecode/reader.c
---- build/qjsx-baseline/bytecode/reader.c	2026-11-11 15:49:05.258869200 +0100
-+++ engine/qjsx/bytecode/reader.c	2026-11-11 15:34:49.321521200 +0100
+--- build/qjsx-baseline/bytecode/reader.c	2026-11-11 16:11:32.391791300 +0100
++++ engine/qjsx/bytecode/reader.c	2026-11-11 16:04:41.505342000 +0100
 @@ -427,6 +427,11 @@
      bc.js_mode = v8;
      if (bc_get_atom(s, &bc.func_name))  //@ atom leak if failure
          goto fail;
-+    /* espjs: read even without debug info */
++    /* qjsx: read even without debug info */
 +    if (bc_get_atom(s, &bc.filename))
 +        goto fail;
 +    if (bc_get_leb128_u16(s, &bc.function_number))
@@ -43,7 +43,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/
      return obj;
  }
  
-+/* espjs: the bytecode version checked by JS_ReadObjectAtoms() below */
++/* qjsx: the bytecode version checked by JS_ReadObjectAtoms() below */
 +int JS_GetBytecodeVersion(void)
 +{
 +    return BC_VERSION;
@@ -53,13 +53,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/
  {
      uint8_t v8;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/bytecode/writer.c
---- build/qjsx-baseline/bytecode/writer.c	2026-11-11 15:49:05.257871500 +0100
-+++ engine/qjsx/bytecode/writer.c	2026-11-10 19:57:29.182430100 +0100
+--- build/qjsx-baseline/bytecode/writer.c	2026-11-11 16:11:32.391791300 +0100
++++ engine/qjsx/bytecode/writer.c	2026-11-11 16:04:41.506342600 +0100
 @@ -444,6 +444,9 @@
      bc_put_u16(s, flags);
      bc_put_u8(s, b->js_mode);
      bc_put_atom(s, b->func_name);
-+    /* espjs: written even without debug info */
++    /* qjsx: written even without debug info */
 +    bc_put_atom(s, b->filename);
 +    bc_put_leb128(s, b->function_number);
  
@@ -74,19 +74,19 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/
          dbuf_put(&s->dbuf, b->debug.pc2line_buf, b->debug.pc2line_len);
          if (b->debug.source) {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjsx/compiler/compiler.h
---- build/qjsx-baseline/compiler/compiler.h	2026-11-11 15:49:05.276405300 +0100
-+++ engine/qjsx/compiler/compiler.h	2026-11-11 15:34:49.494455400 +0100
+--- build/qjsx-baseline/compiler/compiler.h	2026-11-11 16:11:32.407784200 +0100
++++ engine/qjsx/compiler/compiler.h	2026-11-11 16:04:41.507341800 +0100
 @@ -189,8 +189,31 @@
  typedef struct JSVarScope {
      int parent;  /* index into fd->scopes of the enclosing scope */
      int first;   /* index into fd->vars of the last variable in this scope */
-+    /* espjs: source range of the scope, for the debug info. -1: from the
++    /* qjsx: source range of the scope, for the debug info. -1: from the
 +       start / to the end of the function */
 +    int source_start;
 +    int source_end;
  } JSVarScope;
  
-+/* espjs: debugger positions are carried by OP_line_num, whose operand is a
++/* qjsx: debugger positions are carried by OP_line_num, whose operand is a
 +   source offset: its two high bits give the kind (JSDebugPositionKind).
 +   Plain positions (kind 0) are those of upstream QuickJS. The others are
 +   emitted by emit_debug_pos() and recorded by resolve_labels() at the pc
@@ -112,7 +112,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
  typedef struct JSFunctionDef {
      JSContext *ctx;
      struct JSFunctionDef *parent;
-+    /* espjs: in the root function only: next JSFunctionBytecode.function_number */
++    /* qjsx: in the root function only: next JSFunctionBytecode.function_number */
 +    int function_counter;
      int parent_cpool_idx; /* index in the constant pool of the parent
                               or -1 if none */
@@ -121,7 +121,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
      char *source;  /* raw source, utf-8 encoded */
      int source_len;
  
-+    /* espjs: debug info (compiler/debug-info.c), only filled when a debug
++    /* qjsx: debug info (compiler/debug-info.c), only filled when a debug
 +       info collector is set */
 +    uint32_t source_end;            /* end of the function source */
 +    JSDebugPosition *debug_positions;
@@ -135,7 +135,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
      BOOL is_module; /* parsing a module */
      BOOL allow_html_comments;
      BOOL ext_json; /* JSON parsing: true if accepting JSON superset */
-+    /* espjs: 'import()' is a syntax error (JS_EVAL_FLAG_NO_DYNAMIC_IMPORT) */
++    /* qjsx: 'import()' is a syntax error (JS_EVAL_FLAG_NO_DYNAMIC_IMPORT) */
 +    BOOL no_dynamic_import;
      GetLineColCache get_line_col_cache;
  } JSParseState;
@@ -145,7 +145,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
  void emit_u32(JSParseState *s, uint32_t val);
  void emit_source_pos(JSParseState *s, const uint8_t *source_ptr);
 +void emit_debug_pos(JSParseState *s, JSDebugPositionKind kind, const uint8_t *source_ptr);
-+/* espjs: compiler/debug-info.c */
++/* qjsx: compiler/debug-info.c */
 +void js_debug_info_add_position(JSFunctionDef *s, uint32_t pc, uint32_t operand);
 +uint32_t js_debug_skipped_marker(const uint8_t *bc_buf, int bc_len, int start, int end);
 +void js_debug_info_collect(JSContext *ctx, JSFunctionDef *fd, JSFunctionBytecode *b);
@@ -159,7 +159,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
                               int drop_count);
  void pop_break_entry(JSFunctionDef *fd);
 -void emit_return(JSParseState *s, BOOL hasval);
-+/* espjs: 'source_ptr' is the debugger position of the return instruction
++/* qjsx: 'source_ptr' is the debugger position of the return instruction
 +   (JS_DEBUG_POSITION_RETURN), NULL for a return the debugger does not stop
 +   at (code generated for generators and default constructors) */
 +void emit_return(JSParseState *s, BOOL hasval, const uint8_t *source_ptr);
@@ -168,12 +168,12 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
  int is_let(JSParseState *s, int decl_mask);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/qjsx/compiler/debug-info.c
 --- build/qjsx-baseline/compiler/debug-info.c	1970-01-01 01:00:00.000000000 +0100
-+++ engine/qjsx/compiler/debug-info.c	2026-11-11 15:34:49.454357800 +0100
++++ engine/qjsx/compiler/debug-info.c	2026-11-11 16:04:41.507341800 +0100
 @@ -0,0 +1,234 @@
 +/*
 + * QuickJS - compiler/debug-info.c
 + *
-+ * espjs: debug info of the compiled functions, given to the collector set by
++ * qjsx: debug info of the compiled functions, given to the collector set by
 + * JS_SetDebugInfoCollector() (quickjs-debug.h). Not part of upstream
 + * QuickJS: see doc/engine-changes.md.
 + *
@@ -405,13 +405,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/q
 +    js_free(ctx, scopes);
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx/compiler/emitter.c
---- build/qjsx-baseline/compiler/emitter.c	2026-11-11 15:49:05.250686600 +0100
-+++ engine/qjsx/compiler/emitter.c	2026-11-10 20:17:22.794174600 +0100
+--- build/qjsx-baseline/compiler/emitter.c	2026-11-11 16:11:32.385772400 +0100
++++ engine/qjsx/compiler/emitter.c	2026-11-11 16:04:41.508343500 +0100
 @@ -57,6 +57,21 @@
      }
  }
  
-+/* espjs: debugger position of the next instruction (see LINE_NUM_KIND_SHIFT).
++/* qjsx: debugger position of the next instruction (see LINE_NUM_KIND_SHIFT).
 +   Always emitted, with or without debug info, so that the bytecode does not
 +   depend on it. */
 +void emit_debug_pos(JSParseState *s, JSDebugPositionKind kind, const uint8_t *source_ptr)
@@ -433,7 +433,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx
          fd->scope_count++;
          fd->scopes[scope].parent = fd->scope_level;
          fd->scopes[scope].first = fd->scope_first;
-+        /* espjs: the scope starts at the current token (end set by pop_scope) */
++        /* qjsx: the scope starts at the current token (end set by pop_scope) */
 +        fd->scopes[scope].source_start = s->token.ptr - s->buf_start;
 +        fd->scopes[scope].source_end = -1;
          emit_op(s, OP_enter_scope);
@@ -443,19 +443,19 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx
          int scope = fd->scope_level;
          emit_op(s, OP_leave_scope);
          emit_u16(s, scope);
-+        /* espjs: the scope ends before the current token */
++        /* qjsx: the scope ends before the current token */
 +        fd->scopes[scope].source_end = s->token.ptr - s->buf_start;
          fd->scope_level = fd->scopes[scope].parent;
          fd->scope_first = get_first_lexical_var(fd, fd->scope_level);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/compiler/eval.c
---- build/qjsx-baseline/compiler/eval.c	2026-11-11 15:49:05.257871500 +0100
-+++ engine/qjsx/compiler/eval.c	2026-11-11 14:52:15.259380400 +0100
+--- build/qjsx-baseline/compiler/eval.c	2026-11-11 16:11:32.390787900 +0100
++++ engine/qjsx/compiler/eval.c	2026-11-11 16:04:41.508343500 +0100
 @@ -86,6 +86,8 @@
      }
      s->is_module = (m != NULL);
      s->allow_html_comments = !s->is_module;
-+    /* espjs: JS_EVAL_FLAG_NO_DYNAMIC_IMPORT refuses 'import()' */
++    /* qjsx: JS_EVAL_FLAG_NO_DYNAMIC_IMPORT refuses 'import()' */
 +    s->no_dynamic_import = (flags & JS_EVAL_FLAG_NO_DYNAMIC_IMPORT) != 0;
  
      push_scope(s); /* body scope */
@@ -464,7 +464,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/co
          goto fail1;
      /* Could add a flag to avoid resolution if necessary */
      if (m) {
-+        /* espjs: JS_EVAL_FLAG_NO_RESOLVE leaves the imports unloaded */
++        /* qjsx: JS_EVAL_FLAG_NO_RESOLVE leaves the imports unloaded */
 +        BOOL resolve = !(flags & JS_EVAL_FLAG_NO_RESOLVE);
          m->func_obj = fun_obj;
 -        if (js_resolve_module(ctx, m) < 0)
@@ -473,13 +473,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/co
          fun_obj = JS_NewModuleValue(ctx, m);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjsx/compiler/finalize.c
---- build/qjsx-baseline/compiler/finalize.c	2026-11-11 15:49:05.256876000 +0100
-+++ engine/qjsx/compiler/finalize.c	2026-11-10 20:21:36.451964600 +0100
+--- build/qjsx-baseline/compiler/finalize.c	2026-11-11 16:11:32.390787900 +0100
++++ engine/qjsx/compiler/finalize.c	2026-11-11 16:04:41.509343200 +0100
 @@ -444,6 +444,19 @@
      js_free(ctx, fd->byte_code.buf);
      fd->byte_code.buf = NULL;
  
-+    /* espjs: number in compilation order; the children are created before
++    /* qjsx: number in compilation order; the children are created before
 +       their parent, so the top-level function gets the last number */
 +    {
 +        JSFunctionDef *root = fd;
@@ -488,7 +488,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjs
 +        }
 +        b->function_number = root->function_counter++;
 +    }
-+    /* espjs: debug info for the sidecar, before the variable names are
++    /* qjsx: debug info for the sidecar, before the variable names are
 +       stripped below */
 +    js_debug_info_collect(ctx, fd, b);
 +
@@ -499,7 +499,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjs
  
      b->stack_size = stack_size;
  
-+    /* espjs: the file name is kept even when the debug info is stripped */
++    /* qjsx: the file name is kept even when the debug info is stripped */
 +    b->filename = fd->filename;
 +
      if (fd->strip_debug) {
@@ -515,13 +515,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjs
          //DynBuf pc2line;
          //compute_pc2line_info(fd, &pc2line);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx/compiler/funcdef.c
---- build/qjsx-baseline/compiler/funcdef.c	2026-11-11 15:49:05.254202000 +0100
-+++ engine/qjsx/compiler/funcdef.c	2026-11-10 20:17:22.707496100 +0100
+--- build/qjsx-baseline/compiler/funcdef.c	2026-11-11 16:11:32.388803900 +0100
++++ engine/qjsx/compiler/funcdef.c	2026-11-11 16:04:41.510348300 +0100
 @@ -59,6 +59,8 @@
      fd->scope_count = 1;
      fd->scopes[0].first = -1;
      fd->scopes[0].parent = -1;
-+    fd->scopes[0].source_start = -1;   /* espjs: the whole function */
++    fd->scopes[0].source_start = -1;   /* qjsx: the whole function */
 +    fd->scopes[0].source_end = -1;
      fd->scope_level = 0;  /* 0: var/arg scope */
      fd->scope_first = -1;
@@ -530,7 +530,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx
      js_free(ctx, fd->jump_slots);
      js_free(ctx, fd->label_slots);
      js_free(ctx, fd->line_number_slots);
-+    js_free(ctx, fd->debug_positions);   /* espjs */
++    js_free(ctx, fd->debug_positions);   /* qjsx */
  
      for(i = 0; i < fd->cpool_count; i++) {
          JS_FreeValue(ctx, fd->cpool[i]);
@@ -539,7 +539,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx
      const char *str;
  
 -    if (b->has_debug && b->debug.filename != JS_ATOM_NULL) {
-+    if (b->has_debug && b->filename != JS_ATOM_NULL) {   /* espjs: was debug.filename */
++    if (b->has_debug && b->filename != JS_ATOM_NULL) {   /* qjsx: was debug.filename */
          int line_num, col_num;
 -        str = JS_AtomGetStr(ctx, atom_buf, sizeof(atom_buf), b->debug.filename);
 +        str = JS_AtomGetStr(ctx, atom_buf, sizeof(atom_buf), b->filename);
@@ -547,14 +547,14 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx
          printf("%s:%d:%d: ", str, line_num, col_num);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-class.c engine/qjsx/compiler/parser-class.c
---- build/qjsx-baseline/compiler/parser-class.c	2026-11-11 15:49:05.251689900 +0100
-+++ engine/qjsx/compiler/parser-class.c	2026-11-10 20:20:17.902515000 +0100
+--- build/qjsx-baseline/compiler/parser-class.c	2026-11-11 16:11:32.387772200 +0100
++++ engine/qjsx/compiler/parser-class.c	2026-11-11 16:04:41.510348300 +0100
 @@ -52,7 +52,7 @@
  
      fd->func_kind = JS_FUNC_NORMAL;
      fd->func_type = func_type;
 -    emit_return(s, FALSE);
-+    emit_return(s, FALSE, NULL);   /* espjs: generated, no debugger stop */
++    emit_return(s, FALSE, NULL);   /* qjsx: generated, no debugger stop */
  
      s->cur_func = fd->parent;
      if (pfd)
@@ -562,19 +562,19 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-class.c engine
      /* patch the constant pool index for the constructor */
      put_u32(fd->byte_code.buf + ctor_cpool_offset, ctor_fd->parent_cpool_idx);
  
-+    /* espjs: the constructor covers the class source */
++    /* qjsx: the constructor covers the class source */
 +    ctor_fd->source_end = s->buf_ptr - s->buf_start;
      /* store the class source code in the constructor. */
      if (!fd->strip_source) {
          js_free(ctx, ctor_fd->source);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/qjsx/compiler/parser-expr.c
---- build/qjsx-baseline/compiler/parser-expr.c	2026-11-11 15:49:05.251689900 +0100
-+++ engine/qjsx/compiler/parser-expr.c	2026-11-11 15:34:49.600371300 +0100
+--- build/qjsx-baseline/compiler/parser-expr.c	2026-11-11 16:11:32.386772700 +0100
++++ engine/qjsx/compiler/parser-expr.c	2026-11-11 16:04:41.512350100 +0100
 @@ -1839,6 +1839,11 @@
          } else {
              if (js_parse_postfix_expr(s, 0))
                  return -1;
-+            /* espjs: 'new Function', with or without arguments, compiles
++            /* qjsx: 'new Function', with or without arguments, compiles
 +               a function at run time; reported at the token that follows
 +               the name */
 +            if (js_last_op_is_scope_var(s->cur_func, JS_ATOM_Function))
@@ -586,7 +586,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
              emit_op(s, OP_special_object);
              emit_u8(s, OP_SPECIAL_OBJECT_IMPORT_META);
          } else {
-+            /* espjs: the token is still the one after 'import', so the
++            /* qjsx: the token is still the one after 'import', so the
 +               error is reported at the '(' of the call */
 +            if (s->no_dynamic_import)
 +                return js_parse_error(s, "'import()' is not allowed: use a static import");
@@ -597,10 +597,10 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
                          if (name == JS_ATOM_eval && call_type == FUNC_CALL_NORMAL && !has_optional_chain) {
                              /* direct 'eval' */
                              opcode = OP_eval;
-+                            /* espjs: needs the compiler at run time */
++                            /* qjsx: needs the compiler at run time */
 +                            js_compile_warning(s, JS_COMPILE_WARNING_EVAL, op_token_ptr);
                          } else {
-+                            /* espjs: Function(...) compiles its arguments */
++                            /* qjsx: Function(...) compiles its arguments */
 +                            if (name == JS_ATOM_Function && call_type == FUNC_CALL_NORMAL)
 +                                js_compile_warning(s, JS_COMPILE_WARNING_FUNCTION, op_token_ptr);
                              /* verify if function name resolves to a simple
@@ -611,7 +611,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
              emit_op(s, OP_nip);
              emit_op(s, OP_nip);
 -            emit_return(s, TRUE);
-+            emit_return(s, TRUE, NULL);   /* espjs: generator return(), no debugger stop */
++            emit_return(s, TRUE, NULL);   /* qjsx: generator return(), no debugger stop */
  
              /* throw handling */
              emit_label(s, label_throw);
@@ -620,18 +620,18 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
              emit_op(s, OP_yield);
              label_next = emit_goto(s, OP_if_false, -1);
 -            emit_return(s, TRUE);
-+            emit_return(s, TRUE, NULL);   /* espjs: generator return(), no debugger stop */
++            emit_return(s, TRUE, NULL);   /* qjsx: generator return(), no debugger stop */
              emit_label(s, label_next);
          }
          return 0;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/qjsx/compiler/parser-func.c
---- build/qjsx-baseline/compiler/parser-func.c	2026-11-11 15:49:05.256876000 +0100
-+++ engine/qjsx/compiler/parser-func.c	2026-11-10 20:20:10.886071600 +0100
+--- build/qjsx-baseline/compiler/parser-func.c	2026-11-11 16:11:32.390787900 +0100
++++ engine/qjsx/compiler/parser-func.c	2026-11-11 16:04:41.513349800 +0100
 @@ -196,6 +196,7 @@
      int func_idx, lexical_func_idx = -1;
      BOOL has_opt_arg;
      BOOL create_func_var = FALSE;
-+    const uint8_t *closing_brace_ptr;   /* espjs */
++    const uint8_t *closing_brace_ptr;   /* qjsx */
  
      is_expr = (func_type != JS_PARSE_FUNC_STATEMENT &&
                 func_type != JS_PARSE_FUNC_VAR);
@@ -639,19 +639,19 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/
              if (js_parse_function_check_names(s, fd, func_name))
                  goto fail;
  
-+            /* espjs: the expression body is a statement for the debugger */
++            /* qjsx: the expression body is a statement for the debugger */
 +            emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
              if (js_parse_assign_expr(s))
                  goto fail;
  
-+            /* espjs: return position on the last character of the body */
++            /* qjsx: return position on the last character of the body */
 +            emit_debug_pos(s, JS_DEBUG_POSITION_RETURN, s->last_ptr - 1);
              if (func_kind != JS_FUNC_NORMAL)
                  emit_op(s, OP_return_async);
              else
                  emit_op(s, OP_return);
  
-+            fd->source_end = s->last_ptr - s->buf_start;   /* espjs */
++            fd->source_end = s->last_ptr - s->buf_start;   /* qjsx */
              if (!fd->strip_source) {
                  /* save the function source code */
                  /* the end of the function source code is after the last
@@ -659,7 +659,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/
          if (js_parse_source_element(s))
              goto fail;
      }
-+    fd->source_end = s->buf_ptr - s->buf_start;   /* espjs: after the '}' */
++    fd->source_end = s->buf_ptr - s->buf_start;   /* qjsx: after the '}' */
      if (!fd->strip_source) {
          /* save the function source code */
          fd->source_len = s->buf_ptr - ptr;
@@ -667,7 +667,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/
              goto fail;
      }
  
-+    /* espjs: the implicit return is on the closing brace */
++    /* qjsx: the implicit return is on the closing brace */
 +    closing_brace_ptr = s->token.ptr;
      if (next_token(s)) {
          /* consume the '}' */
@@ -685,7 +685,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/
          if (js_parse_source_element(s))
              return -1;
      }
-+    fd->source_end = s->buf_end - s->buf_start;   /* espjs */
++    fd->source_end = s->buf_end - s->buf_start;   /* qjsx */
  
      if (!s->is_module) {
          /* return the value of the hidden variable eval_ret_idx  */
@@ -694,7 +694,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/
              emit_u16(s, fd->eval_ret_idx);
          }
 -        emit_return(s, TRUE);
-+        emit_return(s, TRUE, s->token.ptr);   /* espjs: end of the source */
++        emit_return(s, TRUE, s->token.ptr);   /* qjsx: end of the source */
      } else {
 -        emit_return(s, FALSE);
 +        emit_return(s, FALSE, s->token.ptr);
@@ -702,14 +702,14 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/
  
      return 0;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/qjsx/compiler/parser-stmt.c
---- build/qjsx-baseline/compiler/parser-stmt.c	2026-11-11 15:49:05.252689500 +0100
-+++ engine/qjsx/compiler/parser-stmt.c	2026-11-10 20:20:31.163321900 +0100
+--- build/qjsx-baseline/compiler/parser-stmt.c	2026-11-11 16:11:32.387772200 +0100
++++ engine/qjsx/compiler/parser-stmt.c	2026-11-11 16:04:41.515348900 +0100
 @@ -83,7 +83,15 @@
  }
  
  /* execute the finally blocks before return */
 -void emit_return(JSParseState *s, BOOL hasval)
-+/* espjs: emits a return opcode, preceded by its debugger position */
++/* qjsx: emits a return opcode, preceded by its debugger position */
 +static void emit_return_op(JSParseState *s, int op, const uint8_t *source_ptr)
 +{
 +    if (source_ptr != NULL)
@@ -740,7 +740,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/
          }
      }
  
-+    /* espjs: statement start, where the debugger stops */
++    /* qjsx: statement start, where the debugger stops */
 +    emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
 +
      switch(tok = s->token.val) {
@@ -763,7 +763,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/
              set_eval_ret_undefined(s);
  
              emit_label(s, label_cont);
-+            /* espjs: the loop test is a debugger stop at each iteration */
++            /* qjsx: the loop test is a debugger stop at each iteration */
 +            emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
              if (js_parse_expr_paren(s))
                  goto fail;
@@ -772,7 +772,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/
                  goto fail;
  
              emit_label(s, label_cont);
-+            /* espjs: the loop test is a debugger stop at each iteration */
++            /* qjsx: the loop test is a debugger stop at each iteration */
 +            emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
              if (js_parse_expect(s, TOK_WHILE))
                  goto fail;
@@ -781,7 +781,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/
                  label_test = label_body;
              } else {
                  emit_label(s, label_test);
-+                /* espjs: the loop test is a debugger stop at each iteration */
++                /* qjsx: the loop test is a debugger stop at each iteration */
 +                emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
                  if (js_parse_expr(s))
                      goto fail;
@@ -790,7 +790,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/
  
                  pos_cont = s->cur_func->byte_code.size;
                  emit_label(s, label_cont);
-+                /* espjs: the update expression is a debugger stop too (this
++                /* qjsx: the update expression is a debugger stop too (this
 +                   code is moved after the loop body, with its position) */
 +                emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
                  if (js_parse_expr(s))
@@ -800,13 +800,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/
              }
  
              if (s->token.val == TOK_CATCH) {
-+                const uint8_t *catch_ptr = s->token.ptr;   /* espjs */
++                const uint8_t *catch_ptr = s->token.ptr;   /* qjsx */
                  if (next_token(s))
                      goto fail;
  
                  push_scope(s);  /* catch variable */
                  emit_label(s, label_catch);
-+                /* espjs: entering the catch clause is a debugger stop */
++                /* qjsx: entering the catch clause is a debugger stop */
 +                emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, catch_ptr);
  
                  if (s->token.val == '{') {
@@ -816,20 +816,20 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/
  
      case TOK_DEBUGGER:
 -        /* currently no debugger, so just skip the keyword */
-+        /* espjs: calls the debugger hook (no-op without debugger) */
++        /* qjsx: calls the debugger hook (no-op without debugger) */
 +        emit_op(s, OP_debugger);
          if (next_token(s))
              goto fail;
          if (js_parse_expect_semi(s))
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engine/qjsx/compiler/resolve-labels.c
---- build/qjsx-baseline/compiler/resolve-labels.c	2026-11-11 15:49:05.255859900 +0100
-+++ engine/qjsx/compiler/resolve-labels.c	2026-11-10 20:35:24.036212300 +0100
+--- build/qjsx-baseline/compiler/resolve-labels.c	2026-11-11 16:11:32.389792300 +0100
++++ engine/qjsx/compiler/resolve-labels.c	2026-11-11 16:04:41.516349600 +0100
 @@ -36,7 +36,10 @@
              if (pos_next > s->bc_len)
                  goto done;
              if (op == OP_line_num) {
 -                line_num = get_u32(tab + pos + 1);
-+                /* espjs: debugger positions are skipped too; when a match
++                /* qjsx: debugger positions are skipped too; when a match
 +                   consumes one, the pass loop moves it to the next
 +                   emitted instruction (js_debug_skipped_marker) */
 +                line_num = line_num_pos(get_u32(tab + pos + 1));
@@ -842,7 +842,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
          if (op == OP_line_num) {
 -            *linep = get_u32(bc_buf + pos + 1);
 +            uint32_t operand = get_u32(bc_buf + pos + 1);
-+            /* espjs: the debugger positions of dead code are dropped */
++            /* qjsx: the debugger positions of dead code are dropped */
 +            if (line_num_kind(operand) == JS_DEBUG_POSITION_EXPRESSION)
 +                *linep = operand;
          } else
@@ -852,12 +852,12 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
      }
  
      line_num = 0; /* avoid warning */
-+    /* espjs: end of the previous instruction; when pos goes further, an
++    /* qjsx: end of the previous instruction; when pos goes further, an
 +       optimization consumed several instructions */
 +    int natural_pos = 0;
      for (pos = 0; pos < bc_len; pos = pos_next) {
 +        if (pos > natural_pos) {
-+            /* espjs: keep a debugger position the optimization consumed */
++            /* qjsx: keep a debugger position the optimization consumed */
 +            uint32_t marker = js_debug_skipped_marker(bc_buf, bc_len, natural_pos, pos);
 +            if (marker != 0) {
 +                s->line_number_size++;
@@ -876,7 +876,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
  /* the pc2line table gives a source position for each PC value */
  static void add_pc2line_info(JSFunctionDef *s, uint32_t pc, uint32_t source_pos)
  {
-+    /* espjs: the same positions go to the debug info (even when stripped) */
++    /* qjsx: the same positions go to the debug info (even when stripped) */
 +    js_debug_info_add_position(s, pc, source_pos);
      if (s->line_number_slots != NULL
      &&  s->line_number_count < s->line_number_size
@@ -885,7 +885,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
          for (;;) {
              switch(op = s->byte_code.buf[pos]) {
              case OP_line_num:
-+                /* espjs: a jump to a debugger position keeps its target,
++                /* qjsx: a jump to a debugger position keeps its target,
 +                   so that the stop is not skipped (e.g. a jump to the
 +                   implicit return replaced by a return) */
 +                if (line_num_kind(get_u32(s->byte_code.buf + pos + 1)) !=
@@ -898,13 +898,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
          put_short_code(&bc_out, OP_put_loc, s->arg_var_object_idx);
      }
  
-+    /* espjs: end of the previous instruction; when pos goes further, an
++    /* qjsx: end of the previous instruction; when pos goes further, an
 +       optimization consumed several instructions */
 +    int natural_pos = 0;
      for (pos = 0; pos < bc_len; pos = pos_next) {
          int val;
 +        if (pos > natural_pos) {
-+            /* espjs: a debugger position the optimization consumed goes
++            /* qjsx: a debugger position the optimization consumed goes
 +               to the next emitted instruction */
 +            uint32_t marker = js_debug_skipped_marker(bc_buf, bc_len, natural_pos, pos);
 +            if (marker != 0)
@@ -922,7 +922,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
 -            line_num = get_u32(bc_buf + pos + 1);
 +            {
 +                uint32_t operand = get_u32(bc_buf + pos + 1);
-+                /* espjs: a debugger position applies to the next emitted
++                /* qjsx: a debugger position applies to the next emitted
 +                   instruction, whose pc is the current output size */
 +                if (line_num_kind(operand) != JS_DEBUG_POSITION_EXPRESSION)
 +                    js_debug_info_add_position(s, bc_out.size, operand);
@@ -936,7 +936,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
          case OP_call_method:
              {
 -                /* detect and transform tail calls */
-+                /* espjs: "call; return" is no longer fused into
++                /* qjsx: "call; return" is no longer fused into
 +                   OP_tail_call(_method): the separate OP_return is where the
 +                   debugger stops to show the return value of 'return f()'.
 +                   (QuickJS keeps the caller frame during a tail call anyway:
@@ -954,13 +954,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
                  put_short_code(&bc_out, op, argc);
                  break;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/core.h engine/qjsx/core/core.h
---- build/qjsx-baseline/core/core.h	2026-11-11 15:49:05.272414500 +0100
-+++ engine/qjsx/core/core.h	2026-11-10 20:22:27.722389600 +0100
+--- build/qjsx-baseline/core/core.h	2026-11-11 16:11:32.404772600 +0100
++++ engine/qjsx/core/core.h	2026-11-11 16:04:41.519350500 +0100
 @@ -543,4 +543,15 @@
  #endif
  int JS_AddIntrinsicBasicObjects(JSContext *ctx);
  
-+/* espjs: debugger support (core/debug.c), called by the interpreter. 'pc'
++/* qjsx: debugger support (core/debug.c), called by the interpreter. 'pc'
 +   is the address of the instruction where the frame stops. The int
 +   functions return -1 when the hook asks to throw. */
 +int js_debug_check_stop(JSContext *ctx, JSStackFrame *sf, JSFunctionBytecode *b,
@@ -974,12 +974,12 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/core.h engine/qjsx/core/c
  #endif /* QUICKJS_CORE_H */
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/debug.c engine/qjsx/core/debug.c
 --- build/qjsx-baseline/core/debug.c	1970-01-01 01:00:00.000000000 +0100
-+++ engine/qjsx/core/debug.c	2026-11-10 20:53:56.544219000 +0100
++++ engine/qjsx/core/debug.c	2026-11-11 16:04:41.520350100 +0100
 @@ -0,0 +1,581 @@
 +/*
 + * QuickJS - core/debug.c
 + *
-+ * espjs: debugger support (not part of upstream QuickJS). Public API in
++ * qjsx: debugger support (not part of upstream QuickJS). Public API in
 + * quickjs-debug.h; the interpreter calls the js_debug_* functions below
 + * (core/interpreter.c). See doc/engine-changes.md.
 + */
@@ -1558,13 +1558,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/debug.c engine/qjsx/core/
 +    return 0;
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core/errors.c
---- build/qjsx-baseline/core/errors.c	2026-11-11 15:49:05.243692000 +0100
-+++ engine/qjsx/core/errors.c	2026-11-10 20:07:04.781772700 +0100
+--- build/qjsx-baseline/core/errors.c	2026-11-11 16:11:32.368733800 +0100
++++ engine/qjsx/core/errors.c	2026-11-11 16:04:41.521349400 +0100
 @@ -30,6 +30,9 @@
      JSRuntime *rt = ctx->rt;
      val = rt->current_exception;
      rt->current_exception = JS_UNINITIALIZED;
-+    /* espjs: the exception is handled by C code: if it is thrown again,
++    /* qjsx: the exception is handled by C code: if it is thrown again,
 +       it is a new throw for the debugger */
 +    js_debug_forget_exception(rt);
      return val;
@@ -1575,7 +1575,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core
  
              b = p->u.func.function_bytecode;
 -            if (b->has_debug) {
-+            /* espjs: the file name is known without debug info; the line
++            /* qjsx: the file name is known without debug info; the line
 +               number needs it (find_line_num returns 0 without pc2line) */
 +            if (b->filename != JS_ATOM_NULL) {
                  line_num1 = find_line_num(ctx, b,
@@ -1586,28 +1586,28 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core
                              atom_str ? atom_str : "<null>");
                  JS_FreeCString(ctx, atom_str);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/gc.c engine/qjsx/core/gc.c
---- build/qjsx-baseline/core/gc.c	2026-11-11 15:49:05.243692000 +0100
-+++ engine/qjsx/core/gc.c	2026-11-10 20:06:50.880056700 +0100
+--- build/qjsx-baseline/core/gc.c	2026-11-11 16:11:32.367230400 +0100
++++ engine/qjsx/core/gc.c	2026-11-11 16:04:41.522349800 +0100
 @@ -1281,8 +1281,10 @@
          JS_FreeContext(b->realm);
  
      JS_FreeAtomRT(rt, b->func_name);
-+    JS_FreeAtomRT(rt, b->filename);     /* espjs: no longer in 'debug' */
-+    js_free_rt(rt, b->debug_breakpoints);   /* espjs */
-+    js_free_rt(rt, b->debug_statements);    /* espjs */
++    JS_FreeAtomRT(rt, b->filename);     /* qjsx: no longer in 'debug' */
++    js_free_rt(rt, b->debug_breakpoints);   /* qjsx */
++    js_free_rt(rt, b->debug_statements);    /* qjsx */
      if (b->has_debug) {
 -        JS_FreeAtomRT(rt, b->debug.filename);
          js_free_rt(rt, b->debug.pc2line_buf);
          js_free_rt(rt, b->debug.source);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx/core/interpreter.c
---- build/qjsx-baseline/core/interpreter.c	2026-11-11 15:49:05.248685400 +0100
-+++ engine/qjsx/core/interpreter.c	2026-11-10 20:22:27.845153000 +0100
+--- build/qjsx-baseline/core/interpreter.c	2026-11-11 16:11:32.383788900 +0100
++++ engine/qjsx/core/interpreter.c	2026-11-11 16:04:41.523350500 +0100
 @@ -29,8 +29,22 @@
      JSVarRef **var_refs;
      size_t alloca_size;
  
-+    /* espjs: debugger stops. A frame whose function has stops (see
++    /* qjsx: debugger stops. A frame whose function has stops (see
 +       js_debug_frame_has_stops) checks them before each instruction. The
 +       choice is made again by REFRESH_DEBUG_DISPATCH() when the debugger
 +       state may have changed: at 'restart' (entry, resume, catch), after
@@ -1649,7 +1649,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
  #define BREAK           SWITCH(pc)
  #endif
  
-+    /* espjs: polls the interrupt handler like js_poll_interrupts(). When
++    /* qjsx: polls the interrupt handler like js_poll_interrupts(). When
 +       the handler ran, it may have changed the debugger state (pause
 +       request, new stops): the dispatch is chosen again. */
 +#define POLL_INTERRUPTS()                                           \
@@ -1670,7 +1670,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
              rt->current_stack_frame = sf;
 -            if (s->throw_flag)
 +            if (s->throw_flag) {
-+                /* espjs: a value thrown into a generator or async function
++                /* qjsx: a value thrown into a generator or async function
 +                   (rejected await, generator throw()) is not a new throw
 +                   for the debugger */
 +                js_debug_mark_exception_reported(ctx);
@@ -1686,7 +1686,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
      ctx = b->realm; /* set the current realm */
  
   restart:
-+    REFRESH_DEBUG_DISPATCH();   /* espjs */
++    REFRESH_DEBUG_DISPATCH();   /* qjsx */
      for(;;) {
          int call_argc;
          JSValue *call_argv;
@@ -1694,7 +1694,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
                      JS_FreeValue(ctx, call_argv[i]);
                  sp -= call_argc + 1;
                  *sp++ = ret_val;
-+                REFRESH_DEBUG_DISPATCH();   /* espjs */
++                REFRESH_DEBUG_DISPATCH();   /* qjsx */
              }
              BREAK;
          CASE(OP_call_constructor):
@@ -1702,7 +1702,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
                      JS_FreeValue(ctx, call_argv[i]);
                  sp -= call_argc + 2;
                  *sp++ = ret_val;
-+                REFRESH_DEBUG_DISPATCH();   /* espjs */
++                REFRESH_DEBUG_DISPATCH();   /* qjsx */
              }
              BREAK;
          CASE(OP_call_method):
@@ -1710,7 +1710,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
                      JS_FreeValue(ctx, call_argv[i]);
                  sp -= call_argc + 2;
                  *sp++ = ret_val;
-+                REFRESH_DEBUG_DISPATCH();   /* espjs */
++                REFRESH_DEBUG_DISPATCH();   /* qjsx */
              }
              BREAK;
          CASE(OP_array_from):
@@ -1782,7 +1782,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
          CASE(OP_nop):
              BREAK;
 +        CASE(OP_debugger):
-+            /* espjs: 'debugger;' statement */
++            /* qjsx: 'debugger;' statement */
 +            if (js_debug_on_debugger_statement(ctx, sf, pc - 1) < 0)
 +                goto exception;
 +            REFRESH_DEBUG_DISPATCH();
@@ -1796,7 +1796,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
      }
 +#if DIRECT_DISPATCH
 + debug_check:
-+    /* espjs: reached through debug_dispatch_table: 'opcode' is read and
++    /* qjsx: reached through debug_dispatch_table: 'opcode' is read and
 +       'pc' points after it */
 +    if (js_debug_check_stop(ctx, sf, b, pc - 1, sp) < 0)
 +        goto exception;
@@ -1810,7 +1810,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
          sf->cur_pc = pc;
          build_backtrace(ctx, rt->current_exception, NULL, 0, 0, 0);
      }
-+    /* espjs: report the throw to the debugger (only in the frame of the
++    /* qjsx: report the throw to the debugger (only in the frame of the
 +       throw, not again while it unwinds through the calling frames) */
 +    if (unlikely(rt->debug.hook != NULL))
 +        js_debug_on_exception(ctx, sf, pc);
@@ -1821,35 +1821,35 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
                      sp--;
                      JS_IteratorClose(ctx, sp[-1], TRUE);
                  } else {
-+                    /* espjs: a 'catch' clause ends the throw for the
++                    /* qjsx: a 'catch' clause ends the throw for the
 +                       debugger (not a 'finally' clause, which rethrows) */
 +                    js_debug_exception_caught(rt, b, pos);
                      *sp++ = rt->current_exception;
                      rt->current_exception = JS_UNINITIALIZED;
                      pc = b->byte_code_buf + pos;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/iteration.c engine/qjsx/core/iteration.c
---- build/qjsx-baseline/core/iteration.c	2026-11-11 15:49:05.247685200 +0100
-+++ engine/qjsx/core/iteration.c	2026-11-10 19:57:29.362350900 +0100
+--- build/qjsx-baseline/core/iteration.c	2026-11-11 16:11:32.381756100 +0100
++++ engine/qjsx/core/iteration.c	2026-11-11 16:04:41.524857300 +0100
 @@ -25,8 +25,8 @@
                                            JSValueConst this_val)
  {
      JSFunctionBytecode *b = JS_GetFunctionBytecode(this_val);
 -    if (b && b->has_debug) {
 -        return JS_AtomToString(ctx, b->debug.filename);
-+    if (b && b->filename != JS_ATOM_NULL) {   /* espjs: was b->has_debug */
++    if (b && b->filename != JS_ATOM_NULL) {   /* qjsx: was b->has_debug */
 +        return JS_AtomToString(ctx, b->filename);
      }
      return JS_UNDEFINED;
  }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/modules.c engine/qjsx/core/modules.c
---- build/qjsx-baseline/core/modules.c	2026-11-11 15:49:05.252689500 +0100
-+++ engine/qjsx/core/modules.c	2026-11-11 14:52:15.176607100 +0100
+--- build/qjsx-baseline/core/modules.c	2026-11-11 16:11:32.388803900 +0100
++++ engine/qjsx/core/modules.c	2026-11-11 16:04:41.524857300 +0100
 @@ -1206,9 +1206,11 @@
              return JS_ATOM_NULL;
          b = p->u.func.function_bytecode;
          if (!b->is_direct_or_indirect_eval) {
 -            if (!b->has_debug)
-+            /* espjs: the file name no longer depends on the debug info, so
++            /* qjsx: the file name no longer depends on the debug info, so
 +               import.meta and import() work with fully stripped bytecode */
 +            if (b->filename == JS_ATOM_NULL)
                  return JS_ATOM_NULL;
@@ -1862,13 +1862,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/modules.c engine/qjsx/cor
      return JS_DupAtom(ctx, m->module_name);
  }
  
-+/* espjs: number of modules asked for by 'm' (import, export ... from) */
++/* qjsx: number of modules asked for by 'm' (import, export ... from) */
 +int JS_GetModuleRequestCount(JSModuleDef *m)
 +{
 +    return m->req_module_entries_count;
 +}
 +
-+/* espjs: name of a module asked for by 'm', as written in its source */
++/* qjsx: name of a module asked for by 'm', as written in its source */
 +JSAtom JS_GetModuleRequestName(JSContext *ctx, JSModuleDef *m, int index)
 +{
 +    if (index < 0 || index >= m->req_module_entries_count)
@@ -1880,13 +1880,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/modules.c engine/qjsx/cor
  {
      JSValue obj;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/core/runtime.c
---- build/qjsx-baseline/core/runtime.c	2026-11-11 15:49:05.241687200 +0100
-+++ engine/qjsx/core/runtime.c	2026-11-11 13:29:47.256848800 +0100
+--- build/qjsx-baseline/core/runtime.c	2026-11-11 16:11:32.366634100 +0100
++++ engine/qjsx/core/runtime.c	2026-11-11 16:04:41.528421700 +0100
 @@ -617,6 +617,7 @@
      rt->malloc_ctx.mf = *mf;
      rt->malloc_ctx.malloc_state = ms;
      rt->malloc_gc_threshold = 256 * 1024;
-+    rt->debug.reported_exception = JS_UNINITIALIZED;   /* espjs: none */
++    rt->debug.reported_exception = JS_UNINITIALIZED;   /* qjsx: none */
  
      init_list_head(&rt->context_list);
      init_list_head(&rt->gc_obj_list);
@@ -1895,7 +1895,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  #elif defined(__linux__) || defined(__GLIBC__)
      return malloc_usable_size((void *)ptr);
 +#elif defined(__NEWLIB__)
-+    /* espjs: newlib (ESP32, RP2350) does not declare malloc_usable_size; the
++    /* qjsx: newlib (ESP32, RP2350) does not declare malloc_usable_size; the
 +       devices give their own allocator (board::jsAllocator), so this default
 +       one is not used there */
 +    return 0;
@@ -1906,7 +1906,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
      int i;
  
      JS_FreeValueRT(rt, rt->current_exception);
-+    js_debug_forget_exception(rt);   /* espjs */
++    js_debug_forget_exception(rt);   /* qjsx */
  
      list_for_each_safe(el, el1, &rt->job_list) {
          JSJobEntry *e = list_entry(el, JSJobEntry, link);
@@ -1915,7 +1915,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
      if (JS_AddIntrinsicBaseObjects(ctx) ||
          JS_AddIntrinsicDate(ctx) ||
 +#ifndef QJSX_NO_COMPILER
-+        /* espjs: an engine built without compiler/ (QJSX_NO_COMPILER, the
++        /* qjsx: an engine built without compiler/ (QJSX_NO_COMPILER, the
 +           targets) has no eval: eval(), Function() and JS_Eval() throw
 +           "eval is not supported" */
          JS_AddIntrinsicEval(ctx) ||
@@ -1925,10 +1925,10 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
          JS_AddIntrinsicJSON(ctx) ||
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/quickjs-debug.h
 --- build/qjsx-baseline/quickjs-debug.h	1970-01-01 01:00:00.000000000 +0100
-+++ engine/qjsx/quickjs-debug.h	2026-11-11 15:34:49.362606200 +0100
++++ engine/qjsx/quickjs-debug.h	2026-11-11 16:04:41.532421100 +0100
 @@ -0,0 +1,288 @@
 +/*
-+ * espjs: debugger support in the QuickJS engine.
++ * qjsx: debugger support in the QuickJS engine.
 + *
 + * Not part of upstream QuickJS: see doc/engine-changes.md. Implemented in
 + * core/debug.c, with hooks in core/interpreter.c.
@@ -2216,13 +2216,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/qu
 +
 +#endif /* QUICKJS_DEBUG_H */
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx/quickjs-internal.h
---- build/qjsx-baseline/quickjs-internal.h	2026-11-11 15:49:05.275405400 +0100
-+++ engine/qjsx/quickjs-internal.h	2026-11-11 15:34:49.412510100 +0100
+--- build/qjsx-baseline/quickjs-internal.h	2026-11-11 16:11:32.407784200 +0100
++++ engine/qjsx/quickjs-internal.h	2026-11-11 16:04:41.533427000 +0100
 @@ -30,6 +30,7 @@
  #include "cutils.h"
  #include "list.h"
  #include "quickjs.h"
-+#include "quickjs-debug.h"  /* espjs */
++#include "quickjs-debug.h"  /* qjsx */
  #include "libregexp.h"
  #include "libunicode.h"
  #include "dtoa.h"
@@ -2230,7 +2230,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  
  /* end JS Malloc */
  
-+/* espjs: state of the debugger support (quickjs-debug.h, core/debug.c) */
++/* qjsx: state of the debugger support (quickjs-debug.h, core/debug.c) */
 +typedef struct JSDebugState {
 +    JSDebugHook *hook;           /* NULL: debugging off */
 +    void *hook_opaque;
@@ -2259,7 +2259,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
      int shape_hash_count; /* number of hashed shapes */
      JSShape **shape_hash;
      void *user_opaque;
-+    JSDebugState debug; /* espjs */
++    JSDebugState debug; /* qjsx */
  };
  
  struct JSClass {
@@ -2267,14 +2267,14 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
      JSValue *cpool; /* constant pool (self pointer) */
      int cpool_count;
      int closure_var_count;
-+    /* espjs: name of the script or module, kept even without debug info
++    /* qjsx: name of the script or module, kept even without debug info
 +       (was debug.filename): import.meta, import() and backtraces need it. */
 +    JSAtom filename;
-+    /* espjs: number of the function in its script, in compilation order
++    /* qjsx: number of the function in its script, in compilation order
 +       (the top-level function has the last number). Serialized. Identifies
 +       the function in the debug sidecar and for the debugger. */
 +    uint16_t function_number;
-+    /* espjs: stops of the debugger (see quickjs-debug.h), bitmaps with one
++    /* qjsx: stops of the debugger (see quickjs-debug.h), bitmaps with one
 +       bit per byte of bytecode (bit 'offset & 7' of byte 'offset >> 3'),
 +       or NULL if none. Not serialized. */
 +    uint8_t *debug_breakpoints;
@@ -2292,7 +2292,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  } BCTagEnum;
  
 -#define BC_VERSION 5
-+/* espjs: own value (QuickJS 2026-06-04 uses 5): the format differs
++/* qjsx: own value (QuickJS 2026-06-04 uses 5): the format differs
 +   (filename always written, function_number), so a bytecode of one is
 +   refused by the other instead of being misread. */
 +#define BC_VERSION 0x45
@@ -2303,7 +2303,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
      }
  }
  
-+/* espjs: TRUE if a frame running 'b' must check the debugger stops before
++/* qjsx: TRUE if a frame running 'b' must check the debugger stops before
 +   each instruction (debug dispatch table in JS_CallInternal). */
 +static inline BOOL js_debug_frame_has_stops(JSRuntime *rt, JSFunctionBytecode *b)
 +{
@@ -2319,30 +2319,30 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  static force_inline BOOL can_extend_fast_array(JSObject *p)
  {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-opcode.h engine/qjsx/quickjs-opcode.h
---- build/qjsx-baseline/quickjs-opcode.h	2026-11-11 15:49:05.685200300 +0100
-+++ engine/qjsx/quickjs-opcode.h	2026-11-10 20:10:06.813701200 +0100
+--- build/qjsx-baseline/quickjs-opcode.h	2026-11-11 16:11:32.793089900 +0100
++++ engine/qjsx/quickjs-opcode.h	2026-11-11 16:04:41.534423300 +0100
 @@ -256,6 +256,8 @@
  DEF(is_undefined_or_null, 1, 1, 1, none)
  DEF(     private_in, 1, 2, 1, none)
  DEF(push_bigint_i32, 5, 0, 1, i32)
-+/* espjs: 'debugger;' statement, calls the debugger hook if any */
++/* qjsx: 'debugger;' statement, calls the debugger hook if any */
 +DEF(       debugger, 1, 0, 0, none)
  /* must be the last non short and non temporary opcode */
  DEF(            nop, 1, 0, 0, none)
  
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.h
---- build/qjsx-baseline/quickjs.h	2026-11-11 15:49:05.630336400 +0100
-+++ engine/qjsx/quickjs.h	2026-11-11 15:34:49.266891400 +0100
+--- build/qjsx-baseline/quickjs.h	2026-11-11 16:11:32.745298600 +0100
++++ engine/qjsx/quickjs.h	2026-11-11 16:04:41.535423300 +0100
 @@ -345,6 +345,14 @@
  /* allow top-level await in normal script. JS_Eval() returns a
     promise. Only allowed with JS_EVAL_TYPE_GLOBAL */
  #define JS_EVAL_FLAG_ASYNC (1 << 7)
-+/* espjs: with JS_EVAL_FLAG_COMPILE_ONLY and JS_EVAL_TYPE_MODULE, the
++/* qjsx: with JS_EVAL_FLAG_COMPILE_ONLY and JS_EVAL_TYPE_MODULE, the
 +   imported modules are not loaded (a compiler producing bytecode does not
 +   need them). The module must be resolved before it is run. */
 +#define JS_EVAL_FLAG_NO_RESOLVE (1 << 8)
-+/* espjs: 'import()' is a syntax error, reported at its position. For the
-+   programs whose modules must all be known when they are built (espjs
++/* qjsx: 'import()' is a syntax error, reported at its position. For the
++   programs whose modules must all be known when they are built (qjsx
 +   build): only static imports are left. */
 +#define JS_EVAL_FLAG_NO_DYNAMIC_IMPORT (1 << 9)
  
@@ -2352,7 +2352,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.
  /* return the import.meta object of a module */
  JSValue JS_GetImportMeta(JSContext *ctx, JSModuleDef *m);
  JSAtom JS_GetModuleName(JSContext *ctx, JSModuleDef *m);
-+/* espjs: the modules a module asks for with 'import' and 'export ... from',
++/* qjsx: the modules a module asks for with 'import' and 'export ... from',
 +   as written in its source (not normalized), in source order; the same
 +   name may come several times. For a compiler that follows the imports
 +   itself (see JS_EVAL_FLAG_NO_RESOLVE).
@@ -2367,7 +2367,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.
  #define JS_READ_OBJ_REFERENCE (1 << 3) /* allow object references */
  JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
                        int flags);
-+/* espjs: version of the bytecode this engine writes and reads (BC_VERSION):
++/* qjsx: version of the bytecode this engine writes and reads (BC_VERSION):
 +   JS_ReadObject() refuses any other. For a loader that wants to refuse a
 +   program compiled for another engine before it loads anything. */
 +int JS_GetBytecodeVersion(void);

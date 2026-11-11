@@ -151,7 +151,7 @@ private:
         size_t size = 0;
         const uint8_t *package = board::openPackage(&size);
         if (package == nullptr) {
-            fprintf(stderr, "espjs agent: no package installed\n");
+            fprintf(stderr, "qjsx agent: no package installed\n");
             return false;
         }
 

@@ -106,7 +106,7 @@ public:
 
         _partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)0x40, "packages");
         if (_partition == nullptr) {
-            fprintf(stderr, "espjs: no \"packages\" partition\n");
+            fprintf(stderr, "qjsx: no \"packages\" partition\n");
             return false;
         }
 
@@ -450,7 +450,7 @@ void closePackage(const uint8_t *) {
 bool startLinks(agent::Agent *agent) {
     // the driver, and stdout / stderr through it: one write call at a time
     if (uart_driver_install(HOST_UART, UART_RX_BUFFER, UART_TX_BUFFER, 0, nullptr, 0) != ESP_OK) {
-        fprintf(stderr, "espjs: cannot install the UART0 driver\n");
+        fprintf(stderr, "qjsx: cannot install the UART0 driver\n");
         return false;
     }
 
@@ -462,11 +462,11 @@ bool startLinks(agent::Agent *agent) {
 
     // the reader task
     if (!platform::startThread(&uartReader, nullptr, platform::defaultThreadOptions("agent-uart"))) {
-        fprintf(stderr, "espjs: cannot start the UART0 reader\n");
+        fprintf(stderr, "qjsx: cannot start the UART0 reader\n");
         return false;
     }
 
-    printf("espjs agent: listening on UART0\n");
+    printf("qjsx agent: listening on UART0\n");
     return true;
 }
 

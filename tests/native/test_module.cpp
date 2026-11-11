@@ -1,5 +1,5 @@
 // Native module "jsbind_test": exercises the binding library from JS
-// (tests/jsbind.test.js). Only built into espjs-tests.
+// (tests/jsbind.test.js). Only built into qjsx-tests.
 #include <errno.h>
 
 #include "jsbind.h"
@@ -262,7 +262,7 @@ JS_MODULE(jsbind_test, module) {
 void registerDebugTestModule();   // debug_module.cpp
 
 /**
- * Registers the native test modules; called by main() in espjs-tests only.
+ * Registers the native test modules; called by main() in qjsx-tests only.
  */
 void registerTestModules() {
     rt::registerNativeModule("jsbind_test", &jsNewModule_jsbind_test);

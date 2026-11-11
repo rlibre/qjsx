@@ -120,7 +120,7 @@ JSValue readManifest(JSContext *ctx, const package::Reader *reader) {
     // find manifest.json
     const package::Entry *manifest = reader->find("manifest.json");
     if (manifest == nullptr) {
-        fprintf(stderr, "espjs: the package has no manifest.json\n");
+        fprintf(stderr, "qjsx: the package has no manifest.json\n");
         return JS_EXCEPTION;
     }
 
@@ -154,7 +154,7 @@ char *manifestMain(JSContext *ctx, JSValueConst manifest) {
         result = (char *)memory::allocate(strlen(mainName) + 1);
         strcpy(result, mainName);
     } else {
-        fprintf(stderr, "espjs: manifest.json has no \"main\"\n");
+        fprintf(stderr, "qjsx: manifest.json has no \"main\"\n");
     }
 
     // free the JS values
@@ -165,25 +165,25 @@ char *manifestMain(JSContext *ctx, JSValueConst manifest) {
 
 /**
  * True if the package holds the bytecode this engine reads ("bytecode" of
- * the parsed manifest, written by espjs build); prints why if not. An engine
+ * the parsed manifest, written by qjsx build); prints why if not. An engine
  * only reads the bytecode of its own version: checked here, before any
  * module is loaded, the error is clear.
  */
 bool bytecodeMatches(JSContext *ctx, JSValueConst manifest) {
-    // read "bytecode" as a number (absent in a package of an older espjs)
+    // read "bytecode" as a number (absent in a package of an older qjsx)
     JSValue field = JS_GetPropertyStr(ctx, manifest, "bytecode");
     int32_t packaged = 0;
     bool present = JS_IsNumber(field) && JS_ToInt32(ctx, &packaged, field) == 0;
     JS_FreeValue(ctx, field);
     if (!present) {
-        fprintf(stderr, "espjs: the package does not say which bytecode version it holds: rebuild it\n");
+        fprintf(stderr, "qjsx: the package does not say which bytecode version it holds: rebuild it\n");
         return false;
     }
 
     // compare it with the version of this engine
     int expected = JS_GetBytecodeVersion();
     if (packaged != expected) {
-        fprintf(stderr, "espjs: the package holds bytecode version %d, this engine reads version %d: rebuild it\n",
+        fprintf(stderr, "qjsx: the package holds bytecode version %d, this engine reads version %d: rebuild it\n",
                 (int)packaged, expected);
         return false;
     }
@@ -217,7 +217,7 @@ void copyStrings(JSContext *ctx, JSValueConst from, JSValueConst to) {
 }
 
 /**
- * Device run (RunHooks::device): process.argv = ["espjs", main module] and
+ * Device run (RunHooks::device): process.argv = ["qjsx", main module] and
  * process.env = the strings of the manifest's "env" ({} without one).
  */
 void setDeviceProcess(JSContext *ctx, JSValueConst manifest, const char *main) {
@@ -228,11 +228,11 @@ void setDeviceProcess(JSContext *ctx, JSValueConst manifest, const char *main) {
     // argv: the tool and the main module, like "node main.js"; nothing else
     // (no command line on a device)
     JSValue argv = JS_NewArray(ctx);
-    JS_SetPropertyUint32(ctx, argv, 0, JS_NewString(ctx, "espjs"));
+    JS_SetPropertyUint32(ctx, argv, 0, JS_NewString(ctx, "qjsx"));
     JS_SetPropertyUint32(ctx, argv, 1, JS_NewString(ctx, main));
     JS_SetPropertyStr(ctx, process, "argv", argv);
 
-    // env: the "env" of espjs.json, copied into the manifest by espjs build
+    // env: the "env" of qjsx.json, copied into the manifest by qjsx build
     // (never the environment of the machine running the agent)
     JSValue env = JS_NewObject(ctx);
     JSValue packaged = JS_GetPropertyStr(ctx, manifest, "env");
@@ -292,7 +292,7 @@ bool startPackage(JSContext *ctx, void *startOpaque) {
     // find its bytecode
     const package::Entry *entry = findBytecode(start->reader, main);
     if (entry == nullptr) {
-        fprintf(stderr, "espjs: no bytecode for the main module %s\n", main);
+        fprintf(stderr, "qjsx: no bytecode for the main module %s\n", main);
         memory::release(main);
         return false;
     }
@@ -502,7 +502,7 @@ int runPackage(const uint8_t *data, size_t size, const RunHooks *hooks, int argu
     // the whole run
     package::Reader reader;
     if (!reader.open(data, size)) {
-        fprintf(stderr, "espjs: invalid package: %s\n", reader.error());
+        fprintf(stderr, "qjsx: invalid package: %s\n", reader.error());
         return 1;
     }
 

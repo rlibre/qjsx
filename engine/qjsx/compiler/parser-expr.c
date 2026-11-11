@@ -1839,7 +1839,7 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
         } else {
             if (js_parse_postfix_expr(s, 0))
                 return -1;
-            /* espjs: 'new Function', with or without arguments, compiles
+            /* qjsx: 'new Function', with or without arguments, compiles
                a function at run time; reported at the token that follows
                the name */
             if (js_last_op_is_scope_var(s->cur_func, JS_ATOM_Function))
@@ -1892,7 +1892,7 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
             emit_op(s, OP_special_object);
             emit_u8(s, OP_SPECIAL_OBJECT_IMPORT_META);
         } else {
-            /* espjs: the token is still the one after 'import', so the
+            /* qjsx: the token is still the one after 'import', so the
                error is reported at the '(' of the call */
             if (s->no_dynamic_import)
                 return js_parse_error(s, "'import()' is not allowed: use a static import");
@@ -2031,10 +2031,10 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
                         if (name == JS_ATOM_eval && call_type == FUNC_CALL_NORMAL && !has_optional_chain) {
                             /* direct 'eval' */
                             opcode = OP_eval;
-                            /* espjs: needs the compiler at run time */
+                            /* qjsx: needs the compiler at run time */
                             js_compile_warning(s, JS_COMPILE_WARNING_EVAL, op_token_ptr);
                         } else {
-                            /* espjs: Function(...) compiles its arguments */
+                            /* qjsx: Function(...) compiles its arguments */
                             if (name == JS_ATOM_Function && call_type == FUNC_CALL_NORMAL)
                                 js_compile_warning(s, JS_COMPILE_WARNING_FUNCTION, op_token_ptr);
                             /* verify if function name resolves to a simple
@@ -2932,7 +2932,7 @@ __exception int js_parse_assign_expr2(JSParseState *s, int parse_flags)
             emit_op(s, OP_nip);
             emit_op(s, OP_nip);
             emit_op(s, OP_nip);
-            emit_return(s, TRUE, NULL);   /* espjs: generator return(), no debugger stop */
+            emit_return(s, TRUE, NULL);   /* qjsx: generator return(), no debugger stop */
 
             /* throw handling */
             emit_label(s, label_throw);
@@ -2973,7 +2973,7 @@ __exception int js_parse_assign_expr2(JSParseState *s, int parse_flags)
                 emit_op(s, OP_await);
             emit_op(s, OP_yield);
             label_next = emit_goto(s, OP_if_false, -1);
-            emit_return(s, TRUE, NULL);   /* espjs: generator return(), no debugger stop */
+            emit_return(s, TRUE, NULL);   /* qjsx: generator return(), no debugger stop */
             emit_label(s, label_next);
         }
         return 0;

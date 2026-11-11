@@ -617,7 +617,7 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     rt->malloc_ctx.mf = *mf;
     rt->malloc_ctx.malloc_state = ms;
     rt->malloc_gc_threshold = 256 * 1024;
-    rt->debug.reported_exception = JS_UNINITIALIZED;   /* espjs: none */
+    rt->debug.reported_exception = JS_UNINITIALIZED;   /* qjsx: none */
 
     init_list_head(&rt->context_list);
     init_list_head(&rt->gc_obj_list);
@@ -682,7 +682,7 @@ static size_t js_def_malloc_usable_size(const void *ptr)
 #elif defined(__linux__) || defined(__GLIBC__)
     return malloc_usable_size((void *)ptr);
 #elif defined(__NEWLIB__)
-    /* espjs: newlib (ESP32, RP2350) does not declare malloc_usable_size; the
+    /* qjsx: newlib (ESP32, RP2350) does not declare malloc_usable_size; the
        devices give their own allocator (board::jsAllocator), so this default
        one is not used there */
     return 0;
@@ -920,7 +920,7 @@ void JS_FreeRuntime(JSRuntime *rt)
     int i;
 
     JS_FreeValueRT(rt, rt->current_exception);
-    js_debug_forget_exception(rt);   /* espjs */
+    js_debug_forget_exception(rt);   /* qjsx */
 
     list_for_each_safe(el, el1, &rt->job_list) {
         JSJobEntry *e = list_entry(el, JSJobEntry, link);
@@ -1148,7 +1148,7 @@ JSContext *JS_NewContext(JSRuntime *rt)
     if (JS_AddIntrinsicBaseObjects(ctx) ||
         JS_AddIntrinsicDate(ctx) ||
 #ifndef QJSX_NO_COMPILER
-        /* espjs: an engine built without compiler/ (QJSX_NO_COMPILER, the
+        /* qjsx: an engine built without compiler/ (QJSX_NO_COMPILER, the
            targets) has no eval: eval(), Function() and JS_Eval() throw
            "eval is not supported" */
         JS_AddIntrinsicEval(ctx) ||

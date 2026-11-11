@@ -345,12 +345,12 @@ static inline JSValue __JS_NewShortBigInt(JSContext *ctx, int64_t d)
 /* allow top-level await in normal script. JS_Eval() returns a
    promise. Only allowed with JS_EVAL_TYPE_GLOBAL */
 #define JS_EVAL_FLAG_ASYNC (1 << 7)
-/* espjs: with JS_EVAL_FLAG_COMPILE_ONLY and JS_EVAL_TYPE_MODULE, the
+/* qjsx: with JS_EVAL_FLAG_COMPILE_ONLY and JS_EVAL_TYPE_MODULE, the
    imported modules are not loaded (a compiler producing bytecode does not
    need them). The module must be resolved before it is run. */
 #define JS_EVAL_FLAG_NO_RESOLVE (1 << 8)
-/* espjs: 'import()' is a syntax error, reported at its position. For the
-   programs whose modules must all be known when they are built (espjs
+/* qjsx: 'import()' is a syntax error, reported at its position. For the
+   programs whose modules must all be known when they are built (qjsx
    build): only static imports are left. */
 #define JS_EVAL_FLAG_NO_DYNAMIC_IMPORT (1 << 9)
 
@@ -974,7 +974,7 @@ void JS_SetModuleLoaderFunc2(JSRuntime *rt,
 /* return the import.meta object of a module */
 JSValue JS_GetImportMeta(JSContext *ctx, JSModuleDef *m);
 JSAtom JS_GetModuleName(JSContext *ctx, JSModuleDef *m);
-/* espjs: the modules a module asks for with 'import' and 'export ... from',
+/* qjsx: the modules a module asks for with 'import' and 'export ... from',
    as written in its source (not normalized), in source order; the same
    name may come several times. For a compiler that follows the imports
    itself (see JS_EVAL_FLAG_NO_RESOLVE).
@@ -1010,7 +1010,7 @@ uint8_t *JS_WriteObject2(JSContext *ctx, size_t *psize, JSValueConst obj,
 #define JS_READ_OBJ_REFERENCE (1 << 3) /* allow object references */
 JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
                       int flags);
-/* espjs: version of the bytecode this engine writes and reads (BC_VERSION):
+/* qjsx: version of the bytecode this engine writes and reads (BC_VERSION):
    JS_ReadObject() refuses any other. For a loader that wants to refuse a
    program compiled for another engine before it loads anything. */
 int JS_GetBytecodeVersion(void);

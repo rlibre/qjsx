@@ -1,12 +1,12 @@
 // Tests of the JS modules of the tool: zip, glob, project.
-// Run with: bin/Release/espjs run tests/tools.test.js
+// Run with: bin/Release/qjsx run tests/tools.test.js
 import * as fs from "fs";
 import { join } from "stdlib/path";
-import { writeZip, readZip, crc32 } from "espjs:zip";
-import { globToRegExp, matchFiles } from "espjs:glob";
-import { loadProject } from "espjs:project";
-import { compileModule, normalizeImport, warningText, BYTECODE_VERSION } from "espjs:compile";
-import { libraryOf } from "espjs:library";
+import { writeZip, readZip, crc32 } from "qjsx:zip";
+import { globToRegExp, matchFiles } from "qjsx:glob";
+import { loadProject } from "qjsx:project";
+import { compileModule, normalizeImport, warningText, BYTECODE_VERSION } from "qjsx:compile";
+import { libraryOf } from "qjsx:library";
 import { check, equal, throws, report } from "./assert.js";
 
 const encode = text => new TextEncoder().encode(text);
@@ -47,31 +47,31 @@ equal(project.keep, 3, "keep");
 const directory = join("build", "test-project");
 fs.rmSync(directory, { recursive: true, force: true });
 fs.mkdirSync(directory, { recursive: true });
-throws(() => loadProject(directory), /no espjs\.json/, "missing project file");
-fs.writeFileSync(join(directory, "espjs.json"), '{ "mian": "x.js" }');
+throws(() => loadProject(directory), /no qjsx\.json/, "missing project file");
+fs.writeFileSync(join(directory, "qjsx.json"), '{ "mian": "x.js" }');
 throws(() => loadProject(directory), /unknown setting 'mian'/, "typo in a setting");
-fs.writeFileSync(join(directory, "espjs.json"), '{ "keep": "3" }');
+fs.writeFileSync(join(directory, "qjsx.json"), '{ "keep": "3" }');
 throws(() => loadProject(directory), /'keep' must be a number/, "wrong type");
-fs.writeFileSync(join(directory, "espjs.json"), "{ broken");
-throws(() => loadProject(directory), /espjs\.json/, "invalid JSON");
-fs.writeFileSync(join(directory, "espjs.json"), '{ "env": ["A"] }');
+fs.writeFileSync(join(directory, "qjsx.json"), "{ broken");
+throws(() => loadProject(directory), /qjsx\.json/, "invalid JSON");
+fs.writeFileSync(join(directory, "qjsx.json"), '{ "env": ["A"] }');
 throws(() => loadProject(directory), /'env' must be a object/, "env is not an object");
-fs.writeFileSync(join(directory, "espjs.json"), '{ "env": null }');
+fs.writeFileSync(join(directory, "qjsx.json"), '{ "env": null }');
 throws(() => loadProject(directory), /'env' must be a object/, "env is null");
-fs.writeFileSync(join(directory, "espjs.json"), '{ "env": { "PORT": 80 } }');
+fs.writeFileSync(join(directory, "qjsx.json"), '{ "env": { "PORT": 80 } }');
 throws(() => loadProject(directory), /'env\.PORT' must be a string/, "env value is not a string");
-fs.writeFileSync(join(directory, "espjs.json"), '{ "env": { "PORT": "80" } }');
+fs.writeFileSync(join(directory, "qjsx.json"), '{ "env": { "PORT": "80" } }');
 equal(loadProject(directory).env.PORT, "80", "env of strings");
-fs.writeFileSync(join(directory, "espjs.json"), "{}");
+fs.writeFileSync(join(directory, "qjsx.json"), "{}");
 equal(loadProject(directory).name, "test-project", "default name is the directory name");
 equal(loadProject(directory).libraries.length, 0, "no library by default");
-fs.writeFileSync(join(directory, "espjs.json"), '{ "libraries": [3] }');
+fs.writeFileSync(join(directory, "qjsx.json"), '{ "libraries": [3] }');
 throws(() => loadProject(directory), /'libraries' must be an array of paths/, "library that is not a path");
-fs.writeFileSync(join(directory, "espjs.json"), '{ "modules": { "../x": "src/x.js" } }');
+fs.writeFileSync(join(directory, "qjsx.json"), '{ "modules": { "../x": "src/x.js" } }');
 throws(() => loadProject(directory), /module name '\.\.\/x'/, "module name that leaves the library");
-fs.writeFileSync(join(directory, "espjs.json"), '{ "modules": { "x": 3 } }');
+fs.writeFileSync(join(directory, "qjsx.json"), '{ "modules": { "x": 3 } }');
 throws(() => loadProject(directory), /'modules\.x' must be the path/, "module without a source file");
-fs.writeFileSync(join(directory, "espjs.json"), '{ "version": "1.0.0", "modules": { "drivers/x": "src/x.js" } }');
+fs.writeFileSync(join(directory, "qjsx.json"), '{ "version": "1.0.0", "modules": { "drivers/x": "src/x.js" } }');
 equal(loadProject(directory).modules["drivers/x"], "src/x.js", "modules of a library project");
 fs.rmSync(directory, { recursive: true });
 

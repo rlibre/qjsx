@@ -1,13 +1,13 @@
 -- Embeds a JS file in a C++ file that registers it as an embedded module of
 -- the runtime (see rt::EmbeddedRegistration in common/runtime/modules/modules.h).
 --
---   premake5 --file=tools/embed-js.lua embed-js --input=a.js --output=a.js.cpp --name=espjs:a
+--   premake5 --file=tools/embed-js.lua embed-js --input=a.js --output=a.js.cpp --name=qjsx:a
 --
 -- Used as a custom build rule by premake5.lua: make regenerates the C++ file
 -- only when the JS file changes.
 
 -- C++ raw string delimiter (16 characters at most).
-local DELIMITER = "espjs_js"
+local DELIMITER = "qjsx_js"
 
 local function embedJs(input, output, name)
     local source = io.readfile(input)

@@ -24,7 +24,7 @@ struct RunHooks {
     void (*finished)(void *opaque);              // the loop has ended, the runtime is not freed yet
     JSInterruptHandler *interrupt;               // stops runaway JS code (opaque passed)
     bool                exitOnUncaught;          // false: print uncaught exceptions and go on
-    // Run as on a device (package runs only): process.argv is ["espjs", main
+    // Run as on a device (package runs only): process.argv is ["qjsx", main
     // module] and process.env the "env" object of the manifest ({} without
     // one), instead of the arguments given and the system's environment.
     bool                device;

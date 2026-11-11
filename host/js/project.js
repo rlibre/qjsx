@@ -1,4 +1,4 @@
-// The project file espjs.json, at the root of a project:
+// The project file qjsx.json, at the root of a project:
 //   {
 //     "name": "demo",                 package name (default: the directory name)
 //     "main": "src/main.js",          module run at start
@@ -14,7 +14,7 @@
 //                                     the standard one (paths from the project)
 //   }
 //
-// A library project (espjs mklib) has 'modules' instead of 'main' and
+// A library project (qjsx mklib) has 'modules' instead of 'main' and
 // 'sources', and a version:
 //   {
 //     "name": "sensors",              library name: its modules are imported
@@ -28,7 +28,7 @@
 import * as fs from "fs";
 import { join, basename, resolve } from "stdlib/path";
 
-export const PROJECT_FILE = "espjs.json";
+export const PROJECT_FILE = "qjsx.json";
 
 const DEFAULTS = {
     main: "src/main.js",

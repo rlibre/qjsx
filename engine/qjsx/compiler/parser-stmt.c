@@ -83,7 +83,7 @@ static __exception int emit_break(JSParseState *s, JSAtom name, int is_cont)
 }
 
 /* execute the finally blocks before return */
-/* espjs: emits a return opcode, preceded by its debugger position */
+/* qjsx: emits a return opcode, preceded by its debugger position */
 static void emit_return_op(JSParseState *s, int op, const uint8_t *source_ptr)
 {
     if (source_ptr != NULL)
@@ -642,7 +642,7 @@ __exception int js_parse_statement_or_decl(JSParseState *s,
         }
     }
 
-    /* espjs: statement start, where the debugger stops */
+    /* qjsx: statement start, where the debugger stops */
     emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
 
     switch(tok = s->token.val) {
@@ -762,7 +762,7 @@ __exception int js_parse_statement_or_decl(JSParseState *s,
             set_eval_ret_undefined(s);
 
             emit_label(s, label_cont);
-            /* espjs: the loop test is a debugger stop at each iteration */
+            /* qjsx: the loop test is a debugger stop at each iteration */
             emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
             if (js_parse_expr_paren(s))
                 goto fail;
@@ -800,7 +800,7 @@ __exception int js_parse_statement_or_decl(JSParseState *s,
                 goto fail;
 
             emit_label(s, label_cont);
-            /* espjs: the loop test is a debugger stop at each iteration */
+            /* qjsx: the loop test is a debugger stop at each iteration */
             emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
             if (js_parse_expect(s, TOK_WHILE))
                 goto fail;
@@ -901,7 +901,7 @@ __exception int js_parse_statement_or_decl(JSParseState *s,
                 label_test = label_body;
             } else {
                 emit_label(s, label_test);
-                /* espjs: the loop test is a debugger stop at each iteration */
+                /* qjsx: the loop test is a debugger stop at each iteration */
                 emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
                 if (js_parse_expr(s))
                     goto fail;
@@ -920,7 +920,7 @@ __exception int js_parse_statement_or_decl(JSParseState *s,
 
                 pos_cont = s->cur_func->byte_code.size;
                 emit_label(s, label_cont);
-                /* espjs: the update expression is a debugger stop too (this
+                /* qjsx: the update expression is a debugger stop too (this
                    code is moved after the loop body, with its position) */
                 emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, s->token.ptr);
                 if (js_parse_expr(s))
@@ -1126,13 +1126,13 @@ __exception int js_parse_statement_or_decl(JSParseState *s,
             }
 
             if (s->token.val == TOK_CATCH) {
-                const uint8_t *catch_ptr = s->token.ptr;   /* espjs */
+                const uint8_t *catch_ptr = s->token.ptr;   /* qjsx */
                 if (next_token(s))
                     goto fail;
 
                 push_scope(s);  /* catch variable */
                 emit_label(s, label_catch);
-                /* espjs: entering the catch clause is a debugger stop */
+                /* qjsx: entering the catch clause is a debugger stop */
                 emit_debug_pos(s, JS_DEBUG_POSITION_STATEMENT, catch_ptr);
 
                 if (s->token.val == '{') {
@@ -1330,7 +1330,7 @@ __exception int js_parse_statement_or_decl(JSParseState *s,
         break;
 
     case TOK_DEBUGGER:
-        /* espjs: calls the debugger hook (no-op without debugger) */
+        /* qjsx: calls the debugger hook (no-op without debugger) */
         emit_op(s, OP_debugger);
         if (next_token(s))
             goto fail;

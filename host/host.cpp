@@ -100,7 +100,7 @@ int runScriptFile(const char *path, int argumentCount, char **arguments) {
     size_t size = 0;
     uint8_t *source = files::readAll(path, &size);
     if (source == nullptr) {
-        fprintf(stderr, "espjs: cannot read %s: %s\n", path, strerror(errno));
+        fprintf(stderr, "qjsx: cannot read %s: %s\n", path, strerror(errno));
         return 1;
     }
 
@@ -119,7 +119,7 @@ int runPackageFile(const char *path, int argumentCount, char **arguments) {
     size_t size = 0;
     uint8_t *data = files::readAll(path, &size);
     if (data == nullptr) {
-        fprintf(stderr, "espjs: cannot read %s: %s\n", path, strerror(errno));
+        fprintf(stderr, "qjsx: cannot read %s: %s\n", path, strerror(errno));
         return 1;
     }
 
@@ -133,7 +133,7 @@ int runPackageFile(const char *path, int argumentCount, char **arguments) {
 } // namespace
 
 /**
- * "espjs run <path>": a package runs from its bytecode (like on a target),
+ * "qjsx run <path>": a package runs from its bytecode (like on a target),
  * anything else is a source module.
  */
 int runFile(const char *path, int argumentCount, char **arguments) {
@@ -152,13 +152,13 @@ int runFile(const char *path, int argumentCount, char **arguments) {
 
 /**
  * The commands of the tool: runs the JS modules embedded in the executable
- * ("espjs:cli" and the modules it imports).
+ * ("qjsx:cli" and the modules it imports).
  */
 int runCommand(int argumentCount, char **arguments) {
     // a two-line main module imports the CLI and awaits main(process.argv.slice(1))
-    const char *source = "import { main } from \"espjs:cli\";\n"
+    const char *source = "import { main } from \"qjsx:cli\";\n"
                          "await main(process.argv.slice(1));\n";
-    return runSource("<espjs>", source, strlen(source), argumentCount, arguments);
+    return runSource("<qjsx>", source, strlen(source), argumentCount, arguments);
 }
 
 } // namespace host

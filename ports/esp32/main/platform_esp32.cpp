@@ -53,7 +53,7 @@ int64_t monotonicMs() {
  * the backtrace and restarts the chip.
  */
 void fatal(const char *message) {
-    fprintf(stderr, "espjs: fatal: %s\n", message);
+    fprintf(stderr, "qjsx: fatal: %s\n", message);
     fflush(stderr);
     esp_system_abort(message);
 }

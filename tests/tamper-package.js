@@ -2,9 +2,9 @@
 // another engine had compiled it. The copy says another bytecode version in
 // its manifest; a package also gets another build id, so that it can be told
 // from the original once installed.
-// Usage: espjs run tests/tamper-package.js <package or library> <copy>
+// Usage: qjsx run tests/tamper-package.js <package or library> <copy>
 import * as fs from "fs";
-import { readZip, writeZip } from "espjs:zip";
+import { readZip, writeZip } from "qjsx:zip";
 
 const [original, copy] = process.argv.slice(2);
 const entries = readZip(fs.readFileSync(original));

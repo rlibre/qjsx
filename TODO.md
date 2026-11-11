@@ -2,6 +2,18 @@
 
 ## Où on en est (2026-11-11, à relire en reprenant le travail)
 
+- [x] **Projet renommé `qjsx`** (ex-`espjs`) le 2026-11-11 : commande `qjsx`, fichier de
+      projet `qjsx.json`, modules de l'outil `qjsx:nom`, macros `QJSX_*`, marqueur `qjsx:`
+      dans le moteur, firmware `qjsx.bin`. Les bibliothèques du moteur sont les projets premake
+      `qjsx-engine` et `qjsx-engine-target`. Seul le dossier de travail garde l'ancien nom
+      (`C:\Sandbox\espjs`). Tests PC OK en Release et en Debug (49 vérifications), tests
+      d'origine de QuickJS OK, firmware compilé. RESTE : flasher ce firmware (la carte
+      s'annonce encore « espjs esp32s3 ») ; un projet existant doit renommer son
+      `espjs.json` en `qjsx.json`.
+- [x] **Dépôt git** : https://github.com/rlibre/qjsx.git, branche `main`. `README.md` en
+      anglais. **Documentation en anglais** (2026-11-11) : tous les fichiers de `doc/` sont
+      traduits ; `TODO.md` et `doc/prompt-reprise.md` (hors dépôt) restent en français.
+
 - [x] Documentation du code terminée le 2026-11-11 : `/** */` court sur chaque fonction,
       déroulement en pseudo-code dans les corps, `//` sur chaque membre, `case` indentés,
       séparateurs `// ### titre ###`. Contrôles : `tools/undocumented.pl` et
@@ -20,7 +32,7 @@
       - les « mineurs », qui attendent l'utilisateur.
 - [x] **Chemins Windows** (demande du 2026-11-11, fait le même jour) : tout en `/` (Windows
       les accepte). Une seule fonction, `files::useSlashes` (Windows seulement ; sur POSIX `\`
-      est un caractère de nom), utilisée par `currentDirectory`, `espjs run` (host.cpp) et
+      est un caractère de nom), utilisée par `currentDirectory`, `qjsx run` (host.cpp) et
       l'URL de `import.meta` ; même règle dans `toSlashes` du module `path`. Les chemins
       `\\?\` (longs) et `\\.\` (périphériques, COM10...) gardent leurs `\` (accord de
       l'utilisateur). Tests OK le 2026-11-11.
@@ -35,7 +47,7 @@
         (option B), carte, plateforme, lien UART0 ; deux changements moteur newlib (I) ;
         `board::jsStackSize()` ajouté à board.h.
       - [x] flashé et essayé le 2026-11-11 : agent par UART0, déploiement + exécution sur place,
-        debugger 52/52 (`espjs run tests/debugger.test.js serial:COM11@921600`). Structure par
+        debugger 52/52 (`qjsx run tests/debugger.test.js serial:COM11@921600`). Structure par
         carte (ports/esp32/boards/, partitions/) faite et revalidée sur la carte.
       - [x] deux défauts trouvés sur la carte, CORRIGÉS le 2026-11-11 (tests run-tests.sh,
         vérifiés sur la carte) : l'arrêt d'un programme n'affiche plus « interrupted » (le
@@ -55,9 +67,9 @@
       - [x] `import "path"` échouait sur la carte (module embarqué en source, pas de
         compilateur). FAIT le 2026-11-11 : bibliothèques `.qjslib` (architecture.md 4.5,
         CLAUDE.md « JS libraries »). Modules nommés `<bibliothèque>/<module>`
-        (`stdlib/path`), `espjs mklib`, `stdlib.qjslib` fabriqué à côté de l'exécutable
+        (`stdlib/path`), `qjsx mklib`, `stdlib.qjslib` fabriqué à côté de l'exécutable
         depuis `lib/stdlib/`, modules importés copiés entiers dans le paquet par
-        `espjs build`, `import()` refusé par le compilateur (changement moteur J), plus
+        `qjsx build`, `import()` refusé par le compilateur (changement moteur J), plus
         aucun JS dans le firmware. Tests PC OK en Release et en Debug (10 vérifications de
         plus dans run-tests.sh, 43 en tout ; tools.test.js), tests d'origine de QuickJS OK,
         microbench −3,9 % contre l'original (pas de régression). Sur la carte :
@@ -67,10 +79,10 @@
         52/52. Le port série lent sous Windows, trouvé pendant cet essai, est corrigé
         (history.md).
         Restent, non faits :
-        - `espjs deploy` qui compare `natives` du manifeste à une liste que le firmware
+        - `qjsx deploy` qui compare `natives` du manifeste à une liste que le firmware
           donnerait dans `Hello` (changement de protocole) ;
         - les `.d.ts` des bibliothèques ;
-        - `espjs run script.js` ne connaît que `stdlib` (un script qui importe une autre
+        - `qjsx run script.js` ne connaît que `stdlib` (un script qui importe une autre
           bibliothèque doit être construit) ;
         - les branches Linux et macOS de `host/platform/executable_path.cpp` sont écrites
           mais pas compilées.
@@ -78,7 +90,7 @@
         refuse un paquet compilé pour un autre moteur (numéro de bytecode dans le manifeste,
         contrôlé par l'agent à l'envoi et par le chargeur au lancement) ; une bibliothèque
         d'un autre compilateur est recompilée depuis ses sources, avec un message ;
-        `espjs build` et `espjs mklib` préviennent de `eval()` et du constructeur `Function`
+        `qjsx build` et `qjsx mklib` préviennent de `eval()` et du constructeur `Function`
         avec leur position. Tests PC OK en Release et en Debug (49 vérifications). Firmware
         FLASHÉ le 2026-11-11 et vérifié sur la carte : un paquet d'un autre numéro de
         bytecode est refusé à l'envoi avec son message, le paquet installé reste, le
@@ -104,27 +116,27 @@
       (broches, fonctions, réservées, noms comme `LED`), un module par fonction (jamais par
       puce) enregistré seulement si le port le fournit et si l'option Kconfig / CMake est
       active (`--gc-sections` retire alors les piles du SDK), liste des modules dans `Hello`
-      vérifiée par `espjs deploy`, `.d.ts` par cible. Questions posées : firmware générique
+      vérifiée par `qjsx deploy`, `.d.ts` par cible. Questions posées : firmware générique
       par carte ou par projet ? API JS à nous ou proche d'une existante ?
       Code C chargeable à la volée (« pseudo .lib ») : abandonné par l'utilisateur (2026-11-11).
 - [ ] **Doc « créer un nouveau device »** (demande de l'utilisateur, 2026-11-11) : un guide
       pas à pas, `doc/new-device.md`, pour deux cas :
       - une nouvelle carte d'une puce déjà portée (ESP32) : dossier `ports/esp32/boards/<carte>/`
         (`sdkconfig.board` : puce, flash, table de `partitions/`, PSRAM ; `board_config.h`),
-        build avec `board=<carte>`, vérifications (esptool flash-id, `espjs device info`,
+        build avec `board=<carte>`, vérifications (esptool flash-id, `qjsx device info`,
         déploiement, tests du debugger sur la carte) ;
-      - une nouvelle puce (nouveau port, comme le RP2350) : `ports/cmake/espjs.cmake`,
+      - une nouvelle puce (nouveau port, comme le RP2350) : `ports/cmake/qjsx.cmake`,
         `ports/freertos/` ou équivalent, ce que `platform.h` et `board.h` demandent (fonction par
         fonction, threads, propriété), point d'entrée, liaisons, stockage des paquets, pièges
         rencontrés (int32_t = long, newlib, `-Werror` d'IDF, PSRAM octale ou quad).
       À écrire quand la structure par carte est validée sur l'ESP32 (en cours).
 - [ ] **Diagramme du principe de fonctionnement** (demande de l'utilisateur, 2026-11-11) : un
-      diagramme en SVG qui explique le fonctionnement global du système (tout espjs : PC,
+      diagramme en SVG qui explique le fonctionnement global du système (tout qjsx : PC,
       outil hôte, paquets, liaisons, agent, moteur sur le device, debugger). Emplacement décidé :
       un fichier SVG dans `doc/`, affiché en tête de doc/architecture.md.
 - [ ] **Statistiques du device** (demande de l'utilisateur, 2026-11-11) : l'agent doit pouvoir
       envoyer des statistiques (mémoire, etc.). À concevoir : quelles valeurs, quel message du
-      protocole, quelle commande de `espjs`.
+      protocole, quelle commande de `qjsx`.
 - [ ] **FFI** (demande de l'utilisateur, 2026-11-11) : à discuter. Appeler du C depuis le JS
       sans écrire de module jsbind (déclarer une fonction native et ses types côté JS) ?
       Questions : sur quels devices, quelle sécurité (pas de protection mémoire), lien avec
@@ -144,12 +156,12 @@
         partition des paquets (+ données si `fs` existe sur cible) ;
       - compatibilité : le firmware annonce son identifiant dans `Hello`, un paquet compilé
         pour un autre moteur (format de bytecode) est refusé ; commande hôte du genre
-        `espjs device update firmware.bin`.
+        `qjsx device update firmware.bin`.
 - [ ] **Port RP2350** (Olimex PICO2-XXL, PSRAM sur GPIO8) après l'ESP32-S3 : chaîne pico-sdk et
       FreeRTOS-Kernel à confirmer avec l'utilisateur (pas de téléchargement sans accord).
 - [ ] **Debugger, étape 2** : le cœur du proxy en JS, sans CDP (lien entre le sidecar et le
       stub, variables visibles par portée, évaluation compilée sur l'hôte). Puis l'étape 3
-      (serveur CDP, `espjs debug`), puis l'étape 4 (points d'arrêt conditionnels, prédiction
+      (serveur CDP, `qjsx debug`), puis l'étape 4 (points d'arrêt conditionnels, prédiction
       « non rattrapée », `--wait-debugger`, liaison série).
 - [ ] `C:\temp` contient des sauvegardes et des scripts des agents (doc-orig, pseudo-*,
       jsbind-orig, doc-trial, final-style, espjs-backup-before-style…), qu'on peut supprimer.
@@ -163,7 +175,7 @@
         par test, et pistes, dans doc/quickjs-split-perf.md (section « Moteur modifié pour le
         debugger »)
 - [ ] Retravailler les tests du microbench plus lents que l'original (moteur modifié pour le
-      debugger, mesure du 2026-11-10, ns par opération, original → espjs). Tous étaient déjà
+      debugger, mesure du 2026-11-10, ns par opération, original → qjsx). Tous étaient déjà
       lents avec le découpage seul : c'est le découpage, pas le debugger.
       - `prop_clone` 42.97 → 51.40 (+19.6 %) : copie d'objet `{ ...ref }` (10 propriétés nommées
         + 10 indices)
@@ -182,7 +194,7 @@
       quickjs-opcode.h, donc ordre de la table de dispatch et des cas dans JS_CallInternal ;
       l'ajout de OP_debugger avant nop a décalé tous les opcodes courts)
 - [ ] Pouvoir uploader des sources JS (fichiers, dossiers) vers la cible, via le stub du debugger ou ailleurs
-      → fait côté hôte et agent desktop : `espjs deploy` (paquet .qjspkg) ; reste le stockage en flash sur l'ESP
+      → fait côté hôte et agent desktop : `qjsx deploy` (paquet .qjspkg) ; reste le stockage en flash sur l'ESP
 - [ ] Faciliter l'écriture d'objets C visibles en JS (aujourd'hui fastidieux)
       → en cours : bibliothèque de liaison C++ common/jsbind (conception dans CLAUDE.md)
 - [ ] Décider ce qu'on retire de la bibliothèque standard de qjs (quickjs-libc : fichiers, etc.)

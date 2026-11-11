@@ -1,14 +1,14 @@
 {
-	// Debugging the espjs tool itself (C and C++ code) with gdb. The Debug
+	// Debugging the qjsx tool itself (C and C++ code) with gdb. The Debug
 	// executable must be built first: make -C build config=debug
 	"version": "0.2.0",
 	"configurations": [
 		{
 			// runs a script, or a package (.qjspkg) like a device does
-			"name": "espjs run (gdb)",
+			"name": "qjsx run (gdb)",
 			"type": "cppdbg",
 			"request": "launch",
-			"program": "${workspaceFolder}/bin/Debug/espjs.exe",
+			"program": "${workspaceFolder}/bin/Debug/qjsx.exe",
 			"args": ["run", "tests/runtime.test.js"],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
@@ -18,10 +18,10 @@
 		},
 		{
 			// a command written in JS (host/js): here the build of the demo project
-			"name": "espjs build (gdb)",
+			"name": "qjsx build (gdb)",
 			"type": "cppdbg",
 			"request": "launch",
-			"program": "${workspaceFolder}/bin/Debug/espjs.exe",
+			"program": "${workspaceFolder}/bin/Debug/qjsx.exe",
 			"args": ["build", "tests/fixtures/demo"],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",

@@ -1,9 +1,9 @@
-// espjs agent: the device side running on the desktop, a stand-in for a
+// qjsx agent: the device side running on the desktop, a stand-in for a
 // board. The same code as the firmware (agent::runDevice, common/agent),
 // with the desktop board (host/platform/board_host.cpp): packages in files,
 // a TCP link, the JS program on the main thread.
 //
-//   espjs agent [--host 127.0.0.1] [--port 5555] [--storage build/agent] [--token secret]
+//   qjsx agent [--host 127.0.0.1] [--port 5555] [--storage build/agent] [--token secret]
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +16,7 @@
 namespace {
 
 /**
- * Options of "espjs agent", with their defaults.
+ * Options of "qjsx agent", with their defaults.
  */
 struct Options {
     const char *host = "127.0.0.1";       // address to listen on (borrowed from argv)
@@ -26,7 +26,7 @@ struct Options {
 };
 
 /**
- * Reads the options that follow "espjs agent" into *options (missing ones keep
+ * Reads the options that follow "qjsx agent" into *options (missing ones keep
  * their default). Prints the usage and returns false on a bad option.
  */
 bool parseOptions(int argc, char **argv, Options *options) {
@@ -43,7 +43,7 @@ bool parseOptions(int argc, char **argv, Options *options) {
         } else if (strcmp(argv[i], "--token") == 0 && hasValue) {
             options->token = argv[++i];
         } else {
-            fprintf(stderr, "usage: espjs agent [--host 127.0.0.1] [--port 5555] [--storage build/agent] [--token secret]\n");
+            fprintf(stderr, "usage: qjsx agent [--host 127.0.0.1] [--port 5555] [--storage build/agent] [--token secret]\n");
             return false;
         }
     }
@@ -54,7 +54,7 @@ bool parseOptions(int argc, char **argv, Options *options) {
 } // namespace
 
 /**
- * "espjs agent [options]": runs the desktop agent. Returns the exit code (2 on
+ * "qjsx agent [options]": runs the desktop agent. Returns the exit code (2 on
  * a usage error, 1 if it could not start); never returns otherwise.
  */
 int runAgentCommand(int argc, char **argv) {
@@ -71,7 +71,7 @@ int runAgentCommand(int argc, char **argv) {
     }
 
     // run the device: the calling thread becomes the JS thread
-    agent::Identity identity = { "espjs desktop agent " ESPJS_VERSION, CONFIG_VERSION, options.token,
+    agent::Identity identity = { "qjsx desktop agent " QJSX_VERSION, CONFIG_VERSION, options.token,
                                  JS_GetBytecodeVersion() };
     agent::runDevice(identity);
     return 1;   // runDevice returns only when the links could not start

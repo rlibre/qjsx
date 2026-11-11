@@ -10,7 +10,7 @@
 // Requests are answered by RESPONSE (payload: result) or ERROR (payload:
 // { MESSAGE, CODE }). A repeated request id gets the same answer again
 // without being executed twice (lost answer on a serial link).
-import { encode, decode } from "espjs:cbor";
+import { encode, decode } from "qjsx:cbor";
 
 export const PROTOCOL_VERSION = 1;
 export const DEFAULT_MAX_MESSAGE = 65536;

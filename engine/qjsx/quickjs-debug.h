@@ -1,5 +1,5 @@
 /*
- * espjs: debugger support in the QuickJS engine.
+ * qjsx: debugger support in the QuickJS engine.
  *
  * Not part of upstream QuickJS: see doc/engine-changes.md. Implemented in
  * core/debug.c, with hooks in core/interpreter.c.

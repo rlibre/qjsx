@@ -104,7 +104,7 @@ public:
 };
 
 struct Identity {
-    const char *name;       // "espjs desktop agent", "esp32-s3"...
+    const char *name;       // "qjsx desktop agent", "esp32-s3"...
     const char *engine;     // QuickJS version
     const char *token;      // required in HELLO if not null (network links)
     int         bytecode;   // version of the bytecode the engine reads (JS_GetBytecodeVersion)

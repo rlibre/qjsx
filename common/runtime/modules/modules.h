@@ -13,7 +13,7 @@ struct NativeModule {
 };
 
 // Module written in JS and embedded in the executable as source, compiled at
-// load time: the desktop tool only (its commands "espjs:name", and its own
+// load time: the desktop tool only (its commands "qjsx:name", and its own
 // copy of the standard library, "stdlib/name"). A device has no compiler and
 // embeds no JS: its programs bring the library modules they use in their
 // package (.qjslib libraries, see host/js/build.js).

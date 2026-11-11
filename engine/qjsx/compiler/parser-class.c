@@ -52,7 +52,7 @@ static __exception int js_parse_class_default_ctor(JSParseState *s,
 
     fd->func_kind = JS_FUNC_NORMAL;
     fd->func_type = func_type;
-    emit_return(s, FALSE, NULL);   /* espjs: generated, no debugger stop */
+    emit_return(s, FALSE, NULL);   /* qjsx: generated, no debugger stop */
 
     s->cur_func = fd->parent;
     if (pfd)
@@ -564,7 +564,7 @@ __exception int js_parse_class(JSParseState *s, BOOL is_class_expr,
     /* patch the constant pool index for the constructor */
     put_u32(fd->byte_code.buf + ctor_cpool_offset, ctor_fd->parent_cpool_idx);
 
-    /* espjs: the constructor covers the class source */
+    /* qjsx: the constructor covers the class source */
     ctor_fd->source_end = s->buf_ptr - s->buf_start;
     /* store the class source code in the constructor. */
     if (!fd->strip_source) {

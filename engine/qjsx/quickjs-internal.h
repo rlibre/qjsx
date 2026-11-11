@@ -30,7 +30,7 @@
 #include "cutils.h"
 #include "list.h"
 #include "quickjs.h"
-#include "quickjs-debug.h"  /* espjs */
+#include "quickjs-debug.h"  /* qjsx */
 #include "libregexp.h"
 #include "libunicode.h"
 #include "dtoa.h"
@@ -302,7 +302,7 @@ typedef struct {
 
 /* end JS Malloc */
 
-/* espjs: state of the debugger support (quickjs-debug.h, core/debug.c) */
+/* qjsx: state of the debugger support (quickjs-debug.h, core/debug.c) */
 typedef struct JSDebugState {
     JSDebugHook *hook;           /* NULL: debugging off */
     void *hook_opaque;
@@ -396,7 +396,7 @@ struct JSRuntime {
     int shape_hash_count; /* number of hashed shapes */
     JSShape **shape_hash;
     void *user_opaque;
-    JSDebugState debug; /* espjs */
+    JSDebugState debug; /* qjsx */
 };
 
 struct JSClass {
@@ -722,14 +722,14 @@ typedef struct JSFunctionBytecode {
     JSValue *cpool; /* constant pool (self pointer) */
     int cpool_count;
     int closure_var_count;
-    /* espjs: name of the script or module, kept even without debug info
+    /* qjsx: name of the script or module, kept even without debug info
        (was debug.filename): import.meta, import() and backtraces need it. */
     JSAtom filename;
-    /* espjs: number of the function in its script, in compilation order
+    /* qjsx: number of the function in its script, in compilation order
        (the top-level function has the last number). Serialized. Identifies
        the function in the debug sidecar and for the debugger. */
     uint16_t function_number;
-    /* espjs: stops of the debugger (see quickjs-debug.h), bitmaps with one
+    /* qjsx: stops of the debugger (see quickjs-debug.h), bitmaps with one
        bit per byte of bytecode (bit 'offset & 7' of byte 'offset >> 3'),
        or NULL if none. Not serialized. */
     uint8_t *debug_breakpoints;
@@ -1384,7 +1384,7 @@ typedef enum BCTagEnum {
     BC_TAG_OBJECT_REFERENCE,
 } BCTagEnum;
 
-/* espjs: own value (QuickJS 2026-06-04 uses 5): the format differs
+/* qjsx: own value (QuickJS 2026-06-04 uses 5): the format differs
    (filename always written, function_number), so a bytecode of one is
    refused by the other instead of being misread. */
 #define BC_VERSION 0x45
@@ -1788,7 +1788,7 @@ static inline __exception int js_poll_interrupts(JSContext *ctx)
     }
 }
 
-/* espjs: TRUE if a frame running 'b' must check the debugger stops before
+/* qjsx: TRUE if a frame running 'b' must check the debugger stops before
    each instruction (debug dispatch table in JS_CallInternal). */
 static inline BOOL js_debug_frame_has_stops(JSRuntime *rt, JSFunctionBytecode *b)
 {

@@ -1,5 +1,5 @@
 // Tests of the "net" and "serial" modules (serial: listing only, no hardware).
-// Run with: bin/Release/espjs run tests/net.test.js
+// Run with: bin/Release/qjsx run tests/net.test.js
 import { connect, listen } from "net";
 import { list } from "serial";
 import { check, equal, rejects, report } from "./assert.js";

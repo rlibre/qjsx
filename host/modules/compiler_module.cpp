@@ -22,7 +22,7 @@
 // Source offsets are byte offsets in the UTF-8 source; flags are the
 // JS_DEBUG_VARIABLE_* bits.
 // 'dynamicImport': false makes 'import()' a syntax error, reported at its
-// position (programs built by espjs build: all their modules must be known
+// position (programs built by qjsx build: all their modules must be known
 // when they are built). Default: true.
 // 'imports' in the result: the modules the module asks for (import, export
 // ... from), as written in the source, in source order; a module imported by
@@ -34,7 +34,7 @@
 // "eval" is a direct eval(...), "Function" a call or a 'new' of Function;
 // indirect uses are not seen (JS_SetCompileWarningHandler, quickjs-debug.h).
 //
-// Constants: 'quickjsVersion', 'espjsVersion', and 'bytecodeVersion', the
+// Constants: 'quickjsVersion', 'qjsxVersion', and 'bytecodeVersion', the
 // version of the bytecode this compiler writes: an engine only reads its own.
 //
 // Note: compiling a module registers it in the context of the tool; this is
@@ -335,6 +335,6 @@ JS_MODULE(compiler, module) {
     // recorded in the package manifest: bytecode is only valid for the engine
     // version that produced it
     module.constant("quickjsVersion", CONFIG_VERSION);
-    module.constant("espjsVersion", ESPJS_VERSION);
+    module.constant("qjsxVersion", QJSX_VERSION);
     module.constant("bytecodeVersion", JS_GetBytecodeVersion());
 }

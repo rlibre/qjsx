@@ -1,4 +1,4 @@
-# espjs on every ESP32 board: what does not depend on the board. Each board
+# qjsx on every ESP32 board: what does not depend on the board. Each board
 # adds its own boards/<board>/sdkconfig.board (chip, flash size, partition
 # table, PSRAM), read after this file (CMakeLists.txt, SDKCONFIG_DEFAULTS).
 
