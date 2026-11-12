@@ -573,6 +573,9 @@
             « occupé » ; architecture.md 6.6. Pas fait : déclenchement, se déplacer dans
             l'historique (Stop fige la vue, Run repart de zéro), impulsions RMT, décodeurs ;
             le temps est celui du PC ;
+      - [ ] **x4js dans les crédits** (utilisateur, 2026-11-12) : mentionner x4js (la page du
+            jumeau, `host/twin/ui`) dans la section « Credits and license » de README.md, à
+            côté de QuickJS ;
       - [ ] **redimensionnement du panneau des broches** (utilisateur, 2026-11-12) : à gérer.
             Constaté : la bande de droite garde ses 460 px quand la fenêtre est étroite et
             écrase le panneau de la carte et l'analyseur (vu à 560 px de large) ;
