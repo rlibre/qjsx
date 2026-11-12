@@ -1,0 +1,10 @@
+{
+    "name": "twinbad",
+    "twin": {
+        "board": "yd-esp32-s3",
+        "parts": [
+            { "id": "meteo", "model": "bme280", "i2c": { "sda": 8, "scl": 9 } },
+            { "id": "meteo", "model": "bme280", "i2c": { "sda": 8, "scl": 9 }, "address": "0x77" }
+        ]
+    }
+}

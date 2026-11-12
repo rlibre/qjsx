@@ -7,6 +7,7 @@
 
 // Module "sys/fs": synchronous file system functions, named and behaving like
 // their Node counterparts (subset).
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -15,19 +16,36 @@
 #include "memory.h"
 #include "files.h"
 #include "modules.h"
+#include "permissions.h"
 
 namespace {
 
 // A path given by the program, as fs must open it (rt::resolveProgramPath:
-// relative to the data directory on a device). Freed when it goes out of
-// scope; error messages keep showing the path the program gave, like Node.
+// relative to the run's working folder), checked against the run's
+// permissions (rt::Permissions::mayAccess). Freed when it goes out of scope;
+// error messages keep showing the path the program gave, like Node.
 class ProgramPath {
 public:
     /**
-     * Resolves 'path'; valid() is false (errno ENOSYS) on a device without
-     * file system.
+     * Resolves 'path' and checks that the run may access it this way;
+     * valid() is false on a device without file system (errno ENOSYS) or if
+     * the access is not granted (errno EACCES).
      */
-    explicit ProgramPath(const char *path) : _resolved(rt::resolveProgramPath(path)) {
+    ProgramPath(const char *path, rt::Access access)
+        : _given(path), _access(access), _resolved(rt::resolveProgramPath(path)), _refused(false) {
+        // the tool's own commands have no permissions: everything allowed
+        const rt::Permissions *permissions = rt::permissions();
+        if (_resolved == nullptr || permissions == nullptr) {
+            return;
+        }
+
+        // a refused access: no path to open
+        if (!permissions->mayAccess(_resolved, access)) {
+            memory::release(_resolved);
+            _resolved = nullptr;
+            _refused = true;
+            errno = EACCES;
+        }
     }
 
     /**
@@ -38,10 +56,17 @@ public:
     }
 
     /**
-     * False on a device without file system.
+     * False on a device without file system, or if the access is refused.
      */
     bool valid() const {
         return _resolved != nullptr;
+    }
+
+    /**
+     * True if the access was refused by the permissions.
+     */
+    bool refused() const {
+        return _refused;
     }
 
     /**
@@ -51,8 +76,29 @@ public:
         return _resolved;
     }
 
+    /**
+     * The JS error of an invalid path: EACCES with how to grant the access
+     * when refused, else the system error in errno, naming the given path.
+     */
+    js::Failure fail() const {
+        // not refused by the permissions: the system's error
+        if (!_refused) {
+            return js::failSystem(errno, _given);
+        }
+
+        // refused: say which access, to what, and how to grant it
+        char what[512];
+        const char *hint = rt::permissions()->hint();
+        snprintf(what, sizeof(what), "%s access to \"%s\" is not allowed%s%s", rt::accessName(_access), _given,
+                 hint[0] != 0 ? ": " : "", hint);
+        return js::failSystem(EACCES, what);
+    }
+
 private:
-    char *_resolved;  // malloc'd; nullptr: no file system
+    const char *_given;     // the path the program gave (borrowed: lives as long as the call)
+    rt::Access  _access;    // how the path is used
+    char       *_resolved;  // malloc'd; nullptr: no file system, or refused
+    bool        _refused;   // the permissions refused the access
 };
 
 struct MkdirOptions {
@@ -150,9 +196,9 @@ js::Value readFileSync(js::Str path, js::Optional<js::Value> options) {
     }
 
     // where the file is (relative to the data directory on a device)
-    ProgramPath file(path.data());
+    ProgramPath file(path.data(), rt::Access::read);
     if (!file.valid()) {
-        return js::failSystem(errno, path.data());
+        return file.fail();
     }
 
     // read the whole file; system error with a Node-like code on failure
@@ -178,9 +224,9 @@ void writeFileSync(js::Str path, js::Value data) {
     JSContext *ctx = js::context();
 
     // where the file goes (relative to the data directory on a device)
-    ProgramPath file(path.data());
+    ProgramPath file(path.data(), rt::Access::write);
     if (!file.valid()) {
-        return (void)js::failSystem(errno, path.data());
+        return (void)file.fail();
     }
 
     // a string: convert it to UTF-8; a failed conversion (out of memory)
@@ -228,7 +274,11 @@ void writeFileSync(js::Str path, js::Value data) {
  */
 bool existsSync(js::Str path) {
     // nothing exists on a device without file system
-    ProgramPath file(path.data());
+    ProgramPath file(path.data(), rt::Access::read);
+    if (file.refused()) {
+        return file.fail();
+    }
+
     if (!file.valid()) {
         return false;
     }
@@ -243,9 +293,13 @@ bool existsSync(js::Str path) {
  */
 js::Value statSync(js::Str path) {
     // stat the path; system error if it does not exist (or no file system)
-    ProgramPath file(path.data());
+    ProgramPath file(path.data(), rt::Access::read);
+    if (!file.valid()) {
+        return file.fail();
+    }
+
     files::Status status;
-    if (!file.valid() || !files::stat(file.text(), &status)) {
+    if (!files::stat(file.text(), &status)) {
         return js::failSystem(errno, path.data());
     }
 
@@ -284,9 +338,9 @@ bool addName(void *opaque, const char *name) {
  */
 js::Value readdirSync(js::Str path) {
     // where the directory is (relative to the data directory on a device)
-    ProgramPath directory(path.data());
+    ProgramPath directory(path.data(), rt::Access::read);
     if (!directory.valid()) {
-        return js::failSystem(errno, path.data());
+        return directory.fail();
     }
 
     // fill a new array from the listing; on failure free it and throw a
@@ -307,9 +361,9 @@ js::Value readdirSync(js::Str path) {
  */
 void mkdirSync(js::Str path, js::Optional<MkdirOptions> options) {
     // where it goes (relative to the data directory on a device)
-    ProgramPath directory(path.data());
+    ProgramPath directory(path.data(), rt::Access::write);
     if (!directory.valid()) {
-        return (void)js::failSystem(errno, path.data());
+        return (void)directory.fail();
     }
 
     // create it, with its parents if recursive
@@ -389,9 +443,9 @@ void rmSync(js::Str path, js::Optional<RmOptions> options) {
     bool force = options.has() && options.value().force;
 
     // where it is (relative to the data directory on a device)
-    ProgramPath target(path.data());
+    ProgramPath target(path.data(), rt::Access::write);
     if (!target.valid()) {
-        return (void)js::failSystem(errno, path.data());
+        return (void)target.fail();
     }
 
     // stat the path: a missing path is ignored with force, an error otherwise
@@ -422,10 +476,14 @@ void rmSync(js::Str path, js::Optional<RmOptions> options) {
  */
 void renameSync(js::Str from, js::Str to) {
     // both paths relative to the data directory on a device
-    ProgramPath source(from.data());
-    ProgramPath destination(to.data());
-    if (!source.valid() || !destination.valid()) {
-        return (void)js::failSystem(errno, from.data());
+    ProgramPath source(from.data(), rt::Access::write);
+    if (!source.valid()) {
+        return (void)source.fail();
+    }
+
+    ProgramPath destination(to.data(), rt::Access::write);
+    if (!destination.valid()) {
+        return (void)destination.fail();
     }
 
     // rename; the error names the source, like Node
@@ -439,9 +497,9 @@ void renameSync(js::Str from, js::Str to) {
  */
 void unlinkSync(js::Str path) {
     // where it is (relative to the data directory on a device)
-    ProgramPath file(path.data());
+    ProgramPath file(path.data(), rt::Access::write);
     if (!file.valid()) {
-        return (void)js::failSystem(errno, path.data());
+        return (void)file.fail();
     }
 
     // delete it

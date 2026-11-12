@@ -101,6 +101,7 @@ enum Key {
     KEY_UNCAUGHT = 41,
     KEY_NATIVES = 42,
     KEY_VERSION = 43,
+    KEY_VOLATILE = 44,
 };
 
 enum Stream {

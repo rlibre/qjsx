@@ -16,6 +16,16 @@ build/
 /ports/esp32/sdkconfig.old
 /ports/esp32/managed_components/
 
+# pico-sdk builds of the RP2350 firmware, one folder per board
+/ports/rp2350/build-*/
+
+# npm packages of the twin's page (host/twin/ui); its build (dist/) IS kept:
+# a machine without Node builds qjsx with it
+/host/twin/ui/node_modules/
+
+# Scratch files of the work sessions (test scripts, logs...)
+/temp/
+
 # The old program, kept on disk only (no longer built)
 /legacy/
 

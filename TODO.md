@@ -217,8 +217,132 @@
       - compatibilité : le firmware annonce son identifiant dans `Hello`, un paquet compilé
         pour un autre moteur (format de bytecode) est refusé ; commande hôte du genre
         `qjsx device update firmware.bin`.
-- [ ] **Port RP2350** (Olimex PICO2-XXL, PSRAM sur GPIO8) après l'ESP32-S3 : chaîne pico-sdk et
-      FreeRTOS-Kernel à confirmer avec l'utilisateur (pas de téléchargement sans accord).
+- [ ] **Port RP2350** (Olimex PICO2-XXL, PSRAM sur GPIO8) : conception CONVENUE le 2026-11-11
+      (CLAUDE.md « RP2350 port design ») ; chaîne installée dans `C:\tools\pico` ; ÉCRIT le
+      même jour (`ports/rp2350/`, `tools/pico.ps1`) : FreeRTOS SMP, liaison USB CDC, paquets
+      lus en place en flash, tas JS en PSRAM avec l'allocateur maison `memory::RegionHeap`
+      (testé sur le PC : 37 vérifications, et toute la suite Debug avec `QJSX_JS_HEAP_MB=64`).
+      Le firmware compile (740 Ko). FLASHÉ et ESSAYÉ le 2026-11-12 (COM13) : deploy, run,
+      tampon de 4 Mo en PSRAM, debugger 72/72, proxy 30/30, cdp 53/53. RESTE :
+      - la vitesse (2026-11-12, known-bugs.md « Speed ») : code chaud du moteur en SRAM et
+        `-fira-region=one` : jusqu'à ×3 ; toggle GPIO15 122 → 132 kHz ; par cycle, proche
+        de l'ESP32-S3. Restent : l'horloge (200 MHz ?), et les pistes algorithmiques
+        (entrée suivante) ;
+      - l'outil PC doit rouvrir le port USB après un reset de la puce (known-bugs.md) ;
+      - `device/gpio` ÉCRIT le 2026-11-12 (toggle natif SIO, drain ouvert par la direction,
+        anti-rebond partagé avec l'ESP32 dans `ports/freertos/gpio_watch`) ; toggle de GPIO15
+        mesuré à l'oscillo : 122 kHz avec le trou de yieldIfDue (ESP32-S3 : 247 kHz) ;
+        `onChange` / `waitFor` pas essayés ;
+        le firmware ESP32 recompile avec le module partagé, pas reflashé ;
+      - ensuite `device/rmt` sur PIO.
+- [ ] **Carte client ESP32-S3** (utilisateur, 2026-11-12) : ESP32-S3, 4 Mo de flash, PAS de
+      PSRAM (tas JS en RAM interne, chemin jamais essayé : à mesurer), deux ports USB comme
+      la YD : un port de debug (pont USB-série sur UART0, la liaison de l'agent) et l'USB
+      natif pour la tablette du client, qui ne parle qu'en USB. Les détails (firmware C
+      d'origine, brochage, liste de ce qu'il faut porter) sont dans les notes du dossier de
+      la carte, ignoré par git (par `.git/info/exclude`, local, pas `.gitignore`). Ordre
+      convenu :
+      - [x] `device/usb`, générique (puces avec USB OTG : S2, S3, P4 ; pas le RP2350, dont
+            l'USB porte l'agent). FAIT le 2026-11-12 (CLAUDE.md, architecture.md 5.4 et
+            6.6) : `common/hal/hal_usb.h`, `common/device/usb_module.cpp`,
+            `ports/esp32/main/hal_usb_esp32.cpp` (esp_tinyusb 2.4.0 téléchargé,
+            `ports/esp32/main/idf_component.yml`), `host/twin/sim/twin_usb.cpp` + `qjsx agent
+            --usb-port`, `lib/stdlib/src/usb.js` (`UsbSerial extends Usb`),
+            `tests/usb.test.js` 18/18, suite Debug 87 OK. Correctif à côté :
+            `js::failSystem` coupe `what` à 400 octets (-Werror=format-truncation de GCC 15
+            sur `fs.cpp`, travail des permissions). FLASHÉ et ESSAYÉ sur la YD (USB natif =
+            COM26, script `temp/usbboard.js`, le PC joue la tablette avec device/serial) :
+            erreurs JS, écho, 3000 octets, reprise par un nouveau programme sans perdre le
+            port, close() : tout OK. Décidé après l'essai : `write()` ne regarde plus DTR
+            (Windows ouvre le port avec RTS seul) ; ce que l'hôte ne prend pas en 50 ms est
+            perdu sans erreur. Pas de `.d.ts` : aucun module n'en a encore. Pas mesuré : le
+            coût en RAM sans PSRAM ;
+      - [ ] relais USB pour le jumeau (utilisateur, 2026-11-12 : la tablette ne parle qu'en
+            USB et son logiciel est trop gros pour être joué par un script) : une YD (ou
+            tout ESP32-S3) en « dongle », USB natif vers la tablette, port COM vers le PC ;
+            un petit firmware C dédié (pas qjsx) présente les descripteurs demandés par le
+            programme, fait passer les octets et remonte DTR / RTS, en trames `0x00 |
+            COBS(...) | 0x00` ; côté jumeau `qjsx agent --board ... --usb-relay COM11`, un
+            second hal USB qui parle au relais au lieu du TCP. La vraie tablette parle alors
+            au programme JS du jumeau, debugger compris ;
+      - [ ] la board : `sdkconfig.board` (4 Mo sans PSRAM), `board_config.h` et le JSON du
+            jumeau (dossier et fichier ignorés par git) ;
+      - [x] `device/serial` sur un UART de carte (un lecteur sur UART). FAIT le 2026-11-12
+            pour l'ESP32 et le jumeau (CLAUDE.md, architecture.md 5.4 et 6.6) : un seul
+            module `common/device/serial_module.cpp` sur un PILOTE (`common/hal/hal_serial.h`,
+            table de fonctions : PC `host/platform/serial_host.cpp`, ESP32
+            `hal_serial_esp32.cpp`, jumeau `twin_uart.cpp`) ; options `dataBits`, `parity`,
+            `stopBits`, `flowControl` (PC) ou broches `tx` / `rx` / `rts` / `cts` (carte) ;
+            `port()` remplace `path()` ; UART0 (liaison de l'agent) refusé (EBUSY). Jumeau :
+            `"uarts"` / `"linkUart"` dans le JSON, un lien TCP par UART
+            et une section par UART dans la page (journal texte / hexa, envoi texte ou
+            hexa), essayé dans le navigateur. `tests/serial.test.js` 26/26, suite Debug 89 OK,
+            firmware de la YD compilé (892 Ko) mais PAS flashé. Restent : un essai sur la
+            carte (rien de câblé pour l'instant, utilisateur), RP2350 plus tard ;
+      - [x] ports TCP du jumeau réglés dans la page (utilisateur, 2026-11-12, FAIT le même
+            jour) : port et « listen » par UART (dans son panneau) et par fonction série
+            USB (section USB de la vue de la carte, sous les pièces), gardés dans
+            `<storage>/twin.json`, rien n'écoute par défaut, port pris = erreur et écoute
+            coupée, USB écoute seulement appareil démarré ; `--uart-port` / `--usb-port`
+            gardés pour les tests (rien d'enregistré). `host/twin/sim/twin_tcp.*`,
+            `tests/twintcp.test.js` (15 + 7). Signalé : `Switch` de x4js n'a ni
+            événement `change` ni `getCheck()` (une `Checkbox` bouton à la place) ;
+      - [x] page du jumeau en SECTIONS repliables (utilisateur, 2026-11-12, FAIT le même
+            jour) : une section par périphérique dans la vue de la carte (chaque pièce,
+            USB, chaque UART), résumé de l'état sur la ligne de titre, ouvert / plié gardé
+            par le navigateur ; composant à nous `controls/section.ts` (x4js n'en a pas) ;
+            plus de panneaux UART ancrés ; lignes USB avec une icône et des textes clairs
+            (« unused: the device is not started »...). Essayé dans le navigateur ;
+      - [ ] `device/i2c` (demande de l'utilisateur, 2026-11-12) : bus maître, pour un
+            switch I2C et les cartes derrière. ÉCRIT le 2026-11-12 pour l'ESP32 et le
+            jumeau (`common/hal/hal_i2c.h`, `common/device/i2c_module.cpp`,
+            `ports/esp32/main/hal_i2c_esp32.cpp`, `host/twin/sim/twin_i2c.cpp`,
+            `tests/i2c.test.js` 25/25 avec `tests/fixtures/twini2c`, suite Debug 88 OK ;
+            `ENXIO` ajouté aux noms d'erreurs de jsbind ; firmware de la YD, 891 Ko). FLASHÉ
+            et ESSAYÉ sur la YD le 2026-11-12 sans rien de branché (bus 0 sur GPIO8 / 9,
+            script `temp/i2cboard`) : sans pull-up, probe ETIMEDOUT et transferts ENXIO au
+            bout des 100 ms ; avec `pullUp: true`, probe false en 1 ms, ENXIO en 1 à 2 ms,
+            scan de 112 adresses en 21 ms. Reste : un essai avec un vrai composant (aucun
+            sous la main). RP2350 plus tard. API convenue le 2026-11-12 (CLAUDE.md) :
+            - `new I2c(port, { sda, scl, frequency = 100000, pullUp = false, timeout = 100 })`
+              (port = numéro du contrôleur, comme l'UART de `Serial` ; `frequency` et
+              `timeout` = valeurs par défaut des appareils) ; `bus.device(address, {
+              frequency, timeout })` -> `I2cDevice` (adresse 7 bits, fréquence PAR APPAREIL,
+              pas de constructeur public) ; `bus.probe(address)` / `probeSync` (booléen, ne
+              lève rien) ; `bus.reset()` (récupération de bus) ; `bus.close()` (ferme aussi
+              ses appareils) ;
+            - `I2cDevice` : `write(bytes)`, `read(length)`, `writeRead(bytes, length)`
+              (repeated start), promesses, ET leurs versions `writeSync` / `readSync` /
+              `writeReadSync` ; `close()` ; les transferts se font SEULEMENT sur les
+              appareils (pas de `bus.write(address, ...)` : doublon, fréquence ambiguë) ;
+            - `bytes` = `Uint8Array` ou tableau de nombres 0..255 ; les lectures rendent un
+              `Uint8Array` ;
+            - erreurs avec `code` : `ENXIO` (NACK), `ETIMEDOUT`, `EIO` (promesse rejetée,
+              ou exception pour les versions Sync) ;
+            - transferts d'un bus un par un dans l'ordre des appels (un Sync attend les
+              asynchrones déjà en file) ; transaction atomique (switch puis lecture) : au
+              programme, par un verrou JS ;
+            - hors du natif : helpers de registre (`readWord`...), pilote d'un switch
+              PCA9548A, pilotes des cartes (en JS) ; pas de mode esclave ni d'adresse 10 bits
+              pour l'instant ;
+            - couches comme `device/rmt` (`common/hal/hal_i2c.h`, tâche du hal qui fait les
+              transferts bloquants d'ESP-IDF, `common/device/i2c_module.cpp`) ; jumeau : au
+              début aucune adresse ne répond (`ENXIO`), composants simulés au backlog ;
+      - [ ] **convertir le firmware C de la carte en JS** (demande de l'utilisateur,
+            2026-11-12 ; liste de ce qu'il faut porter dans les notes de la carte). Il manque
+            encore pour ça un stockage sur la carte et le WiFi.
+- [ ] **Vitesse du moteur, pistes algorithmiques** (2026-11-12, mesures sur le PC :
+      `bash tools/profile/profile.sh`, test costaud `tools/profile/workload.js`) :
+      - [x] contrôles de zone morte des `let` / `const` retirés quand inutiles (modification
+        N, `compiler/tdz.c`) : boucle `let` 363 → 246 ms ; test costaud inchangé ;
+      - pistes notées par Bellard en « XXX » dans quickjs.c : `for (x of tableau)` sans
+        créer d'itérateur, lecture de propriété sans le chemin lent pour les tableaux,
+        `loc(a) += expr` en `add_loc`, méthodes de tableau (`fill`, `includes`, `slice`,
+        `sort`) spécialisées pour les tableaux rapides ;
+      - [x] profil du test costaud (2026-11-12) : boucle de l'interpréteur 28 à 43 %,
+        recherche de propriétés 8 à 16 % ;
+      - [x] cache des dernières recherches de propriété essayé sur le PC (2026-11-12) :
+        jusqu'à 82,6 % trouvées, aucun gain de temps ; code retiré (known-bugs.md « Speed »).
 - [ ] **Debugger, étape 2** : le cœur du proxy en JS, sans CDP (lien entre le sidecar et le
       stub, variables visibles par portée, évaluation compilée sur l'hôte). Puis l'étape 3
       (serveur CDP, `qjsx debug`), puis l'étape 4 (points d'arrêt conditionnels, prédiction
@@ -227,6 +351,233 @@
       jsbind-orig, doc-trial, final-style, espjs-backup-before-style…), qu'on peut supprimer.
 
 ## Backlog
+
+- [x] **Exécutable pour le « device » desktop** (FAIT le 2026-11-12 : `qjsx build
+      --executable`, `qjsx-runtime` + le paquet collé à la fin, 1,3 Mo pour la démo ;
+      sans compilateur ; tests dans run-tests.sh) (utilisateur, 2026-11-12) : générer un
+      exécutable autonome qui embarque un programme (son paquet), le PC jouant le rôle d'un
+      device. Conception à proposer (point de départ possible : `qjsx-target`, le moteur sans
+      compilateur, plus le paquet embarqué ou collé à la fin de l'exécutable).
+- [x] **Jumeaux numériques sur le desktop** (utilisateur, 2026-11-12 ; FAIT le même jour pour
+      la YD-ESP32-S3, architecture.md 6.6) : `qjsx agent --board yd-esp32-s3 [--ui-port
+      8090]`, carte décrite dans `boards/<nom>.json` (copiée dans `bin/<config>/boards/`),
+      `hal::gpio` et `hal::rmt` simulés dans `host/twin/sim/`, seuls les modules natifs de la carte
+      offerts au programme, `process.platform` de la carte, page web (broches, bouton BOOT,
+      couleur de la LED, forçage 0 / 1 / libre) servie par un runtime JS sur son propre
+      thread. Testé en Debug (`tests/twin.test.js`, 17 vérifications) et essayé dans un
+      navigateur. Pas d'exécutable : l'outil joue la carte (deploy, debug, monitor comme sur
+      la vraie). Reste :
+      - [ ] d'autres pièces (potentiomètre, écran...), I2C / SPI / UART simulés ;
+      - [ ] **code de simulation sur les ports des jumeaux** (idée de l'utilisateur,
+            2026-11-12) : pouvoir écrire du code qui joue ce qui est branché sur les ports
+            du jumeau (un composant I2C qui répond à son adresse, un appareil sur un UART,
+            l'hôte USB, des stimuli sur des broches...), au lieu des seuls clics de la
+            page. COMPOSANTS FAITS le 2026-11-12 (suite Debug 94 OK + twinparts corrigé et
+            relancé seul, 21/21 ; architecture.md 6.6) :
+            API `qjsx:twin`, modèles button / ws2812 / bme280 / potentiometer, composants du
+            projet (`model.js` + `view.js`), section `"twin"` de `qjsx.json`, `-p`,
+            `"target": "twin"`, ports, trace I2C, ADC, vues à trois niveaux, section
+            Buttons, console. Reste : SSD1306, SPI / UART joués par des modèles, oscilloscope,
+            vitesse de la carte, scénarios, signaux. Ce qui suit est l'historique de la
+            conception. Première étape (page x4js) FAITE le même jour (suite Debug 88 OK, page
+            essayée dans le navigateur intégré, architecture.md 6.6) : tout dans
+            `host/twin/` (`sim/`, `js/server.js` = `qjsx:twin/server`, `ui/`) ; x4js installé
+            (accord de l'utilisateur) ; page x4js (DockingView carte + broches, `Led` à nous,
+            table des broches mise à jour en place) ; messages `twin.board`, `twin.state`,
+            `twin.pin.force` sur `/ws` (sous-protocole `messaging` géré par
+            `qjsx:websocket`) ; zip embarqué (`tools/embed-twin-ui.lua`, CRC-32 des sources
+            dans `dist/sources.crc32`) ; option cachée `--ui-dir`. RESTE : les composants
+            (modèle + vue, API `qjsx:twin`, `"twin"` de `qjsx.json`, ids), BOOT et WS2812
+            sur ce modèle, BME280 / SSD1306, trace et console, `PixelDisplay`. Pas de
+            vérification de types TS (`tsc` absent : `typescript` non installé) :
+            - un composant = un **modèle** d'émulation + sa **vue** (une div). Modèles en JS
+              (accordé), exécutés dans le runtime du jumeau, jamais dans celui du programme.
+              API de `qjsx:twin` (ACCORDÉE, utilisateur 2026-11-12) :
+              - un modèle = module qui exporte par défaut une classe dérivée de `Part`,
+                `constructor(config, board)` (config = son entrée du câblage, validée par
+                lui : une erreur levée est affichée, l'agent refuse de démarrer) ; créé au
+                démarrage de l'agent, vit autant que lui ; `onBoardReset()` optionnel ;
+              - `Part` : `id`, `label`, `config`, `publish(state)` (-> `twin.part.state`,
+                dernier état envoyé aux pages qui arrivent), `onAction(action, args)`
+                (<- `twin.part.action`), `log(...)` (console des modèles de la page) ;
+                timers standard, `board.now()` ;
+              - `board.pin(n)` : `level`, `mode` (ce que le programme a configuré),
+                `drive(0 | 1 | null)`, `pull("up" | "down" | null)`, `onChange(fn)`.
+                PRIORITÉ sur la ligne (accordée) : sortie push-pull du programme > drain
+                ouvert du programme à 0 > forçage de la page > `drive` d'un composant >
+                pulls (programme, puis composants) > flottant = 0 ; programme et
+                composant en sens contraire = court-circuit signalé dans la trace ;
+              - `board.i2c({ sda, scl })` (bus repéré par ses broches, pas par le numéro de
+                port) : `attach(address, { onTransfer(written, readLength) })` -> octets ou
+                null (NACK), `detach(address)` ; un appel par transfert (écriture puis
+                lecture après repeated start ; probe = written vide, readLength 0) ;
+                `onTransfer` SYNCHRONE uniquement (accordé : une promesse donne `EIO`),
+                timeout du bus -> `ETIMEDOUT` ; aide `Registers` (pointeur auto-incrémenté,
+                `set`, `onWrite`) ;
+              - `board.rmt(pin)` : `onBytes(fn)`, `onPulses(fn)` (le décodage GRB quitte
+                `server.js` pour le modèle `ws2812`) ;
+              - plus tard : `board.uart`, `board.spi`, `pin.voltage` (ADC) ;
+              - threads : tout le code d'un modèle sur le thread du jumeau ; un modèle
+                n'attend jamais le programme ;
+              - `boards/*.json` (accordé) : `kind` -> `model`, un `id` par composant
+                (`boot` / `button`, `rgb` / `ws2812`) ; le C++ ne connaît plus de bouton
+                (le pull-up de BOOT vient du modèle `button`) ;
+            - chaque composant a un **`id` unique** (utilisateur) en plus de son `label` :
+              minuscules, chiffres, `-`, `_` ; doublon refusé par `qjsx build` ; sert aux
+              scénarios, aux messages, à la trace, à la disposition retenue de la page ;
+            - la logique électrique reste en C++ (`twin.cpp`) : un modèle qui pilote une
+              broche écrit dans l'état partagé, la lecture d'une broche par le programme
+              reste locale. Seules les transactions de bus appellent le modèle, en
+              synchrone depuis le thread JS du programme (requête postée au runtime du
+              jumeau, attente mutex + condition) ; RÈGLE : le runtime du jumeau n'attend
+              jamais le thread du programme ;
+            - VUES (ACCORDÉ, utilisateur 2026-11-12) : trois niveaux : (a) pas de vue -> la
+              page montre l'état publié (nom / valeur, lecture seule) ; (b) contrôles
+              déclarés par le modèle (`static controls = [{ name, type: "slider" | "knob"
+              | "switch" | "select" | "button" | "value" | "led", min, max, step, unit,
+              items }]`), vue construite par la page, un contrôle envoie `twin.part.action
+              { id, action: "set", args: { name: value } }` ; (c) vue libre `export function
+              createView(x4, part)` -> Component, `part` = `{ id, label, config,
+              onState(fn), send(action, args) }` ; TS compilée dans la page pour les
+              composants fournis (`host/twin/parts/<modèle>/view.ts`), `view.js` d'un
+              projet chargé par `import()`. Chaque composant = un `Panel` DANS le panneau
+              Board (utilisateur : il peut y en avoir beaucoup), pas un panneau du
+              DockingView ;
+            - `qjsx.json` `"twin"` : `board` (nom ou chemin `.json`), `parts` (modèle sans
+              chemin = fourni par qjsx, `./dossier` = composant du projet : `model.js` +
+              `view.js` optionnel) ; PAS de `remove` (utilisateur : superflu) ; `ports`
+              (ACCORDÉ, OPTIONNEL) : `{ agent, ui, usb }`, chaque port pris dans l'ordre
+              option de la ligne de commande > `twin.ports` > défaut (5555, 8090, 8091) ;
+              À VOIR avec le travail des UART du jumeau (une autre session : un port TCP
+              par UART) ; `"target": "twin"` (ACCORDÉ) = le jumeau local pour
+              deploy / debug / monitor. Vérifié au démarrage de l'agent (ids uniques carte +
+              projet, champs validés par chaque modèle, deux composants qui pilotent la
+              même broche, même adresse sur un bus) : erreur affichée, l'agent ne démarre
+              pas ; `qjsx build` ne la lit pas (pas dans le build id) ;
+            - lancement (ACCORDÉ, utilisateur 2026-11-12) : `qjsx agent` lancé dans le dossier
+              d'un projet lit la section `"twin"` de son `qjsx.json` (carte + composants) ;
+              `-p <dossier>` / `--project <dossier>` désigne le projet d'ailleurs (qjsx
+              installé globalement) ; `--board` reste pour une carte nue hors projet ;
+            - câblage (proposé, exemple donné) : `boards/*.json` = la carte nue (BOOT, LED) ;
+              ce que l'utilisateur branche dessus va dans une section `"twin"` de
+              `qjsx.json` : `board`, `parts` (`id`, `model` = nom d'un composant fourni ou
+              chemin d'un dossier du projet, `label`, `i2c: { sda, scl }`, `address` en
+              chaîne hexa "0x76", champs propres au modèle validés par lui) ;
+            - premiers composants : BOOT et WS2812 réécrits sur ce modèle (valide
+              l'interface), puis BME280 et SSD1306 avec `device/i2c` (accordé) ;
+            - **page en x4js** (utilisateur) : `DockingView` (au centre la carte et ses
+              composants, un `Panel` chacun ; outils : table des broches en `Gridview`,
+              scénarios ; en bas : trace des bus et console des modèles ; `persist`).
+              Vues : contrôles standard x4js (`Slider`, `Knob`, `Switch`, `Gauge`,
+              `Chart`, `Button`) ET vues libres (utilisateur : « les 2 ») ; composants
+              custom À NOUS (pas dans x4js, utilisateur) : `Led`, `PixelDisplay` (sur un
+              `Canvas`). Vues des composants fournis en TS compilées dans le bundle ; vue
+              d'un composant du projet = module JS chargé par `import()`, `export function
+              createView(x4, part)` (x4js passé par la coquille : le bundle est un IIFE, et
+              `Application` est un singleton strict) ;
+            - **messages** : `Application.setupSocketMessaging` de x4 (lu dans
+              `src/core/core_application.ts`) : JSON texte `{ msg, params }` dans les deux
+              sens, tout `fireGlobal` de la page part au serveur ; sous-protocole
+              `messaging` demandé par le client : `host/js/websocket.js` doit renvoyer
+              `Sec-WebSocket-Protocol: messaging` (sinon Chrome refuse) ; texte `ping`
+              ignoré par le client (keep-alive) ; URL par défaut `/ws` (un `path` doit
+              contenir hôte et port) ; pas de reconnexion automatique (`looseCallback` :
+              afficher « jumeau déconnecté », retenter). Remplace le protocole `/twin`
+              actuel. Messages proposés : `twin.pins`, `twin.pin.force { pin, level }`,
+              `twin.part.state { id, state }`, `twin.part.action { id, action, args }`,
+              `twin.trace`, `twin.log`, `twin.scenario.*` ; tous les onglets reçoivent tout ;
+            - **build** (ACCORDÉ, utilisateur 2026-11-12) : une étape premake lance
+              `npm run build` dans `host/twin/ui/` quand Node et `node_modules` sont là et
+              que les sources ont changé ; le `dist/` est versionné (une machine sans Node
+              compile qjsx avec lui) ; sources changées sans Node = avertissement, pas
+              d'échec. « Changées » = un hash des sources écrit dans le `dist/` (pas les
+              dates : un clone ou un changement de branche les remet à l'heure du moment),
+              dans le `dist/` ; l'interface est embarquée dans l'exécutable comme une archive
+              = un ZIP NON COMPRESSÉ (utilisateur ; nom interne sans importance, jamais vu
+              par l'utilisateur : un simple `.zip` dans le dossier objet du build) qui
+              contient les fichiers du `dist/` (`index.html`, `main.js`, `main.css`,
+              `assets/`...), comme un `.qjspkg` : lu en place par le lecteur de zip des
+              paquets, chaque entrée servie par le serveur du jumeau avec un type MIME tiré
+              de son extension ; une commande / option CACHÉE (utilisateur) sert à la place
+              l'interface depuis un dossier, pour développer le jumeau sans relinker qjsx
+              (avec `x4js build --debug` : source maps dans les devtools) ;
+            - **dossier** (ACCORDÉ, utilisateur 2026-11-12 : tout le jumeau au même endroit,
+              dans `host/`) : `host/twin/sim/` (le C++ de l'actuel `host/sim/` : premake,
+              globs et `includedirs` à adapter, pas deux headers du même nom),
+              `host/twin/ui/` (projet x4js : package.json, x4.config.json, src/ avec la
+              coquille et `controls/`, `dist/`), `host/twin/parts/<modèle>/` (`model.js` +
+              `view.ts`), `host/twin/js/` (serveur de la page = l'actuel `host/js/twin.js`,
+              chargement des modèles) ; `host/js/twinpage.js` disparaît ;
+            - **noms** (ACCORDÉ, utilisateur 2026-11-12) : `qjsx:twin` = l'API des modèles,
+              PUBLIQUE (documentée, stable : les modèles d'un projet l'importent aussi) ;
+              les composants fournis sont embarqués sous `qjsx:twin/parts/<modèle>`, nom
+              tiré du DOSSIER (tous les fichiers s'appellent `model.js` : règle
+              d'embarquement à adapter) ; un composant du projet (`"model": "./twin/relay"`)
+              est chargé depuis le disque par `import()` (permis : JS de l'outil) ;
+            - **debug** proposé : trace par composant et par bus (heure, adresse, octets
+              écrits / lus, NACK ; changements de niveau) + console des modèles (le runtime
+              du jumeau n'écrit pas sur la sortie) dans le panneau du bas ; déboguer les
+              modèles dans VS Code : plus tard ;
+            - **scénarios de test** : REPORTÉS (utilisateur, 2026-11-12 ; d'abord « maintenant,
+              super idée », puis mis en TODO). Proposé : un fichier JS du projet ; une
+              commande (nom à choisir) démarre le jumeau, déploie en RAM, lance le
+              programme, exécute le scénario avec `board.part(id)`,
+              `board.output.waitFor(regex, { timeout })`, `board.waitFor(fn, { timeout })`,
+              `press({ ms })`, injection de fautes (`fail("nack")`) ; temps réel du PC. Où ils
+              tournent, à trancher : (a) côté qjsx, dans le runtime du jumeau (sans
+              navigateur, code de sortie pour la CI, accès direct aux modèles, timing
+              précis ; console dans la trace) ; (b) dans la page (devtools, on voit le test,
+              mais navigateur obligatoire, Chrome headless en CI, latence du WebSocket,
+              onglet pilote) ; (c) la même API `board` des deux côtés (deux
+              implémentations, API entièrement asynchrone). Recommandé : (a) avec une API
+              asynchrone, pour pouvoir aller vers (c) quand les signaux arriveront dans la
+              page ; la page affiche quand même les scénarios (`twin.scenario.*`) ;
+            - **signaux** (grandeurs qui évoluent : température du BME280...) : REPORTÉS
+              (utilisateur). Idée de l'utilisateur : du code exécuté dans la PAGE WEB (script
+              « environnement » du projet chargé par la page, `meteo.set({ temperature })`
+              envoyé au modèle qui garde la dernière valeur ; débogable dans les devtools ;
+              à voir : une page doit être ouverte, un seul onglet pilote, grandeurs lentes
+              seulement). Le mini-langage JSON (`sine`, `ramp`...) est REJETÉ ;
+      - [ ] **simuler la vitesse de la carte** (utilisateur, 2026-11-12) : un réglage du
+            jumeau (page de réglages) pour que le programme tourne à peu près à la vitesse
+            de la vraie carte, pas à celle du PC ; trouver un moyen (ralentir l'interpréteur,
+            budget d'instructions par tranche de temps...) ; à concevoir ;
+      - [ ] **analyseur logique / oscilloscope sur les broches** (utilisateur, 2026-11-12) :
+            les niveaux des broches dans le temps sur la page (plusieurs voies, le temps
+            du jumeau), y compris les impulsions `send` du RMT ; à concevoir ;
+      - [x] jumeau choisi dans `qjsx.json` (FAIT le 2026-11-12 : section `"twin"`, `qjsx
+            agent` dans le dossier ou `-p`) ;
+      - [ ] d'autres cartes (PICO2-XXL...) ;
+      - [x] la page reconstruit le tableau des broches à chaque changement (RÉGLÉ le
+            2026-11-12 : la page x4js construit les lignes une fois et les met à jour).
+
+- [ ] **Éditeur Monaco pour les devices** (utilisateur, 2026-11-12) : à préciser. x4js a un
+      composant `MonacoEditor` (`x4js/monaco`).
+
+- [ ] **Manuel utilisateur** (utilisateur, 2026-11-12) : à préciser.
+
+- [x] **Entrées ADC** (utilisateur, 2026-11-12 ; FAIT le même jour, pas encore essayé sur la
+      carte) : `device/adc` (`new Adc(pin, { range })`, `read()` brut, `readVoltage()` en volts,
+      `bits`, `close()`), ESP32 sur ADC1 seulement (`hal_adc_esp32.cpp`, adc_oneshot +
+      calibration ; le firmware compile), jumeau (`"adc"` dans `boards/*.json`, `pin.voltage`
+      de `qjsx:twin`, composant `potentiometer`).
+
+- [ ] **Sorties DAC** (utilisateur, 2026-11-12) : REPORTÉ, à faire avec l'oscilloscope du
+      jumeau. Nos cartes n'ont pas de DAC (ESP32-S3, RP2350) ; l'ESP32 classique et l'ESP32-S2
+      en ont un (8 bits), le STM32H743 aussi (12 bits).
+
+- [x] **Permissions d'un programme du PC** (utilisateur, 2026-11-12 : « éviter que l'exe puisse
+      supprimer un disque complet en cas de bug JS » ; FAIT le même jour, architecture.md 6.7) :
+      modèle de Deno, rien sans autorisation. Section `desktop` de `qjsx.json` (`rootFolder`,
+      `permissions` : read / write / net / env / serial), variables `${executableFolder}`,
+      `${userAppDataFolder}`, `${currentFolder}`, `${rootFolder}` ; options de `qjsx run`
+      (`-A -R -W -N -E --allow-serial`) ; racine par `--qjsx-root-folder=` ou
+      `QJSX_ROOT_FOLDER` ; racine d'un disque refusée ; vrais chemins (liens et jonctions
+      résolus). Le device n'a pas de permissions, sauf l'agent desktop et le jumeau (même
+      code, sur le disque du PC) : fichiers limités à `<storage>/data`, comme la partition
+      d'une carte (`board::confineFiles()`). Testé en Debug (86 vérifications).
+      Reste : build des cartes à refaire (nouveau fichier `common/runtime/permissions.cpp` :
+      `tools/idf.ps1 reconfigure build`), tests en Release et sous Linux / macOS.
 
 - [ ] **Troisième carte : WeAct Studio STM32H743** (utilisateur, 2026-11-11 ; caractéristiques
       citées de mémoire, à vérifier sur le schéma WeAct) : Cortex-M7 480 MHz, FPU double, 2 Mo
@@ -247,7 +598,9 @@
       Vérifier le pont de soudure « RGB » de la carte. Ensuite : le port RP2350 (pico-sdk et
       FreeRTOS-Kernel à télécharger, avec accord).
 
-- [ ] **Version de qjsx visible du JS** (utilisateur, 2026-11-11 : « je ne sais pas encore
+- [x] **Version de qjsx visible du JS** (FAIT le 2026-11-12 : `process.versions.qjsx`,
+      `.quickjs`, et `.build`, l'empreinte du paquet qui tourne ; demande de l'utilisateur,
+      2026-11-11 : « je ne sais pas encore
       comment ») : le firmware la connaît (`QJSX_VERSION`, envoyée dans `HELLO`). Pistes :
       `process.versions.qjsx` / `process.versions.quickjs` (comme `process.versions.node`),
       ou `process.env` (mais `env` vient de `qjsx.json` sur un device et du système avec
@@ -269,11 +622,6 @@
       release les exécutables, `stdlib.qjslib` et les `qjsx.bin` (avec l'adresse de
       flashage). Questions : déclencheur (tag `v*` ?), plateformes, signature, numéro de
       version (`QJSX_VERSION`).
-
-- [ ] **Points d'arrêt conditionnels, logpoints et compteurs de passages** (reportés par
-      l'utilisateur le 2026-11-11, quand on a repris l'étape 4 du debugger sans eux) :
-      évalués sur le device, sans aller-retour par passage (conception 3.6). Aujourd'hui
-      le serveur CDP les refuse et VS Code les montre non résolus.
 
 - [ ] **Accepter TypeScript** (demande de l'utilisateur, 2026-11-11) : des sources `.ts` dans
       un projet qjsx. À concevoir avant de coder : qui retire les types (un transpileur
@@ -313,3 +661,8 @@
       → en cours : bibliothèque de liaison C++ common/jsbind (conception dans CLAUDE.md)
 - [ ] Décider ce qu'on retire de la bibliothèque standard de qjs (quickjs-libc : fichiers, etc.)
       → décidé : quickjs-libc remplacée par nos modules (fs, path, process, net, serial, crypto, compiler), voir CLAUDE.md
+- [ ] **Points d'arrêt conditionnels, logpoints et compteurs de passages** (reportés par
+      l'utilisateur le 2026-11-11, quand on a repris l'étape 4 du debugger sans eux ;
+      descendus en fin de TODO le 2026-11-12) :
+      évalués sur le device, sans aller-retour par passage (conception 3.6). Aujourd'hui
+      le serveur CDP les refuse et VS Code les montre non résolus.

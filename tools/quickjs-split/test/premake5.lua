@@ -7,7 +7,7 @@
 -- Test build: qjs linked with the original QuickJS (engine/qjs-bellard) and with the
 -- split one (engine/qjsx), to compare behaviour and speed.
 --
--- premake5 gmake --cc=gcc --shell=posix --upstream=<release dir> --builddir=<build dir>
+-- premake5 gmake --cc=gcc --shell=posix --upstream=<release dir> --builddir=<build dir> [--lto]
 --
 -- <release dir> is an extracted QuickJS release of the same version
 -- (it provides qjs.c, qjsc.c, quickjs-libc.c, repl.js and tests/).
@@ -22,6 +22,11 @@ newoption {
     trigger = "builddir",
     value = "DIR",
     description = "Where the makefiles, objects and executables go (default: ./build)",
+}
+
+newoption {
+    trigger = "lto",
+    description = "Link time optimization (-flto) for both engines and both qjs",
 }
 
 local function absolute(dir)
@@ -54,6 +59,14 @@ workspace "quickjs-split-test"
     buildoptions { "-fwrapv", "-Wall", "-Wno-array-bounds", "-Wno-format-truncation",
                    "-Wno-infinite-recursion", "-Werror=implicit-function-declaration" }
     targetdir(BUILD .. "/bin")
+
+    -- link time optimization: the whole engine seen at once at link time, as
+    -- in a single file (the static libraries keep regular code too: premake
+    -- archives them with ar, which does not read the LTO part)
+    if _OPTIONS["lto"] then
+        buildoptions { "-flto", "-ffat-lto-objects" }
+        linkoptions { "-flto" }
+    end
 
 local function engine(name, root, sources)
     project(name)

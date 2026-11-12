@@ -401,6 +401,11 @@ JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     if (resolve_variables(ctx, fd))
         goto fail;
 
+    /* qjsx: the temporal dead zone checks proven useless become plain
+       accesses (compiler/tdz.c) */
+    if (remove_useless_tdz_checks(ctx, fd))
+        goto fail;
+
 #if defined(DUMP_BYTECODE) && (DUMP_BYTECODE & 2)
     if (!fd->strip_debug) {
         printf("pass 2\n");

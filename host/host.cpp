@@ -16,6 +16,7 @@
 #include "quickjs.h"
 #include "jsbind.h"
 #include "files.h"
+#include "permissions_host.h"
 #include "program.h"
 
 namespace host {
@@ -99,11 +100,18 @@ int runSource(const char *name, const char *source, size_t size, int argumentCou
 }
 
 /**
- * Runs a source file as the main module. Returns the exit code (1 if the
- * file cannot be read).
+ * Runs a source file as the main module, with the permissions of 'launch'
+ * (its options only) and its root folder. Returns the exit code (1 if the
+ * file cannot be read or the root folder is wrong).
  */
-int runScriptFile(const char *path, int argumentCount, char **arguments) {
-    // read the whole source
+int runScriptFile(const char *path, int argumentCount, char **arguments, const Launch *launch) {
+    // the root folder (process.cwd()) and the hint of the refusals
+    if (!applyScriptRoot(launch->rootFolder, launch->permissions)) {
+        return 1;
+    }
+
+    // read the whole source (code is loaded whatever the permissions, as
+    // with Deno: they guard what the program does)
     size_t size = 0;
     uint8_t *source = files::readAll(path, &size);
     if (source == nullptr) {
@@ -112,27 +120,33 @@ int runScriptFile(const char *path, int argumentCount, char **arguments) {
     }
 
     // run it; the source is freed once the program has ended
-    int exitCode = runSource(path, (const char *)source, size, argumentCount, arguments);
+    SourceStart start = { path, (const char *)source, size };
+    rt::RunHooks hooks = fileHooks();
+    hooks.permissions = launch->permissions;
+    int exitCode = rt::runProgram(nullptr, &startSource, &start, &hooks, argumentCount, arguments);
     memory::release(source);
     return exitCode;
 }
 
 /**
- * Runs the main module of a .qjspkg file from its bytecode. Returns the exit
- * code (1 if the file cannot be read).
+ * Runs the main module of a .qjspkg file from its bytecode;
+ * ${executableFolder} is the folder of the file. Returns the exit code (1 if
+ * the file cannot be read).
  */
-int runPackageFile(const char *path, int argumentCount, char **arguments) {
+int runPackageFile(const char *path, int argumentCount, char **arguments, const Launch *launch) {
     // load the whole package into memory
     size_t size = 0;
     uint8_t *data = files::readAll(path, &size);
-    if (data == nullptr) {
+    char *folder = data != nullptr ? folderOf(path) : nullptr;
+    if (folder == nullptr) {
         fprintf(stderr, "qjsx: cannot read %s: %s\n", path, strerror(errno));
+        memory::release(data);
         return 1;
     }
 
     // rt::runPackage reads the package in place: it is freed only after the run
-    rt::RunHooks hooks = fileHooks();
-    int exitCode = rt::runPackage(data, size, &hooks, argumentCount, arguments);
+    int exitCode = runPackageData(data, size, folder, argumentCount, arguments, launch);
+    memory::release(folder);
     memory::release(data);
     return exitCode;
 }
@@ -140,10 +154,28 @@ int runPackageFile(const char *path, int argumentCount, char **arguments) {
 } // namespace
 
 /**
+ * A package in memory, with the hooks of the host (an uncaught exception
+ * stops the program) and its permissions: the launch's, plus the "desktop"
+ * section of its manifest.
+ */
+int runPackageData(const uint8_t *data, size_t size, const char *programFolder, int argumentCount, char **arguments,
+                   const Launch *launch) {
+    // the permissions; wrong ones: nothing runs
+    if (!applyDesktopSection(data, size, programFolder, launch->rootFolder, launch->permissions)) {
+        return 1;
+    }
+
+    // run it
+    rt::RunHooks hooks = fileHooks();
+    hooks.permissions = launch->permissions;
+    return rt::runPackage(data, size, &hooks, argumentCount, arguments);
+}
+
+/**
  * "qjsx run <path>": a package runs from its bytecode (like on a target),
  * anything else is a source module.
  */
-int runFile(const char *path, int argumentCount, char **arguments) {
+int runFile(const char *path, int argumentCount, char **arguments, const Launch *launch) {
     // the path is used with '/' separators (the module resolution works with
     // '/', a Windows path may contain '\')
     char *normalized = memory::copyText(path, strlen(path));
@@ -151,8 +183,8 @@ int runFile(const char *path, int argumentCount, char **arguments) {
     bool isPackage = endsWith(normalized, ".qjspkg");
 
     // run it as a package or as a source module
-    int exitCode = isPackage ? runPackageFile(normalized, argumentCount, arguments)
-                             : runScriptFile(normalized, argumentCount, arguments);
+    int exitCode = isPackage ? runPackageFile(normalized, argumentCount, arguments, launch)
+                             : runScriptFile(normalized, argumentCount, arguments, launch);
     memory::release(normalized);
     return exitCode;
 }

@@ -15,6 +15,7 @@
 #include "debugger.h"
 #include "modules.h"
 #include "protocol.h"
+#include "ram_storage.h"
 
 namespace agent {
 
@@ -72,6 +73,14 @@ struct Agent::Fields {
         }
 
         return found;
+    }
+
+    /**
+     * Boolean field: true only when present and true.
+     */
+    bool flag(int64_t key) const {
+        const Field *field = find(key);
+        return field != nullptr && field->type == cbor::Type::True;
     }
 
     /**
@@ -178,11 +187,11 @@ bool Agent::readFields(cbor::Reader *reader, Fields *fields) {
 /**
  * An agent without host, session nor upload.
  */
-Agent::Agent(Storage *storage, Controller *controller, Identity identity)
+Agent::Agent(Storage *storage, RamStorage *ram, Controller *controller, Identity identity)
     // the frame parser gets twice the maximum message size: room for the
     // frame header and the COBS overhead; bytes that are not frames are
     // dropped (no text callback)
-    : _storage(storage), _controller(controller), _debugger(nullptr), _identity(identity),
+    : _storage(storage), _ram(ram), _uploadStorage(storage), _controller(controller), _debugger(nullptr), _identity(identity),
       _parser(DEFAULT_MAX_MESSAGE * 2, &onMessage, nullptr, this), _link(nullptr), _session(false),
       _uploading(false), _uploadSize(0), _uploadReceived(0), _hash(nullptr), _agentAnswer{ -1, nullptr, 0 },
       _debuggerAnswer{ -1, nullptr, 0 } {
@@ -375,30 +384,44 @@ void Agent::handleHello(int64_t id, const Fields *fields) {
     payload.integer(KEY_MAX_MESSAGE);
     payload.integer(DEFAULT_MAX_MESSAGE);
 
-    // and the native modules of this firmware: the host refuses to deploy a
+    // and the native modules of this firmware a program may import (the
+    // twin of a board: those of the board): the host refuses to deploy a
     // program that imports another one
-    int nativeCount = rt::countNativeModules();
+    int registered = rt::countNativeModules();
+    int nativeCount = 0;
+    for (int i = 0; i < registered; i++) {
+        nativeCount += rt::isDeviceNativeModule(rt::nativeModuleNameAt(i)) ? 1 : 0;
+    }
+
     payload.integer(KEY_NATIVES);
     payload.array((uint64_t)nativeCount);
 
-    for (int i = 0; i < nativeCount; i++) {
-        payload.text(rt::nativeModuleNameAt(i));
+    for (int i = 0; i < registered; i++) {
+        const char *name = rt::nativeModuleNameAt(i);
+        if (rt::isDeviceNativeModule(name)) {
+            payload.text(name);
+        }
     }
 
     respond(id, &payload, 6);
 }
 
 /**
- * INFO: is a program running, which package is installed.
+ * INFO: is a program running, which package RUN starts: the one loaded in
+ * RAM if any (VOLATILE true), else the one installed in flash.
  */
 void Agent::handleInfo(int64_t id) {
-    // ask the storage for the installed package
+    // the package in RAM first, else the installed one
     char buildId[64];
     size_t packageSize = 0;
-    bool installed = _storage->installed(buildId, sizeof(buildId), &packageSize);
+    bool inRam = _ram->installed(buildId, sizeof(buildId), &packageSize);
+    bool installed = inRam || _storage->installed(buildId, sizeof(buildId), &packageSize);
 
-    // answer RUNNING, BUILD_ID (null without package), PACKAGE_SIZE (0 without package)
+    // answer RUNNING, BUILD_ID (null without package), PACKAGE_SIZE (0
+    // without package), VOLATILE
     cbor::Writer payload;
+    payload.integer(KEY_VOLATILE);
+    payload.boolean(inRam);
     payload.integer(KEY_RUNNING);
     payload.boolean(_controller->running());
     payload.integer(KEY_BUILD_ID);
@@ -410,12 +433,13 @@ void Agent::handleInfo(int64_t id) {
 
     payload.integer(KEY_PACKAGE_SIZE);
     payload.integer(installed ? (int64_t)packageSize : 0);
-    respond(id, &payload, 3);
+    respond(id, &payload, 4);
 }
 
 /**
- * UPLOAD_BEGIN: a package of SIZE bytes is coming. Refused if it was
- * compiled for another bytecode version than the one of this engine.
+ * UPLOAD_BEGIN: a package of SIZE bytes is coming, to the flash, or to RAM
+ * with VOLATILE. Refused if it was compiled for another bytecode version
+ * than the one of this engine, or if the RAM cannot hold it.
  */
 void Agent::handleUploadBegin(int64_t id, const Fields *fields) {
     // fields: SIZE > 0, SHA256 of 32 bytes, BUILD_ID that fits _uploadBuildId
@@ -453,13 +477,24 @@ void Agent::handleUploadBegin(int64_t id, const Fields *fields) {
 
     // an upload in progress: the host started over, drop it
     if (_uploading) {
-        _storage->abortUpload();
+        _uploadStorage->abortUpload();
     }
 
-    // the storage prepares room for the package
-    if (!_storage->beginUpload((size_t)size)) {
+    // where it goes: RAM (VOLATILE) or flash; the storage prepares room
+    bool toRam = fields->flag(KEY_VOLATILE);
+    _uploadStorage = toRam ? (Storage *)_ram : _storage;
+    if (!_uploadStorage->beginUpload((size_t)size)) {
         _uploading = false;
-        respondError(id, "cannot store a package of this size");
+        if (toRam) {
+            char message[160];
+            snprintf(message, sizeof(message),
+                     "not enough RAM for this package (%u bytes): install it in flash with qjsx deploy",
+                     (unsigned)size);
+            respondError(id, message);
+        } else {
+            respondError(id, "cannot store a package of this size");
+        }
+
         return;
     }
 
@@ -499,7 +534,7 @@ void Agent::handleUploadChunk(int64_t id, const Fields *fields) {
 
     // write the chunk; on error the upload stays in progress: the host may
     // send the chunk again
-    if (!_storage->writeUpload(_uploadReceived, data, size)) {
+    if (!_uploadStorage->writeUpload(_uploadReceived, data, size)) {
         respondError(id, "cannot write the package");
         return;
     }
@@ -526,15 +561,21 @@ void Agent::handleUploadEnd(int64_t id) {
     _hash->finish(digest);
     _uploading = false;
     if (memcmp(digest, _uploadHash, 32) != 0) {
-        _storage->abortUpload();
+        _uploadStorage->abortUpload();
         respondError(id, "UPLOAD_END: SHA-256 mismatch");
         return;
     }
 
     // install it with its build id
-    if (!_storage->finishUpload(_uploadBuildId)) {
+    if (!_uploadStorage->finishUpload(_uploadBuildId)) {
         respondError(id, "cannot install the package");
         return;
+    }
+
+    // a package installed in flash replaces the one loaded in RAM: RUN
+    // starts what was just installed
+    if (_uploadStorage == _storage) {
+        _ram->clear();
     }
 
     // answer the build id now installed

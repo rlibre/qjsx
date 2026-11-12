@@ -226,5 +226,40 @@ optimizations (TODO.md).
   with the split, which changes the size of `JS_CallInternal` and the placement of the code.
   Possible checks:
   - compare the machine code of the opcode cases concerned;
-  - measure with LTO;
+  - measure with LTO (done, see below);
   - see whether the order or the alignment of the dispatch cases matters (TODO.md).
+
+### With link time optimization (2026-11-12)
+
+`premake5 ... --lto` (option added to `tools/quickjs-split/test/premake5.lua`: `-flto` and
+`-ffat-lto-objects` for both engines and both `qjs`), with engine changes up to N. Two
+passes kept (a third one was disturbed by another job). Totals of the microbench:
+
+| Build | Total (ns) | Against the original without LTO |
+|---|---:|---:|
+| original, no LTO | 4,642.8 | — |
+| original, LTO (as Bellard's Makefile builds `qjs`) | 4,551.9 | −2.0 % |
+| qjsx, no LTO | 4,449.0 | −4.2 % |
+| qjsx, LTO | 4,416.4 | −4.9 % (−3.0 % against the original with LTO) |
+
+The hypothesis is confirmed: LTO brings back most of the losses of the split, the
+functions inlined again across files:
+
+| Test | original | qjsx, no LTO | qjsx, LTO |
+|---|---:|---:|---:|
+| `prop_clone` | 43.35 | 51.79 | 45.59 |
+| `string_to_int` | 56.51 | 64.17 | 59.18 |
+| `regexp_utf16` | 149.49 | 163.53 | 147.40 |
+| `prop_delete` | 78.75 | 85.64 | 78.91 |
+| `prop_create` | 34.64 | 36.54 | 33.12 |
+| `array_hole_length_decr` | 42.53 | 46.87 | 36.39 |
+| `prop_update` | 9.79 | 11.01 | 12.14 |
+
+But it costs the interpreter loop what the split had gained: against qjsx without LTO, the
+empty loops +24 to +34 %, `prop_read` +11 %, `prop_write` +20 %, `array_read` +19 %,
+`int_arith` +11 %, `global_write` +19 % (`JS_CallInternal` grows again with what is inlined
+into it). On the total, LTO gains 0.7 %, within the noise. `prop_update` stays slower than
+the original with or without LTO (+12 to +26 %): another cause, to look at in its opcodes.
+
+Not tried: LTO for the whole engine except `core/interpreter.c` (the builtins inlined again,
+the interpreter loop as it is now).

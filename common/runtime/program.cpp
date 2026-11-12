@@ -17,6 +17,7 @@
 #include "jsbind.h"
 #include "loop.h"
 #include "modules.h"
+#include "permissions.h"
 
 namespace rt {
 
@@ -88,9 +89,12 @@ JSModuleDef *readPackageModule(JSContext *ctx, const Session *session, const pac
 JSModuleDef *loadModule(JSContext *ctx, const char *name, void *opaque, JSValueConst) {
     Session *session = (Session *)opaque;
 
-    // a native module (C++) first
+    // a native module (C++) first; a device program only gets those of its
+    // device (the digital twin of a board on the desktop has more)
     const NativeModule *native = findNativeModule(name);
-    if (native != nullptr) {
+    bool isDevice = session->hooks != nullptr && session->hooks->device;
+    bool allowed = !isDevice || isDeviceNativeModule(name);
+    if (native != nullptr && allowed) {
         return native->create(ctx, name);
     }
 
@@ -228,6 +232,34 @@ void copyStrings(JSContext *ctx, JSValueConst from, JSValueConst to) {
 }
 
 /**
+ * process.versions.build = the build id of the package (manifest
+ * "buildId": a hash of the bytecode of its modules), when it has one.
+ */
+void setBuildVersion(JSContext *ctx, JSValueConst manifest) {
+    // the build id, a string
+    JSValue buildId = JS_GetPropertyStr(ctx, manifest, "buildId");
+    if (!JS_IsString(buildId)) {
+        JS_FreeValue(ctx, buildId);
+        return;
+    }
+
+    // into process.versions (made by installGlobals)
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue process = JS_GetPropertyStr(ctx, global, "process");
+    JSValue versions = JS_GetPropertyStr(ctx, process, "versions");
+    if (JS_IsObject(versions)) {
+        JS_SetPropertyStr(ctx, versions, "build", buildId);
+    } else {
+        JS_FreeValue(ctx, buildId);
+    }
+
+    // free the values read
+    JS_FreeValue(ctx, versions);
+    JS_FreeValue(ctx, process);
+    JS_FreeValue(ctx, global);
+}
+
+/**
  * Device run (RunHooks::device): process.argv = ["qjsx", main module] and
  * process.env = the strings of the manifest's "env" ({} without one).
  */
@@ -294,6 +326,9 @@ bool startPackage(JSContext *ctx, void *startOpaque) {
     if (main != nullptr && isDevice) {
         setDeviceProcess(ctx, manifest, main);
     }
+
+    // every package run: process.versions.build is its build id
+    setBuildVersion(ctx, manifest);
 
     JS_FreeValue(ctx, manifest);
     if (main == nullptr) {
@@ -471,6 +506,10 @@ bool evaluateMain(JSContext *ctx, JSValue module, const char *name) {
  */
 int runProgram(const package::Reader *package, StartFunction *start, void *startOpaque, const RunHooks *hooks,
                int argumentCount, char **arguments) {
+    // what the program may reach, for this thread, before any code runs
+    // (process.env is filtered by it when the globals are installed)
+    setPermissions(hooks != nullptr ? hooks->permissions : nullptr);
+
     // create the runtime, the context and the loop; set process.argv
     Session session = { package, hooks };
     Runtime runtime = createRuntime(&session);
@@ -499,8 +538,9 @@ int runProgram(const package::Reader *package, StartFunction *start, void *start
         hooks->finished(hooks->opaque);
     }
 
-    // free everything
+    // free everything; the thread's next run sets its own permissions
     destroyRuntime(runtime);
+    setPermissions(nullptr);
     return exitCode;
 }
 

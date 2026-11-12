@@ -17,7 +17,7 @@ What exists today:
 |---|---|---|
 | ESP32-S3, ESP-IDF 6.1 | `ports/esp32/` | works on one real board: VCC-GND YD-ESP32-S3, WROOM-1 N16R8 module (16 MB flash, 8 MB octal PSRAM), wired by its UART0 / COM port |
 | Desktop "board" (`qjsx agent`) | `host/platform/board_host.cpp`, `host/platform/platform_host.cpp` | works; a stand-in for a board, and a second implementation of the same interfaces |
-| RP2350 (Olimex PICO2-XXL, FreeRTOS + pico-sdk) | nothing: there is no `ports/rp2350/` | planned, **not written** |
+| RP2350 (Olimex PICO2-XXL, FreeRTOS SMP + pico-sdk) | `ports/rp2350/` | works on the board (2026-11-12): USB CDC link, packages in flash, JS heap in PSRAM, debugger tests pass |
 
 Two cases:
 
@@ -27,8 +27,8 @@ Two cases:
 2. **Your chip has no port.** You write a port: a build file, an implementation of two
    interfaces (`platform.h` and `board.h`) and an entry point. Read
    [section 2](#2-what-a-device-firmware-is-made-of), then
-   [section 4](#4-case-2-a-new-chip-a-new-port). The RP2350 will be the first port written
-   this way; until it exists, the ESP32 port and the desktop board are the only examples.
+   [section 4](#4-case-2-a-new-chip-a-new-port). The RP2350 is the first port written
+   this way (`ports/rp2350/`, see architecture.md 5.5).
 
 An ESP32 that is not an ESP32-S3 (ESP32, ESP32-C3, ESP32-C6...) is between the two cases: only
 the `esp32s3` target has been built. See [3.7](#37-what-a-board-description-cannot-change-yet).
@@ -223,7 +223,13 @@ These are in the shared code, the same for every ESP32 board:
 
 - The host link is UART0 (`HOST_UART` in `ports/esp32/main/board_esp32.cpp`), at 921600 baud
   (`CONFIG_ESP_CONSOLE_UART_BAUDRATE` in `sdkconfig.defaults`). Native USB and WiFi links are
-  not written.
+  not written. The native USB of the chips with USB OTG is offered to the programs instead,
+  as the module `device/usb` (`doc/architecture.md` 5.4): a board whose host link is UART0
+  can use its native USB port for a host of its own (a tablet). The host link's UART is
+  refused to `device/serial` (its driver is installed already: EBUSY); the other UARTs are
+  the programs'. A new port gives `device/serial` its UARTs with a driver
+  (`common/hal/hal_serial.h`: `hal::serial::boardDriver()`, a table of functions, not free
+  functions) and calls `setSerialDriver` before registering the module.
 - The JS task: 48 KB of stack, priority 5, pinned to core 1 (`JS_TASK_STACK`,
   `JS_TASK_PRIORITY`, `JS_TASK_CORE` in `ports/esp32/main/board_esp32.h`). A single-core chip
   has no core 1: not tried, this constant would have to move to the board.
@@ -730,14 +736,15 @@ Symptoms met so far:
   of the ESP32 tables is reserved for it.
 - **Hardware modules** (GPIO, PWM, I2C, SPI, UART, ADC, WiFi...). A program can compute, print
   and use timers; it cannot drive a pin.
-- **Native USB and WiFi links.** The only link is UART0 on the ESP32.
+- **WiFi links, native USB on the ESP32.** The ESP32 talks over UART0; the RP2350 over its
+  native USB (CDC).
 - **OTA** (firmware update over the link). The 8 MB and 16 MB tables reserve two firmware
   slots; nothing uses them.
 - **The device identity in the protocol.** `board::identity()` is implemented and not
   transmitted.
 - **Several links on one board**, and events posted from interrupt handlers.
-- **The RP2350 port.** Planned for the Olimex PICO2-XXL, with FreeRTOS and the pico-sdk. No
-  file of it exists.
+- **The speed of the RP2350 port.** JS runs well below the ESP32-S3 there; not measured
+  nor explained yet.
 
 ## 7. Files to read
 

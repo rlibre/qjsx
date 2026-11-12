@@ -17,6 +17,7 @@ import { build } from "qjsx:build";
 import { warningText } from "qjsx:compile";
 import { qjsxVersion } from "sys/compiler";
 import { makeLibrary } from "qjsx:library";
+import { makeExecutable } from "qjsx:executable";
 import { loadProject, PROJECT_FILE } from "qjsx:project";
 import { Device } from "qjsx:device";
 import { upload, latestPackage, reducePackage } from "qjsx:deploy";
@@ -27,13 +28,29 @@ import { CdpServer } from "qjsx:cdp";
 const HELP = `usage: qjsx <command> [arguments]
 
 commands:
-  run <file.js | package.qjspkg> [arguments]   run a script, or a package like the ESP does
-  build [directory]                            compile the project (qjsx.json) into a .qjspkg
+  run [options] <file.js | package.qjspkg> [arguments]
+                                               run a script, or a package like the ESP does;
+                                               it reaches nothing but what is granted (Deno-like):
+      -A, --allow-all                     everything
+      -R, --allow-read[=folder,...]       read files (everywhere without a list)
+      -W, --allow-write[=folder,...]      write files
+      -N, --allow-net[=host[:port],...]   network
+      -E, --allow-env[=NAME,...]          environment variables
+      --allow-serial[=port,...]           serial ports
+      --qjsx-root-folder=<folder>         its process.cwd() (also QJSX_ROOT_FOLDER);
+                                          a package adds the "desktop" section of qjsx.json
+  build [directory] [--executable]             compile the project (qjsx.json) into a .qjspkg;
+                                               --executable: also an executable of the PC
+                                               that runs it (<output>/<name>[.exe])
   mklib [directory] [--output <file>]          compile a library project into a .qjslib
   deploy [package] [options]                   send a package to a device and start it
       --target <target>   device (default: "target" of qjsx.json)
       --token <token>     token of a network agent
       --no-run            install without starting
+      --ram               load it in the RAM of the device (nothing written to
+                          the flash; lost at the next restart of the device)
+      --reset             restart the device after installing (the program starts
+                          at boot, like after a power on)
       --monitor           then show the program output (--until-exit: stop when it ends)
   monitor [options]                            show the output of the program on a device
       --target, --token, --until-exit
@@ -43,13 +60,23 @@ commands:
       --port <port>       default: "debugPort" of qjsx.json (9339)
       --host <address>    default: 127.0.0.1
       --restart           start the program again when VS Code attaches (debug its startup)
+      --no-upload         debug what the device runs (default: load the latest
+                          package of the project in RAM first)
   targets                                      list the serial ports
   agent [--host h] [--port p] [--storage dir] [--token t]
                                                desktop device agent (stand-in for an ESP)
+      --board <name | file.json>  digital twin of a board (boards/<name>.json):
+                          its native modules, its platform, its pins and parts
+                          simulated
+      -p, --project <dir> the twin of that project (the "twin" section of its
+                          qjsx.json: board, parts, ports); without --board, the
+                          project of the current folder, if it has one
+      --ui-port <port>    page of the twin on http://127.0.0.1:<port> (default 8090)
   help                                         this help
   --version                                    versions of qjsx and QuickJS
 
-targets: tcp:<host>:<port>   serial:<port>[@<baud rate>]   e.g. serial:COM3, tcp:esp.local:5555`;
+targets: tcp:<host>:<port>   serial:<port>[@<baud rate>]   e.g. serial:COM3, tcp:esp.local:5555
+         twin: the twin of the project on this PC (port "twin.ports.agent", 5555)`;
 
 // '--name value' options and '--flag' flags; everything else is positional.
 function parseArguments(args, { values = [], flags = [] }) {
@@ -80,10 +107,19 @@ function currentProject() {
     return fs.existsSync(PROJECT_FILE) ? loadProject(".") : undefined;
 }
 
+// The port of the agent of a twin when its project does not give one.
+const TWIN_AGENT_PORT = 5555;
+
+// The target of a command: --target, else "target" of qjsx.json. "twin" is
+// the twin of the project on this PC ("qjsx agent" in its folder), on the
+// port "twin.ports.agent" of qjsx.json, 5555 by default.
 function targetOf(options, project) {
     const target = options.target ?? project?.target;
     if (target === undefined) {
         throw new Error(`no target: use --target or set "target" in ${PROJECT_FILE}`);
+    }
+    if (target === "twin") {
+        return `tcp:127.0.0.1:${project?.twin?.ports?.agent ?? TWIN_AGENT_PORT}`;
     }
     return target;
 }
@@ -139,37 +175,90 @@ function monitorHandlers(afterStart = false) {
     return { handlers, exited };
 }
 
-async function deployCommand(args) {
-    const { options, positional } = parseArguments(args, {
-        values: ["target", "token"],
-        flags: ["no-run", "monitor", "until-exit"],
-    });
-    const project = currentProject();
-    const target = targetOf(options, project);
+// The latest package of the project, or the one given; throws without one.
+function packageToSend(positional, project) {
     const packagePath = positional[0] ?? (project && latestPackage(join(project.directory, project.output), project.name));
     if (packagePath === undefined) {
         throw new Error("no package: give its path or run 'qjsx build' first");
     }
-    const bytes = fs.readFileSync(packagePath);
-    const monitor = monitorHandlers(true);
-    const device = await openDevice(target, options.token, monitor.handlers);
-    // a firmware of another qjsx version may not run this package as the tool
-    // expects: said, not refused (the bytecode number is what must match)
+    return packagePath;
+}
+
+// Sends a package to an open device, in flash or in RAM, and says so. A
+// firmware of another qjsx version may not run it as the tool expects: said,
+// not refused (the bytecode number is what must match).
+async function sendPackage(device, packagePath, ram) {
     if (device.version !== undefined && device.version !== qjsxVersion) {
         status(`warning: the device runs qjsx ${device.version}, this tool is qjsx ${qjsxVersion}`);
     }
-    const buildId = await upload(device, bytes);
-    status(`installed ${packagePath} (${reducePackage(bytes).length} bytes sent, build ${buildId.slice(0, 12)})`);
+
+    const bytes = fs.readFileSync(packagePath);
+    const buildId = await upload(device, bytes, { ram });
+    const sent = `${reducePackage(bytes).length} bytes sent, build ${buildId.slice(0, 12)}`;
+    if (ram) {
+        status(`loaded ${packagePath} in RAM (${sent})`);
+        status("warning: a package in RAM is lost at the next restart of the device; 'qjsx deploy' installs it in flash");
+    } else {
+        status(`installed ${packagePath} (${sent})`);
+    }
+}
+
+// qjsx deploy: sends the package, then starts it (RUN), or restarts the
+// device, which starts it at boot (--reset), or nothing (--no-run).
+async function deployCommand(args) {
+    const { options, positional } = parseArguments(args, {
+        values: ["target", "token"],
+        flags: ["no-run", "monitor", "until-exit", "ram", "reset"],
+    });
+    if (options.ram && options.reset) {
+        throw new Error("--ram and --reset do not go together: a restart loses the package loaded in RAM");
+    }
+
+    const project = currentProject();
+    const target = targetOf(options, project);
+    const packagePath = packageToSend(positional, project);
+    let monitor = monitorHandlers(true);
+    let device = await openDevice(target, options.token, monitor.handlers);
+    await sendPackage(device, packagePath, options.ram === true);
     if (options["no-run"]) {
         device.close();
         return 0;
     }
-    await device.request(KIND.RUN);
+
+    // start it: RUN, or a restart of the device (the installed package starts
+    // at boot, before the tool opens the session again: no STARTED event
+    // then, the end of the program is what counts)
+    if (options.reset) {
+        device = await restartDevice(device, target, options.token, options.monitor);
+        monitor = device.monitor ?? monitor;
+    } else {
+        await device.request(KIND.RUN);
+    }
+
     if (!options.monitor) {
         device.close();
         return 0;
     }
     return waitForExit(device, monitor, options["until-exit"]);
+}
+
+// Sends RESET to an open device, then waits for it to come back (its link may
+// go away meanwhile: native USB port) and opens the session again. With
+// 'monitored', the device returned carries the monitor of its output in
+// 'monitor'.
+async function restartDevice(device, target, token, monitored) {
+    status("restarting the device");
+    // the answer may be lost with the link: the device restarts anyway; this
+    // connection ends here on purpose (its handlers are not told)
+    await device.request(KIND.RESET, {}, { attempts: 1 }).catch(() => {});
+    device.handlers = {};
+    device.close();
+
+    const monitor = monitored ? monitorHandlers(false) : undefined;
+    const again = await Device.reopen(target, monitor?.handlers ?? {}, token);
+    again.monitor = monitor;
+    status(`device restarted, connected again on ${target}`);
+    return again;
 }
 
 async function waitForExit(device, monitor, untilExit) {
@@ -198,9 +287,10 @@ async function deviceCommand(args) {
     const device = await openDevice(targetOf(options, currentProject()), options.token, {});
     const answer = await device.request(requests[action]);
     if (action === "info") {
+        const where = answer.get(KEY.VOLATILE) === true ? ", in RAM: lost at the next restart" : "";
         console.log(`firmware: qjsx ${device.version ?? "(unknown: older firmware)"}`);
         console.log(`running:  ${answer.get(KEY.RUNNING)}`);
-        console.log(`package:  ${answer.get(KEY.BUILD_ID) ?? "(none)"} (${answer.get(KEY.PACKAGE_SIZE)} bytes)`);
+        console.log(`package:  ${answer.get(KEY.BUILD_ID) ?? "(none)"} (${answer.get(KEY.PACKAGE_SIZE)} bytes${where})`);
     } else {
         status(`${kindName(requests[action]).toLowerCase()} done`);
     }
@@ -227,17 +317,32 @@ function printWarnings(warnings) {
     }
 }
 
+// qjsx build: the package of the project; with --executable, also an
+// executable of the PC that runs it (<output>/<name>, .exe on Windows).
 function buildCommand(args) {
-    if (args.length > 1) {
-        throw new Error("usage: qjsx build [directory]");
+    const { options, positional } = parseArguments(args, { flags: ["executable"] });
+    if (positional.length > 1) {
+        throw new Error("usage: qjsx build [directory] [--executable]");
     }
-    const result = build(args[0] ?? ".");
+
+    const directory = positional[0] ?? ".";
+    const result = build(directory);
     printWarnings(result.warnings);
     for (const note of result.notes) {
         status(note);
     }
     console.log(`built ${result.file}`);
     console.log(`  ${result.scriptCount} module(s), ${result.size} bytes, build ${result.buildId.slice(0, 12)}`);
+
+    if (options.executable) {
+        const project = loadProject(directory);
+        const name = process.platform === "win32" ? `${project.name}.exe` : project.name;
+        const executable = makeExecutable(result.file, join(project.directory, project.output, name));
+        console.log(`built ${executable.file} (${executable.size} bytes)`);
+        if (process.platform !== "win32") {
+            status(`mark it executable: chmod +x ${executable.file}`);
+        }
+    }
     return 0;
 }
 
@@ -254,12 +359,18 @@ function mklibCommand(args) {
 }
 
 // qjsx debug: the debugger server (CDP) of the project's device, for VS Code.
-// Runs until Ctrl+C or until the device goes away.
+// First loads the latest package of the project in the RAM of the device
+// (nothing written to the flash; --no-upload: debug what the device has) and
+// starts it, or, with --restart, stops what runs: the program starts when VS
+// Code attaches. Runs until Ctrl+C or until the device goes away.
 async function debugCommand(args) {
-    const { options, positional } = parseArguments(args, { values: ["target", "token", "port", "host"], flags: ["restart"] });
+    const { options, positional } = parseArguments(args, {
+        values: ["target", "token", "port", "host"],
+        flags: ["restart", "no-upload"],
+    });
     const project = currentProject();
     if (project === undefined || positional.length > 0) {
-        throw new Error(`usage: qjsx debug [--target <target>] [--port <port>] [--restart], in a project folder (${PROJECT_FILE})`);
+        throw new Error(`usage: qjsx debug [--target <target>] [--port <port>] [--restart] [--no-upload], in a project folder (${PROJECT_FILE})`);
     }
 
     // the packages of the project, to find the one the device runs
@@ -277,6 +388,13 @@ async function debugCommand(args) {
         onClose: () => deviceClosed(),
     };
     const device = await openDevice(targetOf(options, project), options.token, handlers);
+
+    // the latest package of the project, in RAM; started now, or when VS Code
+    // attaches (--restart)
+    if (!options["no-upload"]) {
+        await sendPackage(device, packageToSend([], project), true);
+        await device.request(options.restart ? KIND.STOP : KIND.RUN);
+    }
 
     // the server
     const host = options.host ?? "127.0.0.1";
@@ -298,7 +416,21 @@ async function debugCommand(args) {
     return 1;
 }
 
+// Hidden command "twin-ui --host h --port p [--project folder] [--ui-dir folder]": the web page
+// of the digital twin, started by "qjsx agent --board" on a thread of its
+// own (host/agent_command.cpp); --project: the project whose parts are
+// wired on the board; --ui-dir serves the page from a folder instead of the
+// embedded one. Imported on demand: its native module
+// "qjsx:twinboard" exists only in such an agent.
+async function twinUiCommand(args) {
+    const { options } = parseArguments(args, { values: ["host", "port", "project", "ui-dir"] });
+    const { serveTwin } = await import("qjsx:twin/server");
+    await serveTwin({ host: options.host, port: Number(options.port), projectDir: options.project, uiDir: options["ui-dir"] });
+    return 0;
+}
+
 const COMMANDS = {
+    "twin-ui": twinUiCommand,
     debug: debugCommand,
     build: buildCommand,
     mklib: mklibCommand,

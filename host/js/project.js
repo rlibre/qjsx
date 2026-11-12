@@ -17,6 +17,15 @@
 //     "debugPort": 9339,              port of the debugger server (qjsx debug)
 //     "env": { "LOG": "debug" }       process.env of the program on a device
 //                                     (strings only; copied into the manifest)
+//     "desktop": {                    the program as a program of the PC (an
+//       "rootFolder": "${userAppDataFolder}",    executable, qjsx run): its
+//       "permissions": {                         root folder (process.cwd())
+//         "read": ["${rootFolder}"],             and what it may reach;
+//         "write": ["${rootFolder}"],            nothing without them (a root
+//         "net": ["api.example.com:443"],        alone may be read). Each kind:
+//         "env": ["HOME"], "serial": ["COM3"]    true or a list. Copied into
+//       }                                        the manifest
+//     }
 //     "libraries": ["libs/sensors.qjslib"]
 //                                     libraries the program may import, besides
 //                                     the standard one (paths from the project)
@@ -47,6 +56,7 @@ const DEFAULTS = {
     target: undefined,
     debugPort: 9339,
     env: undefined,
+    desktop: undefined,
     libraries: [],
     version: undefined,
     modules: undefined,
@@ -62,9 +72,11 @@ const TYPES = {
     target: "string",
     debugPort: "number",
     env: "object",
+    desktop: "object",
     libraries: "array",
     version: "string",
     modules: "object",
+    twin: "object",
 };
 
 // A name made of letters, digits, '.', '_' and '-': project and library
@@ -73,6 +85,91 @@ const NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 function isModuleName(name) {
     return name.split("/").every(element => NAME_PATTERN.test(element) && element !== "." && element !== "..");
+}
+
+// The variables a path of "desktop" may start with.
+const DESKTOP_VARIABLES = ["executableFolder", "userAppDataFolder", "currentFolder", "rootFolder"];
+
+// The kinds of "desktop.permissions"; read and write hold paths.
+const PERMISSION_KINDS = ["read", "write", "net", "env", "serial"];
+
+// Checks a path of "desktop": it starts with a known variable (followed by
+// '/' or nothing) or is absolute. 'allowRoot': ${rootFolder} may be used.
+function checkDesktopPath(file, where, path, allowRoot) {
+    const variable = /^\$\{([^}]*)\}(.*)$/.exec(path);
+    if (variable === null) {
+        const absolute = path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
+        if (!absolute) {
+            throw new Error(`${file}: '${where}': "${path}" must start with \${${DESKTOP_VARIABLES.join("}, \${")}} or be absolute`);
+        }
+        return;
+    }
+    const [, name, rest] = variable;
+    if (!DESKTOP_VARIABLES.includes(name)) {
+        throw new Error(`${file}: '${where}': unknown variable \${${name}} (known: \${${DESKTOP_VARIABLES.join("}, \${")}})`);
+    }
+    if (rest !== "" && !rest.startsWith("/")) {
+        throw new Error(`${file}: '${where}': "${path}": a variable is followed by '/' or ends the path`);
+    }
+    if (name === "rootFolder" && !allowRoot) {
+        throw new Error(`${file}: '${where}': \${rootFolder} needs 'desktop.rootFolder'`);
+    }
+}
+
+// Checks the "desktop" section (see the top of the file).
+// The "twin" section (the digital twin of the project, "qjsx agent"): its
+// shape only; the agent checks the board and each part (their models).
+function checkTwin(file, twin) {
+    if (typeof twin.board !== "string" || twin.board === "") {
+        throw new Error(`${file}: 'twin.board' (the board of the twin) must be a name or a .json path`);
+    }
+    if (twin.parts !== undefined && !Array.isArray(twin.parts)) {
+        throw new Error(`${file}: 'twin.parts' must be an array of parts`);
+    }
+    for (const [name, port] of Object.entries(twin.ports ?? {})) {
+        const known = ["agent", "ui", "usb", "uart"].includes(name);
+        if (!known || !Number.isInteger(port) || port < 1 || port > 65535) {
+            throw new Error(`${file}: 'twin.ports' holds agent, ui, usb, uart: ports from 1 to 65535`);
+        }
+    }
+}
+
+function checkDesktop(file, desktop) {
+    for (const key of Object.keys(desktop)) {
+        if (key !== "rootFolder" && key !== "permissions") {
+            throw new Error(`${file}: unknown setting 'desktop.${key}'`);
+        }
+    }
+    const { rootFolder, permissions } = desktop;
+    if (rootFolder !== undefined) {
+        if (typeof rootFolder !== "string") {
+            throw new Error(`${file}: 'desktop.rootFolder' must be a string`);
+        }
+        checkDesktopPath(file, "desktop.rootFolder", rootFolder, false);
+    }
+    if (permissions === undefined) {
+        return;
+    }
+    if (typeOf(permissions) !== "object") {
+        throw new Error(`${file}: 'desktop.permissions' must be an object`);
+    }
+    for (const [kind, value] of Object.entries(permissions)) {
+        const where = `desktop.permissions.${kind}`;
+        if (!PERMISSION_KINDS.includes(kind)) {
+            throw new Error(`${file}: unknown permission '${where}' (known: ${PERMISSION_KINDS.join(", ")})`);
+        }
+        if (typeof value === "boolean") {
+            continue;
+        }
+        if (!Array.isArray(value) || value.some(item => typeof item !== "string")) {
+            throw new Error(`${file}: '${where}' must be true, false or a list of strings`);
+        }
+        if (kind === "read" || kind === "write") {
+            for (const path of value) {
+                checkDesktopPath(file, where, path, rootFolder !== undefined);
+            }
+        }
+    }
 }
 
 function typeOf(value) {
@@ -105,6 +202,12 @@ export function loadProject(directory) {
         if (typeof value !== "string") {
             throw new Error(`${file}: 'env.${key}' must be a string`);
         }
+    }
+    if (settings.desktop !== undefined) {
+        checkDesktop(file, settings.desktop);
+    }
+    if (settings.twin !== undefined) {
+        checkTwin(file, settings.twin);
     }
     for (const library of settings.libraries ?? []) {
         if (typeof library !== "string") {

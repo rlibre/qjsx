@@ -15,7 +15,8 @@ prevails.
 (precompiled bytecode, debug and deployment agent, no compiler):
 
 - the **ESP32** (ESP32-S3, YD board with a WROOM-1 module, PSRAM): ported, runs on the board;
-- the **RP2350** (Olimex PICO2-XXL, RP2350B, 8 MB of PSRAM): planned, not written.
+- the **RP2350** (Olimex PICO2-XXL, RP2350B, 8 MB of PSRAM): ported (pico-sdk + FreeRTOS
+  SMP, USB link, JS heap in PSRAM), runs on the board.
 
 This list will grow: what is said of a device holds for any new target
 (one more port in `ports/`, one implementation of `board.h`). A chip is named only
@@ -60,7 +61,8 @@ project.
 > protocol (4.3), the runtime (5), the host tool (6) and the ESP32-S3 firmware (5.5). For the
 > debugger, the part that lives on the device is done and tested (4.3); the host part (proxy,
 > CDP server, VS Code) is not written (section 3). Not started: hardware modules (GPIO,
-> I2C…), files on a device, native USB and WiFi links, the RP2350 port.
+> I2C…), files on a device, WiFi links. The RP2350 port is written and builds (5.5), not tried
+> on the board yet.
 
 ### 1.1 Goals
 
@@ -102,7 +104,14 @@ target.
    flash. It sends a reduced package (2026-11-11): the manifest (`"reduced": true`) and
    `bytecode/` only; the debug sidecars and the sources stay in the full package on the PC.
    Before sending, it checks that the firmware has every native module the program
-   imports (the agent lists them in its answer to `HELLO`).
+   imports (the agent lists them in its answer to `HELLO`). With `--ram` (2026-11-12) the
+   package goes to the RAM of the device instead: nothing is written to the flash, the
+   package runs instead of the installed one until the next restart of the device
+   (`common/agent/ram_storage.*`: the exact size, from the C heap; refused when it does not
+   fit). `qjsx debug` loads the project's latest package that way by default
+   (`--no-upload`: debug what the device has). With `--reset` (flash only), the tool
+   restarts the device after installing and waits for it to come back (`Device.reopen`:
+   a native USB port goes away meanwhile); the program starts at boot, as after a power on.
 4. The device runs the bytecode, with no compilation on the target.
 5. Planned, not written: `qjsx debug` starts the proxy. It opens a CDP server for VS Code
    (through js-debug) and talks to the device agent over a serial or TCP link. It finds the
@@ -765,9 +774,9 @@ never travel to or from the device: they are read in the sidecar.
 >   0 for an event; content = integer-keyed map (or `null`);
 > - **types**: `RESPONSE` 1, `ERROR` 2 (`{MESSAGE}`), `HELLO` 10 (`{PROTOCOL, TOKEN?}` →
 >   `{PROTOCOL, AGENT, ENGINE, VERSION, MAX_MESSAGE, NATIVES}`; VERSION: qjsx version of the
->   firmware, NATIVES: names of its native modules, 2026-11-11), `INFO` 11 (→ `{RUNNING, BUILD_ID, PACKAGE_SIZE}`),
->   `UPLOAD_BEGIN` 20 (`{SIZE, SHA256, BUILD_ID, BYTECODE}`, refused if the bytecode number
->   is not that of the device's engine), `UPLOAD_CHUNK` 21 (`{OFFSET, DATA}`, 2,048
+>   firmware, NATIVES: names of its native modules, 2026-11-11), `INFO` 11 (→ `{RUNNING, BUILD_ID, PACKAGE_SIZE, VOLATILE}`: the package RUN starts, VOLATILE when it is in RAM),
+>   `UPLOAD_BEGIN` 20 (`{SIZE, SHA256, BUILD_ID, BYTECODE, VOLATILE?}`, refused if the bytecode number
+>   is not that of the device's engine; VOLATILE true: to RAM, refused if it does not fit), `UPLOAD_CHUNK` 21 (`{OFFSET, DATA}`, 2,048
 >   bytes, in order), `UPLOAD_END` 22 (checks size and SHA-256, installs), `RUN` 23,
 >   `STOP` 24, `RESET` 25; events `LOG` 30 (`{STREAM, TEXT}`), `EXITED` 31 (`{CODE}`),
 >   `STARTED` 32 (`{BUILD_ID}`). Key values: `common/agent/protocol.h`;
@@ -850,7 +859,7 @@ integer-keyed maps.
 | Category | Messages |
 |---|---|
 | Opening | `HELLO` (protocol version, token; the answer gives the maximum size), `INFO` |
-| Deployment | `UPLOAD_BEGIN`, `UPLOAD_CHUNK`, `UPLOAD_END` (write a `.qjspkg` to flash), `RUN`, `STOP`, `RESET` |
+| Deployment | `UPLOAD_BEGIN`, `UPLOAD_CHUNK`, `UPLOAD_END` (write a `.qjspkg` to flash, or load it in RAM), `RUN`, `STOP`, `RESET` |
 | Debug session | `DEBUG_ATTACH`, `DEBUG_DETACH` |
 | Execution control | `PAUSE`, `RESUME`, `STEP`, `SET_STOPS`, `SET_EXCEPTIONS` |
 | Scripts | `LIST_SCRIPTS` |
@@ -1123,8 +1132,9 @@ C++17, header-only, **no `std::` at all**, no C++ exceptions, no RTTI.
 >   onConnection)` → server (`port()`, `close()`); connection: `onData`, `onClose`,
 >   `write(text or bytes)`, `close()`, `remoteAddress()`, `remotePort()`. One read
 >   thread per connection; `listen` listens on 127.0.0.1 by default (tested, `tests/net.test.js`);
-> - `device/serial` (PC today): `list()`, `new Serial(port, {baudRate})` → `onData`,
->   `onClose`, `write`, `close`, 8N1. Used on Windows with the ESP32-S3 board (deployment, debugger); the POSIX
+> - `device/serial`: `list()`, `new Serial(port, options)` → `onData`, `onClose`, `write`,
+>   `port()`, `isOpen()`, `close()`; the ports of the PC by name, the UARTs of a board by
+>   number (section 5.4). Used on Windows with the ESP32-S3 board (deployment, debugger); the POSIX
 >   part is written, not tried;
 > - `process.stdout.write` / `process.stderr.write`.
 >
@@ -1155,25 +1165,172 @@ the device where it makes sense.
 | `stdlib/path` | all (standard library, in JS) | paths |
 | `sys/crypto` | all | `sha256`, `sha1` |
 | `sys/net` | host | TCP, asynchronous |
-| `device/serial` | host (class `Serial`) | serial port; on a board the same module will drive the UARTs |
+| `device/serial` | host, ESP32, the twin (class `Serial`) | serial ports: the PC's by name, the UARTs of a board by number with their pins |
 | `sys/compiler` | host | compile API |
-| `device/gpio` | ESP32 | class `Gpio`: `read`, `write`, `toggle`, `onChange`, `waitFor`, `close` |
+| `device/gpio` | ESP32, RP2350 | class `Gpio`: `read`, `write`, `toggle`, `onChange`, `waitFor`, `close` |
 | `device/rmt` | ESP32 | class `Rmt`: pulse trains (`send`, `sendBytes`), promises |
 | `stdlib/rgbled` | boards with `device/rmt` (standard library, in JS) | class `RgbLed` (WS2812…): `set`, `fill`, `setHsv`, `fillHsv`, `show`, `close` |
+| `device/usb` | ESP32 with USB OTG (S2, S3, P4), the twin | class `Usb`: the board as a composite USB device (`serial()`, `start()`, `close()`); class `UsbCdc`: a serial function (`onData`, `onLineState`, `write`, `lineState`) |
+| `stdlib/usb` | boards with `device/usb` (standard library, in JS) | re-exports `Usb`, `UsbCdc`; class `UsbSerial extends Usb`: one serial function, started at once |
+| `device/i2c` | ESP32, the twin | class `I2c`: an I2C master bus (`device`, `probe`, `probeSync`, `reset`, `close`); class `I2cDevice`: `write`, `read`, `writeRead` (promises) and their `Sync` versions, `close` |
 
-`process` is a global, on every platform.
+`process` is a global, on every platform. `process.versions` (2026-11-12) holds `qjsx` (the
+version of the tool or of the firmware), `quickjs` (the engine) and, for a package run,
+`build` (its build id: a hash of the bytecode of its modules).
 
 **Hardware modules** (2026-11-11): three layers. An interface of the hardware in
-`common/hal/` (`hal_gpio.h`, `hal_rmt.h`: free functions, called on the JS thread; events
+`common/hal/` (`hal_gpio.h`, `hal_rmt.h`, `hal_usb.h`, `hal_i2c.h`: free functions, called on the JS thread; events
 reported by an event task of the hal), one implementation per port
-(`ports/esp32/main/hal_*_esp32.cpp`), and the JS class written once with the binding
+(`ports/esp32/main/hal_*_esp32.cpp`, `ports/rp2350/main/hal_gpio_rp2350.cpp`), and the JS
+class written once with the binding
 library in `common/device/`, which the port compiles and registers in its entry point
 (`device_modules.h`). Interrupts never post to the loop themselves: they queue to the
 event task of the hal, which posts through a table of targets (mailbox + source) by pin
-or channel. A pin is not reset at the end of a program (only `close()` resets it).
+or channel. The debounce and event task of changing pins is shared by the FreeRTOS ports
+(`ports/freertos/gpio_watch.*`): a port keeps its registers and its interrupt. On the
+RP2350, `toggle()` is one write to the SIO toggle register, and an open-drain pin is made
+with the direction (the chip has no open-drain output). A pin is not reset at the end of a
+program (only `close()` resets it).
 Measured on the YD-ESP32-S3 (240 MHz, JS heap in PSRAM): a `toggle()` loop gives 247 kHz on
 the pin, `write(1)` / `write(0)` 183 kHz; the WS2812 LED on GPIO48 takes about 67 frames
-per second from a JS loop with a 10 ms pause.
+per second from a JS loop with a 10 ms pause. On the PICO2-XXL (RP2350 at 150 MHz, JS heap in
+PSRAM), a `toggle()` loop on GPIO15 gives 122 kHz (2026-11-12), 132 kHz once the hot code of
+the engine runs from SRAM (known-bugs.md "Speed"): about 570 clocks per turn against 490 on
+the ESP32-S3; the rest of the gap is the clock (150 MHz against 240).
+
+**`device/usb`** (2026-11-12; design agreed with the user, tried on the YD-ESP32-S3): the
+board as a USB **device** for a host (a PC, a tablet), on the chip's native USB port, not
+the USB-serial bridge of the agent. First use: a board whose host is a tablet that only
+speaks USB.
+
+```js
+import { Usb } from "device/usb";
+const usb = new Usb({ manufacturer: "Acme", product: "Gadget", serialNumber: "v2.0.0" });
+const port = usb.serial();                  // a UsbCdc, declared before start()
+port.onData(bytes => { ... });
+port.onLineState(({ dtr, rts }) => { ... });
+usb.start();                                // the host sees the device
+port.write("hello\r\n");                    // string or bytes
+
+import { UsbSerial } from "stdlib/usb";     // the common case: one serial function
+const tablet = new UsbSerial({ manufacturer: "Acme", product: "Gadget" });
+```
+
+- **Composite**: the functions are declared with `serial()` (at most 2, the limit of
+  esp_tinyusb; HID or mass storage could come later) before `start()`, which presents them
+  all at once; one `Usb` object at a time ("busy"). `UsbSerial` is written in JS
+  (`lib/stdlib/src/usb.js`, `extends Usb`: the jsbind constructor takes the prototype of
+  `new.target`).
+- **Descriptors**: `manufacturer`, `product`, `serialNumber` (printable ASCII, 31
+  characters at most: esp_tinyusb sends ASCII only and cuts at 31), `vendorId` /
+  `productId` (0 or absent: the chip vendor's default, 0x303A / 0x4001 on the ESP32).
+- **The device outlives the program**: at the end of a program it stays started (the bytes
+  received meanwhile are dropped); the next program that starts a device with the same
+  descriptors and functions takes it over without the host seeing it go away, other
+  descriptors restart it; only `close()` stops it. A started device keeps the program
+  running (`js::keepAlive`) until `close()`. The JS objects never reach the hal: the events
+  go through one target (mailbox + source), a `UsbCdc` knows its device by a generation
+  number.
+- **`write()`** (decided after the try on the board): DTR is not a condition (Windows opens
+  a port with RTS only, and a host may read without raising DTR); what the host does not
+  take within 50 ms is dropped without error, all of it when the device is not enumerated,
+  as a UART with nobody at the other end. `onLineState` / `lineState()` only report DTR and
+  RTS; on Windows they do not tell whether the port is open (RTS stays at 1 after a close).
+- **ESP32** (`ports/esp32/main/hal_usb_esp32.cpp`): TinyUSB through Espressif's
+  `esp_tinyusb` (component manager, `ports/esp32/main/idf_component.yml`, fetched only for
+  the chips with USB OTG; `CONFIG_TINYUSB_CDC_COUNT=2` in `sdkconfig.defaults`). The
+  descriptors are built at run time (configuration of one or two CDC ACM functions, with
+  esp_tinyusb's own endpoint numbers) and kept static while the device runs; its task runs
+  on core 0; the received bytes are read straight into a block given to the loop.
+  `tinyusb_driver_uninstall` makes the restart with other descriptors possible.
+  `qjsx.bin` of the YD-ESP32-S3 with it: 0xce3b0 bytes (845 KB).
+- **Tried on the YD-ESP32-S3** (2026-11-12, script kept out of the repository): the PC
+  plays the host with `device/serial` on the new COM port: errors, echo, 3000 bytes both
+  ways, a new program taking the device over with the port open on the PC, `close()`.
+- **Twin**: the serial functions are TCP ports (section 6.6), tested by
+  `tests/usb.test.js`.
+
+**`device/i2c`** (2026-11-12; API agreed with the user, built for the ESP32 and the twin;
+tried on the YD-ESP32-S3 with nothing wired, no I2C component at hand; RP2350 later):
+
+```js
+import { I2c } from "device/i2c";
+const bus = new I2c(0, { sda: 8, scl: 9, frequency: 400000 });   // pullUp: false, timeout: 100 ms
+const sensor = bus.device(0x48, { frequency: 100000 });           // I2cDevice: its own clock
+await sensor.write([0x01, 0x60]);                                 // array of numbers or Uint8Array
+const word = await sensor.writeRead([0x00], 2);                   // repeated start: a register read
+const now = sensor.readSync(2);                                   // blocking the JS thread
+const there = await bus.probe(0x70);                              // true / false, never ENXIO
+```
+
+- **Buses and devices**: a bus is a controller of the chip (its number, like the UART of
+  `Serial`), with the default clock and time limit of its devices; a device is a 7-bit
+  address with its own clock (`i2c_master` sets it per device). The transfers are only on
+  the devices (no `bus.write(address, ...)`: a second way to do the same, with an
+  ambiguous clock). `bus.close()` closes its devices; a bus or device closed is refused.
+- **Errors**: a system error with a Node-like `code`: `ENXIO` (nobody answered, NACK),
+  `ETIMEDOUT`, `EIO`; a promise is rejected with it, a `Sync` call throws it. `probe`
+  answers false instead of ENXIO. On the ESP32 a clock held low too long by a device also
+  reads as ENXIO (the driver gives the same error as a NACK).
+- **Order and threads**: the transfers of a bus run one at a time, in the order of the
+  calls. The promises go through one "i2c" task shared by every bus and every run (a queue
+  of jobs: the bytes to write are copied, the result is posted to the loop with the bytes
+  read); a `Sync` call first waits until the jobs of its bus are done, then calls the hal on
+  the JS thread. At most 16 promises pending per bus; a bus with pending promises keeps the
+  program running. A sequence that must not be cut (select a channel of a switch, then
+  read) is the program's business. `close()` drops the queued jobs, waits for the running
+  one and rejects the pending promises. A device finds its bus by number and generation,
+  never by a pointer: the finalizers of a run may come in any order.
+- **hal** (`common/hal/hal_i2c.h`): blocking functions, never two at once on a bus (the
+  module sees to it). ESP32: `ports/esp32/main/hal_i2c_esp32.cpp`, the `i2c_master` driver
+  in its blocking mode (ESP_ERR_INVALID_RESPONSE -> NACK, ESP_ERR_TIMEOUT, probe's
+  ESP_ERR_NOT_FOUND; a probe always runs at 100 kHz).
+- **Tried on the YD-ESP32-S3** (2026-11-12, bus 0 on GPIO8 / GPIO9, nothing wired):
+  without pull-ups the lines stay low: a probe gives ETIMEDOUT and a transfer ENXIO, each
+  after the whole time limit (100 ms); with the chip's pull-ups (`pullUp: true`) nobody
+  answers at once: probe false in about 1 ms, transfers ENXIO in 1 to 2 ms, a probe of the
+  112 addresses 0x08..0x77 in 21 ms. So a bus without pull-ups reads as ETIMEDOUT on a probe.
+- **Twin** (`host/twin/sim/twin_i2c.cpp`): the buses open on the board's pins but nothing is
+  wired: a probe answers false, a transfer ENXIO. Tested by `tests/i2c.test.js`. Code that
+  plays components on the ports of a twin is in TODO.md.
+
+**`device/serial` on the UARTs of a board** (2026-11-12; design agreed with the user, built
+for the ESP32 and the twin; not tried on a board, nothing wired; RP2350 later):
+
+```js
+import { list, Serial } from "device/serial";
+list();                                                    // [1, 2]: the free UARTs
+const reader = new Serial(2, { baudRate: 115200, tx: 38, rx: 37 });
+reader.onData(bytes => { ... });                           // one block per burst received
+reader.write("text or bytes");                             // synchronous
+reader.port();                                             // 2 ("COM3" on the PC)
+```
+
+- **One class for the PC and the boards**: the port is a system name on the PC, the number
+  of a UART on a board. Options: `baudRate` (115200), `dataBits` (8; 5 to 8), `parity`
+  (`"none"`, `"even"`, `"odd"`), `stopBits` (1 or 2); on the PC `flowControl` (`"none"`,
+  `"rts-cts"`); on a board the pins `tx`, `rx` (one at least) and `rts` with `cts` (the
+  flow control). A pin not given is not wired. A pin on the PC, or `flowControl` on a
+  board, is a TypeError. `port()` replaced `path()`.
+- **Errors**: the UART of the agent's link (UART0 on the ESP32: its driver is installed)
+  and a UART open already give EBUSY, a UART the chip does not have ENOENT, settings
+  refused EINVAL. A port is freed at the end of the program; a new program can open it at
+  once (`open` waits up to 300 ms for a UART still being closed by the reader thread of the
+  previous one).
+- **One module, three drivers**: `common/device/serial_module.cpp` (the class, a reader
+  thread per open port, the state shared with it reference counted) over a driver,
+  `common/hal/hal_serial.h`: a table of functions chosen when the process starts
+  (`setSerialDriver`), not free functions, because the qjsx executable holds both the
+  ports of the PC and, in a twin, the UARTs of the board. Drivers:
+  `host/platform/serial_host.cpp` (the PC; the system code of the former host module),
+  `ports/esp32/main/hal_serial_esp32.cpp`, `host/twin/sim/twin_uart.cpp` (section 6.6).
+- **ESP32**: the `uart` driver of ESP-IDF with its event queue: the driver reports bytes
+  when the line has been quiet for 10 characters (0.87 ms at 115200, 10.4 ms at 9600) or
+  when 120 bytes are in its FIFO, so a burst usually arrives in one block; an overflow of
+  its 2 KB buffer drops the bytes (said on the console). A closed UART gives its pins back
+  as plain GPIO (`gpio_reset_pin`). `qjsx.bin` of the YD-ESP32-S3 with it: 0xdf000 bytes.
+- **Twin**: each UART is a TCP port and a panel of the page (section 6.6), tested by
+  `tests/serial.test.js`.
 
 **Naming rule:**
 
@@ -1187,17 +1344,19 @@ per second from a JS loop with a 10 ms pause.
 > **Status: ESP32-S3 done on 2026-11-11** (ESP-IDF v6.1, 700 KB firmware, with no
 > JS at all), flashed and tried on the YD board: agent over UART0, deployment and execution in place,
 > debugger 52/52, program using `.qjslib` libraries.
-> RP2350: designed, not implemented.
+> RP2350: written on 2026-11-11 (pico-sdk 2.3.1, FreeRTOS SMP V11.3.3, 740 KB firmware), builds,
+> flashed and tried on the board on 2026-11-12: deploy and run in place, 4 MB buffer in PSRAM, debugger 72/72, proxy 30/30, cdp 53/53. JS is slow there for now (a loop of 10^6 simple turns: 4 s; 20,000 small
+> objects: 3 s), to measure against the ESP32-S3 and to understand (see below).
 
 One firmware per board, generic: everything the chip can do, flashed once; the
 programs then arrive as packages. Each port provides three things around the common code,
 identical on every board (`agent::runDevice()`):
 
-| Part | Role | ESP32 |
-|---|---|---|
-| `ports/cmake/qjsx.cmake` | common sources (engine without compiler, runtime, agent), engine options | shared with the RP2350 |
-| `platform.h` | clock, fatal stop, tasks, locks, signal, periodic pause of the JS thread | `ports/freertos/` (locks, signal, `sleepMs`, `yieldIfDue`) + `platform_esp32.cpp` (`esp_timer`, `esp_system_abort`, pinned tasks) |
-| `board.h` | identity, JS heap, JS stack, package storage, links, console | `board_esp32.cpp` |
+| Part | Role | ESP32 | RP2350 |
+|---|---|---|---|
+| `ports/cmake/qjsx.cmake` | common sources (engine without compiler, runtime, agent), engine options | shared | shared |
+| `platform.h` | clock, fatal stop, tasks, locks, signal, periodic pause of the JS thread | `ports/freertos/` (locks, signal, `sleepMs`, `yieldIfDue`) + `platform_esp32.cpp` (`esp_timer`, `esp_system_abort`, pinned tasks) | `ports/freertos/` + `platform_rp2350.cpp` (`time_us_64`, watchdog reboot, `xTaskCreateAffinitySet`) |
+| `board.h` | identity, JS heap, JS stack, package storage, links, console | `board_esp32.cpp` | `board_rp2350.cpp`, `psram_rp2350.cpp` |
 | entry point | creates the JS task, which calls `agent::runDevice()` | `main.cpp` (48 KB task on core 1) |
 
 **One description per board.** `ports/esp32` serves every ESP32 board; what changes from one
@@ -1205,6 +1364,38 @@ board to another is in `boards/<board>/`: `sdkconfig.board` (chip, flash size, t
 `partitions/`, PSRAM mode) and `board_config.h` (name, later links and pins). The
 board is chosen at build time (`QJSX_BOARD`), each one in its `build-<board>` folder. The partition
 tables go by flash size (4, 8, 16 MB), not by board.
+
+**The RP2350 port** (`ports/rp2350/`, 2026-11-11; built by `tools/pico.ps1` with the
+toolchain installed in `C:\tools\pico`: Arm GNU Toolchain 15.2, pico-sdk 2.3.1, FreeRTOS-Kernel
+V11.3.3 and its `RP2350_ARM_NTZ` port, ninja, picotool):
+
+- *Cores and tasks.* FreeRTOS SMP on both Cortex-M33 cores; the JS task (48 KB) is pinned to
+  core 1, the USB stack and the reader of the link run on core 0.
+- *Link.* The chip's own USB port, as a CDC serial port (the pico-sdk's `stdio_usb`), which
+  also carries the console, as UART0 does on the ESP32: frames go out in one
+  `stdio_put_string()` call, which holds the stdout lock, so text never cuts a frame. The
+  link counts as connected as soon as the PC has enumerated the board, whatever DTR says.
+  The port goes away at each chip reset.
+- *Packages.* Two slots in the upper 8 MB of the flash (`board_config.h`), read in place
+  through the XIP window; the firmware checks at boot that it ends before them. Erasing and
+  programming go through `flash_safe_execute()` (the other core held in RAM, interrupts
+  masked), one 4 KB sector at a time so the USB is served in between; the upload is
+  programmed by 256-byte pages through a buffer in SRAM (the PSRAM cannot be read while the
+  flash is written).
+- *JS heap.* In the 8 MB QSPI PSRAM on QMI chip select 1 (GPIO8): set up first thing in
+  `main()` (direct mode of the QMI, from RAM: leave QPI, read the ID, enter QPI, timings of
+  window M1 for the system clock), checked by writing and reading a few words, then managed
+  by `memory::RegionHeap` (`common/runtime/region_heap.*`: two-level segregated free lists,
+  8-byte headers, merge in constant time). A PSRAM that does not answer leaves the JS heap
+  in SRAM, with a message. The same heap runs on the PC with `QJSX_JS_HEAP_MB=<size>` (the
+  whole test suite passes on it).
+- *What newlib lacks.* `ports/rp2350/compat/`: `pthread` on FreeRTOS semaphores for the
+  engine (class id lock, `Atomics.wait`), `clock_gettime` from the boot timer, directory and
+  file calls failing with ENOSYS (no file system yet). The engine is a library of its own:
+  its `list.h` and FreeRTOS's have the same name.
+- *Flashing.* `tools/pico.ps1 flash` (picotool reboots a board running qjsx into BOOTSEL
+  through the USB, loads and starts the firmware); the first time, the board is put in
+  BOOTSEL by hand (BOOT held, RESET pressed).
 
 **Long computation and watchdog** (decided, coded and verified on the YD board on 2026-11-11:
 during the endless loop of `tests/fixtures/debuggee`, no "task_wdt" message in 17 s
@@ -1276,10 +1467,17 @@ How to add a board, or a new chip, is described step by step in
 >   `common/runtime/package.*`, without copying, shared with the device). Module loader: native,
 >   bytecode of the package, embedded JS, files;
 > - `qjsx build [directory]`: compiles the project (`qjsx.json`) into a `.qjspkg` (see 4.1), with
->   the library modules it imports (4.5);
+>   the library modules it imports (4.5); `--executable` (2026-11-12) also makes an executable
+>   of the PC that runs it, `<output>/<name>[.exe]`: a copy of `qjsx-runtime` (built next to
+>   `qjsx`: engine without compiler, runtime, native modules of the PC, no tool command, 1.25 MB
+>   in Release without symbols) with the package appended and a 16-byte trailer
+>   (`QJSXPKG1` + 64-bit size, little endian; `host/runtime/runtime_main.cpp`,
+>   `host/js/executable.js`); `process.argv` = [executable, executable, arguments], as a
+>   standalone Node executable; on Linux / macOS the file must be `chmod +x`ed (no chmod in
+>   `sys/fs` yet);
 > - `qjsx mklib [directory] [--output <file>]`: compiles a library project into a `.qjslib`
 >   (4.5);
-> - `qjsx deploy [package] --target T [--token X] [--no-run] [--monitor [--until-exit]]`,
+> - `qjsx deploy [package] --target T [--token X] [--no-run] [--ram | --reset] [--monitor [--until-exit]]`,
 >   `qjsx monitor`, `qjsx device info|run|stop|reset`, `qjsx targets`; the status messages
 >   go to stderr, stdout only carries the program's output;
 > - `qjsx agent [--host] [--port 5555] [--storage build/agent] [--token]`: the
@@ -1287,6 +1485,8 @@ How to add a board, or a new chip, is described step by step in
 >   develop and test; same agent code as the firmware; installed program started at
 >   startup; stopping a program even when it is stuck in a loop (interrupt handler);
 >   an uncaught exception is printed and the program continues, as on the device;
+>   with `--board <name>` (2026-11-12) it is the digital twin of a board, with a web page
+>   (6.6);
 > - `qjsx help`, `qjsx --version`.
 >
 > The commands other than `run` and `--version` are written in JS (`host/js/`), embedded
@@ -1315,14 +1515,14 @@ A single executable:
 
 | Command | Role |
 |---|---|
-| `run` | runs a script on the PC, or a package from its bytecode like a device does |
+| `run` | runs a script on the PC, or a package from its bytecode like a device does; it reaches only what is granted (6.7) |
 | `build` | compiles the project and produces the `.qjspkg` (planned: the `.d.ts` of the native modules) |
 | `mklib` | compiles a library project, produces the `.qjslib` (section 4.5) |
 | `deploy` | sends a package to the device through the agent and starts it; `--monitor` then shows the program's output |
 | `monitor` | shows the output of the program running on a device |
 | `device info` / `run` / `stop` / `reset` | installed package and state, start, stop, restart of the device |
 | `targets` | lists the serial ports of the PC |
-| `agent` | the device agent on the desktop, which stands in for a board |
+| `agent` | the device agent on the desktop, which stands in for a board; `--board`: the digital twin of a board (6.6) |
 | `debug` | planned: starts the proxy, a CDP server for VS Code |
 | `trace` | planned; its behaviour is not designed yet |
 
@@ -1393,6 +1593,263 @@ A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with
 - The proxy keeps the breakpoints and re-applies them on `SCRIPT_LOADED` and after a device
   restart.
 - `--wait-debugger`: see 3.8.
+
+### 6.6 The digital twin of a board (`qjsx agent --board`, `qjsx agent -p`)
+
+> **Status: done 2026-11-12 for the YD-ESP32-S3: pins, parts with models (button, WS2812,
+> BME280, potentiometer, and the project's own), I2C buses with a trace, analog inputs,
+> UARTs and USB device over TCP, a page in x4js. Tested in Debug by `tests/twin.test.js`,
+> `tests/twinparts.test.js`, `tests/usb.test.js`, `tests/i2c.test.js`,
+> `tests/serial.test.js`, `tests/twintcp.test.js`, and tried in the browser pane.**
+
+![The page of the twin](images/twin.jpg)
+
+A twin makes the desktop agent a board: a program written for the board runs on the PC, at
+the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `qjsx debug`,
+`qjsx monitor`). No executable is involved: the tool itself plays the board (the standalone
+executable of `qjsx build --executable` is a different thing, a program delivered as a PC
+application).
+
+- **Starting it**:
+  - `qjsx agent --board <name | file.json> [--ui-port 8090] [--usb-port <port>]
+    [--uart-port <port>]`: the bare board;
+  - `qjsx agent` in the folder of a project whose `qjsx.json` has a `"twin"` section, or
+    `qjsx agent -p <folder>` / `--project <folder>` from elsewhere (qjsx installed
+    globally): the board it names, with the parts it wires and its ports. `--board` wins
+    over the project's board (its parts come with `-p` only then). With `-p`, the storage
+    goes in `<folder>/build/agent`.
+
+  ```json
+  "target": "twin",
+  "twin": {
+      "board": "yd-esp32-s3",
+      "ports": { "agent": 5555, "ui": 8090, "usb": 8091, "uart": 8093 },
+      "parts": [
+          { "id": "meteo", "model": "bme280", "label": "Weather", "i2c": { "sda": 8, "scl": 9 },
+            "address": "0x76", "initial": { "temperature": 21.5 } },
+          { "id": "relay", "model": "./twin/relay", "label": "Relay", "pin": 5 }
+      ]
+  }
+  ```
+
+  `ports` is optional: each port comes from the command line, else `twin.ports`, else its
+  default. `"target": "twin"` sends `deploy`, `debug`, `monitor`, `device` to the twin of
+  the project on this PC (`tcp:127.0.0.1:<twin.ports.agent, 5555>`). `qjsx build` checks
+  the shape of the section only; the agent checks the rest when it starts (below).
+- **Board description**: `boards/<name>.json` (copied next to the executable by the build,
+  in `bin/<config>/boards/`): `name`, `chip`, `description`, `platform`
+  (`process.platform` of the program), `pins` (GPIO count), `uarts`, `linkUart`, `adc` (`{
+  pins, bits, spans (the ranges its converter reads, in mV), vref (volts) }`), `natives`
+  (the native modules of the board's firmware), `parts` (the parts soldered on the board,
+  as the project's: `{ id, model, label, ... }`; the YD-ESP32-S3: BOOT, a `button` on
+  GPIO0, and RGB, a `ws2812` on GPIO48).
+- **What the program sees**: only the board's native modules (`rt::setDeviceNativeModules`:
+  the loader refuses the others in a device run, the agent lists only them in HELLO, so
+  `qjsx deploy` refuses a program importing `sys/net` or `sys/compiler`); the board's
+  `process.platform`; the agent calls itself "qjsx twin" and gives the board's chip and
+  name as identity.
+- **Simulated hardware** (`host/twin/sim/`), behind the interfaces of `common/hal`, so that
+  the modules of `common/device/` run unchanged:
+  - `twin.cpp`, `hal::gpio`: the level of a pin comes from what drives it, in this order:
+    a push-pull output of the program; an open drain of the program at 0; what the page
+    forces; what a part drives (a button pressed); the pulls (the program's, else a
+    part's); a floating line reads 0. A program's output and a part driving the other
+    level is a short on a real board: the pin is marked `conflict` (shown on the page). A
+    watched pin calls the change handler at once, on the thread that changed the level:
+    no debounce, the twin's lines do not bounce;
+  - `twin_bridge.cpp`, the bridge to the models of the parts: the hardware posts events
+    to the twin's runtime (a pin a part watches changed; bytes and pulses of the RMT;
+    an I2C transfer). An I2C transfer is synchronous for the program: its thread posts the
+    request, then waits for the answer of the model at most the timeout of the transfer
+    (`ETIMEDOUT` after); the twin's thread never waits for the program's;
+  - `twin_rmt.cpp`, `hal::rmt`: 8 channels; a send lasts the time the hardware would take
+    (its ticks over the resolution, at least 1 ms), then the done handler is called on a
+    thread "twin rmt"; what is sent goes to the parts (a WS2812 decodes its colors);
+  - `twin_i2c.cpp`, `hal::i2c`: two buses on the board's pins; a transfer goes to the part
+    attached at that address on the bus of those pins (by its pins, not by the port
+    number the program chose), a NACK (`ENXIO`) when none; a probe is a transfer of
+    nothing. Every transfer is kept in a trace (the last 256, every bus together: time,
+    bus, address, frequency of the device, the first 32 bytes written and read, status);
+  - `twin_adc.cpp`, `hal::adc`: the analog inputs the description lists; a read converts
+    the voltage on the pin (what a part sets, else its level times vref) over the span
+    chosen for the range, saturating above it, as the ESP32-S3 does;
+  - `twin_tcp.cpp`, the TCP links of the twin: a program of the PC plays the other end of
+    a UART or of a USB serial function through a TCP port, one client at a time. The page
+    chooses each port and turns its listening on or off (`twin.tcp.listen`); the twin
+    keeps the choices in `<storage>/twin.json`; `--uart-port` / `--usb-port` make a group
+    listen from the start on consecutive ports instead (tests, scripts);
+  - `twin_usb.cpp`, `hal::usb`: each serial function is a TCP link ("usb0", "usb1"), which
+    listens only while the program has the device started. A client that connects plays
+    the host opening the port (DTR and RTS at 1). A real tablet cannot reach the twin this
+    way: a USB relay board is in TODO.md;
+  - `twin_uart.cpp`, the driver of `device/serial` (`hal_serial.h`): the UARTs of the
+    board (`"linkUart"`, the agent's link of the real board, is refused with EBUSY). Each
+    UART is a TCP link and a panel of the page; nothing is timed. The traffic is kept as
+    numbered records (the last 16 KB per UART) for the page.
+- **Parts and their models**: a part is a component wired on the board: a model (its
+  emulation, JS) and a view (its section on the page). The models run in the twin's
+  runtime, never in the program's: the program cannot reach them, the debugger does not
+  see them, and they outlive the program (a deploy or a restart keeps the temperature set
+  on the page).
+  - `qjsx:twin` (`host/twin/api/twin.js`), the PUBLIC API of the models: a model is a
+    module whose default export is a class derived from `Part`, built as `new
+    Model(config, board)` (config: its entry of the wiring, checked by the model: an
+    exception stops the twin). `Part`: `id`, `label`, `config`, `publish(state)` (to the
+    pages; the last one is given to a page that connects later), `onAction(action, args)`
+    (from the page), `log(...)` (the console of the page), `static controls` (below).
+    `board.pin(n)`: `level`, `mode`, `voltage` (read and set, volts), `drive(0 | 1 |
+    null)`, `pull("up" | "down" | null)`, `onChange(fn)`; a pin taken by two parts is
+    refused. `board.i2c({ sda, scl })`: `attach(address, { onTransfer(written,
+    readLength) })` (bytes, or null for a NACK; synchronous only: a promise fails the
+    transfer), `detach(address)`; an address taken twice is refused. `board.rmt(pin)`:
+    `onBytes(fn)`, `onPulses(fn)`. `board.now()`, `board.supply` (vref). Helpers:
+    `Registers` (the registers of a chip: a pointer that moves at each byte, writes
+    "increment" or "pairs", `set`, `get`, `onWrite`, `onRead`), `parseAddress`,
+    `parsePin`. Everything of a model runs on the twin's thread, one call at a time;
+  - the parts of qjsx (`host/twin/parts/<model>/model.js`, embedded as
+    `qjsx:twin/parts/<model>`): `button` (pin, activeLow; held down on the page),
+    `ws2812` (pin, count, order), `bme280` (i2c, address 0x76 / 0x77, initial; the
+    registers, calibration and compensation of the datasheet: a driver written for the
+    real chip reads it; the raw values found by bisection of the compensation formulas),
+    `potentiometer` (pin, position: the voltage on the pin, read by `device/adc`);
+  - a part of the project: `"model": "./folder"`, `model.js` (it imports `qjsx:twin`)
+    and, if it wants, `view.js` (below);
+  - `host/twin/js/parts.js` (`qjsx:twin/parts`) builds them when the twin starts: the
+    board's then the project's; ids unique (lower case, digits, `-`, `_`); the first
+    error stops the twin: the twin's runtime reports it (`twinboard.ready(error)`) and
+    the agent prints it and exits before the program runs.
+- **The server of the page**: `host/twin/js/server.js` (`qjsx:twin/server`, `serveTwin`),
+  run by the hidden command `qjsx twin-ui` in a JS runtime of its own, on a thread of the
+  agent (4 MB stack), through the native module `qjsx:twinboard`
+  (`host/twin/sim/twin_module.cpp`), registered only in a twin. It builds the parts,
+  then the bridge (`new twinboard.Bridge(event => board._dispatch(event))`), then
+  listens and says the twin is ready. HTTP: `/` and the files of the page,
+  `/board.json`, `/state`, `/parts/<id>/view.js` (a project's view); WebSocket `/ws`
+  with the subprotocol `messaging` (x4js `Application.setupSocketMessaging`): JSON texts
+  `{ msg, params }`:
+  - to the page: `twin.board`, `twin.parts` (`[{ id, label, model, controls, view, pins
+    }]`), `twin.part.state` (`{ id, state }`), `twin.log` (`{ id, text }`, the last 200
+    kept for a page that connects), `twin.state` (pins, UARTs, USB device, I2C buses with
+    the parts on them; polled every 50 ms, sent when it changed), `twin.uart.data`,
+    `twin.i2c.data` (new records of the traces; a page that connects gets those kept);
+  - from the page: `twin.part.action` (`{ id, action, args }`), `twin.pin.force` (`{
+    pin, level }`: 0, 1, or -1), `twin.uart.send`, `twin.tcp.listen`.
+
+  The page's runtime prints nothing: the output sink is one per process (the device
+  program's output).
+- **The page**: `host/twin/ui/`, an x4js application:
+  - `main.ts`, `twinview.ts`: the header (`appheader.ts`: a microprocessor logo, title,
+    board, state of the link, settings button), then a `DockingView`: the board in the
+    middle, the pins on the right, the console of the parts at the bottom (`consoleview.ts`,
+    Clear in a status bar); a context menu (right click) shows / hides the panels or
+    resets the layout; the layout and the settings (`settings.ts`: theme, used pins only;
+    a `SettingsView` in a `Dialog`) are kept by the browser;
+  - `boardview.ts`: one folding section per device (`controls/section.ts`): the push
+    buttons together in a section "Buttons"; each other part, titled "label · model",
+    its summary showing what the program uses each of its pins for ("GPIO6 adc 1.65 V",
+    "GPIO8 i2c"); the USB device (`usbview.ts`); each UART but the agent's link
+    (`uartpanel.ts`); each I2C bus the program opened with no part on it (`i2cpanel.ts`:
+    its pins and frequencies, the trace of its transfers);
+  - `partview.ts`, the view of a part, three levels: no view and no controls, its state
+    as name / value; controls declared by the model (`static controls = [{ name, type:
+    "slider" | "knob" | "switch" | "select" | "button" | "value" | "led", label, min,
+    max, step, unit, items }]`: the page builds them; a control sends `"set" { name:
+    value }`; consecutive knobs side by side, a fixed width each); a view of its own
+    (`export function createView(x4, part)` in the project's `view.js`, loaded with
+    `import()`, given x4js and `part = { id, label, model, onState(fn), send(action,
+    args) }`);
+  - `pintable.ts`: one row per pin built once and updated in place: level, mode ("adc
+    1.65 V", "i2c", "rmt", or the gpio mode), pull, parts, force buttons on / off / free
+    in one segmented control (a tooltip says what "free" means); a pin a part drives is
+    marked, a conflict in red;
+  - `controls/`: our own components (`Led`: a bezel and a lens with a highlight, a glow
+    when lit; `HoldButton`; `Section`); `model.ts`: the only `fetch` of the page;
+    `texts.ts`: the texts (`addTranslation`, English); `messages.ts`: the messages.
+
+  One font size everywhere, 12px (user: x4's `--font-size` on `:root`); the page paints its
+  own background (else the browser's canvas shows through in the light theme). A lost
+  link shows "disconnected" and the page reloads once the twin answers again. Types
+  checked with `tsc --noEmit -p host/twin/ui`. Its build, `dist/`, is in the repository,
+  with `dist/sources.crc32`.
+- **Embedding**: `tools/embed-twin-ui.lua`, a build rule of premake5.lua: when the CRC-32 of
+  the sources differs from `dist/sources.crc32`, it runs `npm run build` if
+  `node_modules/` is there, else warns and keeps the `dist/` of the repository; then the
+  files of `dist/` become a zip archive with stored entries, written as a byte array
+  (`twin::uiArchive()`). To work on the page without linking qjsx again: `npm run build`
+  in `host/twin/ui`, and the hidden option `qjsx agent ... --ui-dir host/twin/ui/dist`.
+- **Not done**: other parts (a display: SSD1306), SPI and UART devices played by models,
+  a logic analyzer / oscilloscope of the pins, the speed of the board simulated, test
+  scenarios, signals (values that change over time, scripted in the page), other boards
+  than the YD-ESP32-S3 (TODO.md).
+
+### 6.7 Permissions of a program of the PC
+
+> **Status: done 2026-11-12 (design agreed with the user the same day), tested in Debug
+> by `tests/run-tests.sh` (12 checks with `tests/fixtures/permissions`).**
+
+Goal (user): a bug in the JS of a program running on the PC must not be able to wipe a
+disk. Model: Deno's — nothing is allowed unless granted.
+
+- **Where it applies**: a program of the PC, i.e. `qjsx run script.js`, `qjsx run
+  app.qjspkg`, and an executable made by `qjsx build --executable`. A **device has no
+  permissions** (user): its working folder is the board's data folder (`process.cwd()`,
+  base of relative `fs` paths) and everything is allowed; but the desktop agent and the
+  twin, which run on the PC's own disk, **simulate the partition of a board**: their
+  programs reach no file outside `<storage>/data` (`board::confineFiles()`, true only on the
+  desktop board; network, serial ports and environment stay free). The tool's own commands
+  (`qjsx build`, `deploy`...) have no permissions either.
+- **Kinds**: `read` and `write` (folders; `sys/fs`), `net` (`host` or `host:port`;
+  `listen` and `connect` of `sys/net`), `env` (variable names; the others are left out of
+  `process.env`), `serial` (port names; `new Serial`, and `list()` needs some port). Each is
+  nothing, a list, or everything. Code loading is not checked (the modules a script imports
+  are read whatever the permissions, as in Deno).
+- **`qjsx.json`**, copied into the manifest by `qjsx build` (part of the build id):
+
+  ```json
+  "desktop": {
+      "rootFolder": "${userAppDataFolder}",
+      "permissions": {
+          "read":  ["${rootFolder}", "${executableFolder}/config"],
+          "write": ["${rootFolder}"],
+          "net":   ["api.example.com:443"],
+          "env":   ["HOME"],
+          "serial": ["COM3"]
+      }
+  }
+  ```
+
+  each kind is `true`, `false` or a list; a path starts with a variable (followed by `/` or
+  nothing) or is absolute, else `qjsx build` refuses it. Variables: `${executableFolder}`
+  (the executable's folder; the package file's for `qjsx run app.qjspkg`),
+  `${userAppDataFolder}` (`%APPDATA%/<name>`, `~/Library/Application Support/<name>`,
+  `$XDG_DATA_HOME/<name>` or `~/.local/share/<name>`; not created), `${currentFolder}` (the
+  current folder at launch), `${rootFolder}` (needs `rootFolder`). Without `permissions`,
+  a root folder may be read, not written; without anything, nothing is allowed.
+- **Root folder**: the program's `process.cwd()`, base of its relative `fs` paths. From
+  `--qjsx-root-folder=<folder>` (the only option an executable takes for itself; removed
+  from `process.argv`), else the environment variable `QJSX_ROOT_FOLDER`, else
+  `rootFolder` of the manifest. The root of a file system (`/`, `C:/`, `//server/share`) is
+  refused: nothing runs.
+- **`qjsx run` options**, before the script (after it, the arguments are the program's):
+  `-A` / `--allow-all`, `-R` / `--allow-read[=folders]`, `-W` / `--allow-write[=folders]`,
+  `-N` / `--allow-net[=hosts]`, `-E` / `--allow-env[=names]`, `--allow-serial[=ports]`,
+  `--qjsx-root-folder=<folder>`; lists separated by commas, no list = everything. With a
+  package they add to its `desktop` section.
+- **Checks**: one place per kind (`rt::Permissions`, `common/runtime/permissions.*`): the
+  permissions of a run are those of its thread (`thread_local`, set by `rt::runProgram` from
+  `RunHooks::permissions`), so the twin's page (a tool runtime) and the device program can
+  run side by side. A path is compared by its **real path** (`files::realPath`: absolute,
+  `.` and `..` resolved, links and junctions of the existing part followed, the missing part
+  appended); a granted folder is resolved once, when granted. A path whose first missing
+  component is a dangling link is refused (a write would land at the link's target). A
+  recursive `rmSync` never follows a link (it removes the link, not its target). On Windows
+  paths, hosts and variable names are compared without case. A refusal throws a system
+  error `EACCES` whose message names the access and says how to grant it.
+- Built by `host/permissions_host.cpp` (manifest read in a short-lived JS context before the
+  run, variables, root, options).
+- **Limits**: a guard against bugs, not an isolation — another process can still change the
+  links between the check and the use; `eval` is not concerned (there is none outside the
+  tool); on the devices `files::realPath` only normalizes (no links on their file systems).
 
 ---
 

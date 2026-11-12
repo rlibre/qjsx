@@ -51,6 +51,15 @@ const char *platformName();
 const char *dataDirectory();
 
 /**
+ * True if the programs must reach no file outside dataDirectory(): the
+ * desktop agent and the twin, which run on the PC's own disk, simulate the
+ * partition of a board this way. False on a real board: its programs see
+ * only its own file system anyway (a device has no permissions, user
+ * 2026-11-12).
+ */
+bool confineFiles();
+
+/**
  * Restarts the chip: does not return on a target. Returns false when the
  * board cannot restart (desktop): the caller restarts the program instead.
  */

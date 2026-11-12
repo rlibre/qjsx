@@ -1,0 +1,15 @@
+{
+    "name": "twinparts",
+    "target": "twin",
+    "twin": {
+        "board": "yd-esp32-s3",
+        "ports": { "agent": 45694, "ui": 45695 },
+        "parts": [
+            { "id": "meteo", "model": "bme280", "label": "Weather", "i2c": { "sda": 8, "scl": 9 }, "address": "0x76",
+              "initial": { "temperature": 21.5, "humidity": 40, "pressure": 1013.25 } },
+            { "id": "echo", "model": "./parts/echo", "label": "Echo", "i2c": { "sda": 8, "scl": 9 }, "address": "0x50" },
+            { "id": "strip", "model": "ws2812", "label": "Strip", "pin": 21, "count": 5 },
+            { "id": "gain", "model": "potentiometer", "label": "Gain", "pin": 6, "position": 50 }
+        ]
+    }
+}

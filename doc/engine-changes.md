@@ -509,6 +509,48 @@ will catch the value.
   of the stack), and the "uncaught" mode of the stub in `tests/proxy.test.js` (a caught
   exception does not pause).
 
+## N. Temporal dead zone checks removed where useless
+
+Speed work of 2026-11-12, agreed with the user. `resolve_variables()` turns every read
+of a local `let` / `const` / `class` into `OP_get_loc_check` and every write into
+`OP_put_loc_check`, which throw while the variable is in its temporal dead zone.
+Nothing removed them (Bellard's own note in `resolve_labels()`: "XXX: should check if
+variable can be used before initialization"), and the peephole optimizations of
+`resolve_labels()` only match the plain opcodes (`i++` on a `let` did not become
+`inc_loc`). On the PC, the same loop took 363 ms with `let` and 251 ms with `var`.
+
+- New pass `remove_useless_tdz_checks()` (`compiler/tdz.c`), called by
+  `js_create_function()` (`compiler/finalize.c`) between `resolve_variables()` and
+  `resolve_labels()`: a forward data-flow analysis, "this local is surely initialized",
+  over the bytecode whose labels are still symbolic, repeated until the states of the
+  labels no longer change; `OP_enter_scope` puts the variables of its scope in the dead
+  zone (function declarations excepted), an initialization takes them out, a label keeps
+  what is initialized on every path reaching it; the handler of `OP_catch` gets the state
+  at the `OP_catch`, the path goes on after `OP_gosub`.
+- A check on a variable surely initialized becomes `OP_get_loc` / `OP_put_loc`, same size:
+  nothing moves, and the optimizations of `resolve_labels()` then apply.
+- Left as they are: closure variables, `this` of a derived class constructor, functions
+  calling `eval()` directly, code the scan does not reach, functions too large for the
+  analysis (more than 2^20 words of label states).
+- **Bytecode**: no new opcode, the format is unchanged: `BC_VERSION` is not bumped
+  (packages built before stay valid, they are only slower). Debug info is recorded after
+  the pass, from the same positions.
+- **Debugger positions** (found by `tests/debug.test.js` and `tests/debugger.test.js`
+  once `let` / `const` compile like `var`): the peephole `put_x(n) get_x(n) -> set_x(n)`
+  of `resolve_labels()` no longer crosses a statement or return position
+  (`js_debug_has_stop_marker`, `compiler/debug-info.c`): `const r = f(); return r;` kept
+  one stop for the start of `return r;` and its return, so a step stopped at the return
+  too early. It was already the case for `var` code. The bytecode stays the same with or
+  without debug info (the positions are always in the bytecode before this pass).
+- **Gain** on the PC: the `let` loop 363 → 246 ms (`var`: 245 ms); the workload of
+  `tools/profile/workload.js` (classes, closures, JSON, strings) does not change beyond the
+  noise (1,009 to 1,034 ms, before and after): its time is elsewhere (calls, properties,
+  allocations).
+- **Tests**: `tests/tdz.test.js` (29 checks: the accesses before the declaration still
+  throw, through blocks, `switch`, loops, labels, `try` / `catch` / `finally`, generators,
+  closures, hoisted functions, destructuring defaults; the accesses after it read the right
+  value).
+
 ## Limits and items not done
 
 - **"Uncaught" prediction**: done statically (section M), not with the planned
@@ -551,6 +593,7 @@ Measurements of 2026-11-10:
 | + A, B, C and two dispatch tables | 4,645.6 | 4,455.6 | −4.1% |
 | + positions (E), final version | 4,665.4 | 4,546.3 | −2.6% |
 | + activation number of the frames (L), 2026-11-11 | 4,637.7 | 4,485.8 | −3.3% |
+| + temporal dead zone checks removed (N), 2026-11-12 | 4,642.8 | 4,449.0 | −4.2% |
 
 - The final version costs about 2% more than the version without markers. Part of this
   difference stays within the noise from one pass to the next: `regexp_replace`, purely in C,
@@ -591,3 +634,4 @@ Measurements of 2026-11-10:
 | `core/runtime.c` (also) | `js_def_malloc_usable_size` returns 0 with newlib (I) |
 | `quickjs-internal.h`, `quickjs-debug.h`, `core/debug.c`, `core/interpreter.c`, `core/closures.c` (also) | activation number of the frames, `is_async`, async frames seen as bytecode (L) |
 | `quickjs-debug.h`, `core/debug.c`, `core/core.h`, `core/interpreter.c` (also) | prediction of uncaught exceptions, `JSDebugEvent.uncaught` (M) |
+| `compiler/tdz.c` (new), `compiler/compiler.h`, `compiler/finalize.c`, `compiler/resolve-labels.c`, `compiler/debug-info.c` (also) | temporal dead zone checks removed where useless; `set_x` fusion not across a stop position (N) |

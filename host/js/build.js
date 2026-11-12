@@ -263,10 +263,14 @@ export function build(directory) {
         warnings.push(...module.warnings.map(warning => ({ file: module.script.path, ...warning })));
     }
 
-    // the build id covers what changes the program: scripts, main module, env
+    // the build id covers what changes the program: scripts, main module,
+    // env, what it may reach on the PC
     let identity = scripts.map(script => `${script.path}:${script.buildId}`).join("\n") + `\nmain:${project.main}`;
     if (project.env !== undefined) {
         identity += `\nenv:${JSON.stringify(project.env)}`;
+    }
+    if (project.desktop !== undefined) {
+        identity += `\ndesktop:${JSON.stringify(project.desktop)}`;
     }
     const buildId = hex(sha256(identity)).slice(0, 32);
     const manifest = {
@@ -278,6 +282,7 @@ export function build(directory) {
         bytecode: BYTECODE_VERSION,
         main: project.main,
         env: project.env,   // process.env on a device; left out of the JSON when undefined
+        desktop: project.desktop,   // root folder and permissions on the PC; left out when undefined
         libraries: usedLibraries,
         natives: [...natives].sort(),
         scripts,

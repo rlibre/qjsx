@@ -501,9 +501,12 @@ void emit_debug_pos(JSParseState *s, JSDebugPositionKind kind, const uint8_t *so
 /* qjsx: compiler/debug-info.c */
 void js_debug_info_add_position(JSFunctionDef *s, uint32_t pc, uint32_t operand);
 uint32_t js_debug_skipped_marker(const uint8_t *bc_buf, int bc_len, int start, int end);
+BOOL js_debug_has_stop_marker(const uint8_t *bc_buf, int start, int end);
 void js_debug_info_collect(JSContext *ctx, JSFunctionDef *fd, JSFunctionBytecode *b);
 void js_compile_warning(JSParseState *s, JSCompileWarningKind kind, const uint8_t *ptr);
 BOOL js_last_op_is_scope_var(JSFunctionDef *fd, JSAtom name);
+/* qjsx: compiler/tdz.c */
+int remove_useless_tdz_checks(JSContext *ctx, JSFunctionDef *fd);
 void emit_op(JSParseState *s, uint8_t val);
 void emit_atom(JSParseState *s, JSAtom name);
 int update_label(JSFunctionDef *s, int label, int delta);

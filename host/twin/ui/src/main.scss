@@ -1,0 +1,490 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
+// Styles of the twin's page; colors from the variables of the x4 theme. One
+// font size everywhere, the theme's (user): bold marks a title, not a size.
+
+// the size of the text of the whole page (user: 12px; x4's default is 14px)
+:root {
+	--font-size: 12px;
+}
+
+html, body {
+	height: 100%;
+	margin: 0;
+}
+
+// the main view (x4flex) fills the window; the page paints its own
+// background and text, from the theme (else the browser's canvas shows
+// through, dark when the browser is dark, even in the light theme)
+body {
+	display: flex;
+	flex-direction: column;
+	background: var(--background-primary);
+	color: var(--text-primary);
+}
+
+// the native parts (selects, scroll bars) light in the light theme, whatever
+// the browser prefers (the dark theme of x4 sets "dark" itself)
+html:not(.x4theme-dark) {
+	color-scheme: light;
+}
+
+// ### The header #############################################################
+
+.app-header {
+	align-items: center;
+	gap: 10px;
+	padding: 6px 12px;
+	border-bottom: 1px solid var(--border);
+
+	.logo {
+		width: 28px;
+		height: 28px;
+	}
+
+	.title {
+		font-weight: bold;
+	}
+
+	.board-of {
+		opacity: 0.75;
+	}
+
+	.status.lost {
+		color: var(--alert-background);
+	}
+
+	.settings {
+		min-width: 0;
+		padding: 4px 6px;
+	}
+}
+
+.settings-page {
+	width: 640px;
+	height: 360px;
+}
+
+// ### The board ##############################################################
+
+.board {
+	padding: 12px;
+	gap: 8px;
+	overflow: auto;
+
+	.board-name {
+		font-weight: bold;
+	}
+
+	.twinholdbutton {
+		align-self: flex-start;
+		padding: 10px 16px;
+		touch-action: none;
+
+		// held down: the colors of an x4 button pressed (text on the accent)
+		&.down {
+			background: var(--accent-background-active);
+			color: var(--accent-color);
+		}
+	}
+
+	.leds {
+		gap: 8px;
+	}
+
+	// a part (partview.ts): a row per control or per field of its state
+	.part {
+		gap: 10px;
+		padding: 4px 2px;
+
+		.control {
+			align-items: center;
+			gap: 12px;
+			min-height: 24px;
+		}
+
+		.name {
+			width: 100px;
+			opacity: 0.75;
+		}
+
+		.value {
+			min-width: 80px;
+		}
+
+		.x4slider {
+			flex: 1;
+			min-width: 140px;
+			max-width: 260px;
+		}
+
+		.error {
+			color: var(--alert-background);
+		}
+	}
+}
+
+// an LED (controls/led.ts): a metal bezel lit from the top, then the lens,
+// in the color of --led-color with a highlight, glowing around when lit
+.twinled {
+	--led-color: #333;
+	width: 26px;
+	height: 26px;
+	padding: 2px;
+	border-radius: 50%;
+	background: linear-gradient(160deg, #d4d4d4 0%, #8c8c8c 100%);
+
+	&::after {
+		content: "";
+		display: block;
+		width: 100%;
+		height: 100%;
+		border-radius: 50%;
+		background:
+			radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.5) 0, rgba(255, 255, 255, 0) 25%),
+			radial-gradient(circle, var(--led-color) 0, color-mix(in srgb, var(--led-color) 75%, #000) 100%);
+		box-shadow: 0 0 4px 1px color-mix(in srgb, var(--led-color) 45%, transparent);
+	}
+
+	// off: a dark lens, a faint highlight, no glow
+	&.off::after {
+		background:
+			radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.2) 0, rgba(255, 255, 255, 0) 25%),
+			radial-gradient(circle, #383838 0, #1a1a1a 100%);
+		box-shadow: none;
+	}
+}
+
+// ### The pins ###############################################################
+
+.pins {
+	padding: 8px;
+	gap: 6px;
+	overflow: hidden;
+
+	.rows {
+		overflow: auto;
+		flex: 1;
+	}
+
+	.pin-row {
+		align-items: center;
+		gap: 6px;
+		padding: 2px 0;
+
+		&.header {
+			font-weight: bold;
+			border-bottom: 1px solid var(--border);
+		}
+
+		&.forced {
+			background: color-mix(in srgb, var(--accent-background) 30%, transparent);
+		}
+
+		// a part drives it (a button pressed)
+		&.driven .part-name {
+			font-weight: bold;
+		}
+
+		// the program and a part drive different levels
+		&.conflict {
+			background: color-mix(in srgb, var(--alert-background) 40%, transparent);
+		}
+	}
+
+	.number { width: 40px; text-align: right; }
+	.mode { width: 90px; }
+	.pull { width: 44px; }
+	.part-name { width: 90px; }
+	.force { margin-left: auto; }
+
+	.level {
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		background: #555;
+
+		&.high {
+			background: #3c3;
+		}
+	}
+
+	.pin-row.header .level {
+		background: none;
+	}
+
+	// the force buttons: one segmented control, every button the same height
+	.force {
+		gap: 0;
+
+		.x4button {
+			min-width: 34px;
+			height: 20px;
+			padding: 0 6px;
+			margin: 0;
+			border-radius: 0;
+			justify-content: center;
+
+			// the borders of two neighbours are one line
+			& + .x4button {
+				margin-left: -1px;
+			}
+
+			&:first-child {
+				border-radius: 4px 0 0 4px;
+			}
+
+			&:last-child {
+				border-radius: 0 4px 4px 0;
+			}
+		}
+	}
+}
+
+// ### The sections of the board view (controls/section.ts) ##################
+
+.sections {
+	gap: 8px;
+	margin-top: 8px;
+}
+
+.twinsection {
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	// what is wider than the section is cut, not spilled over the panel
+	overflow: hidden;
+	flex-shrink: 0;
+
+	.section-header {
+		align-items: center;
+		gap: 6px;
+		padding: 4px 8px;
+		cursor: pointer;
+		background: color-mix(in srgb, var(--border) 25%, transparent);
+	}
+
+	.chevron {
+		width: 12px;
+		height: 12px;
+		transition: transform 0.15s;
+	}
+
+	&.folded .chevron {
+		transform: rotate(-90deg);
+	}
+
+	.section-title {
+		font-weight: bold;
+	}
+
+	.section-summary {
+		color: var(--text-secondary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.section-body {
+		padding: 8px;
+		gap: 6px;
+	}
+}
+
+// ### The UARTs ##############################################################
+
+.uart-panel {
+	gap: 6px;
+
+	.uart-bar {
+		align-items: center;
+		gap: 6px;
+	}
+
+	// the log: monospace, selectable (x4 makes every element unselectable)
+	.uart-log {
+		height: 160px;
+		overflow: auto;
+		border: 1px solid var(--border);
+		padding: 4px;
+		font-family: monospace;
+		user-select: text;
+
+		* {
+			user-select: text;
+		}
+	}
+
+	.uart-line {
+		white-space: pre-wrap;
+		word-break: break-all;
+
+		// what the program received, apart from what it wrote
+		&.in {
+			color: var(--text-secondary);
+		}
+	}
+
+	.x4textedit.invalid #edit {
+		border-bottom-color: var(--alert-background);
+	}
+}
+
+// ### The TCP links ##########################################################
+
+.tcp-control {
+	align-items: center;
+	gap: 6px;
+
+	.tcp-status.error {
+		color: var(--alert-background);
+	}
+}
+
+// ### The USB device #########################################################
+
+.usb-view {
+	gap: 4px;
+
+	.usb-function {
+		align-items: center;
+		gap: 8px;
+	}
+
+	.usb-function-icon {
+		width: 16px;
+		height: 16px;
+	}
+
+	// greyed when the program does not use it, green when a host is there
+	.usb-function.unused {
+		.usb-function-icon,
+		.usb-function-state {
+			color: var(--text-secondary);
+		}
+	}
+
+	.usb-function.connected .usb-function-icon {
+		color: #3c3;
+	}
+
+	.usb-function-name {
+		width: 50px;
+	}
+
+	.usb-function-state {
+		width: 230px;
+	}
+}
+
+// ### The console of the parts (consoleview.ts) ###############################
+
+// it fills its panel: the lines take the room, the status bar stays under them
+.console {
+	height: 100%;
+	overflow: hidden;
+
+	.console-lines {
+		flex: 1;
+		min-height: 0;
+		overflow: auto;
+		padding: 4px 8px;
+		font-family: monospace;
+		user-select: text;
+
+		* {
+			user-select: text;
+		}
+	}
+
+	.console-bar {
+		flex-shrink: 0;
+		align-items: center;
+		padding: 2px 8px;
+		border-top: 1px solid var(--border);
+		background: var(--background-ternary);
+
+		.x4button {
+			min-width: 0;
+			padding: 1px 8px;
+		}
+	}
+
+	.console-line {
+		white-space: pre-wrap;
+		word-break: break-all;
+	}
+}
+
+// ### The knobs of a part (partview.ts) #######################################
+
+.board .part {
+	.knobs {
+		flex-wrap: wrap;
+		gap: 20px;
+		padding: 4px 0 8px;
+	}
+
+	// every knob the same width, whatever its name and value
+	.knob-control {
+		width: 110px;
+		flex-shrink: 0;
+		align-items: center;
+		gap: 4px;
+
+		.value {
+			min-width: 0;
+			text-align: center;
+		}
+	}
+}
+
+// the push buttons of the board, side by side in their section
+.board .buttons {
+	flex-wrap: wrap;
+	gap: 12px;
+}
+
+// ### The I2C buses (i2cpanel.ts) #############################################
+
+.i2c-panel {
+	gap: 6px;
+
+	.i2c-bar {
+		align-items: center;
+		gap: 6px;
+
+		.x4button {
+			min-width: 0;
+			padding: 1px 8px;
+		}
+	}
+
+	// a fixed height, as the log of a UART: it scrolls, it does not grow
+	.i2c-log {
+		height: 160px;
+		flex-shrink: 0;
+		overflow: auto;
+		border: 1px solid var(--border);
+		padding: 4px;
+		font-family: monospace;
+		user-select: text;
+
+		* {
+			user-select: text;
+		}
+	}
+
+	.i2c-line {
+		white-space: pre;
+
+		// a transfer that did not go through
+		&.nack, &.timeout, &.failed {
+			color: var(--alert-background);
+		}
+	}
+}

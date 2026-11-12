@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- qjsx: a microprocessor, pins on its four sides, the die in the middle -->
+  <g fill="#9aa7b4">
+    <!-- top and bottom pins -->
+    <rect x="17" y="3" width="4" height="10" rx="1"/>
+    <rect x="25" y="3" width="4" height="10" rx="1"/>
+    <rect x="35" y="3" width="4" height="10" rx="1"/>
+    <rect x="43" y="3" width="4" height="10" rx="1"/>
+    <rect x="17" y="51" width="4" height="10" rx="1"/>
+    <rect x="25" y="51" width="4" height="10" rx="1"/>
+    <rect x="35" y="51" width="4" height="10" rx="1"/>
+    <rect x="43" y="51" width="4" height="10" rx="1"/>
+    <!-- left and right pins -->
+    <rect x="3" y="17" width="10" height="4" ry="1"/>
+    <rect x="3" y="25" width="10" height="4" ry="1"/>
+    <rect x="3" y="35" width="10" height="4" ry="1"/>
+    <rect x="3" y="43" width="10" height="4" ry="1"/>
+    <rect x="51" y="17" width="10" height="4" ry="1"/>
+    <rect x="51" y="25" width="10" height="4" ry="1"/>
+    <rect x="51" y="35" width="10" height="4" ry="1"/>
+    <rect x="51" y="43" width="10" height="4" ry="1"/>
+  </g>
+  <!-- the package, its pin 1 mark, the die -->
+  <rect x="10" y="10" width="44" height="44" rx="5" fill="#2b3440" stroke="#9aa7b4" stroke-width="1.5"/>
+  <circle cx="16.5" cy="16.5" r="2" fill="#9aa7b4"/>
+  <rect x="21" y="21" width="22" height="22" rx="2.5" fill="#2f6fb3"/>
+  <rect x="25" y="25" width="14" height="14" rx="1.5" fill="none" stroke="#9cc3ec" stroke-width="1.5"/>
+</svg>

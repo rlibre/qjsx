@@ -14,8 +14,10 @@
 #include "debugger.h"
 #include "loop.h"
 #include "modules.h"
+#include "permissions.h"
 #include "platform.h"
 #include "program.h"
+#include "ram_storage.h"
 
 namespace agent {
 
@@ -37,12 +39,51 @@ namespace {
 class Runner : public Controller {
 public:
     /**
-     * Gives the agent and the debugger (not owned); called once, before any
-     * request can arrive.
+     * Gives the agent, the debugger and the package loaded in RAM (not
+     * owned); called once, before any request can arrive.
      */
-    void attach(Agent *agent, Debugger *debugger) {
+    void attach(Agent *agent, Debugger *debugger, RamStorage *ram) {
         _agent = agent;
         _debugger = debugger;
+        _ram = ram;
+    }
+
+    /**
+     * The board's data folder (called once, before any run): the programs'
+     * process.cwd(), against which fs resolves relative paths; nullptr: no
+     * file system (fs fails with ENOSYS). A device has no permissions
+     * (user, 2026-11-12): everything is allowed, except, with 'confine'
+     * (the desktop agent and the twin, on the PC's disk), the files outside
+     * the data folder.
+     */
+    void setDataFolder(const char *folder, bool confine) {
+        // the working folder, or no file system
+        if (folder == nullptr) {
+            _permissions.setNoFileSystem();
+        } else {
+            _permissions.setWorkingFolder(folder);
+        }
+
+        // no limit to the rest of the device
+        _permissions.allowNet(nullptr);
+        _permissions.allowEnv(nullptr);
+        _permissions.allowSerial(nullptr);
+
+        // the files: everywhere on a real board
+        if (!confine) {
+            _permissions.allowFilesEverywhere(rt::Access::read);
+            _permissions.allowFilesEverywhere(rt::Access::write);
+            return;
+        }
+
+        // else the data folder only, as the partition of a board
+        if (folder == nullptr) {
+            return;
+        }
+
+        _permissions.allowFiles(rt::Access::read, folder);
+        _permissions.allowFiles(rt::Access::write, folder);
+        _permissions.setHint("a program of a device reaches only its data folder");
     }
 
     /**
@@ -70,10 +111,13 @@ public:
     }
 
     /**
-     * A target restarts the chip; the desktop runs the program again.
+     * A target restarts the chip (the package in RAM is lost with it); the
+     * desktop, which cannot, does what a restart would: drops the package in
+     * RAM and runs the installed one again.
      */
     void reset() override {
         if (!board::restart()) {
+            _ram->clear();
             run();
         }
     }
@@ -149,23 +193,29 @@ private:
     }
 
     /**
-     * One run of the installed package (marked running by mainLoop()), from
-     * STARTED to its end; *exitCode receives the exit code. False if no
-     * package is installed (nothing started).
+     * One run (marked running by mainLoop()) of the package loaded in RAM
+     * if any, else of the installed package, from STARTED to its end;
+     * *exitCode receives the exit code. False if there is no package
+     * (nothing started).
      */
     bool runOnce(int *exitCode) {
-        // open the package (read in place)
+        // the package in RAM, kept alive until the end of the run
         size_t size = 0;
-        const uint8_t *package = board::openPackage(&size);
-        if (package == nullptr) {
-            fprintf(stderr, "qjsx agent: no package installed\n");
-            return false;
-        }
-
-        // its build id, for STARTED
         char buildId[64] = "";
-        size_t installedSize = 0;
-        board::packageStorage()->installed(buildId, sizeof(buildId), &installedSize);
+        const uint8_t *package = _ram->acquire(&size, buildId, sizeof(buildId));
+        bool inRam = package != nullptr;
+
+        // else the installed one (read in place), with its build id
+        if (!inRam) {
+            package = board::openPackage(&size);
+            if (package == nullptr) {
+                fprintf(stderr, "qjsx agent: no package installed\n");
+                return false;
+            }
+
+            size_t installedSize = 0;
+            board::packageStorage()->installed(buildId, sizeof(buildId), &installedSize);
+        }
 
         // tell the host (STARTED)
         _agent->sendStarted(buildId);
@@ -179,10 +229,16 @@ private:
         hooks.exitOnUncaught = false;   // a device prints the exception and goes on
         hooks.moduleLoaded = &moduleLoaded;
         hooks.device = true;            // argv and env come from the package manifest
+        hooks.permissions = &_permissions;
 
-        // run it until it ends or is stopped, then close the package
+        // run it until it ends or is stopped, then give the package back
         *exitCode = rt::runPackage(package, size, &hooks, 0, nullptr);
-        board::closePackage(package);
+        if (inRam) {
+            _ram->release(package);
+        } else {
+            board::closePackage(package);
+        }
+
         return true;
     }
 
@@ -277,6 +333,7 @@ private:
 
     Agent           *_agent = nullptr;            // borrowed, set by attach()
     Debugger        *_debugger = nullptr;         // borrowed, set by attach()
+    RamStorage      *_ram = nullptr;              // borrowed, set by attach(): the package loaded in RAM
     platform::Signal _signal;                     // protects the fields below
     bool             _runRequested = false;       // mainLoop() must run the package
     bool             _running = false;            // from the run request taken to EXITED
@@ -284,6 +341,7 @@ private:
     rt::SourceId     _controlSource = { -1, 0 };  // onControl() in that loop; id -1: none
     int              _stopRequested = 0;          // atomic
     rt::Loop        *_loop = nullptr;             // JS thread only
+    rt::Permissions  _permissions;                // data folder of the programs, no limit (setDataFolder())
 };
 
 /**
@@ -309,15 +367,16 @@ void runDevice(Identity identity) {
     // with the storage of the board and the runner, the debugger requests go
     // to the stub, the console output goes to the host
     Runner runner;
-    Agent device(board::packageStorage(), &runner, identity);
+    RamStorage ram;
+    Agent device(board::packageStorage(), &ram, &runner, identity);
     Debugger debugger(&device);
     device.setDebugger(&debugger);
-    runner.attach(&device, &debugger);
+    runner.attach(&device, &debugger, &ram);
     rt::setOutputSink(&outputToHost, &device);
 
-    // the programs keep their files in the board's data directory (their
+    // the programs keep their files in the board's data folder (their
     // process.cwd())
-    rt::setDataDirectory(board::dataDirectory());
+    runner.setDataFolder(board::dataDirectory(), board::confineFiles());
 
     // start the links; the device cannot work without them. On failure the
     // output goes back to the console first: the sink points to the agent,

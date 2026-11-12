@@ -27,6 +27,7 @@
 namespace agent {
 
 class Debugger;
+class RamStorage;   // ram_storage.h
 
 // Connection to the host (serial port or TCP socket), given by the board.
 class Link {
@@ -128,10 +129,12 @@ struct Identity {
 class Agent {
 public:
     /**
-     * The agent borrows 'storage' and 'controller' (not owned); the strings
-     * of 'identity' must outlive it. No host is attached yet.
+     * The agent borrows 'storage' (the board's, in flash), 'ram' (the
+     * package loaded in RAM: UPLOAD_BEGIN with VOLATILE) and 'controller'
+     * (not owned); the strings of 'identity' must outlive it. No host is
+     * attached yet.
      */
-    Agent(Storage *storage, Controller *controller, Identity identity);
+    Agent(Storage *storage, RamStorage *ram, Controller *controller, Identity identity);
 
     /**
      * Frees the upload hash and the remembered last answers.
@@ -301,14 +304,16 @@ private:
      */
     static void     forgetAnswer(LastAnswer *answer);
 
-    Storage        *_storage;     // borrowed
-    Controller     *_controller;  // borrowed
-    Debugger       *_debugger;    // borrowed; nullptr: debugger requests refused
-    Identity        _identity;    // its strings are borrowed
-    frames::Parser  _parser;      // frames from the host (transport thread)
-    platform::Mutex _mutex;       // _link, _session, last answers, writes
-    Link           *_link;        // borrowed; nullptr: no host (_mutex held)
-    bool            _session;     // HELLO done (_mutex held)
+    Storage        *_storage;        // borrowed: the package installed in flash
+    RamStorage     *_ram;            // borrowed: the package loaded in RAM
+    Storage        *_uploadStorage;  // _storage or _ram: where the upload in progress goes
+    Controller     *_controller;     // borrowed
+    Debugger       *_debugger;       // borrowed; nullptr: debugger requests refused
+    Identity        _identity;       // its strings are borrowed
+    frames::Parser  _parser;         // frames from the host (transport thread)
+    platform::Mutex _mutex;          // _link, _session, last answers, writes
+    Link           *_link;           // borrowed; nullptr: no host (_mutex held)
+    bool            _session;        // HELLO done (_mutex held)
 
     // package upload (transport thread only)
     bool            _uploading;          // between UPLOAD_BEGIN and UPLOAD_END

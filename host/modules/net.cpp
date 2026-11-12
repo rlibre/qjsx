@@ -20,12 +20,15 @@
 // Each connection has a reader thread that posts the received bytes to the
 // event loop; writes are synchronous. An open connection or server keeps the
 // event loop running (js::keepAlive) until it is closed.
+#include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "jsbind.h"
 #include "memory.h"
 #include "loop.h"
+#include "permissions.h"
 #include "sockets.h"
 
 namespace {
@@ -549,10 +552,37 @@ struct ListenOptions {
 JS_STRUCT(ListenOptions, host, port);
 
 /**
+ * True if the run may use host:port (rt::Permissions::mayUseNet); else
+ * throws EACCES saying how to grant it, and returns false.
+ */
+bool netAllowed(const char *host, int port) {
+    // the tool's own commands have no permissions: everything allowed
+    const rt::Permissions *permissions = rt::permissions();
+    if (permissions == nullptr || permissions->mayUseNet(host, port)) {
+        return true;
+    }
+
+    // refused
+    char what[300];
+    const char *hint = permissions->hint();
+    snprintf(what, sizeof(what), "net access to \"%s:%d\" is not allowed%s%s", host, port, hint[0] != 0 ? ": " : "",
+             hint);
+    js::failSystem(EACCES, what);
+    return false;
+}
+
+/**
  * JS listen(options, onConnection): a new Server listening on options.host
- * (default 127.0.0.1) and options.port. Throws if it cannot listen.
+ * (default 127.0.0.1) and options.port. Throws if it cannot listen, or if
+ * the run may not use that address.
  */
 js::Value netListen(ListenOptions options, js::Function onConnection) {
+    // the address must be granted
+    const char *host = options.host.has() ? options.host.value().data() : "127.0.0.1";
+    if (!netAllowed(host, options.port)) {
+        return js::Value();
+    }
+
     // make the JS object
     js::Created<Server> server = js::create<Server>();
     if (server.object == nullptr) {
@@ -560,7 +590,6 @@ js::Value netListen(ListenOptions options, js::Function onConnection) {
     }
 
     // start listening (the error is pending if it cannot)
-    const char *host = options.host.has() ? options.host.value().data() : "127.0.0.1";
     if (!server.object->start(host, options.port, onConnection)) {
         return js::Value();
     }
@@ -675,6 +704,12 @@ void connectDone(void *opaque, const rt::Message *message) {
  * Throws if the connect thread cannot start.
  */
 js::Promise<js::Value> netConnect(ConnectOptions options) {
+    // the address must be granted
+    const char *host = options.host.has() ? options.host.value().data() : "127.0.0.1";
+    if (!netAllowed(host, options.port)) {
+        return js::Promise<js::Value>();
+    }
+
     // the promise, a one-shot message source (connectDone) and a loop hold:
     // the loop must wait for the answer although no object is kept alive yet
     js::Promise<js::Value> promise = js::Promise<js::Value>::create();
@@ -686,7 +721,6 @@ js::Promise<js::Value> netConnect(ConnectOptions options) {
     // the request of the thread: a copy of the host name, the port and the
     // mailbox (retained)
     ConnectRequest *request = (ConnectRequest *)memory::allocate(sizeof(ConnectRequest));
-    const char *host = options.host.has() ? options.host.value().data() : "127.0.0.1";
     snprintf(request->host, sizeof(request->host), "%s", host);
     request->port = options.port;
     request->mailbox = loop->mailbox();

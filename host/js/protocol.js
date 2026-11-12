@@ -121,6 +121,7 @@ export const KEY = {
     UNCAUGHT: 41,       // PAUSED on an exception: true if no handler will catch it (prediction)
     VERSION: 43,        // HELLO answer: qjsx version of the firmware (older firmware: absent)
     NATIVES: 42,        // HELLO answer: names of the native modules of the firmware (older firmware: absent)
+    VOLATILE: 44,       // UPLOAD_BEGIN: the package goes to RAM (lost at restart); INFO answer: the package is in RAM
 };
 
 export const STREAM = { STDOUT: 1, STDERR: 2 };

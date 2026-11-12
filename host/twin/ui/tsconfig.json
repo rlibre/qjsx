@@ -1,0 +1,14 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"lib": ["DOM", "ES2022"],
+		"module": "es2022",
+		"strict": true,
+		"strictNullChecks": false,
+		"moduleResolution": "bundler",
+		"experimentalDecorators": true,
+		"noEmit": true
+	},
+	"include": ["src/**/*", "node_modules/x4js/src/types/*.d.ts"],
+	"exclude": ["dist"]
+}

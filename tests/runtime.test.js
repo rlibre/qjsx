@@ -18,6 +18,8 @@ check(Array.isArray(process.argv) && process.argv.length >= 2, "process.argv");
 check(process.argv[1].endsWith("runtime.test.js"), "process.argv[1] is the script");
 check(typeof process.env === "object", "process.env");
 check(["win32", "linux", "darwin"].includes(process.platform), "process.platform");
+check(/^\d+\.\d+\.\d+/.test(process.versions.qjsx), "process.versions.qjsx");
+check(/^\d{4}-\d{2}-\d{2}$/.test(process.versions.quickjs), "process.versions.quickjs");
 check(typeof process.cwd() === "string" && process.cwd().length > 0, "process.cwd()");
 
 // --- TextEncoder / TextDecoder

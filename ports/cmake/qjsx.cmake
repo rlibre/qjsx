@@ -15,9 +15,16 @@
 #   QJSX_ENGINE_SOURCES    the engine (C)
 #   QJSX_COMMON_SOURCES    runtime, modules, agent (C++)
 #   QJSX_FREERTOS_SOURCES  the FreeRTOS part of platform.h, shared by the ports
+#   QJSX_FREERTOS_GPIO_SOURCES  the watch of changing pins, shared by the FreeRTOS
+#                          ports that implement common/hal/hal_gpio.h
 #   QJSX_DEVICE_GPIO_SOURCES  the module device/gpio: add it when the port
 #                          implements common/hal/hal_gpio.h (and register it)
 #   QJSX_DEVICE_RMT_SOURCES   the module device/rmt (common/hal/hal_rmt.h)
+#   QJSX_DEVICE_USB_SOURCES   the module device/usb (common/hal/hal_usb.h)
+#   QJSX_DEVICE_I2C_SOURCES   the module device/i2c (common/hal/hal_i2c.h)
+#   QJSX_DEVICE_ADC_SOURCES   the module device/adc (common/hal/hal_adc.h)
+#   QJSX_DEVICE_SERIAL_SOURCES the module device/serial (common/hal/hal_serial.h:
+#                             the port gives its driver, hal::serial::boardDriver)
 #   QJSX_INCLUDE_DIRS      every source folder (headers are included by name)
 #   QJSX_DEFINES           for every source
 #   QJSX_ENGINE_OPTIONS    compile options of the engine sources
@@ -46,9 +53,16 @@ file(GLOB QJSX_COMMON_SOURCES
 
 set(QJSX_FREERTOS_SOURCES "${QJSX_ROOT}/ports/freertos/platform_freertos.cpp")
 
+# the watch of changing pins of a FreeRTOS port that implements hal_gpio.h
+set(QJSX_FREERTOS_GPIO_SOURCES "${QJSX_ROOT}/ports/freertos/gpio_watch.cpp")
+
 # the hardware modules (common/device/), one list per hal interface
 set(QJSX_DEVICE_GPIO_SOURCES "${QJSX_ROOT}/common/device/gpio_module.cpp")
 set(QJSX_DEVICE_RMT_SOURCES "${QJSX_ROOT}/common/device/rmt_module.cpp")
+set(QJSX_DEVICE_USB_SOURCES "${QJSX_ROOT}/common/device/usb_module.cpp")
+set(QJSX_DEVICE_I2C_SOURCES "${QJSX_ROOT}/common/device/i2c_module.cpp")
+set(QJSX_DEVICE_ADC_SOURCES "${QJSX_ROOT}/common/device/adc_module.cpp")
+set(QJSX_DEVICE_SERIAL_SOURCES "${QJSX_ROOT}/common/device/serial_module.cpp")
 
 set(QJSX_INCLUDE_DIRS
     "${QJSX_ROOT}/engine/qjsx"

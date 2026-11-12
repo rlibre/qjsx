@@ -17,6 +17,8 @@
 #include "jsbind.h"
 #include "loop.h"
 #include "files.h"
+#include "permissions.h"
+#include "version.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -238,22 +240,24 @@ void processExit(js::Optional<int> code) {
     js::detail::markPendingException();
 }
 
-// Files of the program (see rt::setDataDirectory).
-bool runsOnDevice = false;            // setDataDirectory() was called
-const char *dataDirectory = nullptr;  // borrowed; nullptr on a device: no file system
-
 /**
  * process.cwd(): current directory, with '/' separators (also on Windows,
- * unlike Node); on a device, the data directory of the board. Throws a system
- * error if it cannot be read.
+ * unlike Node): the working folder of the run's permissions if they set one
+ * (a device: its data folder; a PC program: its root folder), "/" on a
+ * device without file system, else the system's. Throws a system error if
+ * it cannot be read.
  */
 js::Value cwd() {
     JSContext *ctx = js::context();
 
-    // on a device: the data directory, "/" when the board has no file system
-    if (runsOnDevice) {
-        const char *directory = dataDirectory != nullptr ? dataDirectory : "/";
-        return js::Value(ctx, JS_NewString(ctx, directory));
+    // the run's own folder
+    const rt::Permissions *permissions = rt::permissions();
+    if (permissions != nullptr && !permissions->hasFileSystem()) {
+        return js::Value(ctx, JS_NewString(ctx, "/"));
+    }
+
+    if (permissions != nullptr && permissions->workingFolder() != nullptr) {
+        return js::Value(ctx, JS_NewString(ctx, permissions->workingFolder()));
     }
 
     // ask the system (malloc'd string)
@@ -268,8 +272,23 @@ js::Value cwd() {
     return result;
 }
 
-int processArgumentCount = 0;
-char **processArguments = nullptr;
+// The arguments of process.argv (rt::setProcessArguments), one set per
+// thread: each thread that creates a runtime sets its own first (the twin
+// agent runs the device and its web page on two threads).
+thread_local int processArgumentCount = 0;
+thread_local char **processArguments = nullptr;
+
+/**
+ * New JS object process.versions (plain properties: printed by
+ * JSON.stringify): qjsx and the QuickJS engine. A package run adds 'build',
+ * the build id of the package (rt::runPackage).
+ */
+JSValue newVersions(JSContext *ctx) {
+    JSValue versions = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, versions, "qjsx", JS_NewString(ctx, QJSX_VERSION));
+    JS_SetPropertyStr(ctx, versions, "quickjs", JS_NewString(ctx, CONFIG_VERSION));
+    return versions;
+}
 
 /**
  * New JS array with the arguments given to rt::setProcessArguments.
@@ -285,7 +304,8 @@ JSValue newArgv(JSContext *ctx) {
 }
 
 /**
- * Adds "NAME=value" to the env object as env.NAME = "value".
+ * Adds "NAME=value" to the env object as env.NAME = "value", if the run's
+ * permissions let the program read NAME.
  */
 void addEnvironmentEntry(JSContext *ctx, JSValueConst env, const char *entry) {
     // the name ends at the first '='; entries without a name are skipped
@@ -300,8 +320,13 @@ void addEnvironmentEntry(JSContext *ctx, JSValueConst env, const char *entry) {
     memcpy(name, entry, nameLength);
     name[nameLength] = 0;
 
-    // the value is the rest of the entry
-    JS_SetPropertyStr(ctx, env, name, JS_NewString(ctx, equal + 1));
+    // the value is the rest of the entry; a variable not granted is left out
+    const rt::Permissions *permissions = rt::permissions();
+    bool allowed = permissions == nullptr || permissions->mayUseEnv(name);
+    if (allowed) {
+        JS_SetPropertyStr(ctx, env, name, JS_NewString(ctx, equal + 1));
+    }
+
     memory::release(name);
 }
 
@@ -444,11 +469,12 @@ JS_GLOBALS(runtime, globals) {
     JS_ADD_CLASS(globals, TextEncoder);
     JS_ADD_CLASS(globals, TextDecoder);
 
-    // process: platform, argv and env (read once, now), exit, cwd,
-    // stdout.write, stderr.write
+    // process: platform, versions, argv and env (read once, now), exit,
+    // cwd, stdout.write, stderr.write
     globals.object("process", [](js::ModuleBuilder &process) {
         JSContext *ctx = process.context();
         process.constant("platform", board::platformName());
+        process.constant("versions", js::Value(ctx, newVersions(ctx)));
         process.constant("argv", js::Value(ctx, newArgv(ctx)));
         process.constant("env", js::Value(ctx, newEnv(ctx)));
         JS_FUNCTION_AS(process, processExit, "exit");
@@ -509,41 +535,31 @@ void setProcessArguments(int argc, char **argv) {
 }
 
 /**
- * Switches to device files: cwd() and relative fs paths use 'directory'.
- */
-void setDataDirectory(const char *directory) {
-    runsOnDevice = true;
-    dataDirectory = directory;
-}
-
-/**
- * Host tool: a copy of 'path'. Device: ENOSYS without file system, else the
- * path joined to the data directory when relative.
+ * The path as fs opens it: ENOSYS on a device without file system; a
+ * relative path joined to the run's working folder if it has one; else as
+ * it is (the system resolves a relative path).
  */
 char *resolveProgramPath(const char *path) {
-    // the host tool: as it is (the system resolves a relative path)
-    size_t pathLength = strlen(path);
-    if (!runsOnDevice) {
-        return memory::copyText(path, pathLength);
-    }
-
     // a device without file system
-    if (dataDirectory == nullptr) {
+    size_t pathLength = strlen(path);
+    const rt::Permissions *permissions = rt::permissions();
+    if (permissions != nullptr && !permissions->hasFileSystem()) {
         errno = ENOSYS;
         return nullptr;
     }
 
-    // an absolute path: as it is
-    if (files::isAbsolute(path)) {
+    // absolute, or no working folder: as it is
+    const char *folder = permissions != nullptr ? permissions->workingFolder() : nullptr;
+    if (folder == nullptr || files::isAbsolute(path)) {
         return memory::copyText(path, pathLength);
     }
 
-    // a relative path: "<data directory>/<path>"
-    size_t directoryLength = strlen(dataDirectory);
-    char *joined = (char *)memory::allocate(directoryLength + 1 + pathLength + 1);
-    memcpy(joined, dataDirectory, directoryLength);
-    joined[directoryLength] = '/';
-    memcpy(joined + directoryLength + 1, path, pathLength + 1);
+    // a relative path: "<working folder>/<path>"
+    size_t folderLength = strlen(folder);
+    char *joined = (char *)memory::allocate(folderLength + 1 + pathLength + 1);
+    memcpy(joined, folder, folderLength);
+    joined[folderLength] = '/';
+    memcpy(joined + folderLength + 1, path, pathLength + 1);
     return joined;
 }
 

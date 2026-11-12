@@ -392,6 +392,13 @@ const char *platformName() {
 }
 
 /**
+ * A real board: its programs see only its own file system.
+ */
+bool confineFiles() {
+    return false;
+}
+
+/**
  * No file system yet (the "data" partition will hold one): cwd() is "/" and
  * fs fails with ENOSYS.
  */

@@ -47,6 +47,20 @@ int countNativeModules();
 const char *nativeModuleNameAt(int index);
 
 /**
+ * Restricts the native modules a device program may import (and the agent
+ * lists in HELLO) to 'names' (borrowed, 'count' of them; count < 0: all,
+ * the default). The digital twin of a board gives the board's list, so that
+ * a program sees what the real board has. Before any runtime is created.
+ */
+void setDeviceNativeModules(const char *const *names, int count);
+
+/**
+ * True if a device program may import the native module 'name' (see
+ * setDeviceNativeModules).
+ */
+bool isDeviceNativeModule(const char *name);
+
+/**
  * Embedded JS module registered under this name ("stdlib/path"...), or nullptr.
  */
 const EmbeddedModule *findEmbeddedModule(const char *name);
@@ -103,18 +117,12 @@ void writeOutput(int stream, const char *text, size_t length);
 void setProcessArguments(int argc, char **argv);
 
 /**
- * Runs the programs as on a device (the agent calls it once, before any run):
- * process.cwd() is 'directory' and fs resolves relative paths against it
- * ('directory' borrowed, must stay valid; absolute, '/' separators). nullptr:
- * the board has no file system: process.cwd() is "/" and fs fails with ENOSYS.
- * Without this call (host tool), the system's current directory is used.
- */
-void setDataDirectory(const char *directory);
-
-/**
  * The path fs must open for 'path' given by the program (malloc'd, freed by
- * the caller): a copy of it, or, on a device, a relative path joined to the
- * data directory. nullptr with errno ENOSYS on a device without file system.
+ * the caller): a copy of it, or a relative path joined to the working folder
+ * of the run's permissions (rt::permissions(): a device's data folder, a PC
+ * program's root folder). nullptr with errno ENOSYS on a device without file
+ * system. Only resolves: the access itself is checked by the caller
+ * (Permissions::mayAccess).
  */
 char *resolveProgramPath(const char *path);
 

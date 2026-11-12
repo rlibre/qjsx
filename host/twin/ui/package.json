@@ -1,0 +1,13 @@
+{
+	"name": "qjsx-twin-ui",
+	"version": "1.0.0",
+	"private": true,
+	"description": "The web page of the digital twin of qjsx (embedded in the qjsx executable)",
+	"scripts": {
+		"dev": "x4js dev",
+		"build": "x4js build"
+	},
+	"dependencies": {
+		"x4js": "^2.3.32"
+	}
+}

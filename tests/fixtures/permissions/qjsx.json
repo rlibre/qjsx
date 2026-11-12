@@ -1,0 +1,11 @@
+{
+    "name": "permissions",
+    "desktop": {
+        "rootFolder": "${executableFolder}/perm-root",
+        "permissions": {
+            "read": ["${rootFolder}"],
+            "write": ["${rootFolder}"],
+            "env": ["PERM_TEST"]
+        }
+    }
+}

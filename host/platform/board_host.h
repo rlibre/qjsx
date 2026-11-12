@@ -6,7 +6,9 @@
  */
 
 // The desktop "board" of "qjsx agent" (board.h): packages in files, a TCP
-// link (one host at a time), the console on stdout / stderr.
+// link (one host at a time), the console on stdout / stderr. With --board it
+// takes the identity and the platform of the board it is the twin of
+// (host/twin/sim/twin.h).
 #pragma once
 
 namespace board {
@@ -18,6 +20,11 @@ struct HostOptions {
     const char *host;      // address to listen on
     int         port;      // TCP port to listen on
     const char *storage;   // directory of <storage>/app.qjspkg and app.buildid
+    // the digital twin of a board ("qjsx agent --board"): what the agent
+    // reports instead of the desktop; nullptr: the desktop
+    const char *chip;      // chip of the board ("ESP32-S3")
+    const char *board;     // name of the board ("YD-ESP32-S3")
+    const char *platform;  // process.platform of the board ("esp32")
 };
 
 /**

@@ -12,23 +12,16 @@
 // loops. Outputs are configured as input-output, so that their level can be
 // read (read); toggle inverts the output register itself.
 //
-// Changes of watched pins:
-//   1. an interrupt on both edges puts the pin number in a queue (the
-//      interrupt does nothing else: no lock, no allocation);
-//   2. the event task takes the pins from the queue; each change (re)starts
-//      the debounce delay of its pin;
-//   3. when a delay has run out, the task reads the level and calls the
-//      change handler if it differs from the last level reported.
+// Changes of watched pins: an interrupt on both edges hands the pin to the
+// watch shared by the FreeRTOS ports (ports/freertos/gpio_watch.h), which
+// debounces and reports the changes from its event task.
 #include "hal_gpio.h"
-#include "platform.h"
+#include "gpio_watch.h"
 
 #include <stdint.h>
 
 #include "driver/gpio.h"
 #include "esp_attr.h"
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 #include "soc/gpio_reg.h"
 #include "soc/soc.h"
 #include "soc/soc_caps.h"
@@ -38,143 +31,32 @@ namespace gpio {
 
 namespace {
 
-const int EVENT_QUEUE_LENGTH = 64;   // changes waiting for the event task (more are dropped)
-
-// A watched pin (the event task and the JS thread, under watchLock).
-struct Watch {
-    bool    active;      // the pin is watched
-    int     debounceMs;  // stable time before a change is reported
-    bool    pending;     // a change waits for its delay to run out
-    int64_t deadlineUs;  // when it does (esp_timer_get_time)
-    int     lastLevel;   // last level reported (or read when the watch began)
-};
-
-Watch watches[GPIO_NUM_MAX];           // by pin; watchLock
-platform::Mutex watchLock;             // watches, changeHandler
-ChangeHandler *changeHandler = nullptr;  // one for every pin; set by watch()
-QueueHandle_t changes = nullptr;       // pins whose level changed, from the interrupt
-bool started = false;                  // interrupt service, queue and event task (JS thread)
+bool serviceInstalled = false;   // the interrupt service of the GPIOs (JS thread)
 
 /**
- * Interrupt of a watched pin: queues its number for the event task.
+ * Interrupt of a watched pin: hands its number to the shared watch.
  */
 void IRAM_ATTR onInterrupt(void *argument) {
-    int pin = (int)(intptr_t)argument;
-    BaseType_t higherPriorityWoken = pdFALSE;
-    xQueueSendFromISR(changes, &pin, &higherPriorityWoken);
-    portYIELD_FROM_ISR(higherPriorityWoken);
+    gpiowatch::postFromInterrupt((int)(intptr_t)argument);
 }
 
 /**
- * Ticks to wait for the next change: until the nearest debounce deadline,
- * or forever when no delay runs.
- */
-TickType_t ticksUntilNextDeadline() {
-    int64_t now = esp_timer_get_time();
-    int64_t nearest = INT64_MAX;
-
-    watchLock.lock();
-    for (int pin = 0; pin < GPIO_NUM_MAX; pin++) {
-        if (watches[pin].active && watches[pin].pending && watches[pin].deadlineUs < nearest) {
-            nearest = watches[pin].deadlineUs;
-        }
-    }
-    watchLock.unlock();
-
-    // no delay: forever; a deadline passed: at once; else rounded up to a tick
-    if (nearest == INT64_MAX) {
-        return portMAX_DELAY;
-    }
-    if (nearest <= now) {
-        return 0;
-    }
-    int64_t waitMs = (nearest - now + 999) / 1000;
-    return pdMS_TO_TICKS(waitMs) + 1;
-}
-
-/**
- * A change of 'pin' arrived: its debounce delay starts again.
- */
-void noteChange(int pin) {
-    watchLock.lock();
-    Watch *watch = &watches[pin];
-    if (watch->active) {
-        watch->pending = true;
-        watch->deadlineUs = esp_timer_get_time() + (int64_t)watch->debounceMs * 1000;
-    }
-    watchLock.unlock();
-}
-
-/**
- * Reports the pins whose delay has run out and whose level differs from the
- * last one reported. The handler is called outside the lock.
- */
-void reportDueChanges() {
-    for (int pin = 0; pin < GPIO_NUM_MAX; pin++) {
-        // under the lock: is the delay of this pin over, and did its level change?
-        watchLock.lock();
-        Watch *watch = &watches[pin];
-        bool due = watch->active && watch->pending && watch->deadlineUs <= esp_timer_get_time();
-        int level = 0;
-        bool changed = false;
-        if (due) {
-            watch->pending = false;
-            level = read(pin);
-            changed = level != watch->lastLevel;
-            watch->lastLevel = level;
-        }
-        ChangeHandler *handler = changeHandler;
-        watchLock.unlock();
-
-        // report it
-        if (changed && handler != nullptr) {
-            handler(pin, level);
-        }
-    }
-}
-
-/**
- * Event task: takes the changes queued by the interrupt and reports them
- * once their debounce delay has run out, for ever.
- */
-void eventTask(void *) {
-    for (;;) {
-        // wait for a change, at most until the next deadline
-        int pin = -1;
-        if (xQueueReceive(changes, &pin, ticksUntilNextDeadline()) == pdTRUE) {
-            noteChange(pin);
-        }
-
-        reportDueChanges();
-    }
-}
-
-/**
- * Starts, once, the interrupt service of the GPIOs, the queue and the event
- * task. False if one of them cannot start.
+ * Starts, once, the interrupt service of the GPIOs and the shared watch.
+ * False if one of them cannot start.
  */
 bool startEvents() {
-    if (started) {
-        return true;
-    }
-
     // the interrupt service (already installed by someone else: fine)
-    esp_err_t installed = gpio_install_isr_service(0);
-    if (installed != ESP_OK && installed != ESP_ERR_INVALID_STATE) {
-        return false;
+    if (!serviceInstalled) {
+        esp_err_t installed = gpio_install_isr_service(0);
+        if (installed != ESP_OK && installed != ESP_ERR_INVALID_STATE) {
+            return false;
+        }
+
+        serviceInstalled = true;
     }
 
-    // the queue, then the task that empties it
-    changes = xQueueCreate(EVENT_QUEUE_LENGTH, sizeof(int));
-    if (changes == nullptr) {
-        return false;
-    }
-    if (!platform::startThread(&eventTask, nullptr, platform::defaultThreadOptions("gpio-events"))) {
-        return false;
-    }
-
-    started = true;
-    return true;
+    // the queue and the event task
+    return gpiowatch::start(GPIO_NUM_MAX, &read);
 }
 
 } // namespace
@@ -263,25 +145,16 @@ void toggle(int pin) {
 }
 
 /**
- * Interrupt on both edges, changes reported by the event task.
+ * Interrupt on both edges, changes reported by the shared watch.
  */
 bool watch(int pin, int debounceMs, ChangeHandler *handler) {
     if (!startEvents()) {
         return false;
     }
 
-    // record the watch (or change its debounce); the level now is the
-    // reference of the next change
-    watchLock.lock();
-    changeHandler = handler;
-    bool wasActive = watches[pin].active;
-    watches[pin].debounceMs = debounceMs;
-    if (!wasActive) {
-        watches[pin] = Watch{ true, debounceMs, false, 0, read(pin) };
-    }
-    watchLock.unlock();
-
-    if (wasActive) {
+    // record the watch (or change its debounce)
+    bool added = gpiowatch::add(pin, debounceMs, handler);
+    if (!added) {
         return true;
     }
 
@@ -292,6 +165,7 @@ bool watch(int pin, int debounceMs, ChangeHandler *handler) {
     if (!ok) {
         unwatch(pin);
     }
+
     return ok;
 }
 
@@ -299,17 +173,13 @@ bool watch(int pin, int debounceMs, ChangeHandler *handler) {
  * Removes the interrupt of the pin, then forgets the watch.
  */
 void unwatch(int pin) {
-    if (!started) {
+    if (!serviceInstalled) {
         return;
     }
 
     gpio_intr_disable((gpio_num_t)pin);
     gpio_isr_handler_remove((gpio_num_t)pin);
-
-    watchLock.lock();
-    watches[pin].active = false;
-    watches[pin].pending = false;
-    watchLock.unlock();
+    gpiowatch::remove(pin);
 }
 
 /**

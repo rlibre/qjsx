@@ -19,6 +19,7 @@
 #include "files.h"
 #include "modules.h"
 #include "platform.h"
+#include "region_heap.h"
 #include "sockets.h"
 
 namespace board {
@@ -330,6 +331,40 @@ char *absoluteDataDirectory(const char *storage) {
     return directory;
 }
 
+// ### JS heap of the tests ####################################################
+
+// QJSX_JS_HEAP_MB=<megabytes>: the JS heap of every runtime is a RegionHeap
+// of that size, as on a device whose JS heap is a raw region (RP2350 PSRAM),
+// so that the whole test suite runs on that allocator. Unset: QuickJS's own
+// allocator (malloc).
+const char *const JS_HEAP_VARIABLE = "QJSX_JS_HEAP_MB";
+const int LARGEST_JS_HEAP_MB = 2047;   // RegionHeap takes at most 2 GB
+
+/**
+ * The region heap of QJSX_JS_HEAP_MB, made on the first call (the region is
+ * never freed: it outlives every runtime). nullptr if the variable is unset
+ * or not a size from 1 to LARGEST_JS_HEAP_MB.
+ */
+memory::RegionHeap *makeTestJsHeap() {
+    // the size asked
+    const char *setting = getenv(JS_HEAP_VARIABLE);
+    if (setting == nullptr) {
+        return nullptr;
+    }
+
+    int megabytes = atoi(setting);
+    if (megabytes < 1 || megabytes > LARGEST_JS_HEAP_MB) {
+        fprintf(stderr, "qjsx: %s must be a size in MB from 1 to %d: ignored\n", JS_HEAP_VARIABLE, LARGEST_JS_HEAP_MB);
+        return nullptr;
+    }
+
+    // the region and its heap, for good
+    size_t size = (size_t)megabytes * 1024 * 1024;
+    static memory::RegionHeap heap;
+    heap.init(memory::allocate(size), size);
+    return &heap;
+}
+
 } // namespace
 
 /**
@@ -367,16 +402,25 @@ const char *dataDirectory() {
 }
 
 /**
- * The desktop: no flash or PSRAM size to report.
+ * The desktop (no flash or PSRAM size to report), or the board of a twin.
  */
 void identity(Identity *identity) {
-    *identity = Identity{ "desktop", "qjsx agent", 0, 0 };
+    bool twin = state.options.board != nullptr;
+    *identity = twin ? Identity{ state.options.chip, state.options.board, 0, 0 }
+                     : Identity{ "desktop", "qjsx agent", 0, 0 };
 }
 
 /**
- * The desktop system, named like Node's process.platform.
+ * The desktop system, named like Node's process.platform, or the platform of
+ * the board of a twin.
  */
 const char *platformName() {
+    // a twin: the board's
+    if (state.options.platform != nullptr) {
+        return state.options.platform;
+    }
+
+    // the desktop's
 #if defined(_WIN32)
     return "win32";
 #elif defined(__APPLE__)
@@ -389,6 +433,14 @@ const char *platformName() {
 }
 
 /**
+ * The desktop agent and the twin run on the PC's disk: their programs reach
+ * only <storage>/data, as a board's reach only its partition.
+ */
+bool confineFiles() {
+    return true;
+}
+
+/**
  * The desktop cannot restart: returns false, the runner starts the program
  * again instead.
  */
@@ -397,10 +449,17 @@ bool restart() {
 }
 
 /**
- * The default allocator of QuickJS.
+ * QuickJS's default allocator, or a RegionHeap when QJSX_JS_HEAP_MB is set
+ * (tests). Runtimes may live on several threads: the region heap is locked.
  */
 const JSMallocFunctions *jsAllocator() {
-    return nullptr;
+    // made once, the first time (thread-safe static initialization)
+    static memory::RegionHeap *testHeap = makeTestJsHeap();
+    if (testHeap == nullptr) {
+        return nullptr;
+    }
+
+    return memory::jsAllocator(testHeap, true);
 }
 
 /**

@@ -64,15 +64,42 @@ export class Device {
         this.textTimer = isSerial ? setInterval(() => this.parser.flushText(), 100) : undefined;
     }
 
+    // Opens a device that is restarting (after RESET): tries to open the
+    // target and open the session again and again (the port of a native USB
+    // link goes away during the restart, a TCP agent does not listen yet)
+    // until it answers, at most 'timeout' ms. Resolves with the device, its
+    // session open (hello done). The handlers are given to the device once
+    // it answers (closing a failed try must not look like the end of the
+    // connection to them).
+    static async reopen(targetText, handlers = {}, token = undefined, { timeout = 20000 } = {}) {
+        const RETRY_DELAY = 300;   // ms between two tries
+        const deadline = Date.now() + timeout;
+        for (;;) {
+            let device;
+            try {
+                device = await Device.open(targetText, {});
+                await device.hello(token, { timeout: 500, attempts: 1 });
+                device.handlers = handlers;
+                return device;
+            } catch (error) {
+                device?.close();
+                if (Date.now() >= deadline) {
+                    throw new Error(`the device did not come back within ${timeout / 1000} s (${error.message})`);
+                }
+            }
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        }
+    }
+
     // Opens the session. Keeps the native modules of the firmware in
     // 'natives' and its qjsx version in 'version' (undefined if an older
-    // firmware does not say).
-    async hello(token) {
+    // firmware does not say). 'options' are those of request().
+    async hello(token, options = {}) {
         const payload = { [KEY.PROTOCOL]: PROTOCOL_VERSION };
         if (token !== undefined) {
             payload[KEY.TOKEN] = token;
         }
-        const answer = await this.request(KIND.HELLO, payload);
+        const answer = await this.request(KIND.HELLO, payload, options);
         this.natives = answer.get(KEY.NATIVES);
         this.version = answer.get(KEY.VERSION);
         return answer;

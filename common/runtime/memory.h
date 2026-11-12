@@ -30,6 +30,14 @@ namespace memory {
 void *allocate(size_t size);
 
 /**
+ * A new block of 'size' bytes (at least 1), or nullptr when there is no room:
+ * the only allocation that may fail, for a block whose size comes from
+ * outside and may simply be too large (a package received in RAM). Released
+ * with release().
+ */
+void *tryAllocate(size_t size);
+
+/**
  * Resizes a block (nullptr: a new one), keeping its contents. Never nullptr.
  */
 void *reallocate(void *block, size_t size);

@@ -187,6 +187,9 @@ inline const char *errnoName(int error) {
         case EIO: {
             return "EIO";
         }
+        case ENXIO: {
+            return "ENXIO";
+        }
         case EBADF: {
             return "EBADF";
         }
@@ -313,11 +316,12 @@ inline Failure __attribute__((format(printf, 1, 2))) fail(const char *format, ..
  * 'code' ("ENOENT") and 'errno'; 'what' (a path...) ends the message.
  */
 inline Failure failSystem(int error = errno, const char *what = nullptr) {
-    // message "ENOENT: <strerror>[, what]"
+    // message "ENOENT: <strerror>[, what]"; 'what' is cut at 400 bytes so
+    // that the code and its text always fit (GCC checks the truncation)
     char message[512];
     const char *name = detail::errnoName(error);
     if (what != nullptr) {
-        snprintf(message, sizeof(message), "%s: %s, %s", name, strerror(error), what);
+        snprintf(message, sizeof(message), "%s: %s, %.400s", name, strerror(error), what);
     } else {
         snprintf(message, sizeof(message), "%s: %s", name, strerror(error));
     }

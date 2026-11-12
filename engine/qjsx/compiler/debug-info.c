@@ -135,6 +135,23 @@ uint32_t js_debug_skipped_marker(const uint8_t *bc_buf, int bc_len, int start, i
     return marker;
 }
 
+/* TRUE if a debugger stop position (statement or return, not expression)
+   lies in bc_buf[start, end): an optimization merging the instructions
+   around it would put two stops on one instruction. */
+BOOL js_debug_has_stop_marker(const uint8_t *bc_buf, int start, int end)
+{
+    int pos = start;
+
+    while (pos < end) {
+        int op = bc_buf[pos];
+        if (op == OP_line_num &&
+            line_num_kind(get_u32(bc_buf + pos + 1)) != JS_DEBUG_POSITION_EXPRESSION)
+            return TRUE;
+        pos += opcode_info[op].size;
+    }
+    return FALSE;
+}
+
 static int js_debug_variable_flags(const JSVarDef *vd)
 {
     int flags = 0;

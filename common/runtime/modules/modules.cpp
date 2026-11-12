@@ -31,6 +31,11 @@ NativeModule nativeModules[32] = {
 // main with registerNativeModule()
 int nativeModuleCount = 2;
 
+// The native modules a device program may import (setDeviceNativeModules):
+// every registered one when deviceModuleCount < 0.
+const char *const *deviceModuleNames = nullptr;  // borrowed
+int deviceModuleCount = -1;                        // -1: no restriction
+
 // Filled before main() by EmbeddedRegistration objects: initialized on first
 // use, because the order of static initializations between files is unknown.
 // Only the desktop tool registers modules (its commands and its own copy of
@@ -64,6 +69,34 @@ const NativeModule *findNativeModule(const char *name) {
     }
 
     return nullptr;
+}
+
+/**
+ * Restricts the native modules of device programs to 'names' (borrowed,
+ * 'count' of them); count < 0: all of them (the default).
+ */
+void setDeviceNativeModules(const char *const *names, int count) {
+    deviceModuleNames = names;
+    deviceModuleCount = count;
+}
+
+/**
+ * True if a device program may import the native module 'name'.
+ */
+bool isDeviceNativeModule(const char *name) {
+    // no restriction: every registered module
+    if (deviceModuleCount < 0) {
+        return true;
+    }
+
+    // else only the listed ones
+    for (int i = 0; i < deviceModuleCount; i++) {
+        if (strcmp(deviceModuleNames[i], name) == 0) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**

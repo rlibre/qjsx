@@ -175,6 +175,105 @@ keeps the old name: `C:\Sandbox\espjs`.
     GET_PROPERTIES per object, at most 5 properties, nested values by their description;
     to measure on the board (next step if too slow: a small preview added by the stub).
   - Conditional breakpoints, logpoints, hit counts: postponed (TODO backlog).
+- Package in RAM and restart after deploy (agreed by the user 2026-11-12, IMPLEMENTED the same
+  day, Debug suite 66 OK; TRIED on the ESP32-S3 2026-11-12: deploy --ram, device info, reset
+  drops it, deploy --reset, then debugger 72/72 (one run 71/72 just after a deploy --reset,
+  not reproduced in 3 runs), proxy 30/30, cdp 53/53; RP2350 and STM32 not now, user):
+  `UPLOAD_BEGIN` with `VOLATILE` (key 44)
+  loads the package in RAM (`common/agent/ram_storage.*`, exact size from the C heap via
+  `memory::tryAllocate`, the only allocation allowed to fail; refused with "not enough RAM"),
+  nothing written to flash; RUN starts it instead of the installed one; lost at a chip restart
+  (the desktop agent's RESET drops it); a flash install drops it; INFO reports `VOLATILE`.
+  Deviation from the proposal: RAM comes from the C heap on every board (not PSRAM per
+  board). Tool: `qjsx deploy --ram` (warning printed), `qjsx debug` uploads the project's
+  latest package in RAM by default (`--no-upload` to skip; RUN, or STOP with --restart);
+  `qjsx deploy --reset` (flash only, refused with --ram): RESET then `Device.reopen` (retries
+  until HELLO answers, 20 s), the program starts at boot.
+- Digital twin of a board (design agreed by the user 2026-11-12, IMPLEMENTED the same day for
+  the YD-ESP32-S3, `doc/architecture.md` 6.6; Debug suite 74 OK, `tests/twin.test.js` 17
+  checks, page tried in the browser pane): `qjsx agent --board <name | file.json>
+  [--ui-port 8090]`; board JSON in `boards/` (copied to `bin/<config>/boards/` by the
+  build); `host/twin/sim/twin.cpp` (hal::gpio: output latch wins, then open drain at 0, then what
+  the page forces, then pulls incl. the board's for an active-low button; change handler
+  called at once on the changing thread), `twin_rmt.cpp` (hal::rmt: send lasts its ticks,
+  done on a "twin rmt" thread, bytes kept per pin), `twin_module.cpp` (native
+  `qjsx:twinboard`, registered only in a twin); only the board's natives offered to the
+  program (`rt::setDeviceNativeModules`), its `process.platform`, agent name "qjsx twin";
+  page server `host/twin/js/server.js` (`qjsx:twin/server`) run by the hidden command
+  `qjsx twin-ui` in a second JS runtime on its own thread (4 MB stack); it must print
+  nothing (one output sink per process). No executable involved (user asked, 2026-11-12):
+  the tool plays the board. PAGE IN X4JS (user, 2026-11-12, DONE the same day, Debug suite
+  88 OK, tried in the browser pane): `host/twin/ui/` (x4js project, `npm install` done with
+  the user's agreement; `node_modules/` git-ignored; `dist/` KEPT in git with
+  `dist/sources.crc32`); messages x4js `{ msg, params }` on WebSocket `/ws`, subprotocol
+  `messaging`; embedded as a stored zip by `tools/embed-twin-ui.lua` (runs `npm run build`
+  when the sources changed and node_modules exists, else warns); hidden option
+  `qjsx agent --ui-dir <folder>` to serve the page from disk. Page (user, 2026-11-12): header
+  (microprocessor logo SVG, title, board, link state, settings button), settings in a
+  `SettingsView` page in a `Dialog` (theme, used pins only; kept by the browser with
+  `loadPState`), panels shown / hidden by a CONTEXT MENU, layout kept (`persist`); ONE font
+  size, 12px (user: `--font-size` of x4 set on :root; no other font-size); x4js is READ-ONLY for us (`node_modules`; the user
+  fixes x4 himself and publishes it on npm); types: `tsc --noEmit -p host/twin/ui` (tsc is
+  on the machine). Everything of the twin lives in
+  `host/twin/` (user): `sim/` (C++), `js/` (embedded as `qjsx:twin/<name>`), `ui/`, later
+  `parts/`; `qjsx:twin` = the PUBLIC API of the component models (design in TODO.md).
+  PARTS (agreed and IMPLEMENTED 2026-11-12, `doc/architecture.md` 6.6, Debug suite 94 OK + 1
+  fixed and run again alone, `tests/twinparts.test.js` 21/21): a part = a model (JS, in the twin's runtime, never the
+  program's) + a view; `host/twin/api/twin.js` = `qjsx:twin` (`Part`, `Registers`,
+  `board.pin/i2c/rmt/now/supply`, `pin.voltage`); parts of qjsx in
+  `host/twin/parts/<model>/model.js` = `qjsx:twin/parts/<model>` (button, ws2812, bme280,
+  potentiometer); a project's part = `"model": "./folder"` (model.js, optional view.js);
+  `host/twin/js/parts.js` builds them (ids unique; first error: the agent prints it and
+  exits, `twinboard.ready`); `host/twin/sim/twin_bridge.cpp` posts the hardware events to
+  the twin's runtime (pins watched by parts, RMT bytes / pulses, I2C transfers waited
+  synchronously by the program's thread, timeout = the transfer's; the twin never waits
+  for the program); pin priority: program output > open drain at 0 > page force > part
+  drive > pulls (program's, then part's), `conflict` flag. Boards: `kind` -> `model` + `id`
+  (`boot` button, `rgb` ws2812), `"adc"` section. Project: `qjsx agent` in the folder (or
+  `-p / --project`) reads `"twin"` of `qjsx.json` (`board`, `parts`, optional `ports` {
+  agent, ui, usb, uart }); `"target": "twin"` = tcp:127.0.0.1:<ports.agent | 5555>. Page:
+  three levels of views (state list; `static controls` slider / knob / switch / select /
+  button / value / led; `createView(x4, part)` of a project's view.js), section "Buttons",
+  part titles "label · model" with the live use of their pins, I2C sections only for an
+  open bus with no part (trace of the transfers, frequencies), console of the parts.
+  User's UI rules: show the page (with its URL) before running the tests; one font size;
+  knobs of a fixed width; no exaggerated effects.
+- File access of a PC program (agreed with the user 2026-11-12, IMPLEMENTED the same day,
+  `doc/architecture.md` 6.7, Debug suite 86 OK; a DEVICE HAS NO PERMISSIONS, user: the runner
+  only sets its working folder, EXCEPT the desktop agent and the twin (same runner code, on
+  the PC's disk): `board::confineFiles()` (true only in board_host.cpp) limits their files to
+  `<storage>/data` (user, 2026-11-12; net / serial / env stay free); `rt::Permissions` in common/runtime/permissions.*, built by
+  host/permissions_host.cpp, checked in fs / net / serial / process.env). Before it, the
+  discussion: today
+  `sys/fs` is unrestricted on the PC (exe, `qjsx run`) and only relative paths are rooted in
+  `<storage>/data` on the desktop agent / twin (absolute paths and `..` escape). Goal (user):
+  a JS bug must not be able to wipe a disk. Agreed so far, on Deno's model: a `"desktop"`
+  section in `qjsx.json` (copied into the manifest) with `"rootFolder"` and `"permissions": {
+  read, write, net... }`; NOTHING allowed by default; the program running as a device (board,
+  agent, twin) keeps the board's rules (its data folder), not `desktop`. Variables (names
+  chosen by the user): `${executableFolder}`, `${userAppDataFolder}` (`%APPDATA%/<name>`,
+  `~/Library/Application Support/<name>`, `$XDG_DATA_HOME` or `~/.local/share/<name>`),
+  `${currentFolder}` (only when written), `${rootFolder}`. Must work on Windows, macOS and
+  Linux. Also agreed (user, 2026-11-12): `rootFolder` declared without `permissions` = read
+  allowed in the root, write refused; a root at a file system root (`/`, `C:/`) is refused;
+  `qjsx run script.js` gets nothing except what its command line allows (Deno-like
+  options); `${userAppDataFolder}` is NOT created at launch; `process.cwd()` =
+  `${rootFolder}` for a PC program, as on a board (relative fs paths resolve there); without
+  `rootFolder`, `cwd()` is the real current folder (no file access anyway). The root is
+  overridden at launch by a reserved command line option (removed from `process.argv`;
+  user prefers it: two projects at the same time) `--qjsx-root-folder=<folder>` AND by the
+  environment variable `QJSX_ROOT_FOLDER`; precedence: option > variable > `qjsx.json`.
+  `${executableFolder}` under `qjsx run app.qjspkg` = the package's folder. `qjsx run`
+  options as Deno's: `--allow-read[=paths]` `-R`, `--allow-write[=paths]` `-W`,
+  `--allow-net[=hosts]` `-N`, `--allow-env` `-E`, `-A`, plus `--allow-serial[=ports]` and
+  `"serial"` in `permissions` (opening a port acts on hardware). `--qjsx-root-folder` is the
+  ONLY runtime option of an executable (its permissions are baked in; the prefix avoids
+  stealing a program's own options). `qjsx run` options take no prefix: before the script
+  name they are qjsx's, after it the program's (as Deno). Paths compared as real
+  paths (links resolved); a recursive rmSync never follows a link (removes the link, not
+  its target): `removeTree` already used lstat. Tests: never a destructive probe outside
+  the test's own folder (user); Git Bash turns a "/" argument into its own folder, so the
+  disk root test uses "C:/" on Windows and a script granted nothing.
 - Conditional breakpoints, logpoints and hit counts are compiled by the proxy and evaluated on
   the ESP itself (no round trip per hit).
 - Proxy core without CDP (API agreed by the user 2026-11-11, IMPLEMENTED the same day in
@@ -273,6 +372,18 @@ keeps the old name: `C:\Sandbox\espjs`.
   - sidecar collected in js_create_function before stripping (JS_SetDebugInfoCollector); the
     host `compile(..., { debug: true })` returns `{ bytecode, debug }`, `qjsx build` writes it
     as `functions` in the sidecar JSON (format 2).
+- Temporal dead zone checks (engine change N, agreed by the user 2026-11-12, IMPLEMENTED the
+  same day): `compiler/tdz.c`, a data-flow pass between resolve_variables and resolve_labels,
+  turns `get_loc_check` / `put_loc_check` on surely initialized locals into `get_loc` /
+  `put_loc` (same size; closures, derived `this`, eval functions untouched); BC_VERSION not
+  bumped. Fix found with it: the `put_x get_x -> set_x` peephole no longer crosses a
+  statement / return position (it merged the start and the return of `return x;`).
+  `let` loop 363 -> 246 ms on the PC (= `var`); `tools/profile/workload.js` unchanged
+  (noise +-2 %). Tests: `tests/tdz.test.js` (29 checks, in run-tests.sh).
+- Property cache (experiment of 2026-11-12, REJECTED and removed, user): a fixed table of the
+  last lookups of OP_get_field by (shape, name), own and prototype properties, validated at
+  each use. Up to 82.6 % hits on the workload, no time gained on the PC (QuickJS's lookup is
+  already one or two probes in the shape's hash table). Details: known-bugs.md "Speed".
 - Interpreter (implemented, `quickjs-debug.h`, `core/debug.c`): debug dispatch table chosen per
   frame, JS_SetDebugHook, stepping flag, breakpoint/statement bitmaps, frame and slot access,
   exception reporting once per thrown value. caught/uncaught prediction: static, at the throw
@@ -343,6 +454,43 @@ keeps the old name: `C:\Sandbox\espjs`.
   name on the PC ("COM3", "/dev/ttyUSB0"), a UART number plus pins on a board
   (`new Serial(1, { baudRate, tx, rx })`). Replaces the current function `open(path,
   { baudRate })` of the PC module (the tool's own `qjsx:device` and `targets` adapt).
+  UARTs of a board (design agreed by the user 2026-11-12, IMPLEMENTED the same day for the
+  ESP32 and the twin; `tests/serial.test.js`; not tried on a board: nothing wired, user):
+  - options on both: `baudRate` 115200, `dataBits` 8 (5..8), `parity` "none" | "even" |
+    "odd", `stopBits` 1 | 2; PC only `flowControl` "none" | "rts-cts"; board only the pins
+    `tx`, `rx` (one at least), `rts` + `cts` together (= flow control); a pin not given is
+    not wired; a pin on the PC or flowControl on a board is a TypeError;
+  - `port()` REPLACES `path()` (unused): the name on the PC, the number on a board;
+    `list()` on a board = the numbers of the free UARTs; the UART of the agent's link
+    (UART0 on the ESP32) is refused with EBUSY, a UART open already EBUSY, no such UART
+    ENOENT; a port is freed at the end of the program; `readLine` (promise) later, in JS
+    in the standard library;
+  - ONE module `common/device/serial_module.cpp` over a DRIVER (`common/hal/hal_serial.h`,
+    a table of functions chosen at start by `setSerialDriver`, because the qjsx
+    executable holds both the PC's ports and the twin's UARTs): PC
+    `host/platform/serial_host.cpp`, ESP32 `ports/esp32/main/hal_serial_esp32.cpp`
+    (event queue of the driver: a block on 10 characters of silence or 120 bytes; a
+    closed UART gives its pins back with gpio_reset_pin), twin
+    `host/twin/sim/twin_uart.cpp`;
+  - twin: `"uarts"` and `"linkUart"` in the board JSON; each UART a TCP link AND a
+    section in the page (log of the traffic "program wrote" / "received from page or
+    TCP", text or hex, clear, input in text with a line ending or in hex); the page and
+    TCP both reach the program; no timing; messages `twin.uart.data`, `twin.uart.send`,
+    uarts in `twin.state`. Tried in the browser pane 2026-11-12.
+  - PAGE OF THE TWIN (user, 2026-11-12): the board view is ONE FOLDING SECTION PER DEVICE
+    (each part: BOOT, RGB...; USB; each UART but the agent's link), our own small
+    component `host/twin/ui/src/controls/section.ts` (x4js has none): title, short
+    summary kept visible when folded, open / folded kept by the browser. NO docking
+    panel for the devices (only the board and the pins table are docking panels).
+  - TCP links of the twin (user, 2026-11-12, IMPLEMENTED the same day,
+    `host/twin/sim/twin_tcp.*`, `tests/twintcp.test.js`): the PAGE chooses the port of
+    each UART and each USB serial function and turns its listening on or off; the twin
+    keeps the choices in `<storage>/twin.json`; NOTHING listens by default; a port in use
+    turns it off with the error; a USB function listens only while the device is started;
+    `--uart-port` / `--usb-port` kept (tests, scripts): that group listens from the start
+    on consecutive ports and nothing of it is saved that run. The rows of the USB
+    functions say plainly whether the program uses them ("unused: the device is not
+    started", "unused: the program did not declare it", "used, ..."), with an icon.
 - `device/rmt` + `stdlib/rgbled` (user, 2026-11-11, DONE the same day and tried on the board:
   colors and a rainbow on GPIO48; `setHsv` / `fillHsv` added, user's idea), for the WS2812 LED of the
   YD-ESP32-S3 on GPIO48 (only connected when the "RGB" solder bridge of the board is closed):
@@ -357,13 +505,53 @@ keeps the old name: `C:\Sandbox\espjs`.
     is an option (`type: "ws2812"` first: GRB order, 0.4 / 0.8 us timings): a new LED model is
     a table, no firmware change. The first JS layer of the standard library over a native
     module.
+- `device/usb` + `stdlib/usb` (user, 2026-11-12, DONE the same day, tried on the YD-ESP32-S3
+  native USB port; `doc/architecture.md` 5.4): the board as a COMPOSITE USB device for a host
+  (first use: a client board whose tablet only speaks USB; that board's files are git-ignored):
+  - `device/usb` (native): `new Usb({ manufacturer, product, serialNumber, vendorId,
+    productId })` (printable ASCII, 31 chars max; IDs 0 = chip vendor's default), functions
+    declared before `start()`: `usb.serial()` -> `UsbCdc` (`onData`, `onLineState({ dtr, rts
+    })`, `write(string | bytes)`, `lineState()`), at most 2 (esp_tinyusb); one `Usb` at a
+    time; `close()` stops the device. The device OUTLIVES the program: same descriptors and
+    functions = taken over without re-enumeration, else restarted. A started device keeps the
+    program alive until close();
+  - `write()` (user, after the try on the board): DTR is NOT a condition (Windows opens with
+    RTS only); what the host does not take in 50 ms is dropped without error;
+  - `stdlib/usb` (JS): re-exports `Usb`, `UsbCdc`, adds `class UsbSerial extends Usb` (one
+    serial function, started at once), so a program has one import;
+  - ESP32: esp_tinyusb (component manager, `ports/esp32/main/idf_component.yml`, chips with
+    USB OTG only), `hal_usb_esp32.cpp`; twin: each serial function is a TCP port
+    (port chosen on the page, or `qjsx agent --usb-port <port>`), `tests/usb.test.js`. The PC cannot be a USB device: a USB
+    relay board (an ESP32-S3 with a small C firmware) for a real tablet is in TODO.md.
+- `device/adc` (agreed by the user 2026-11-12, IMPLEMENTED the same day; ESP32 firmware
+  builds, NOT tried on the board): `new Adc(pin, { range = 3.3 })` (range: the highest
+  voltage expected, in volts; the hal chooses the setting), `read()` raw (0..2^bits-1),
+  `readVoltage()` volts (calibrated), `bits`, `close()`; synchronous; EINVAL for a pin
+  without analog input or a range too high, EBUSY if open. `common/hal/hal_adc.h`,
+  `common/device/adc_module.cpp`, `ports/esp32/main/hal_adc_esp32.cpp` (adc_oneshot, ADC1
+  ONLY (user: ADC2 fails with WiFi), attenuation from the range, curve / line fitting
+  calibration), twin `host/twin/sim/twin_adc.cpp` (saturates at the span, as the S3).
+  RP2350 later. DAC: postponed (our boards have none; with the twin's oscilloscope).
+- `device/i2c` (API agreed by the user 2026-11-12, IMPLEMENTED the same day for the ESP32
+  and the twin, `doc/architecture.md` 5.4, `tests/i2c.test.js`; not tried on a board: no I2C
+  component; RP2350 later): `new I2c(port,
+  { sda, scl, frequency = 100000, pullUp = false, timeout = 100 })`; `bus.device(address, {
+  frequency, timeout })` -> `I2cDevice` (frequency PER DEVICE); transfers ONLY on devices:
+  `write(bytes)`, `read(length)`, `writeRead(bytes, length)` (promises) AND `writeSync` /
+  `readSync` / `writeReadSync`; bus: `probe` / `probeSync` (boolean), `reset()`, `close()`;
+  bytes = Uint8Array or array of numbers; errors `ENXIO` / `ETIMEDOUT` / `EIO`; transfers in
+  call order; atomic sequences (mux then read) left to the program. Inside: one "i2c" task
+  shared by every bus runs the queued jobs (blocking hal), a Sync call waits for the jobs of
+  its bus then runs on the JS thread; 16 promises pending per bus at most; a device finds
+  its bus by number + generation. Twin: nothing answers. ENXIO added to jsbind's errno names.
 - Firmware version (user, 2026-11-11, DONE): `QJSX_VERSION` is in `common/runtime/version.h`
   (moved from host/), the same for the tool and the firmwares; `agent::Identity.version`,
   sent in the HELLO answer (`VERSION`), shown by `qjsx device info` ("firmware: qjsx ...")
   and in "connected to ..."; `qjsx deploy` warns (does not refuse) when the tool and the
   firmware differ; ESP-IDF takes it as PROJECT_VER (ports/esp32/CMakeLists.txt parses the
-  #define). How a JS program reads it: NOT decided (ideas: `process.versions.qjsx` as in
-  Node, or `process.env`).
+  #define). Read from JS (user, 2026-11-12, DONE): `process.versions` = `{ qjsx, quickjs,
+  build }` (a plain object, as Node's; `build` = the package's build id, a hash of its
+  bytecode, set by startPackage for every package run; absent for `qjsx run script.js`).
 - `device/gpio` (user, 2026-11-11, IMPLEMENTED the same day on the ESP32, see TODO): a class `new Gpio(pin, { mode, pull })`
   (`init(...)` of the binding library), mode "input" | "output" | "open-drain", pull "up" |
   "down" | "none" (JS_ENUM); `read()`, `write(level)`, `toggle()`, `close()`;
@@ -396,7 +584,35 @@ Top level: `engine/` (QuickJS), `common/` (portable code built for the host AND 
   runtime and agent), sources / includes / defines / engine options (incl. GCC 14+ on 32 bits:
   `-Wno-incompatible-pointer-types`, `-Wno-format`, `-std=gnu11`).
 - `ports/freertos/platform_freertos.cpp` — platform.h parts shared by the FreeRTOS ports
-  (recursive Mutex, Signal = mutex + binary semaphore, sleepMs).
+  (recursive Mutex, Signal = mutex + binary semaphore, sleepMs). `gpio_watch.{h,cpp}`
+  (2026-11-12): debounce + event task of hal::gpio::watch, shared by the ESP32 and RP2350
+  hal_gpio (the port keeps registers + interrupt, calls gpiowatch::postFromInterrupt).
+- RP2350 `device/gpio` (2026-11-12): `ports/rp2350/main/hal_gpio_rp2350.cpp` (SIO registers,
+  native toggle, open drain made with the direction, bank 0 IRQ on the JS task's core).
+  Build option `-DQJSX_JS_HEAP_IN_SRAM=ON` (measures: JS heap in SRAM, PSRAM unused), given
+  to `tools/pico.ps1 configure`; stays in the CMake cache until set back OFF.
+  Speed (2026-11-12, known-bugs.md "Speed"): `JS_CallInternal` (25 KB) is larger than the
+  16 KB XIP cache; it and ~30 hot engine functions (`QJSX_SRAM_FUNCTIONS` in
+  ports/rp2350/CMakeLists.txt) run from SRAM: objcopy renames their `.text.<name>` section
+  of the engine library to `.time_critical.<name>` (no engine change). The engine library
+  needs `-ffunction-sections -fdata-sections` itself (the pico-sdk only gives them to the
+  firmware's own sources). Up to ×2.8 faster; the gpio15 toggle went 122 kHz -> 132 kHz
+  (per clock now close to the ESP32-S3: ~570 clocks per toggle turn against ~490).
+  interpreter.c is compiled with `-fira-region=one` (else GCC spills `pc` of
+  JS_CallInternal to the frame, every opcode; same in upstream QuickJS): about -10 %.
+  The same flag may help the ESP32 (Xtensa) build: not tried.
+  Measures on the PC (user, 2026-11-12: "fais les tests en local pas sur les cartes"):
+  `bash tools/profile/profile.sh [Release]` runs `tools/profile/bench.js` with qjsx-tests
+  (module `profile_test`, tests/native/profile_module.cpp: sampling thread with
+  SuspendThread / GetThreadContext, Windows only; empty native functions to time calls),
+  resolves addresses with addr2line. Findings in known-bugs.md "Speed" (`let` costs 30 %).
+- `ports/rp2350/` — pico-sdk + FreeRTOS SMP project, one firmware per board (`boards/<board>/`:
+  `board.cmake` = PICO_BOARD / PICO_PLATFORM, `board_config.h` = name, flash map, PSRAM).
+  `main/`: `main.cpp` (PSRAM, USB, JS task on core 1, scheduler), `board_rp2350.cpp` (USB CDC
+  link through stdio_usb, package slots in flash via flash_safe_execute, JS heap =
+  RegionHeap in PSRAM), `psram_rp2350.cpp` (QMI CS1 set-up from RAM), `platform_rp2350.cpp`,
+  `FreeRTOSConfig.h`. `compat/`: pthread / dirent / file calls newlib lacks. The engine is a
+  separate static library (`qjsx-engine-target`): QuickJS's `list.h` vs FreeRTOS's.
 - `ports/esp32/` — ESP-IDF project, one firmware per BOARD (agreed 2026-11-11). FLASHED and
   TESTED on the YD board 2026-11-11: agent over UART0, deploy + run in place, debugger 52/52.
   `CMakeLists.txt` picks the board (`-D QJSX_BOARD=<folder of boards/>`, default
@@ -454,7 +670,8 @@ in the include path (no two headers share a name; keep it so).
   `agent_command.cpp` (`qjsx agent`, desktop stand-in for an ESP), `platform/platform_host.cpp`,
   `modules/` (host-only native modules: net + sockets, serial, compiler), `js/*.js` = the tool
   commands written in JS, embedded as modules `qjsx:<name>` by a premake build rule
-  (`tools/embed-js.lua`).
+  (`tools/embed-js.lua`), `twin/` = the digital twin (`sim/` C++, `js/` -> `qjsx:twin/<name>`,
+  `ui/` x4js page embedded by `tools/embed-twin-ui.lua`).
 - Packages are compiled fully stripped (`strip: "all"`): the engine keeps the module name
   outside the debug info, so import.meta / dynamic import still work.
 - `tests/` — `run-tests.sh`, `assert.js`, `jsbind.test.js` (binding library, through
@@ -487,7 +704,11 @@ in the include path (no two headers share a name; keep it so).
   (the same without compiler/, QJSX_NO_COMPILER: no eval, like the targets), `qjsx` (the
   tool), `qjsx-tests`, `qjsx-target` (qjsx without its compiler module, linked with
   qjsx-engine-target: runs packages like a
-  target; checked by run-tests.sh with tests/fixtures/nocompiler). JS modules embedded as
+  target; checked by run-tests.sh with tests/fixtures/nocompiler), `qjsx-runtime` (2026-11-12:
+  the runner of `qjsx build --executable`, engine without compiler + runtime + PC native
+  modules, its own main in host/runtime/, no tool JS, stripped in Release (-s), 1.25 MB;
+  the package is appended to a copy of it with a trailer "QJSXPKG1" + 64-bit LE size;
+  argv = [exe, exe, args]). JS modules embedded as
   source (`qjsx:*`, `stdlib/*`) only work on the host; a target gets library modules as
   bytecode in the package (`.qjslib`).
   Executables in `bin/Release/` and `bin/Debug/`.
@@ -507,6 +728,12 @@ in the include path (no two headers share a name; keep it so).
   `esptool flash-id` reports; the user first read N4R2), wired by its **COM** port (CH343 →
   UART0), COM11 on the user's PC. `tools/idf.ps1 [board=NAME] build|-p COM11 flash|ninja
   -k 0|esptool ...` builds in ports/esp32/build-NAME.
+- RP2350 (ports/rp2350): `tools/pico.ps1 [board=NAME] configure|build|flash|ninja ...|picotool
+  ...` (toolchain in C:\tools\pico, CMake from the PATH; no special environment: runs from the
+  PowerShell tool), builds in ports/rp2350/build-NAME, log C:\temp\pico-build.log (UTF-16),
+  exit code C:\temp\pico-status.txt. `configure` again after adding / removing a source.
+  `flash` = `picotool load -f -x` (reboots a board running qjsx into BOOTSEL by USB); the
+  first flash needs the board in BOOTSEL by hand. Flashing acts on the board: ask first.
 - Second target board: Olimex PICO2-XXL (RP2350B, 48 GPIO, 16 MB QSPI flash, 8 MB QSPI PSRAM on
   QMI chip select 1 = GPIO8, one USB-C, microSD, UEXT, BOOT + RESET buttons; schematic Rev. C in
   github.com/OLIMEX/RP2350-PICO2-XXL). Multi-platform plan AGREED 2026-11-11:
@@ -514,6 +741,52 @@ in the include path (no two headers share a name; keep it so).
   allocator, package storage, links), platform.h completed for an RTOS, one
   platform_freertos.cpp for both targets; order: engine without compiler validated on the PC,
   then ESP32-S3, then RP2350. The board.h / platform.h APIs are proposed to the user first.
+  RP2350 port design AGREED by the user 2026-11-11; WRITTEN the same day (`ports/rp2350/`,
+  architecture.md 5.5): builds (740 KB); FLASHED and TRIED 2026-11-12 (COM13 on the user's PC;
+  the board had CircuitPython 9.2.2, overwritten with the user's agreement, no backup): deploy,
+  run in place, 4 MB buffer in PSRAM, debugger 72/72, proxy 30/30, cdp 53/53. SLOW: 10^6 loop
+  turns 4 s, 20,000 objects 3 s (known-bugs.md "RP2350 port"):
+  - toolchain installed BY HAND in `C:\tools\pico` (user's choice; not the VS Code Pico
+    extension): pico-sdk 2.x (+ TinyUSB), FreeRTOS-Kernel with the RP2350 Cortex-M33 port,
+    Arm GNU Toolchain (arm-none-eabi-gcc), ninja, picotool; each download asked first;
+    a `tools/pico.ps1` like `tools/idf.ps1`. CMake: the user's own, already in the PATH.
+    INSTALLED 2026-11-11 in `C:\tools\pico`: `arm-gnu-toolchain-15.2.rel1/` (bin/arm-none-eabi-gcc
+    15.2.1, zip SHA-256 checked), `pico-sdk/` (2.3.1, submodule lib/tinyusb only),
+    `FreeRTOS-Kernel/` (V11.3.3 + submodule Community-Supported-Ports: port
+    `GCC/RP2350_ARM_NTZ`; not the stale Raspberry Pi fork), `picotool/picotool/` (2.3.1, the
+    layout find_package(picotool) expects), `ninja/` (1.13.2), `downloads/` (the zips). The
+    pico-sdk knows the board: PICO_BOARD=olimex_rp2350_xxl (RP2350B, 16 MB flash, plain LED on
+    GPIO25, no RGB LED, no PSRAM define: CS1 = GPIO8 goes in our board_config.h).
+    ARM cores (not RISC-V);
+  - `ports/rp2350/` on the model of `ports/esp32/` (`main/`, `boards/olimex-pico2-xxl/`,
+    FreeRTOSConfig.h); FreeRTOS SMP, JS task (48 KB) pinned to core 1, I/O and USB on core 0;
+    platform: time_us_64, watchdog_reboot, xTaskCreateAffinitySet + platform_freertos.cpp;
+  - JS heap in the 8 MB PSRAM (QMI CS1 set up by our code, mapped at 0x11000000) through an
+    allocator WRITTEN BY US (user: not TLSF). Allocator design AGREED 2026-11-11:
+    `common/runtime/region_heap.{h,cpp}` (portable, also for the STM32H743 AXI SRAM later),
+    two-level segregated free lists (TLSF idea, our own code): 8-byte block header, size
+    copied at the end of free blocks (O(1) merge), 8-byte alignment, classes every 8 bytes
+    up to 256 then powers of two split in four, bitmap search; realloc grows / shrinks in
+    place; API init(start, size), allocate, reallocate, release, usableSize, stats(Stats
+    *out) (used, peak, largest free block); out of memory returns nullptr (QuickJS throws),
+    not fatal; JS thread only, no lock; unit tests in qjsx-tests, then an option to use it
+    as the desktop JS heap for the whole Debug suite; PSRAM not answering at boot: message
+    and JS heap in the normal malloc (SRAM). DONE 2026-11-11: `memory::RegionHeap` +
+    `memory::jsAllocator(heap, locked)` (QuickJS's functions, counts and limit kept);
+    `tests/region_heap.test.js` (37 checks, module `region_heap_test`); desktop option
+    `QJSX_JS_HEAP_MB=<MB>` (board_host.cpp): the whole Debug suite passes on it. Deviation:
+    when no class above serves a request, the class of the size itself is walked (else the
+    largest free block could not be taken whole). SRAM for FreeRTOS,
+    stacks, memory::allocate. Expect slower JS than the ESP32-S3 (QSPI PSRAM, XIP cache
+    shared with flash): measure;
+  - packages: two flash slots at fixed offsets read in place through XIP; flash writes stop
+    the other core (flash_safe_execute), run from SRAM, data copied to SRAM first (PSRAM is
+    unreachable while the flash is written), QMI CS1 setup restored after;
+  - link: native USB CDC (TinyUSB) on the board's USB-C (user's choice, no UART first); the
+    COM port vanishes at each chip reset: the host tool must reopen it;
+  - order: minimal firmware (agent, deploy, run, debugger, same board tests as the ESP32),
+    then PSRAM heap + microbench, then device/gpio (native SIO XOR toggle), then device/rmt
+    on PIO.
 - After an engine change, also run the upstream engine tests and microbench
   (`tools/quickjs-split/test`, README there; build dir e.g. `C:\temp\qjs-engine-test`, upstream
   release extracted in `C:\temp\qjs-update\v2026-06-04\quickjs-2026-06-04`). Rerun premake

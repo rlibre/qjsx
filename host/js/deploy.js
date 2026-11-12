@@ -67,12 +67,17 @@ export function missingNatives(device, manifest) {
 }
 
 // Uploads the package 'packageBytes' (Uint8Array, a full package) to an open
-// device (session started), reduced (see reducePackage). onProgress(sentBytes,
-// totalBytes) is optional. Refused before anything is written when:
+// device (session started), reduced (see reducePackage). Options:
+//   - onProgress(sentBytes, totalBytes);
+//   - ram: true loads it in the RAM of the device instead of installing it in
+//     flash: nothing is written to the flash, the package is lost at the next
+//     restart of the device, RUN starts it while it is there.
+// Refused before anything is written when:
 //   - the program needs native modules the device does not have (its answer
 //     to HELLO lists them);
-//   - the device reads another bytecode version (it refuses UPLOAD_BEGIN).
-export async function upload(device, packageBytes, onProgress) {
+//   - the device reads another bytecode version (it refuses UPLOAD_BEGIN);
+//   - in RAM: the device has not enough free RAM for it.
+export async function upload(device, packageBytes, { onProgress, ram = false } = {}) {
     const manifest = packageManifest(packageBytes);
     if (typeof manifest.bytecode !== "number") {
         throw new Error("the package does not say which bytecode version it holds: rebuild it");
@@ -93,6 +98,7 @@ export async function upload(device, packageBytes, onProgress) {
         [KEY.SHA256]: sha256(reduced),
         [KEY.BUILD_ID]: buildId,
         [KEY.BYTECODE]: manifest.bytecode,
+        [KEY.VOLATILE]: ram,
     });
     for (let offset = 0; offset < reduced.length; offset += UPLOAD_CHUNK) {
         const chunk = reduced.subarray(offset, offset + UPLOAD_CHUNK);

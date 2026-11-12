@@ -3,6 +3,7 @@
     "version": "0.1.0",
     "modules": {
         "path": "src/path.js",
-        "rgbled": "src/rgbled.js"
+        "rgbled": "src/rgbled.js",
+        "usb": "src/usb.js"
     }
 }

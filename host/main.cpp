@@ -6,7 +6,9 @@
  */
 
 // qjsx: host tool of the project.
-//   qjsx run <file.js | package.qjspkg> [arguments...]
+//   qjsx run [options] <file.js | package.qjspkg> [arguments...]
+//       options: what the program may reach (permissions_host.h: -A, -R, -W,
+//       -N, -E, --allow-serial, --qjsx-root-folder=<folder>); nothing without them
 //   qjsx --version
 //   qjsx <command> ...   other commands, written in JS (host/js/cli.js)
 #include <stdio.h>
@@ -15,8 +17,12 @@
 #include "files.h"
 #include "memory.h"
 #include "host.h"
+#include "permissions.h"
+#include "permissions_host.h"
 #include "version.h"
 #include "modules.h"
+#include "device_modules.h"
+#include "serial_host.h"
 
 /**
  * Creates the native module "sys/compiler" (compiler_module.cpp, JS_MODULE).
@@ -27,11 +33,6 @@ JSModuleDef *jsNewModule_compiler(JSContext *ctx, const char *moduleName);
  * Creates the native module "sys/net" (net.cpp, JS_MODULE).
  */
 JSModuleDef *jsNewModule_net(JSContext *ctx, const char *moduleName);
-
-/**
- * Creates the native module "device/serial" (serial_module.cpp, JS_MODULE).
- */
-JSModuleDef *jsNewModule_serial(JSContext *ctx, const char *moduleName);
 
 /**
  * "qjsx agent ..." (agent_command.cpp). Returns the exit code.
@@ -48,30 +49,52 @@ void registerTestModules();
 namespace {
 
 /**
- * "qjsx run <path> [arguments...]": runs the file with process.argv =
- * [qjsx, path, arguments...], like "node path arguments...". Returns the exit code.
+ * "qjsx run [options] <path> [arguments...]": runs the file with
+ * process.argv = [qjsx, path, arguments...], like "node path arguments...";
+ * the options before the path say what it may reach, as Deno's. Returns the
+ * exit code (2 on a usage error).
  */
 int runScript(int argc, char **argv) {
+    // the options, up to the path: what the program may reach
+    rt::Permissions permissions;
+    host::Launch launch = { &permissions, nullptr };
+    int pathIndex = 2;
+    while (pathIndex < argc && argv[pathIndex][0] == '-') {
+        bool known = false;
+        if (!host::readRunOption(argv[pathIndex], &permissions, &launch.rootFolder, &known)) {
+            if (!known) {
+                fprintf(stderr, "qjsx run: unknown option %s (see 'qjsx help')\n", argv[pathIndex]);
+            }
+
+            return 2;
+        }
+
+        pathIndex++;
+    }
+
+    if (pathIndex >= argc) {
+        fprintf(stderr, "usage: qjsx run [options] <file.js | package.qjspkg> [arguments]\n");
+        return 2;
+    }
+
     // the script's path, process.argv[1], with '/' separators like argv[0]
     // (changed in place, as main() does for argv[0]); the arguments after it
     // belong to the script and stay as they are
-    files::useSlashes(argv[2]);
+    files::useSlashes(argv[pathIndex]);
 
-    // the new command line is the old one without the word "run", on the
-    // heap (no array on the stack)
-    int count = argc - 1;
+    // the new command line: the executable, the path and the arguments
+    // (without "run" and the options), on the heap (no array on the stack)
+    int count = argc - pathIndex + 1;
     char **arguments = (char **)memory::allocate(sizeof(char *) * count);
-
-    // keep the executable, skip "run", keep the path and the arguments
     arguments[0] = argv[0];
 
-    for (int i = 2; i < argc; i++) {
-        arguments[i - 1] = argv[i];
+    for (int i = pathIndex; i < argc; i++) {
+        arguments[i - pathIndex + 1] = argv[i];
     }
 
     // run; process.argv was copied into JS strings at the start, the array
     // can go
-    int exitCode = host::runFile(argv[2], count, arguments);
+    int exitCode = host::runFile(argv[pathIndex], count, arguments, &launch);
     memory::release(arguments);
     return exitCode;
 }
@@ -102,6 +125,7 @@ int main(int argc, char **argv) {
     rt::registerNativeModule("sys/compiler", &jsNewModule_compiler);
 #endif
     rt::registerNativeModule("sys/net", &jsNewModule_net);
+    setSerialDriver(host::serialDriver());   // the twin of a board replaces it (agent_command.cpp)
     rt::registerNativeModule("device/serial", &jsNewModule_serial);
 #ifdef QJSX_TESTS
     registerTestModules();

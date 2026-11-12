@@ -23,6 +23,7 @@
 namespace rt {
 
 class Loop;
+class Permissions;
 
 // Optional control over a run (all fields may be null / false).
 struct RunHooks {
@@ -41,6 +42,10 @@ struct RunHooks {
     // Loads a module that is neither native nor in the package; returns
     // nullptr with a pending exception if it cannot.
     JSModuleDef *(*loadModule)(JSContext *ctx, const char *name, void *opaque);
+    // What the program may reach (files, network, environment, serial
+    // ports), those of the thread during the run; borrowed. nullptr: the
+    // tool's own commands, everything allowed.
+    const Permissions *permissions;
 };
 
 // Evaluates the main module of a program. Returns false after reporting the error.

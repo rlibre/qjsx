@@ -44,6 +44,13 @@ extern "C" void app_main(void) {
     // the hardware modules of this port, before any program runs
     rt::registerNativeModule("device/gpio", &jsNewModule_gpio);
     rt::registerNativeModule("device/rmt", &jsNewModule_rmt);
+    rt::registerNativeModule("device/i2c", &jsNewModule_i2c);
+    rt::registerNativeModule("device/adc", &jsNewModule_adc);
+    setSerialDriver(hal::serial::boardDriver());
+    rt::registerNativeModule("device/serial", &jsNewModule_serial);
+#if QJSX_HAS_USB
+    rt::registerNativeModule("device/usb", &jsNewModule_usb);
+#endif
 
     // the JS task
     platform::ThreadOptions options = { "js", board::JS_TASK_STACK, board::JS_TASK_PRIORITY, board::JS_TASK_CORE };

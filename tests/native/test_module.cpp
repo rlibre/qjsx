@@ -269,9 +269,21 @@ JS_MODULE(jsbind_test, module) {
 void registerDebugTestModule();   // debug_module.cpp
 
 /**
+ * Registers the module "region_heap_test".
+ */
+void registerRegionHeapTestModule();   // region_heap_module.cpp
+
+/**
+ * Registers the module "profile_test".
+ */
+void registerProfileTestModule();   // profile_module.cpp
+
+/**
  * Registers the native test modules; called by main() in qjsx-tests only.
  */
 void registerTestModules() {
     rt::registerNativeModule("jsbind_test", &jsNewModule_jsbind_test);
     registerDebugTestModule();
+    registerRegionHeapTestModule();
+    registerProfileTestModule();
 }

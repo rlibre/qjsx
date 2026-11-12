@@ -9,6 +9,7 @@
 #include "memory.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -381,6 +382,104 @@ char *currentDirectory() {
     return text;
 }
 
+
+/**
+ * Windows version: the absolute form of 'path' (GetFullPathNameW: relative
+ * to the current directory, "." and ".." resolved as Windows itself does
+ * before opening), '/' separators. nullptr with errno set on failure.
+ */
+char *absolutePath(const char *path) {
+    // convert the path to UTF-16
+    wchar_t *wide = widen(path);
+    if (wide == nullptr) {
+        return nullptr;
+    }
+
+    // measure, then ask for the full path
+    DWORD count = GetFullPathNameW(wide, 0, nullptr, nullptr);
+    wchar_t *full = (wchar_t *)memory::allocate((count + 1) * sizeof(wchar_t));
+    DWORD written = count > 0 ? GetFullPathNameW(wide, count + 1, full, nullptr) : 0;
+    memory::release(wide);
+    if (written == 0) {
+        setErrnoFromWin32(GetLastError());
+        memory::release(full);
+        return nullptr;
+    }
+
+    // UTF-8, '/' separators
+    char *text = narrow(full);
+    memory::release(full);
+    useSlashes(text);
+    return text;
+}
+
+/**
+ * Windows version: the final path of an existing entry, its links and
+ * junctions followed (GetFinalPathNameByHandleW), without the "\\?\"
+ * prefix, '/' separators. nullptr with errno set if it does not exist.
+ */
+char *finalPathOfExisting(const char *path) {
+    // open the entry itself (a directory too: backup semantics), no access
+    // asked: only its name is read
+    wchar_t *wide = widen(path);
+    if (wide == nullptr) {
+        return nullptr;
+    }
+
+    DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    HANDLE handle = CreateFileW(wide, 0, share, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    memory::release(wide);
+    if (handle == INVALID_HANDLE_VALUE) {
+        setErrnoFromWin32(GetLastError());
+        return nullptr;
+    }
+
+    // its final name: measure, then read
+    DWORD count = GetFinalPathNameByHandleW(handle, nullptr, 0, VOLUME_NAME_DOS);
+    wchar_t *final = (wchar_t *)memory::allocate((count + 1) * sizeof(wchar_t));
+    DWORD written = count > 0 ? GetFinalPathNameByHandleW(handle, final, count + 1, VOLUME_NAME_DOS) : 0;
+    DWORD error = GetLastError();
+    CloseHandle(handle);
+    if (written == 0) {
+        setErrnoFromWin32(error);
+        memory::release(final);
+        return nullptr;
+    }
+
+    // drop the prefix: "\\?\C:\x" -> "C:\x", "\\?\UNC\server\x" -> "\\server\x"
+    char *text = narrow(final);
+    memory::release(final);
+    const char *start = text;
+    bool isUnc = strncmp(text, "\\\\?\\UNC\\", 8) == 0;
+    bool isLong = strncmp(text, "\\\\?\\", 4) == 0;
+    if (isUnc) {
+        start = text + 6;
+        text[6] = '\\';
+    } else if (isLong) {
+        start = text + 4;
+    }
+
+    char *result = memory::copyText(start, strlen(start));
+    memory::release(text);
+    useSlashes(result);
+    return result;
+}
+
+/**
+ * Windows version: _wgetenv in UTF-8.
+ */
+char *environmentValue(const char *name) {
+    // convert the name, read the wide value
+    wchar_t *wide = widen(name);
+    if (wide == nullptr) {
+        return nullptr;
+    }
+
+    const wchar_t *value = _wgetenv(wide);
+    memory::release(wide);
+    return value != nullptr ? narrow(value) : nullptr;
+}
+
 #else
 
 namespace {
@@ -539,6 +638,65 @@ bool listDirectory(const char *path, DirectoryVisitor *visit, void *opaque) {
  */
 char *currentDirectory() {
     return getcwd(nullptr, 0);
+}
+
+
+/**
+ * POSIX version: 'path' joined to the current directory if relative ("."
+ * and ".." left for the system: they must be resolved after the links).
+ * nullptr with errno set on failure.
+ */
+char *absolutePath(const char *path) {
+    // already absolute
+    if (isAbsolute(path)) {
+        return memory::copyText(path, strlen(path));
+    }
+
+    // "<current directory>/<path>"
+    char *directory = currentDirectory();
+    if (directory == nullptr) {
+        return nullptr;
+    }
+
+    size_t size = strlen(directory) + 1 + strlen(path) + 1;
+    char *joined = (char *)memory::allocate(size);
+    snprintf(joined, size, "%s/%s", directory, path);
+    memory::release(directory);
+    return joined;
+}
+
+/**
+ * POSIX version: realpath(3) of an existing entry, its links followed.
+ * newlib (ESP32, RP2350): no links, the path itself. nullptr with errno set
+ * if it does not exist.
+ */
+char *finalPathOfExisting(const char *path) {
+    // the entry must exist
+    struct ::stat info;
+    if (::stat(path, &info) != 0) {
+        return nullptr;
+    }
+
+#if defined(__NEWLIB__)
+    return memory::copyText(path, strlen(path));
+#else
+    // the system resolves it into a buffer on the heap (PATH_MAX bytes)
+    char *buffer = (char *)memory::allocate(PATH_MAX);
+    if (::realpath(path, buffer) == nullptr) {
+        memory::release(buffer);
+        return nullptr;
+    }
+
+    return buffer;
+#endif
+}
+
+/**
+ * POSIX version: getenv, copied.
+ */
+char *environmentValue(const char *name) {
+    const char *value = getenv(name);
+    return value != nullptr ? memory::copyText(value, strlen(value)) : nullptr;
 }
 
 #endif
@@ -721,6 +879,187 @@ bool isAbsolute(const char *path) {
     fromRoot = fromRoot || hasDrive;
 #endif
     return fromRoot;
+}
+
+
+namespace {
+
+/**
+ * Length of the root of an absolute path with '/' separators, which ".."
+ * cannot climb above: "C:/" (3), "//server/share/" (UNC), "/" (1).
+ */
+size_t rootLength(const char *path) {
+    // a drive: "C:/"
+    bool hasDrive = path[0] != 0 && path[1] == ':';
+    if (hasDrive) {
+        return path[2] == '/' ? 3 : 2;
+    }
+
+    // a network share: "//server/share/"
+    if (path[0] == '/' && path[1] == '/') {
+        const char *server = strchr(path + 2, '/');
+        const char *share = server != nullptr ? strchr(server + 1, '/') : nullptr;
+        return share != nullptr ? (size_t)(share - path) + 1 : strlen(path);
+    }
+
+    // the root of the file system
+    return path[0] == '/' ? 1 : 0;
+}
+
+/**
+ * Resolves "." and ".." and removes repeated and trailing '/' in an
+ * absolute path with '/' separators, in place, without looking at the disk.
+ */
+void normalize(char *path) {
+    size_t root = rootLength(path);
+    size_t length = strlen(path);
+    size_t out = root;
+
+    // copy the components after the root one by one
+    size_t in = root;
+    while (in < length) {
+        // the next component: [in, end)
+        size_t end = in;
+        while (end < length && path[end] != '/') {
+            end++;
+        }
+
+        size_t size = end - in;
+        bool isEmpty = size == 0;
+        bool isDot = size == 1 && path[in] == '.';
+        bool isDotDot = size == 2 && path[in] == '.' && path[in + 1] == '.';
+
+        // "..": back to the previous '/', never above the root
+        if (isDotDot) {
+            while (out > root && path[out - 1] != '/') {
+                out--;
+            }
+
+            if (out > root) {
+                out--;
+            }
+        }
+
+        // a name: appended after a '/'
+        if (!isEmpty && !isDot && !isDotDot) {
+            if (out > root) {
+                path[out++] = '/';
+            }
+
+            memmove(path + out, path + in, size);
+            out += size;
+        }
+
+        in = end + 1;
+    }
+
+    path[out] = 0;
+}
+
+#if !defined(__NEWLIB__)
+/**
+ * Position of the '/' that ends the parent of path[0, end), or the root
+ * length when the parent is the root (not on the devices: realPath only
+ * normalizes there).
+ */
+size_t parentEnd(const char *path, size_t end, size_t root) {
+    size_t position = end;
+    while (position > root && path[position - 1] != '/') {
+        position--;
+    }
+
+    return position > root ? position - 1 : root;
+}
+#endif
+
+} // namespace
+
+/**
+ * 1. the absolute form of the path;
+ * 2. its longest part that exists, resolved by the system (links and
+ *    junctions followed);
+ * 3. the first missing component must not be a link: its target would be
+ *    elsewhere;
+ * 4. the missing part appended as written, then normalized.
+ */
+char *realPath(const char *path) {
+#if defined(__NEWLIB__)
+    // devices: their file systems have no links (and the mount points may
+    // not answer stat): the path normalized, without looking at the disk
+    size_t size = strlen(path) + 2;
+    char *normalized = (char *)memory::allocate(size);
+    snprintf(normalized, size, "%s%s", isAbsolute(path) ? "" : "/", path);
+    normalize(normalized);
+    return normalized;
+#else
+    // the absolute path, without trailing '/'
+    char *absolute = absolutePath(path);
+    if (absolute == nullptr) {
+        return nullptr;
+    }
+
+    size_t root = rootLength(absolute);
+    size_t end = strlen(absolute);
+    while (end > root && absolute[end - 1] == '/') {
+        end--;
+    }
+
+    absolute[end] = 0;
+
+    // the longest existing part: cut one component at a time
+    char *existing = nullptr;
+    size_t cut = end;
+    for (;;) {
+        // try path[0, cut)
+        char saved = absolute[cut];
+        absolute[cut] = 0;
+        existing = finalPathOfExisting(absolute);
+        absolute[cut] = saved;
+        if (existing != nullptr) {
+            break;
+        }
+
+        // only a missing entry lets the search go up; the root must exist
+        bool missing = errno == ENOENT || errno == ENOTDIR;
+        if (!missing || cut <= root) {
+            memory::release(absolute);
+            return nullptr;
+        }
+
+        cut = parentEnd(absolute, cut, root);
+    }
+
+    // the first missing component: a dangling link is refused
+    if (cut < end) {
+        size_t next = absolute[cut] == '/' ? cut + 1 : cut;
+        size_t componentEnd = next;
+        while (componentEnd < end && absolute[componentEnd] != '/') {
+            componentEnd++;
+        }
+
+        char saved = absolute[componentEnd];
+        absolute[componentEnd] = 0;
+        Status status;
+        bool dangling = linkStatus(absolute, &status);
+        absolute[componentEnd] = saved;
+        if (dangling) {
+            memory::release(existing);
+            memory::release(absolute);
+            errno = EACCES;
+            return nullptr;
+        }
+    }
+
+    // the real part + the missing part, normalized
+    const char *rest = absolute + cut;
+    size_t size = strlen(existing) + strlen(rest) + 2;
+    char *result = (char *)memory::allocate(size);
+    snprintf(result, size, "%s/%s", existing, rest);
+    memory::release(existing);
+    memory::release(absolute);
+    normalize(result);
+    return result;
+#endif
 }
 
 } // namespace files

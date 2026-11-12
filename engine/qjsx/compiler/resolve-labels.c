@@ -1656,9 +1656,14 @@ __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
         case OP_put_var_ref:
             if (OPTIMIZE) {
                 /* transformation: put_x(n) get_x(n) -> set_x(n) */
+                /* qjsx: not across a debugger stop position (the end of a
+                   statement storing x, the next one reading it): the stop
+                   of the second statement would merge with the next one
+                   (e.g. 'return x;': its start and its return) */
                 int idx;
                 idx = get_u16(bc_buf + pos + 1);
-                if (code_match(&cc, pos_next, op - 1, idx, -1)) {
+                if (code_match(&cc, pos_next, op - 1, idx, -1) &&
+                    !js_debug_has_stop_marker(bc_buf, pos_next, cc.pos)) {
                     if (cc.line_num >= 0) line_num = cc.line_num;
                     add_pc2line_info(s, bc_out.size, line_num);
                     put_short_code(&bc_out, op + 1, idx);

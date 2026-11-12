@@ -43,6 +43,14 @@ void *allocate(size_t size) {
 }
 
 /**
+ * malloc() of at least one byte; nullptr when there is no room (not fatal).
+ */
+void *tryAllocate(size_t size) {
+    size_t asked = size > 0 ? size : 1;
+    return malloc(asked);
+}
+
+/**
  * realloc() to at least one byte; out of memory is fatal.
  */
 void *reallocate(void *block, size_t size) {

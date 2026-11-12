@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+  <!-- settings: a gear, eight teeth around a ring -->
+  <g>
+    <rect x="10.5" y="1.5" width="3" height="5" rx="1"/>
+    <rect x="10.5" y="1.5" width="3" height="5" rx="1" transform="rotate(45 12 12)"/>
+    <rect x="10.5" y="1.5" width="3" height="5" rx="1" transform="rotate(90 12 12)"/>
+    <rect x="10.5" y="1.5" width="3" height="5" rx="1" transform="rotate(135 12 12)"/>
+    <rect x="10.5" y="1.5" width="3" height="5" rx="1" transform="rotate(180 12 12)"/>
+    <rect x="10.5" y="1.5" width="3" height="5" rx="1" transform="rotate(225 12 12)"/>
+    <rect x="10.5" y="1.5" width="3" height="5" rx="1" transform="rotate(270 12 12)"/>
+    <rect x="10.5" y="1.5" width="3" height="5" rx="1" transform="rotate(315 12 12)"/>
+  </g>
+  <path fill-rule="evenodd" d="M12 4.5a7.5 7.5 0 1 1 0 15a7.5 7.5 0 1 1 0-15zm0 4.5a3 3 0 1 0 0 6a3 3 0 1 0 0-6z"/>
+</svg>

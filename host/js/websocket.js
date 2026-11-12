@@ -200,6 +200,7 @@ export class WebSocket {
         this.masking = masking;
         this.messageHandler = undefined;
         this.closeHandler = undefined;
+        this.waiting = [];          // messages received before onMessage(), in order
         this.fragments = [];        // payloads of a message not finished yet
         this.closed = false;
         this.parser = new FrameParser(frame => this.onFrame(frame));
@@ -208,8 +209,16 @@ export class WebSocket {
         connection.onClose(() => this.onConnectionClosed());
     }
 
+    // Sets the handler of the messages; it gets at once those that came
+    // before (a server may send right after the handshake, in the same
+    // packet as its answer).
     onMessage(handler) {
         this.messageHandler = handler;
+        const waiting = this.waiting;
+        this.waiting = [];
+        for (const text of waiting) {
+            handler(text);
+        }
     }
 
     onClose(handler) {
@@ -256,7 +265,11 @@ export class WebSocket {
             if (fin) {
                 const text = decoder.decode(joinBytes(this.fragments));
                 this.fragments = [];
-                this.messageHandler?.(text);
+                if (this.messageHandler !== undefined) {
+                    this.messageHandler(text);
+                } else {
+                    this.waiting.push(text);
+                }
             }
             break;
         }
@@ -312,12 +325,21 @@ function randomMask() {
 // Starts the server. Throws if it cannot listen.
 //   host, port      where to listen (port 0: any free port, see server.port())
 //   routes(path)    the JSON answer of a GET request, undefined: 404
+//   pages(path)     optional: { contentType, body } of a GET request that is
+//                   not JSON (the page of the digital twin), undefined: routes;
+//                   body is a string or a Uint8Array
 //   acceptsSocket(path)  true if a WebSocket may open on this path
 //   onSocket(socket)     a WebSocket opened
+//   protocols       optional: the subprotocols the server speaks; the first
+//                   one the client asks for (Sec-WebSocket-Protocol) is
+//                   answered, as a browser refuses a socket whose protocol
+//                   is not (x4js asks for "messaging")
 // Returns { port(), close() }.
-export function startServer({ host = "127.0.0.1", port, routes, acceptsSocket, onSocket }) {
+export function startServer({ host = "127.0.0.1", port, routes, pages = () => undefined, acceptsSocket, onSocket,
+                             protocols = [] }) {
+    const handlers = { routes, pages, acceptsSocket, onSocket, protocols };
     const server = listen({ host, port }, connection => {
-        serveConnection(connection, { routes, acceptsSocket, onSocket });
+        serveConnection(connection, handlers);
     });
     return {
         port: () => server.port(),
@@ -327,7 +349,7 @@ export function startServer({ host = "127.0.0.1", port, routes, acceptsSocket, o
 
 // One connection: reads the head of the HTTP request, then answers it with
 // JSON or upgrades it to a WebSocket.
-function serveConnection(connection, { routes, acceptsSocket, onSocket }) {
+function serveConnection(connection, handlers) {
     let received = "";
     let answered = false;
 
@@ -349,13 +371,15 @@ function serveConnection(connection, { routes, acceptsSocket, onSocket }) {
 
         answered = true;
         const request = parseRequestHead(received.slice(0, headEnd));
-        answerRequest(connection, request, { routes, acceptsSocket, onSocket });
+        answerRequest(connection, request, handlers);
     });
     connection.onClose(() => {});
 }
 
-// Answers one HTTP request: a WebSocket upgrade, a JSON route, or an error.
-function answerRequest(connection, request, { routes, acceptsSocket, onSocket }) {
+// Answers one HTTP request: a WebSocket upgrade, a page, a JSON route, or an
+// error.
+function answerRequest(connection, request, { routes, pages, acceptsSocket, onSocket, protocols }) {
+    // a request too malformed to read
     if (request === null || request.method !== "GET") {
         writeResponse(connection, "400 Bad Request", "text/plain", "bad request\n");
         return;
@@ -370,19 +394,34 @@ function answerRequest(connection, request, { routes, acceptsSocket, onSocket })
             return;
         }
 
-        connection.write([
+        // the subprotocol: the first one asked that the server speaks
+        const asked = (request.headers.get("sec-websocket-protocol") ?? "").split(",").map(name => name.trim());
+        const protocol = asked.find(name => protocols.includes(name));
+
+        const head = [
             "HTTP/1.1 101 Switching Protocols",
             "Upgrade: websocket",
             "Connection: Upgrade",
             `Sec-WebSocket-Accept: ${acceptKey(key)}`,
-            "", "",
-        ].join("\r\n"));
+        ];
+        if (protocol !== undefined) {
+            head.push(`Sec-WebSocket-Protocol: ${protocol}`);
+        }
+        head.push("", "");
+        connection.write(head.join("\r\n"));
         onSocket(new WebSocket(connection));
         return;
     }
 
-    // a JSON route
+    // a page
     const path = request.path.split("?")[0];
+    const page = pages(path);
+    if (page !== undefined) {
+        writeResponse(connection, "200 OK", page.contentType, page.body);
+        return;
+    }
+
+    // a JSON route
     const answer = routes(path);
     if (answer === undefined) {
         writeResponse(connection, "404 Not Found", "text/plain", "not found\n");
@@ -391,9 +430,10 @@ function answerRequest(connection, request, { routes, acceptsSocket, onSocket })
     writeResponse(connection, "200 OK", "application/json; charset=UTF-8", JSON.stringify(answer, null, 2));
 }
 
-// Writes a whole HTTP response, then closes the connection.
+// Writes a whole HTTP response, then closes the connection. 'body': a string
+// (sent as UTF-8) or a Uint8Array (sent as is).
 function writeResponse(connection, status, contentType, body) {
-    const bodyBytes = encoder.encode(body);
+    const bodyBytes = typeof body === "string" ? encoder.encode(body) : body;
     const head = [
         `HTTP/1.1 ${status}`,
         `Content-Type: ${contentType}`,
@@ -409,8 +449,10 @@ function writeResponse(connection, status, contentType, body) {
 // ### Client (tests) ##########################################################
 
 // Opens a WebSocket to ws://host:port/path; resolves with a WebSocket (that
-// masks its frames), rejects if the server refuses the upgrade.
-export async function connect({ host = "127.0.0.1", port, path }) {
+// masks its frames), rejects if the server refuses the upgrade. 'protocol':
+// optional subprotocol asked for; as a browser, refused if the server does
+// not answer it.
+export async function connect({ host = "127.0.0.1", port, path, protocol }) {
     const connection = await netConnect({ host, port });
     const key = new Uint8Array(16).map(() => Math.floor(Math.random() * 256)).toBase64();
 
@@ -427,8 +469,9 @@ export async function connect({ host = "127.0.0.1", port, path }) {
 
             // the answer must accept our key
             const head = text.slice(0, headEnd);
-            const accepted = head.startsWith("HTTP/1.1 101") && head.includes(`Sec-WebSocket-Accept: ${acceptKey(key)}`);
-            if (!accepted) {
+            const keyAccepted = head.startsWith("HTTP/1.1 101") && head.includes(`Sec-WebSocket-Accept: ${acceptKey(key)}`);
+            const protocolAccepted = protocol === undefined || head.includes(`Sec-WebSocket-Protocol: ${protocol}`);
+            if (!keyAccepted || !protocolAccepted) {
                 connection.close();
                 reject(new Error(`websocket: upgrade refused: ${head.split("\r\n")[0]}`));
                 return;
@@ -443,14 +486,18 @@ export async function connect({ host = "127.0.0.1", port, path }) {
             resolve(socket);
         });
 
-        connection.write([
+        const request = [
             `GET ${path} HTTP/1.1`,
             `Host: ${host}:${port}`,
             "Upgrade: websocket",
             "Connection: Upgrade",
             `Sec-WebSocket-Key: ${key}`,
             "Sec-WebSocket-Version: 13",
-            "", "",
-        ].join("\r\n"));
+        ];
+        if (protocol !== undefined) {
+            request.push(`Sec-WebSocket-Protocol: ${protocol}`);
+        }
+        request.push("", "");
+        connection.write(request.join("\r\n"));
     });
 }

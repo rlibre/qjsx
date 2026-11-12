@@ -1,0 +1,15 @@
+{
+    "name": "YD-ESP32-S3",
+    "chip": "ESP32-S3",
+    "description": "VCC-GND YD-ESP32-S3, WROOM-1 N16R8 (16 MB flash, 8 MB PSRAM)",
+    "platform": "esp32",
+    "pins": 49,
+    "uarts": 3,
+    "linkUart": 0,
+    "adc": { "pins": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "bits": 12, "spans": [950, 1250, 1750, 3100], "vref": 3.3 },
+    "natives": ["sys/fs", "sys/crypto", "device/gpio", "device/rmt", "device/usb", "device/i2c", "device/adc", "device/serial"],
+    "parts": [
+        { "id": "boot", "model": "button", "label": "BOOT", "pin": 0, "activeLow": true },
+        { "id": "rgb", "model": "ws2812", "label": "RGB", "pin": 48, "count": 1 }
+    ]
+}

@@ -106,4 +106,23 @@ void useSlashes(char *path);
  */
 bool isAbsolute(const char *path);
 
+
+/**
+ * The real path of 'path' (malloc'd, freed by the caller; absolute, '/'
+ * separators): a relative path is taken from the current directory, "." and
+ * ".." are resolved, and the links and junctions of the part that exists are
+ * followed; the part that does not exist yet (a file about to be created) is
+ * appended as written. nullptr with errno set if the path cannot be read, or
+ * EACCES if its first missing component is a link to a missing target (a
+ * write through it would land elsewhere). newlib (devices: no links): the
+ * path normalized.
+ */
+char *realPath(const char *path);
+
+/**
+ * The value of an environment variable (malloc'd UTF-8, freed by the caller),
+ * or nullptr if it is not set.
+ */
+char *environmentValue(const char *name);
+
 } // namespace files

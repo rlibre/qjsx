@@ -1,0 +1,15 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
+# Components fetched by the ESP-IDF component manager (into
+# ports/esp32/managed_components/, versions kept in dependencies.lock).
+dependencies:
+  # TinyUSB for device/usb (hal_usb_esp32.cpp), on the chips with USB OTG only
+  # (the same list as QJSX_USB_TARGETS in CMakeLists.txt)
+  espressif/esp_tinyusb:
+    version: "^2.1.1"
+    rules:
+      - if: "target in [esp32s2, esp32s3, esp32p4]"
