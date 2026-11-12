@@ -1,6 +1,25 @@
 # TODO
 
-## Où on en est (2026-11-11, à relire en reprenant le travail)
+## Où on en est (2026-11-12, à relire en reprenant le travail)
+
+- [x] **Dernier état (2026-11-12, commit e4fa348 sur `main`, pas encore poussé)** :
+      - **jumeau numérique** (architecture.md 6.6, section « Jumeaux numériques » plus bas) :
+        tout dans `host/twin/` ; page x4js embarquée ; composants = modèle (`qjsx:twin`,
+        API publique) + vue ; modèles button, ws2812, bme280, potentiometer ; composants du
+        projet (`model.js`, `view.js`) ; `qjsx agent` dans un projet (ou `-p`) lit la section
+        `"twin"` de `qjsx.json` ; `"target": "twin"` ; trace I2C ; UART et USB par TCP ;
+        projet de test `tests/fixtures/twinparts` (`qjsx agent -p tests/fixtures/twinparts`,
+        page sur http://127.0.0.1:45695/) ;
+      - **`device/adc`** : ESP32 (ADC1) et jumeau ; firmware compilé, PAS essayé sur la carte ;
+      - **tests** : suite Debug 94 OK + `twinparts` corrigé et relancé seul (21/21) ; refaire
+        une suite complète (Debug puis Release) au début de la prochaine session ;
+      - **à essayer sur la carte** : `device/adc` (un potentiomètre sur GPIO1-10),
+        `device/i2c` avec un vrai composant ;
+      - **analyseur des broches** (FAIT le 2026-11-12, version simple) : panneau
+        « Analyzer » en bas de la page du jumeau, traces logiques et analogiques (ADC) ;
+      - **prochaines pistes** (détail plus bas) : SSD1306 dans le jumeau, vitesse de la carte
+        simulée, DAC (avec l'analyseur), scénarios et signaux, manuel utilisateur, éditeur
+        Monaco pour les devices.
 
 - [x] **Projet renommé `qjsx`** (ex-`espjs`) le 2026-11-11 : commande `qjsx`, fichier de
       projet `qjsx.json`, modules de l'outil `qjsx:nom`, macros `QJSX_*`, marqueur `qjsx:`
@@ -377,8 +396,8 @@
             API `qjsx:twin`, modèles button / ws2812 / bme280 / potentiometer, composants du
             projet (`model.js` + `view.js`), section `"twin"` de `qjsx.json`, `-p`,
             `"target": "twin"`, ports, trace I2C, ADC, vues à trois niveaux, section
-            Buttons, console. Reste : SSD1306, SPI / UART joués par des modèles, oscilloscope,
-            vitesse de la carte, scénarios, signaux. Ce qui suit est l'historique de la
+            Buttons, console, analyseur des broches. Reste : SSD1306, SPI / UART joués par des
+            modèles, vitesse de la carte, scénarios, signaux. Ce qui suit est l'historique de la
             conception. Première étape (page x4js) FAITE le même jour (suite Debug 88 OK, page
             essayée dans le navigateur intégré, architecture.md 6.6) : tout dans
             `host/twin/` (`sim/`, `js/server.js` = `qjsx:twin/server`, `ui/`) ; x4js installé
@@ -542,9 +561,21 @@
             jumeau (page de réglages) pour que le programme tourne à peu près à la vitesse
             de la vraie carte, pas à celle du PC ; trouver un moyen (ralentir l'interpréteur,
             budget d'instructions par tranche de temps...) ; à concevoir ;
-      - [ ] **analyseur logique / oscilloscope sur les broches** (utilisateur, 2026-11-12) :
-            les niveaux des broches dans le temps sur la page (plusieurs voies, le temps
-            du jumeau), y compris les impulsions `send` du RMT ; à concevoir ;
+      - [x] **analyseur logique / oscilloscope sur les broches** (utilisateur, 2026-11-12) :
+            FAIT le 2026-11-12 en version simple (utilisateur : « tu vas trop loin ») :
+            panneau « Analyzer » dockable en bas, en onglet avec la console
+            (`host/twin/ui/src/scopeview.ts`) ; broches ajoutées depuis sa barre, une trace
+            chacune sur fond noir, une couleur par trace (menu du bouton de la broche),
+            base de temps, Run / Stop, Clear ; une entrée analogique lue par le
+            programme ou avec un composant dessus est tracée en volts (ADC) ; changements
+            horodatés en µs par le jumeau (`host/twin/sim/twin_scope.cpp`, message
+            `twin.scope.data`), 256 par broche toutes les 50 ms, au-delà une bande
+            « occupé » ; architecture.md 6.6. Pas fait : déclenchement, se déplacer dans
+            l'historique (Stop fige la vue, Run repart de zéro), impulsions RMT, décodeurs ;
+            le temps est celui du PC ;
+      - [ ] **redimensionnement du panneau des broches** (utilisateur, 2026-11-12) : à gérer.
+            Constaté : la bande de droite garde ses 460 px quand la fenêtre est étroite et
+            écrase le panneau de la carte et l'analyseur (vu à 560 px de large) ;
       - [x] jumeau choisi dans `qjsx.json` (FAIT le 2026-11-12 : section `"twin"`, `qjsx
             agent` dans le dossier ou `-p`) ;
       - [ ] d'autres cartes (PICO2-XXL...) ;
@@ -565,6 +596,17 @@
 - [ ] **Sorties DAC** (utilisateur, 2026-11-12) : REPORTÉ, à faire avec l'oscilloscope du
       jumeau. Nos cartes n'ont pas de DAC (ESP32-S3, RP2350) ; l'ESP32 classique et l'ESP32-S2
       en ont un (8 bits), le STM32H743 aussi (12 bits).
+
+- [ ] **Protéger le code d'un programme sur le device** (utilisateur, 2026-11-12) : PLUS TARD.
+      Aujourd'hui les chaînes du bytecode sont en clair (littéraux, noms de propriétés,
+      imports, nom du module ; le strip n'enlève que source, positions et noms de variables)
+      et le bytecode se décompile. Piste ESP32 : chiffrement matériel de la flash (clé
+      XTS-AES dans les eFuses, déchiffrement à la volée par le cache : l'exécution en place
+      via esp_partition_mmap continue de marcher), flag `encrypted` sur la partition
+      `packages` (écrire avec esp_partition_write, pas _raw), et Secure Boot avec (sinon un
+      autre firmware lit la flash en clair). Modes Development / Release (irréversible).
+      Reste en clair : la RAM et la liaison pendant `qjsx deploy`. RP2350 : boot signé + clé
+      en OTP, pas de déchiffrement transparent de la XIP.
 
 - [x] **Permissions d'un programme du PC** (utilisateur, 2026-11-12 : « éviter que l'exe puisse
       supprimer un disque complet en cas de bug JS » ; FAIT le même jour, architecture.md 6.7) :

@@ -553,6 +553,73 @@ js::Value i2cTrace(double after) {
     return js::Value(ctx, result);
 }
 
+// What scope() builds while scopeRead visits the pins.
+struct ScopeResult {
+    JSValue  levels;                     // the level of each pin now
+    JSValue  millivolts;                 // the voltage of each pin now
+    JSValue  changes;                    // the pins that changed: one object each
+    uint32_t changeCount;                // entries of changes
+};
+
+/**
+ * Adds a pin to a ScopeResult: its state now and, when it changed, its
+ * records as one flat array [time, level, millivolts, ...].
+ */
+void addScopePin(void *context, int pin, const twin::ScopeChanges *changes, const twin::ScopeRecord *now) {
+    ScopeResult *result = (ScopeResult *)context;
+    JSContext *ctx = js::context();
+
+    // its state now
+    JS_SetPropertyUint32(ctx, result->levels, (uint32_t)pin, JS_NewInt32(ctx, now->level));
+    JS_SetPropertyUint32(ctx, result->millivolts, (uint32_t)pin, JS_NewInt32(ctx, now->millivolts));
+
+    bool changed = changes->count > 0 || changes->dropped > 0;
+    if (!changed) {
+        return;
+    }
+
+    // its records, three numbers each
+    JSValue records = JS_NewArray(ctx);
+    for (int i = 0; i < changes->count; i++) {
+        const twin::ScopeRecord *record = &changes->records[i];
+        uint32_t slot = (uint32_t)i * 3;
+        JS_SetPropertyUint32(ctx, records, slot, JS_NewFloat64(ctx, (double)record->timeUs));
+        JS_SetPropertyUint32(ctx, records, slot + 1, JS_NewInt32(ctx, record->level));
+        JS_SetPropertyUint32(ctx, records, slot + 2, JS_NewInt32(ctx, record->millivolts));
+    }
+
+    // { pin, records, dropped, droppedUntil }
+    JSValue item = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, item, "pin", JS_NewInt32(ctx, pin));
+    JS_SetPropertyStr(ctx, item, "records", records);
+    JS_SetPropertyStr(ctx, item, "dropped", JS_NewUint32(ctx, changes->dropped));
+    JS_SetPropertyStr(ctx, item, "droppedUntil", JS_NewFloat64(ctx, (double)changes->droppedUntilUs));
+    JS_SetPropertyUint32(ctx, result->changes, result->changeCount++, item);
+}
+
+/**
+ * JS scope(): what the pins did since the last call (one caller: the page's
+ * server), { now, levels, millivolts, changes: [{ pin, records, dropped,
+ * droppedUntil }] }: times in µs since the twin started; levels and
+ * millivolts the state of every pin now; records [time, level, millivolts,
+ * ...] the first changes of a pin; dropped the changes after them, only
+ * counted, the last at droppedUntil.
+ */
+js::Value scope() {
+    JSContext *ctx = js::context();
+
+    // every pin
+    ScopeResult result = { JS_NewArray(ctx), JS_NewArray(ctx), JS_NewArray(ctx), 0 };
+    int64_t nowUs = twin::scopeRead(twin::pinCount(), &addScopePin, &result);
+
+    JSValue value = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, value, "now", JS_NewFloat64(ctx, (double)nowUs));
+    JS_SetPropertyStr(ctx, value, "levels", result.levels);
+    JS_SetPropertyStr(ctx, value, "millivolts", result.millivolts);
+    JS_SetPropertyStr(ctx, value, "changes", result.changes);
+    return js::Value(ctx, value);
+}
+
 /**
  * JS uartSend(uart, bytes): the page sends bytes to the program; false if
  * the program does not have the UART open.
@@ -643,6 +710,7 @@ JS_MODULE(twinboard, module) {
     JS_FUNCTION(module, uartSend);
     JS_FUNCTION(module, i2cBuses);
     JS_FUNCTION(module, i2cTrace);
+    JS_FUNCTION(module, scope);
     JS_FUNCTION(module, usb);
     JS_FUNCTION(module, tcpListen);
     JS_FUNCTION(module, uiArchive);

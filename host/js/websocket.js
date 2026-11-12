@@ -203,6 +203,7 @@ export class WebSocket {
         this.waiting = [];          // messages received before onMessage(), in order
         this.fragments = [];        // payloads of a message not finished yet
         this.closed = false;
+        this.broken = false;        // a write failed: closing, nothing more is sent
         this.parser = new FrameParser(frame => this.onFrame(frame));
 
         connection.onData(bytes => this.onData(bytes));
@@ -238,12 +239,22 @@ export class WebSocket {
         this.connection.close();
     }
 
+    // Sends a frame. A write that fails means the peer is gone (a page
+    // reloaded resets its connection): the connection is closed, nothing more
+    // is sent, and the close handler is called as for any close, when the
+    // connection reports it. So sending never throws.
     sendFrame(opcode, payload) {
-        if (this.closed || !this.connection.isOpen()) {
+        if (this.closed || this.broken || !this.connection.isOpen()) {
             return;
         }
+
         const mask = this.masking ? randomMask() : undefined;
-        this.connection.write(encodeFrame(opcode, payload, mask));
+        try {
+            this.connection.write(encodeFrame(opcode, payload, mask));
+        } catch {
+            this.broken = true;
+            this.connection.close();
+        }
     }
 
     onData(bytes) {

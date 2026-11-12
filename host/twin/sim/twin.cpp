@@ -117,9 +117,19 @@ uint8_t computeLevel(Pin *pin) {
 }
 
 /**
+ * The voltage on a pin in mV: what a component sets, else its level times
+ * vref. stateLock held.
+ */
+int voltageOf(const Pin *pin) {
+    const PinState *state = &pin->state;
+    return state->voltageMv >= 0 ? state->voltageMv : state->level * vrefMv;
+}
+
+/**
  * Computes the level of pin 'index' again after a change; returns what to
  * call once the lock is released (the program's handler of a watched pin,
- * the components watching it), when the level changed. stateLock held.
+ * the components watching it), when the level changed. A change goes to
+ * the analyzer. stateLock held.
  */
 Change update(int index) {
     Pin *pin = &pinTable[index];
@@ -131,6 +141,7 @@ Change update(int index) {
     if (changed) {
         change.handler = pin->watched ? pin->handler : nullptr;
         change.tellParts = pin->partWatched;
+        scopeRecord(index, pin->state.level, voltageOf(pin));
     }
 
     return change;
@@ -340,12 +351,15 @@ bool load(const char *path) {
         return false;
     }
 
-    // the pins at rest: nothing forced, nothing driven by a component
+    // the pins at rest: nothing forced, nothing driven by a component; the
+    // analyzer starts from there
+    scopeStart();
     for (int i = 0; i < pins; i++) {
         pinTable[i].state.forced = -1;
         pinTable[i].state.partDrive = -1;
         pinTable[i].state.voltageMv = -1;
         pinTable[i].state.level = computeLevel(&pinTable[i]);
+        scopeSetInitial(i, pinTable[i].state.level, voltageOf(&pinTable[i]));
     }
 
     loaded = true;
@@ -548,8 +562,7 @@ int pinVoltage(int pin) {
     }
 
     stateLock.lock();
-    const PinState *state = &pinTable[pin].state;
-    int millivolts = state->voltageMv >= 0 ? state->voltageMv : state->level * vrefMv;
+    int millivolts = voltageOf(&pinTable[pin]);
     stateLock.unlock();
     return millivolts;
 }
@@ -568,7 +581,8 @@ void setAdc(int pin, bool open) {
 }
 
 /**
- * A component sets the voltage on a pin (at most vref), or not any more.
+ * A component sets the voltage on a pin (at most vref), or not any more; a
+ * change of the voltage goes to the analyzer.
  */
 void partVoltage(int pin, int millivolts) {
     if (pin < 0 || pin >= pins) {
@@ -577,7 +591,18 @@ void partVoltage(int pin, int millivolts) {
 
     int bounded = millivolts < 0 ? -1 : (millivolts > vrefMv ? vrefMv : millivolts);
     stateLock.lock();
-    pinTable[pin].state.voltageMv = (int16_t)bounded;
+
+    // the new voltage
+    Pin *target = &pinTable[pin];
+    int previous = voltageOf(target);
+    target->state.voltageMv = (int16_t)bounded;
+
+    // to the analyzer when it changed
+    int now = voltageOf(target);
+    if (now != previous) {
+        scopeRecord(pin, target->state.level, now);
+    }
+
     stateLock.unlock();
 }
 

@@ -117,7 +117,8 @@ const sent = record => decoder.decode(new Uint8Array(record.bytes));
 check(await until(() => records.some(record => record.source === "page" && sent(record) === "abc")),
     "the page gets the record of what it sent");
 check(records.some(record => record.source === "tcp" && sent(record) === "hello"), "... of what TCP sent");
-check(records.some(record => record.source === "program" && sent(record) === "echo:abc"), "... of what the program wrote");
+check(await until(() => records.some(record => record.source === "program" && sent(record) === "echo:abc")),
+    "... of what the program wrote");
 
 // --- closing, then opening again at once
 client.write("close");

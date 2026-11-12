@@ -22,6 +22,8 @@
 //   twin.part.action page -> twin  { id, action, args }: to a part
 //   twin.log        twin -> page   { id, text }: a line of a part, or an error of its model
 //   twin.i2c.data   twin -> page   { records }: the I2C transfers of the program (I2cRecord)
+//   twin.scope.data twin -> page   what the pins did since the last message (ScopeData),
+//                                  every 50 ms, for the analyzer
 import { Application } from "x4js";
 
 export const MSG = {
@@ -36,6 +38,7 @@ export const MSG = {
     partAction: "twin.part.action",
     log:       "twin.log",
     i2cData:   "twin.i2c.data",
+    scopeData: "twin.scope.data",
 };
 
 // What a TCP link is for: a UART, or a serial function of the USB device.
@@ -69,6 +72,15 @@ export interface BoardInfo {
     parts?:       BoardPart[];
     uarts?:       number;       // UARTs of the board (device/serial)
     linkUart?:    number;       // the UART of the agent's link on the real board: never opened
+    adc?:         AdcInfo;      // its analog inputs
+}
+
+// The analog inputs of a board ("adc" of boards/<name>.json).
+export interface AdcInfo {
+    pins:  number[];            // the pins with an analog input
+    bits:  number;              // resolution of the converter
+    spans: number[];            // the ranges it reads, in mV
+    vref:  number;              // volts: the level 1 of a pin
 }
 
 // One pin now.
@@ -159,6 +171,23 @@ export interface I2cRecord {
     readSize:  number;          // bytes asked (the first 32 of the answer in read)
     written:   number[];
     read:      number[];
+}
+
+// What a pin did since the last twin.scope.data.
+export interface ScopeChange {
+    pin:          number;
+    records:      number[];     // its first changes: [time (µs), level, millivolts, ...]
+    dropped:      number;       // changes after them, only counted (the pin moved too fast)
+    droppedUntil: number;       // time of the last of them, in µs
+}
+
+// What the pins did since the last message (twin.scope.data); times in µs
+// since the twin started.
+export interface ScopeData {
+    now:        number;         // time of the read
+    levels:     number[];       // the level of every pin now
+    millivolts: number[];       // the voltage of every pin now
+    changes:    ScopeChange[];  // the pins that changed
 }
 
 // The I2C transfers (twin.i2c.data).

@@ -41,6 +41,16 @@ const twin_en = {
         conflict_tooltip: "The program and a part drive different levels: a short on a real board",
         console:        "Console",              // title of the panel of the lines of the parts
         console_clear:  "Clear",
+        scope:          "Analyzer",             // title of the panel of the levels of the pins over time
+        scope_run:      "Run",
+        scope_stop:     "Stop",
+        scope_per_div:  "/div",                 // after a time base: "1 ms/div"
+        scope_add:      "add a pin...",
+        scope_remove:   "Remove",               // menu of the button of a pin
+        scope_channel_tooltip: "The color of its trace, or remove it",
+        scope_colors:   ["Yellow", "Cyan", "Magenta", "Green", "Orange", "Violet", "Blue", "Red"],   // --scope-color-<n>
+        scope_clear:    "Clear",
+        scope_empty:    "Add a pin to see its level over time",
         i2c:            "I2C",                  // title of an I2C bus section: "I2C 0"
         i2c_closed:     "closed",
         i2c_trace:      "Transfers",

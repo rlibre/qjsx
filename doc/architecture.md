@@ -1598,7 +1598,7 @@ A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with
 
 > **Status: done 2026-11-12 for the YD-ESP32-S3: pins, parts with models (button, WS2812,
 > BME280, potentiometer, and the project's own), I2C buses with a trace, analog inputs,
-> UARTs and USB device over TCP, a page in x4js. Tested in Debug by `tests/twin.test.js`,
+> UARTs and USB device over TCP, an analyzer of the pins, a page in x4js. Tested in Debug by `tests/twin.test.js`,
 > `tests/twinparts.test.js`, `tests/usb.test.js`, `tests/i2c.test.js`,
 > `tests/serial.test.js`, `tests/twintcp.test.js`, and tried in the browser pane.**
 
@@ -1685,7 +1685,16 @@ application).
   - `twin_uart.cpp`, the driver of `device/serial` (`hal_serial.h`): the UARTs of the
     board (`"linkUart"`, the agent's link of the real board, is refused with EBUSY). Each
     UART is a TCP link and a panel of the page; nothing is timed. The traffic is kept as
-    numbered records (the last 16 KB per UART) for the page.
+    numbered records (the last 16 KB per UART) for the page;
+  - `twin_scope.cpp`, the analyzer of the pins: each change of a pin (its level, in
+    `update()`, or the voltage a component sets) is recorded with its time, in µs of the
+    PC since the twin started (performance counter / `CLOCK_MONOTONIC`), with the level
+    and the voltage after it. Between two reads of the page's server (every 50 ms) a pin
+    keeps its first 256 changes; the others are only counted, with the time of the last
+    (a pin toggled faster than that: the page draws a "busy" band). Two sets of changes,
+    swapped by the reader: the program never waits for the page. The RMT does not change
+    the level of its pin (its pulses go to the parts only), so the analyzer does not show
+    them; I2C and UARTs are not played bit by bit either.
 - **Parts and their models**: a part is a component wired on the board: a model (its
   emulation, JS) and a view (its section on the page). The models run in the twin's
   runtime, never in the program's: the program cannot reach them, the debugger does not
@@ -1731,7 +1740,9 @@ application).
     }]`), `twin.part.state` (`{ id, state }`), `twin.log` (`{ id, text }`, the last 200
     kept for a page that connects), `twin.state` (pins, UARTs, USB device, I2C buses with
     the parts on them; polled every 50 ms, sent when it changed), `twin.uart.data`,
-    `twin.i2c.data` (new records of the traces; a page that connects gets those kept);
+    `twin.i2c.data` (new records of the traces; a page that connects gets those kept),
+    `twin.scope.data` (every 50 ms: `{ now, levels, millivolts, changes: [{ pin, records:
+    [time, level, millivolts, ...], dropped, droppedUntil }] }`, times in µs);
   - from the page: `twin.part.action` (`{ id, action, args }`), `twin.pin.force` (`{
     pin, level }`: 0, 1, or -1), `twin.uart.send`, `twin.tcp.listen`.
 
@@ -1740,8 +1751,8 @@ application).
 - **The page**: `host/twin/ui/`, an x4js application:
   - `main.ts`, `twinview.ts`: the header (`appheader.ts`: a microprocessor logo, title,
     board, state of the link, settings button), then a `DockingView`: the board in the
-    middle, the pins on the right, the console of the parts at the bottom (`consoleview.ts`,
-    Clear in a status bar); a context menu (right click) shows / hides the panels or
+    middle, the pins on the right, the console of the parts (`consoleview.ts`, Clear in a
+    status bar) and the analyzer as tabs at the bottom; a context menu (right click) shows / hides the panels or
     resets the layout; the layout and the settings (`settings.ts`: theme, used pins only;
     a `SettingsView` in a `Dialog`) are kept by the browser;
   - `boardview.ts`: one folding section per device (`controls/section.ts`): the push
@@ -1762,6 +1773,16 @@ application).
     1.65 V", "i2c", "rmt", or the gpio mode), pull, parts, force buttons on / off / free
     in one segmented control (a tooltip says what "free" means); a pin a part drives is
     marked, a conflict in red;
+  - `scopeview.ts`, the analyzer (user, 2026-11-12: "simple"): the pins added in its tool
+    bar (the button of a pin, marked with the color of its trace, opens a menu: its color
+    among eight, remove), one trace each under the other on black, each in its color (the
+    first one free when added), the time base (1 µs to 1 s per division, ten divisions;
+    the times under it as often as they fit), Run / Stop (Stop freezes the view, Run
+    starts a new acquisition), Clear; the tool bar wraps when narrow; the pins chosen,
+    their colors and the time base kept by the browser. A pin with an analog input that the program reads, or with a part on it, is
+    drawn as its voltage (0 to vref), the others as their level. 20 s of history kept.
+    Drawn in an x4js `Canvas` (whose inner canvas is absolute: its component gets
+    `position: relative`);
   - `controls/`: our own components (`Led`: a bezel and a lens with a highlight, a glow
     when lit; `HoldButton`; `Section`); `model.ts`: the only `fetch` of the page;
     `texts.ts`: the texts (`addTranslation`, English); `messages.ts`: the messages.
@@ -1778,7 +1799,8 @@ application).
   (`twin::uiArchive()`). To work on the page without linking qjsx again: `npm run build`
   in `host/twin/ui`, and the hidden option `qjsx agent ... --ui-dir host/twin/ui/dist`.
 - **Not done**: other parts (a display: SSD1306), SPI and UART devices played by models,
-  a logic analyzer / oscilloscope of the pins, the speed of the board simulated, test
+  in the analyzer a trigger, moving in the history, the RMT pulses and decoders, the
+  speed of the board simulated, test
   scenarios, signals (values that change over time, scripted in the page), other boards
   than the YD-ESP32-S3 (TODO.md).
 

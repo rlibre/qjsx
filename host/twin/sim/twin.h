@@ -212,6 +212,64 @@ void i2cBusStates(I2cBusState *states);
  */
 uint32_t i2cTrace(uint32_t after, I2cTraceVisitor *visit, void *context);
 
+// ### Analyzer of the pins (twin_scope.cpp) ##################################
+//
+// Every change on a pin (its level, or the voltage a component sets on it)
+// is recorded with its time, for the analyzer panel of the page; the page's
+// server reads them every 50 ms (scopeRead). Between two reads, a pin keeps
+// at most SCOPE_RECORDS changes: past that (a pin toggled faster than the
+// page follows), the changes are only counted, and the page draws them as a
+// "busy" band. Times are those of the PC, in µs since the twin started.
+
+const int SCOPE_RECORDS = 256;           // changes of a pin kept between two reads
+
+// A change of a pin, or its state now.
+struct ScopeRecord {
+    int64_t timeUs;                      // when, in µs since the twin started
+    int     level;                       // the level on the line after it
+    int     millivolts;                  // the voltage on the line after it
+};
+
+// What a pin did since the last read.
+struct ScopeChanges {
+    int         count;                   // entries of records
+    ScopeRecord records[SCOPE_RECORDS];  // the first changes, oldest first
+    uint32_t    dropped;                 // changes after the records were full: only counted
+    int64_t     droppedUntilUs;          // time of the last dropped change
+};
+
+// Called by scopeRead() for each pin: what it did since the last read
+// (count and dropped 0: nothing) and its state now.
+typedef void ScopeVisitor(void *context, int pin, const ScopeChanges *changes, const ScopeRecord *now);
+
+/**
+ * Sets the time 0 of the analyzer (load(), before any change).
+ */
+void scopeStart();
+
+/**
+ * µs since scopeStart(). Any thread.
+ */
+int64_t scopeNowUs();
+
+/**
+ * The state of 'pin' at rest, without recording a change (load()).
+ */
+void scopeSetInitial(int pin, int level, int millivolts);
+
+/**
+ * Records a change of 'pin': its level and its voltage after it (twin.cpp,
+ * any thread, the twin's state lock held).
+ */
+void scopeRecord(int pin, int level, int millivolts);
+
+/**
+ * Calls 'visit' for each of the first 'count' pins with what it did since
+ * the last read, then forgets it. One reader only (the page's server).
+ * Returns the time of the read, in µs since scopeStart().
+ */
+int64_t scopeRead(int count, ScopeVisitor *visit, void *context);
+
 /**
  * A component drives 'pin' to 0 or 1, or lets it go (-1) (twin's thread).
  */

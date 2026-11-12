@@ -7,7 +7,8 @@
 
 // The main view of the page: the header, then a DockingView with the board
 // in the middle (its parts and devices in folding sections), the table of
-// the pins on the right and the console of the parts at the bottom. It
+// the pins on the right, the console of the parts and the analyzer of the
+// pins at the bottom. It
 // follows the messages of the twin (messages.ts), keeps the settings (kept
 // by the browser, like the layout of the panels), and offers the panels in a
 // context menu (right click).
@@ -15,8 +16,9 @@ import { BoxProps, DockingView, EvMessage, Menu, StateProxy, VBox } from "x4js";
 import { AppHeader } from "./appheader";
 import { BoardView } from "./boardview";
 import { ConsoleView } from "./consoleview";
-import { BoardInfo, I2cData, LogLine, MSG, PartInfo, PartStateMessage, TwinState, UartData } from "./messages";
+import { BoardInfo, I2cData, LogLine, MSG, PartInfo, PartStateMessage, ScopeData, TwinState, UartData } from "./messages";
 import { PinTable } from "./pintable";
+import { ScopeView } from "./scopeview";
 import { applyTheme, DEFAULT_SETTINGS, openSettings, TwinSettings } from "./settings";
 import { tx } from "./texts";
 
@@ -25,10 +27,10 @@ const SETTINGS_KEY = "qjsx.twin.settings";
 const LAYOUT_KEY = "qjsx.twin.layout";
 
 // The panels of the docking view, in the order of the context menu.
-const PANEL_IDS = ["board", "pins", "console"];
+const PANEL_IDS = ["board", "pins", "console", "scope"];
 
 export class TwinView extends VBox {
-    declare protected refs: { header: AppHeader; board: BoardView; pins: PinTable; console: ConsoleView; dock: DockingView };
+    declare protected refs: { header: AppHeader; board: BoardView; pins: PinTable; console: ConsoleView; scope: ScopeView; dock: DockingView };
 
     private _settings: StateProxy<TwinSettings>;   // kept by the browser
 
@@ -47,6 +49,7 @@ export class TwinView extends VBox {
         const board = this.refs.board = new BoardView({ cls: "board" });
         const pins = this.refs.pins = new PinTable({ cls: "pins" }, this._settings);
         const console = this.refs.console = new ConsoleView({ cls: "console" });
+        const scope = this.refs.scope = new ScopeView({ cls: "scope" });
 
         this.setContent([
             this.refs.header = new AppHeader({ settings: () => openSettings(this._settings) }),
@@ -57,11 +60,12 @@ export class TwinView extends VBox {
                     { id: "board", title: tx.twin.board, kind: "content", content: board },
                     { id: "pins", title: tx.twin.pins, content: pins },
                     { id: "console", title: tx.twin.console, content: console, sides: ["bottom"] },
+                    { id: "scope", title: tx.twin.scope, content: scope, sides: ["bottom"] },
                 ],
                 layout: {
                     left: { size: 0, root: null },
                     right: { size: 460, root: { type: "stack", size: 0, panels: ["pins"], active: "pins" } },
-                    bottom: { size: 140, root: { type: "stack", size: 0, panels: ["console"], active: "console" } },
+                    bottom: { size: 200, root: { type: "stack", size: 0, panels: ["console", "scope"], active: "scope" } },
                     content: { type: "stack", size: 0, panels: ["board"], active: "board" },
                     floats: [],
                     hidden: [],
@@ -83,7 +87,8 @@ export class TwinView extends VBox {
 
     /**
      * One message of the twin: the board, the state now, the traffic of a
-     * UART, the parts, what a part published, a line of a part.
+     * UART, the parts, what a part published, a line of a part, what the
+     * pins did (the analyzer).
      */
     private _onMessage(event: EvMessage) {
         if (event.msg === MSG.board) {
@@ -91,6 +96,7 @@ export class TwinView extends VBox {
             this.refs.header.setBoard(board.name, board.chip);
             this.refs.board.setBoard(board);
             this.refs.pins.setBoard(board);
+            this.refs.scope.setBoard(board);
         } else if (event.msg === MSG.state) {
             const state = event.params as TwinState;
             this.refs.board.setUsb(state.usb);
@@ -98,6 +104,7 @@ export class TwinView extends VBox {
             this.refs.board.setI2c(state.i2c);
             this.refs.pins.setPins(state.pins);
             this.refs.board.setPins(state.pins);
+            this.refs.scope.setPins(state.pins);
         } else if (event.msg === MSG.uartData) {
             const data = event.params as UartData;
             this.refs.board.addUartRecords(data.uart, data.records);
@@ -105,6 +112,7 @@ export class TwinView extends VBox {
             const parts = event.params as PartInfo[];
             this.refs.board.setParts(parts);
             this.refs.pins.setParts(parts);
+            this.refs.scope.setParts(parts);
         } else if (event.msg === MSG.partState) {
             const message = event.params as PartStateMessage;
             this.refs.board.setPartState(message.id, message.state);
@@ -112,6 +120,8 @@ export class TwinView extends VBox {
             this.refs.console.addLine(event.params as LogLine);
         } else if (event.msg === MSG.i2cData) {
             this.refs.board.addI2cRecords((event.params as I2cData).records);
+        } else if (event.msg === MSG.scopeData) {
+            this.refs.scope.addData(event.params as ScopeData);
         }
     }
 
@@ -124,7 +134,7 @@ export class TwinView extends VBox {
         const dock = this.refs.dock;
 
         // a line per panel, checked when shown
-        const titles: Record<string, string> = { board: tx.twin.board, pins: tx.twin.pins, console: tx.twin.console };
+        const titles: Record<string, string> = { board: tx.twin.board, pins: tx.twin.pins, console: tx.twin.console, scope: tx.twin.scope };
         const panelItems = PANEL_IDS.map(id => ({
             text: titles[id],
             checked: dock.isPanelVisible(id),

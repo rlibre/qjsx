@@ -99,6 +99,21 @@ await bothAnswered;
 equal(answers[0], "echo:hello é", "a text message and its echo (UTF-8)");
 equal(answers[1], `echo:${long}`, "a long message (64-bit length)");
 
+// --- the connection gone under the WebSocket (as a page reloaded): sending
+// does not throw, and the close handler is called
+const closed = new Promise(resolve => socket.onClose(resolve));
+socket.connection.close();
+let threw = false;
+try {
+    socket.send("after the connection is gone");
+    socket.send("and again");
+} catch {
+    threw = true;
+}
+check(!threw, "sending on a connection that is gone does not throw");
+const closeCalled = await Promise.race([closed.then(() => true), new Promise(resolve => setTimeout(() => resolve(false), 2000))]);
+check(closeCalled, "... and the close handler is called");
+
 socket.close();
 server.close();
 report("websocket");

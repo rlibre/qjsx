@@ -9,7 +9,7 @@
 // what the agent says of itself, the board's native modules only, and the
 // program of tests/fixtures/twin driven through the page (HTTP + WebSocket
 // with the x4js messages of host/twin/ui), the parts of the board (their
-// models: button, ws2812).
+// models: button, ws2812), the changes of the pins for the analyzer.
 //
 //   qjsx run tests/twin.test.js tcp:127.0.0.1:<agent port> <page port>
 import * as fs from "sys/fs";
@@ -195,6 +195,29 @@ equal(forced.pins[5].level, 1, "a pin forced to 1 by the page reads 1");
 socket.send(JSON.stringify({ msg: "twin.pin.force", params: { pin: 5, level: -1 } }));
 const free = await new Promise(resolve => setTimeout(() => resolve(getJson("/state")), 200));
 equal(free.pins[5].forced, null, "... and let go, it is not forced any more");
+
+// --- the analyzer: the changes of the pins with their time (twin.scope.data)
+const scopeMessages = messages.filter(item => item.msg === "twin.scope.data").map(item => item.params);
+check(scopeMessages.length > 0, "a page gets twin.scope.data");
+
+// the changes of a pin in every message: records are [time, level, millivolts, ...]
+function scopeChanges(pin) {
+    const records = scopeMessages.flatMap(data => data.changes.filter(change => change.pin === pin).flatMap(change => change.records));
+    const changes = [];
+    for (let i = 0; i < records.length; i += 3) {
+        changes.push({ time: records[i], level: records[i + 1], millivolts: records[i + 2] });
+    }
+    return changes;
+}
+
+const bootChanges = scopeChanges(0);
+equal(bootChanges.map(change => change.level).join(","), "0,1", "the analyzer records BOOT pressed, then released");
+check(bootChanges[1]?.time > bootChanges[0]?.time, "... in the order of their times");
+equal(bootChanges.map(change => change.millivolts).join(","), "0,3300", "... with the voltage after each change");
+equal(scopeChanges(5).map(change => change.level).join(","), "1,0", "... and the pin the page forced, then let go");
+const lastScope = scopeMessages[scopeMessages.length - 1];
+equal(lastScope.levels[0], 1, "... each message gives the level of every pin now");
+equal(lastScope.millivolts[0], 3300, "... and its voltage");
 
 socket.close();
 device.close();

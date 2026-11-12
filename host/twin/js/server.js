@@ -45,6 +45,13 @@
 //                                  transfers of the program (bytes as arrays of numbers;
 //                                  the first 32 of each); a page that connects gets
 //                                  what is kept, then the new records
+//   twin.scope.data twin -> page   { now, levels, millivolts, changes: [{ pin, records,
+//                                  dropped, droppedUntil }] }: what the pins did
+//                                  since the last message, for the analyzer, every
+//                                  POLL_MS (times in µs since the twin started;
+//                                  records [time, level, millivolts, ...]; dropped:
+//                                  changes after the records, only counted, the last
+//                                  at droppedUntil; levels, millivolts: every pin now)
 //   twin.tcp.listen page -> twin   { kind: "uart" | "usb", index, port, listen }: the
 //                                  TCP link of a UART or of a USB serial function
 //                                  (the twin keeps the choice in its storage folder)
@@ -423,10 +430,21 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
         }
     }
 
-    // push the traffic, and the state when it changed, to the pages
+    // what the pins did since the last turn, to every page (none open: read
+    // all the same, so that a page that connects starts from now)
+    function pushScope() {
+        const scope = twinboard.scope();
+        if (sockets.size > 0) {
+            broadcast("twin.scope.data", scope);
+        }
+    }
+
+    // push the traffic, what the pins did, and the state when it changed, to
+    // the pages
     setInterval(() => {
         pushTraffic();
         pushI2c();
+        pushScope();
         if (sockets.size === 0) {
             return;
         }

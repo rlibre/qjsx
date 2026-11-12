@@ -420,6 +420,75 @@ html:not(.x4theme-dark) {
 	}
 }
 
+// ### The analyzer of the pins (scopeview.ts) ################################
+
+// the colors of the traces, on the black of the view (a scope's): on :root,
+// for the menus of the pins too, which are not inside the panel
+:root {
+	--scope-color-0: #ffd60a;   // yellow
+	--scope-color-1: #22d3ee;   // cyan
+	--scope-color-2: #f472b6;   // magenta
+	--scope-color-3: #4ade80;   // green
+	--scope-color-4: #fb923c;   // orange
+	--scope-color-5: #a78bfa;   // violet
+	--scope-color-6: #60a5fa;   // blue
+	--scope-color-7: #f87171;   // red
+}
+
+// the swatch of a color: on the button of a pin, on the colors of its menu
+// (important: over the border x4 gives an outline button and a menu item)
+.scope-swatch {
+	border-left: 6px solid var(--swatch-color) !important;
+}
+
+@for $color from 0 through 7 {
+	.scope-swatch-#{$color} {
+		--swatch-color: var(--scope-color-#{$color});
+	}
+}
+
+// it fills its panel: the tool bar (on several lines when narrow), then the
+// traces on black in the room left; the colors of the drawing are read from
+// these variables
+.scope {
+	height: 100%;
+	overflow: hidden;
+	--scope-text: #a0a0a0;
+	--scope-grid: #2a2a2a;
+
+	.scope-bar {
+		flex-shrink: 0;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 4px 6px;
+		padding: 3px 8px;
+		border-bottom: 1px solid var(--border);
+		background: var(--background-ternary);
+
+		> * {
+			flex-shrink: 0;
+		}
+
+		.x4button {
+			min-width: 0;
+			padding: 1px 8px;
+		}
+	}
+
+	.scope-channels {
+		gap: 4px;
+		flex-wrap: wrap;
+	}
+
+	// x4's canvas is placed absolutely in its component, which is not
+	// positioned itself: without this, it covers the tool bar
+	.scope-canvas {
+		position: relative;
+		min-height: 0;
+		background: #000;
+	}
+}
+
 // ### The knobs of a part (partview.ts) #######################################
 
 .board .part {
