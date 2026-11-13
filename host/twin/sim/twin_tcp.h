@@ -10,8 +10,8 @@
 // device (twin_usb.cpp) through a TCP port of the PC, one client at a time.
 //
 // The page chooses each port and turns its listening on or off; the choices
-// are kept in <storage>/twin.json and read again at the next start (nothing
-// listens the first time). "qjsx agent --uart-port" / "--usb-port" make a
+// are kept in <storage>/twin.json (twin_choices.cpp) and read again at the
+// next start (nothing listens the first time). "qjsx agent --uart-port" / "--usb-port" make a
 // group listen from the start instead, on consecutive ports, and nothing of
 // that group is saved during that run.
 //
@@ -143,12 +143,11 @@ private:
 void registerTcpLink(TcpLink *link);
 
 /**
- * Reads the choices kept in '<storage>/twin.json' (persisted links take
- * them; the others keep them to write back) and starts the "twin tcp"
- * thread, listening on 'host'. 'storage' must live as long as the process.
- * False after printing why.
+ * The persisted links take their choices kept in twin.json (choicesLoad()
+ * read it), then the "twin tcp" thread starts, listening on 'host'. False
+ * after printing why.
  */
-bool startTcp(const char *host, const char *storage);
+bool startTcp(const char *host);
 
 /**
  * The link 'key', or nullptr.

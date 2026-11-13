@@ -9,7 +9,8 @@
 // hardware would take (its ticks over the resolution), then the done handler
 // is called on a thread of its own, as the event task of a board would. What
 // is sent goes to the components through the bridge (twin.h): the bytes of
-// sendBytes (a WS2812 decodes its colors), the pulses of sendPulses.
+// sendBytes (a WS2812 decodes its colors), the pulses of sendPulses; and to
+// the analyzer, as sent, with the time it started (twin::scopeRecordTrain).
 //
 // Threads: open / close / send on the JS thread; the "twin rmt" thread waits
 // for the end of the sends and calls the done handler; channelLock protects
@@ -206,10 +207,13 @@ bool sendPulses(int channel, const Pulse *pulses, size_t count) {
     if (!startSend(channel, ticks)) {
         return false;
     }
+    int64_t startUs = twin::scopeNowUs();
 
-    // the pulses, packed, for the components watching that pin
+    // the pulses, packed, for the analyzer and the components watching that
+    // pin
     channelLock.lock();
     int pin = channels[channel].pin;
+    uint32_t resolutionHz = channels[channel].resolutionHz;
     channelLock.unlock();
     size_t size = count * 5;
     uint8_t *packed = (uint8_t *)memory::allocate(size > 0 ? size : 1);
@@ -221,6 +225,8 @@ bool sendPulses(int channel, const Pulse *pulses, size_t count) {
         entry[4] = (uint8_t)(pulses[i].level != 0 ? 1 : 0);
     }
 
+    twin::ScopeTrain train = { pin, startUs, resolutionHz, false, {}, {}, 0, packed, size };
+    twin::scopeRecordTrain(&train);
     twin::bridgePost(twin::BridgeEvent::rmtPulses, pin, packed, size);
     memory::release(packed);
     return true;
@@ -243,11 +249,18 @@ bool sendBytes(int channel, const uint8_t *bytes, size_t size, BitTiming bit0, B
     if (!startSend(channel, ticks)) {
         return false;
     }
+    int64_t startUs = twin::scopeNowUs();
 
-    // the bytes, for the components watching that pin (a WS2812 decodes them)
+    // the bytes, for the analyzer (with the timing of their bits) and the
+    // components watching that pin (a WS2812 decodes them)
     channelLock.lock();
     int pin = channels[channel].pin;
+    uint32_t resolutionHz = channels[channel].resolutionHz;
     channelLock.unlock();
+    // (the bytes are only copied by scopeRecordTrain, never written: the cast
+    // drops a const the struct cannot hold, its kept copies being owned)
+    twin::ScopeTrain train = { pin, startUs, resolutionHz, true, bit0, bit1, resetTicks, (uint8_t *)bytes, size };
+    twin::scopeRecordTrain(&train);
     twin::bridgePost(twin::BridgeEvent::rmtBytes, pin, bytes, size);
     return true;
 }

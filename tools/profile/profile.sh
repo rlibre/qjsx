@@ -11,11 +11,13 @@
 # profiles the functions where the JS thread was found, with their share of
 # the samples (addresses turned into names by addr2line: the innermost
 # function when code was inlined).
-#   bash tools/profile/profile.sh [Release|Debug] [lines per profile, default 12] [script]
+#   bash tools/profile/profile.sh [Profile|Debug] [lines per profile, default 12] [script]
 # e.g. tools/profile/workload-profiled.js for the heavier workload. Run from
-# the root of the repository, with nothing else heavy running.
+# the root of the repository, with nothing else heavy running. Profile is the
+# code of Release with its debug info (make -C build config=profile): Release
+# itself has none, addr2line could not name its functions.
 set -e
-CONFIG=${1:-Release}
+CONFIG=${1:-Profile}
 TOP=${2:-12}
 SCRIPT=${3:-tools/profile/bench.js}
 EXE=bin/$CONFIG/qjsx-tests.exe

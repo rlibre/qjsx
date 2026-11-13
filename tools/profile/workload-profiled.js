@@ -7,7 +7,7 @@
 
 // tools/profile/workload.js under the sampler of qjsx-tests (module
 // "profile_test"): one profile per part, for tools/profile/profile.sh:
-//   bash tools/profile/profile.sh Release 15 tools/profile/workload-profiled.js
+//   bash tools/profile/profile.sh Profile 15 tools/profile/workload-profiled.js
 import { start, stop } from "profile_test";
 
 const SAMPLES_PER_SECOND = 10000;

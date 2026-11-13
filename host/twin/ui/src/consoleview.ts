@@ -8,6 +8,7 @@
 // The console of the parts: the lines their models log (part.log) and the
 // errors of their code (twin.log), the newest at the bottom, MAX_LINES kept.
 import { BoxProps, Button, Flex, HBox, Label, VBox } from "x4js";
+import { LogView } from "./controls/logview";
 import { LogLine } from "./messages";
 import { tx } from "./texts";
 
@@ -15,7 +16,7 @@ import { tx } from "./texts";
 const MAX_LINES = 500;
 
 export class ConsoleView extends VBox {
-    declare protected refs: { lines: VBox };
+    declare protected refs: { lines: LogView };
 
     private _lines: Label[] = [];   // the lines shown, oldest first
 
@@ -27,7 +28,7 @@ export class ConsoleView extends VBox {
 
         // the lines, then a status bar under them
         this.setContent([
-            this.refs.lines = new VBox({ cls: "console-lines", flex: true }),
+            this.refs.lines = new LogView({ cls: "console-lines", flex: true }),
             new HBox({ cls: "console-bar", content: [
                 new Flex(),
                 new Button({ cls: "outline", label: tx.twin.console_clear, click: () => this.clear() }),
@@ -36,7 +37,8 @@ export class ConsoleView extends VBox {
     }
 
     /**
-     * A line of a part, at the bottom (scrolled into view).
+     * A line of a part, at the bottom (in view unless the user scrolled up:
+     * LogView).
      */
     addLine(line: LogLine) {
         // the line: "[id] text"
@@ -48,7 +50,9 @@ export class ConsoleView extends VBox {
         while (this._lines.length > MAX_LINES) {
             this.refs.lines.removeChild(this._lines.shift());
         }
-        label.scrollIntoView();
+
+        // the newest in view
+        this.refs.lines.followNewest();
     }
 
     /**
@@ -56,6 +60,6 @@ export class ConsoleView extends VBox {
      */
     clear() {
         this._lines = [];
-        this.refs.lines.clearContent();
+        this.refs.lines.clearLines();
     }
 }

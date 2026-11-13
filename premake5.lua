@@ -6,7 +6,13 @@
 
 -- qjsx build (desktop).
 --   premake5 gmake --cc=gcc --shell=posix
---   make -C build config=release        (or config=debug)
+--   make -C build config=release        (or config=debug, config=profile)
+--
+-- Configurations:
+--   Debug     no optimization, debug info, asserts (JS_FreeRuntime checks for leaks)
+--   Release   optimized, no debug info, symbols stripped: what is delivered
+--   Profile   the code of Release with its debug info, for tools/profile/profile.sh
+--             (addr2line turns the sampled addresses into function names)
 --
 -- Projects:
 --   qjsx-engine         the engine (engine/qjsx: QuickJS split and modified for qjsx), static library
@@ -38,7 +44,7 @@ TWIN_UI_INPUTS = table.filter(TWIN_UI_INPUTS, function(file)
 end)
 
 workspace "qjsx"
-    configurations { "Debug", "Release" }
+    configurations { "Debug", "Release", "Profile" }
     location "build"
     targetdir "bin/%{cfg.buildcfg}"
     objdir "build/obj/%{prj.name}/%{cfg.buildcfg}"
@@ -49,6 +55,12 @@ workspace "qjsx"
         optimize "Off"
 
     filter "configurations:Release"
+        defines { "NDEBUG" }
+        symbols "Off"
+        optimize "Speed"
+        linkoptions { "-s" }
+
+    filter "configurations:Profile"
         defines { "NDEBUG" }
         symbols "On"
         optimize "Speed"
@@ -260,10 +272,6 @@ hostApplication("qjsx-runtime", "qjsx-engine-target", { "host/runtime/*.cpp" },
     { "host/main.cpp", "host/agent_command.cpp", "host/modules/compiler_module.cpp",
       "host/twin/sim/*.cpp", "common/device/gpio_module.cpp", "common/device/rmt_module.cpp",
       "common/device/usb_module.cpp", "common/device/i2c_module.cpp", "common/device/adc_module.cpp",
-      "host/js/*.js", "host/twin/js/*.js",
+      "common/device/pwm_module.cpp", "host/js/*.js", "host/twin/js/*.js",
       "host/twin/api/twin.js", "host/twin/parts/*/model.js", "host/twin/ui/x4.config.json", "lib/stdlib/src/*.js" },
     { "QJSX_NO_COMPILER" })
-    -- it is copied into every executable made: no debug symbols in Release
-    filter "configurations:Release"
-        linkoptions { "-s" }
-    filter {}

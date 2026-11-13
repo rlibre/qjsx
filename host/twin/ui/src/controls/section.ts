@@ -6,10 +6,14 @@
  */
 
 // A section of the board view that folds: a title line (a chevron, an icon,
-// the title, a short summary of the state, kept visible when folded) and a
-// body. A click on the title line folds or unfolds it; the browser keeps
-// whether it is open (loadPState), open the first time.
-import { BoxProps, ComponentContent, HBox, Icon, Label, VBox } from "x4js";
+// the title, a short summary of the state, kept visible when folded, then
+// the tools of the section at the right: a button with its menu...) and a
+// body. A click on the title line folds or unfolds it (not a click on a
+// tool); the browser keeps whether it is open (loadPState), open the first
+// time. The title line can be dragged (x4js dragManager): the view that
+// holds the sections moves them (boardview.ts) and keeps their order by
+// their key (the name given as 'persist').
+import { BoxProps, Component, ComponentContent, dragManager, HBox, Icon, Label, VBox } from "x4js";
 
 import chevronIcon from "../assets/chevron.svg";
 
@@ -17,12 +21,13 @@ export interface SectionProps extends BoxProps {
     title:   string;             // shown in bold
     persist: string;             // name under which the browser keeps whether it is open
     icon?:   string;             // an svg before the title
+    tools?:  Component[];        // at the right of the title line (a button stops its click)
 }
 
 export class Section extends VBox<SectionProps> {
     static classPrefix = "twin";
 
-    declare protected refs: { title: Label; summary: Label; body: VBox };
+    declare protected refs: { header: HBox; title: Label; summary: Label; body: VBox };
 
     private _state: { open: boolean };   // kept by the browser
 
@@ -36,7 +41,7 @@ export class Section extends VBox<SectionProps> {
         this._state = this.loadPState(`qjsx.twin.section.${props.persist}`, { open: true });
 
         this.setContent([
-            new HBox({
+            this.refs.header = new HBox({
                 cls: "section-header",
                 dom_events: { click: () => this.toggle() },
                 content: [
@@ -44,12 +49,23 @@ export class Section extends VBox<SectionProps> {
                     props.icon ? new Icon({ cls: "section-icon", iconId: props.icon }) : null,
                     this.refs.title = new Label({ cls: "section-title", text: props.title }),
                     this.refs.summary = new Label({ cls: "section-summary", flex: true, text: "" }),
+                    ...(props.tools ?? []),
                 ],
             }),
             this.refs.body = new VBox({ cls: "section-body", content: props.content }),
         ]);
 
         this._showState();
+
+        // dragged by its title line
+        dragManager.registerDraggableElement(this.refs.header);
+    }
+
+    /**
+     * The key of the section (its 'persist' name), for the order kept.
+     */
+    get key(): string {
+        return this.props.persist;
     }
 
     /**

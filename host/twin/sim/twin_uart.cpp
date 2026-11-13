@@ -8,18 +8,21 @@
 // The UARTs of the digital twin (see twin.h, "UARTs"): the driver of
 // device/serial in the twin (hal_serial.h), their TCP links (twin_tcp.h:
 // the port chosen on the page, or "qjsx agent --board ... --uart-port 8093":
-// UART n on 8093 + n) and their traffic for the page.
+// UART n on 8093 + n), their wiring to PC serial ports (twin_uart_serial.cpp,
+// told when the program opens, writes, closes) and their traffic for the
+// page.
 //
 // Each UART keeps:
 //   - a receive buffer, as the driver of a real UART: the bytes from the TCP
-//     client and from the page wait there for the program's reader thread
-//     (past 4 KB, the bytes are lost, said on stderr);
+//     client, the page and the PC serial port wait there for the program's
+//     reader thread (past 4 KB, the bytes are lost, said on stderr);
 //   - its records: what the program wrote and what it received, numbered,
 //     the last 16 KB, for the page.
 //
 // Threads: open / write / close / list on the JS thread of the program;
 // read on its reader thread; the "twin tcp" thread gives what the TCP
-// clients send; uartStates / uartTraffic / uartSend on the page's thread.
+// clients send; "twin serial <n>" what the PC port receives; uartStates /
+// uartTraffic / uartReceive on the page's thread.
 // Each UART has its own lock, which also wakes its reader.
 #include "twin.h"
 #include "memory.h"
@@ -212,6 +215,8 @@ hal::serial::Port *openPort(const char *, int number, const hal::serial::Setting
         return nullptr;
     }
 
+    // a wired PC port opens with these settings
+    twin::serialUartOpened(number, settings);
     return &uart->port;
 }
 
@@ -240,8 +245,9 @@ int readPort(hal::serial::Port *port, uint8_t *buffer, size_t size) {
 }
 
 /**
- * Records the bytes and sends them to the TCP client, if any (a send that
- * fails is ignored: the thread sees the client go).
+ * Records the bytes, sends them to the TCP client, if any (a send that fails
+ * is ignored: the thread sees the client go), and to the PC serial port the
+ * UART is wired to, if any (at real speed, waits the time of the line).
  */
 bool writePort(hal::serial::Port *port, const uint8_t *data, size_t size) {
     Uart *uart = &uartTable[port->number];
@@ -251,6 +257,7 @@ bool writePort(hal::serial::Port *port, const uint8_t *data, size_t size) {
     uart->lock.unlock();
 
     uart->tcp.send(data, size);
+    twin::serialUartWrite(port->number, data, size);
     return true;
 }
 
@@ -265,6 +272,9 @@ void closePort(hal::serial::Port *port) {
     uart->receivedCount = 0;
     uart->lock.notify();
     uart->lock.unlock();
+
+    // a wired PC port closes
+    twin::serialUartClosed(port->number);
 }
 
 /**
@@ -341,6 +351,7 @@ void uartStates(UartState *states, int count) {
 
         TcpState none = { 0, false, false, false, "" };
         states[i].tcp = uart->link ? none : uart->tcp.state();
+        serialState(i, &states[i].serial);
     }
 }
 
@@ -366,15 +377,15 @@ uint32_t uartTraffic(int number, uint32_t after, TrafficVisitor *visit, void *co
 }
 
 /**
- * The page sends bytes to the program.
+ * Bytes for the program (the page, the PC serial port).
  */
-bool uartSend(int number, const uint8_t *bytes, size_t size) {
+bool uartReceive(int number, UartSource source, const uint8_t *bytes, size_t size) {
     Uart *uart = uartAt(number);
     if (uart == nullptr || uart->link) {
         return false;
     }
 
-    return deliver(uart, UartSource::page, bytes, size);
+    return deliver(uart, source, bytes, size);
 }
 
 } // namespace twin

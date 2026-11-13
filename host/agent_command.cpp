@@ -12,7 +12,7 @@
 //
 //   qjsx agent [--host 127.0.0.1] [--port 5555] [--storage build/agent] [--token secret]
 //              [--board <name | file.json>] [-p | --project <folder>] [--ui-port 8090]
-//              [--usb-port <port>] [--uart-port <port>]
+//              [--usb-port <port>] [--uart-port <port>] [--uart-serial <uart>=<PC port>]...
 //
 // With --board, the agent is the digital twin of that board (host/twin/sim/twin.h):
 // a program sees the board's native modules (device/gpio, device/rmt,
@@ -25,6 +25,12 @@
 // <storage>/twin.json; nothing listens the first time. --usb-port and
 // --uart-port make them listen from the start instead (function n of the
 // USB device, UART n, on that port + n; tests and scripts), without saving.
+// A UART can also be wired to a real serial port of the PC
+// (host/twin/sim/twin_uart_serial.cpp): chosen on the page, or from the
+// start, at real speed and without saving, by --uart-serial 1=COM5 (once
+// per UART) or "twin.uarts" of qjsx.json ({ "1": "COM5" }, or { "1": {
+// "port": "COM5", "realSpeed": false } }); the command line wins, UART by
+// UART.
 //
 // The twin of a project: "qjsx agent" in the folder of a project whose
 // qjsx.json has a "twin" section (or "qjsx agent -p <folder>" from
@@ -61,6 +67,13 @@ JSModuleDef *jsNewModule_twinboard(JSContext *ctx, const char *moduleName);
 
 namespace {
 
+// A UART wired to a PC serial port from the start (--uart-serial, "twin.uarts").
+struct SerialWiring {
+    int         uart;                     // the UART
+    const char *port;                     // the PC port (borrowed from argv, or owned)
+    bool        realSpeed;                // the program's writes take the time of the line
+};
+
 /**
  * Options of "qjsx agent", with their defaults.
  */
@@ -75,6 +88,8 @@ struct Options {
     int         usbPort = 0;              // TCP port of serial function 0 of the twin's USB device; 0: the page's choice
     int         uartPort = 0;             // TCP port of UART 0 of the twin; 0: the page's choice
     const char *uiDir = nullptr;          // hidden: folder the page is served from; nullptr: the embedded one
+    SerialWiring wirings[twin::MAX_UARTS];   // UARTs wired to PC serial ports from the start
+    int         wiringCount = 0;          // entries of wirings
     bool        portGiven = false;        // the command line gave --port (wins over the project's)
     bool        uiPortGiven = false;      // ... --ui-port
     bool        usbPortGiven = false;     // ... --usb-port
@@ -90,7 +105,7 @@ const char *const PROJECT_FILE = "qjsx.json";
 
 const char *const USAGE = "usage: qjsx agent [--host 127.0.0.1] [--port 5555] [--storage build/agent] "
                           "[--token secret] [--board <name | file.json>] [-p | --project <folder>] [--ui-port 8090] "
-                          "[--usb-port <port>] [--uart-port <port>]\n";
+                          "[--usb-port <port>] [--uart-port <port>] [--uart-serial <uart>=<PC port>]...\n";
 
 // The command line of the twin's page thread ("qjsx twin-ui ..."), kept for
 // the life of the process.
@@ -109,7 +124,49 @@ struct ProjectTwin {
     int   uiPort;           // "ports.ui"; 0: not given
     int   usbPort;          // "ports.usb"; 0: not given
     int   uartPort;         // "ports.uart"; 0: not given
+    SerialWiring wirings[twin::MAX_UARTS];   // "uarts": UARTs wired to PC serial ports (ports owned)
+    int   wiringCount;      // entries of wirings
 };
+
+/**
+ * Adds a wiring to 'list' ('count' entries), replacing the one of the same
+ * UART; false when the list is full.
+ */
+bool addWiring(SerialWiring *list, int *count, SerialWiring wiring) {
+    for (int i = 0; i < *count; i++) {
+        if (list[i].uart == wiring.uart) {
+            list[i] = wiring;
+            return true;
+        }
+    }
+
+    if (*count >= twin::MAX_UARTS) {
+        return false;
+    }
+
+    list[(*count)++] = wiring;
+    return true;
+}
+
+/**
+ * Reads "<uart>=<PC port>" (--uart-serial) into *wiring, at real speed;
+ * false when it is not that.
+ */
+bool parseWiring(char *text, SerialWiring *wiring) {
+    char *equal = strchr(text, '=');
+    if (equal == nullptr || equal == text || equal[1] == 0) {
+        return false;
+    }
+
+    char *end = nullptr;
+    long uart = strtol(text, &end, 10);
+    if (end != equal || uart < 0 || uart >= twin::MAX_UARTS) {
+        return false;
+    }
+
+    *wiring = SerialWiring{ (int)uart, equal + 1, true };
+    return true;
+}
 
 /**
  * Reads the options that follow "qjsx agent" into *options (missing ones keep
@@ -147,6 +204,13 @@ bool parseOptions(int argc, char **argv, Options *options) {
             options->uartPortGiven = true;
         } else if (strcmp(argv[i], "--ui-dir") == 0 && hasValue) {
             options->uiDir = argv[++i];
+        } else if (strcmp(argv[i], "--uart-serial") == 0 && hasValue) {
+            SerialWiring wiring;
+            bool valid = parseWiring(argv[++i], &wiring) && addWiring(options->wirings, &options->wiringCount, wiring);
+            if (!valid) {
+                fprintf(stderr, "qjsx agent: --uart-serial %s: expected <uart>=<PC port>, as 1=COM5\n", argv[i]);
+                return false;
+            }
         } else {
             fputs(USAGE, stderr);
             return false;
@@ -188,6 +252,56 @@ bool readPort(JSContext *ctx, JSValueConst object, const char *name, const char 
 
     *out = port;
     return true;
+}
+
+/**
+ * Reads "twin.uarts" of qjsx.json ({ "1": "COM5", "2": { "port": "COM6",
+ * "realSpeed": false } }) into twin->wirings. False after printing why.
+ */
+bool readWirings(JSContext *ctx, JSValueConst uarts, const char *file, ProjectTwin *twin) {
+    // each property: a UART number, then a port or { port, realSpeed }
+    JSPropertyEnum *properties = nullptr;
+    uint32_t count = 0;
+    if (JS_GetOwnPropertyNames(ctx, &properties, &count, uarts, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0) {
+        return false;
+    }
+
+    bool ok = true;
+    for (uint32_t i = 0; ok && i < count; i++) {
+        // the UART
+        const char *key = JS_AtomToCString(ctx, properties[i].atom);
+        char *end = nullptr;
+        long uart = key != nullptr ? strtol(key, &end, 10) : -1;
+        bool validUart = key != nullptr && end != key && *end == 0 && uart >= 0 && uart < twin::MAX_UARTS;
+
+        // its port, and the speed
+        JSValue value = JS_GetProperty(ctx, uarts, properties[i].atom);
+        JSValue portValue = JS_IsObject(value) ? JS_GetPropertyStr(ctx, value, "port") : JS_DupValue(ctx, value);
+        JSValue speedValue = JS_IsObject(value) ? JS_GetPropertyStr(ctx, value, "realSpeed") : JS_UNDEFINED;
+        const char *port = JS_IsString(portValue) ? JS_ToCString(ctx, portValue) : nullptr;
+        bool validPort = port != nullptr && port[0] != 0;
+        bool validSpeed = JS_IsUndefined(speedValue) || JS_IsBool(speedValue);
+
+        ok = validUart && validPort && validSpeed;
+        if (ok) {
+            bool realSpeed = JS_IsUndefined(speedValue) || JS_ToBool(ctx, speedValue) == 1;
+            SerialWiring wiring = { (int)uart, memory::copyText(port, strlen(port)), realSpeed };
+            ok = addWiring(twin->wirings, &twin->wiringCount, wiring);
+        }
+        if (!ok) {
+            fprintf(stderr, "qjsx agent: %s: \"twin.uarts.%s\" must be a PC port (\"COM5\") or { \"port\", \"realSpeed\" }\n",
+                    file, key != nullptr ? key : "?");
+        }
+
+        JS_FreeCString(ctx, port);
+        JS_FreeValue(ctx, speedValue);
+        JS_FreeValue(ctx, portValue);
+        JS_FreeValue(ctx, value);
+        JS_FreeCString(ctx, key);
+    }
+
+    JS_FreePropertyEnum(ctx, properties, count);
+    return ok;
 }
 
 /**
@@ -241,6 +355,17 @@ bool readProjectTwin(const char *folder, ProjectTwin *twin) {
         }
 
         JS_FreeValue(ctx, ports);
+
+        // the UARTs wired to PC serial ports
+        JSValue uarts = JS_GetPropertyStr(ctx, section, "uarts");
+        if (ok && JS_IsObject(uarts)) {
+            ok = readWirings(ctx, uarts, file, twin);
+        } else if (ok && !JS_IsUndefined(uarts)) {
+            fprintf(stderr, "qjsx agent: %s: \"twin.uarts\" must be an object ({ \"1\": \"COM5\" })\n", file);
+            ok = false;
+        }
+
+        JS_FreeValue(ctx, uarts);
     }
 
     JS_FreeValue(ctx, section);
@@ -303,6 +428,17 @@ bool applyProject(Options *options) {
         options->uartPort = twin.uartPort;
     }
 
+    // the wired UARTs the command line did not wire
+    for (int i = 0; i < twin.wiringCount; i++) {
+        bool given = false;
+        for (int j = 0; j < options->wiringCount; j++) {
+            given = given || options->wirings[j].uart == twin.wirings[i].uart;
+        }
+        if (!given) {
+            addWiring(options->wirings, &options->wiringCount, twin.wirings[i]);
+        }
+    }
+
     // the storage in the project when it is elsewhere
     if (options->projectGiven && !options->storageGiven) {
         options->storage = joinPath(folder, "build/agent");
@@ -351,13 +487,38 @@ void runTwinUi(void *argument) {
 }
 
 /**
+ * The UARTs wired to PC serial ports from the start, checked (a UART of the
+ * board, not the agent's link) and given to the twin. False after printing
+ * why.
+ */
+bool fixWirings(const Options *options) {
+    for (int i = 0; i < options->wiringCount; i++) {
+        const SerialWiring *wiring = &options->wirings[i];
+        if (wiring->uart >= twin::uartCount()) {
+            fprintf(stderr, "qjsx agent: the board has no UART %d to wire to %s\n", wiring->uart, wiring->port);
+            return false;
+        }
+        if (wiring->uart == twin::linkUartNumber()) {
+            fprintf(stderr, "qjsx agent: UART %d is the agent's link of the board: it cannot be wired to %s\n",
+                    wiring->uart, wiring->port);
+            return false;
+        }
+
+        twin::serialFix(wiring->uart, wiring->port, wiring->realSpeed);
+    }
+
+    return true;
+}
+
+/**
  * Makes this agent the twin of options->board:
  * 1. loads the board;
  * 2. registers its simulated modules and the page's module, keeps only the
  *    board's native modules for the program (before any JS runtime exists:
  *    the registry is not thread-safe);
- * 3. gives device/serial the board's UARTs; sets up the TCP links of the
- *    UARTs and of the USB functions;
+ * 3. gives device/serial the board's UARTs; reads the choices kept in the
+ *    storage folder; sets up the TCP links of the UARTs and of the USB
+ *    functions, and the wiring of the UARTs to PC serial ports;
  * 4. starts the page on a thread of its own.
  * False after printing why.
  */
@@ -376,6 +537,7 @@ bool startTwin(const char *executable, const Options *options) {
     rt::registerNativeModule("device/usb", &jsNewModule_usb);
     rt::registerNativeModule("device/i2c", &jsNewModule_i2c);
     rt::registerNativeModule("device/adc", &jsNewModule_adc);
+    rt::registerNativeModule("device/pwm", &jsNewModule_pwm);
     rt::registerNativeModule("qjsx:twinboard", &jsNewModule_twinboard);
     rt::setDeviceNativeModules(twin::natives(), twin::nativeCount());
 
@@ -383,11 +545,12 @@ bool startTwin(const char *executable, const Options *options) {
     // set those)
     setSerialDriver(twin::serialDriver());
 
-    // the TCP links of the UARTs and of the USB functions, with the choices
-    // kept in the storage folder
+    // the choices kept in the storage folder, then the TCP links of the
+    // UARTs and of the USB functions, and the wiring of the UARTs
+    twin::choicesLoad(options->storage);
     twin::setupUarts(options->host, options->uartPort);
     twin::setupUsb(options->host, options->usbPort);
-    if (!twin::startTcp(options->host, options->storage)) {
+    if (!twin::startTcp(options->host) || !fixWirings(options) || !twin::setupSerial()) {
         return false;
     }
 

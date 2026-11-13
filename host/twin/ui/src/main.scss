@@ -13,9 +13,14 @@
 	--font-size: 12px;
 }
 
+// the page is the window: it never scrolls itself (its panels do). Without
+// this, the copy of a section's title line that follows the pointer while
+// it is dragged (x4js dragManager adds it to the body) gives the whole page
+// scroll bars when it passes the edge of the window
 html, body {
 	height: 100%;
 	margin: 0;
+	overflow: hidden;
 }
 
 // the main view (x4flex) fills the window; the page paints its own
@@ -162,24 +167,46 @@ html:not(.x4theme-dark) {
 
 // ### The pins ###############################################################
 
+// the table keeps its width: a panel narrower than it scrolls horizontally,
+// the header with the rows (the rows alone scroll vertically). The columns
+// are resized from the header (x4js Header, pintable.ts): it sets their
+// widths as --pin-<column>-width on the table, the cells of the rows take
+// them; header cells and row cells have the same side padding (4px) and no
+// gap between them, so that they line up (x4 boxes are border-box).
 .pins {
 	padding: 8px;
 	gap: 6px;
-	overflow: hidden;
+	overflow-x: auto;
+	overflow-y: hidden;
+
+	// x4js gives its header the width of the panel (100%, the rest hidden),
+	// and the part column what is left of it; below the fixed columns and
+	// 60px for the part, the header stops shrinking and the panel scrolls
+	.pin-header {
+		min-width: calc(var(--pin-number-width) + var(--pin-level-width) + var(--pin-mode-width) +
+		                var(--pin-pull-width) + var(--pin-force-width) + 60px);
+
+		.cell {
+			font-weight: bold;
+		}
+	}
 
 	.rows {
-		overflow: auto;
+		overflow-y: auto;
 		flex: 1;
+		min-width: max-content;
 	}
 
 	.pin-row {
 		align-items: center;
-		gap: 6px;
 		padding: 2px 0;
+		min-width: max-content;
+		white-space: nowrap;
 
-		&.header {
-			font-weight: bold;
-			border-bottom: 1px solid var(--border);
+		> * {
+			flex-shrink: 0;
+			padding: 0 4px;
+			overflow: hidden;
 		}
 
 		&.forced {
@@ -197,11 +224,12 @@ html:not(.x4theme-dark) {
 		}
 	}
 
-	.number { width: 40px; text-align: right; }
-	.mode { width: 90px; }
-	.pull { width: 44px; }
-	.part-name { width: 90px; }
-	.force { margin-left: auto; }
+	.number { width: var(--pin-number-width); text-align: right; }
+	.level-cell { width: var(--pin-level-width); }
+	.mode { width: var(--pin-mode-width); }
+	.pull { width: var(--pin-pull-width); }
+	.part-name { width: var(--pin-part-width); }
+	.force { width: var(--pin-force-width); }
 
 	.level {
 		width: 12px;
@@ -212,10 +240,6 @@ html:not(.x4theme-dark) {
 		&.high {
 			background: #3c3;
 		}
-	}
-
-	.pin-row.header .level {
-		background: none;
 	}
 
 	// the force buttons: one segmented control, every button the same height
@@ -253,6 +277,22 @@ html:not(.x4theme-dark) {
 	margin-top: 8px;
 }
 
+// where a dragged section would drop: a line above or under a section; the
+// title line shows it can be dragged
+.twinsection {
+	&.drop-before {
+		box-shadow: 0 -3px 0 var(--accent-color);
+	}
+
+	&.drop-after {
+		box-shadow: 0 3px 0 var(--accent-color);
+	}
+
+	&.dragging {
+		opacity: 0.5;
+	}
+}
+
 .twinsection {
 	border: 1px solid var(--border);
 	border-radius: 4px;
@@ -287,6 +327,27 @@ html:not(.x4theme-dark) {
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+
+	// the settings button of a section (a UART, an I2C bus): its icon alone,
+	// no border nor background (user); for a UART, the icon in the accent
+	// color when a link is on, red when one failed
+	.menu-button {
+		--ol-button-border: transparent;
+		--ol-button-border-focus: transparent;
+		--ol-button-background: transparent;
+		--ol-button-background-hover: transparent;
+		--ol-button-background-active: transparent;
+		min-width: 0;
+		padding: 1px 4px;
+
+		&.on {
+			--ol-button-icon-color: var(--accent-color);
+		}
+
+		&.error {
+			--ol-button-icon-color: var(--alert-background);
+		}
 	}
 
 	.section-body {
@@ -336,12 +397,56 @@ html:not(.x4theme-dark) {
 
 // ### The TCP links ##########################################################
 
-.tcp-control {
+// ### The links of a UART or of a USB function (tcpcontrol.ts, serialcontrol.ts)
+
+// the TCP link and the PC port: a field with its label (the same widths for
+// both, a TextEdit and a Combobox), a toggle button, an option, the status
+.tcp-control,
+.serial-control {
+	--link-label-width: 64px;
+	--link-field-width: 120px;
+	--link-action-width: 64px;
 	align-items: center;
 	gap: 6px;
 
-	.tcp-status.error {
+	.link-field > #label {
+		width: var(--link-label-width);
+		flex: none;
+	}
+
+	.x4textedit.link-field input,
+	.x4combobox.link-field > #edit {
+		width: var(--link-field-width);
+		flex: none;
+	}
+
+	.link-action {
+		min-width: var(--link-action-width);
+		justify-content: center;
+	}
+
+	.link-status.error {
 		color: var(--alert-background);
+	}
+}
+
+// a link of a UART, in a sub menu of the menu of its button: narrow, on
+// several lines (the field; the button and the option; the status), so that
+// the sub menu fits at the right of its menu (x4js pushes a sub menu that
+// does not fit back over its menu)
+.link-menu {
+	padding: 6px 8px;
+	white-space: nowrap;
+
+	.tcp-control,
+	.serial-control {
+		flex-wrap: wrap;
+		row-gap: 6px;
+		width: calc(var(--link-label-width) + var(--link-field-width) + 6px);
+	}
+
+	.link-field {
+		flex-basis: 100%;
 	}
 }
 
@@ -456,22 +561,53 @@ html:not(.x4theme-dark) {
 	--scope-text: #a0a0a0;
 	--scope-grid: #2a2a2a;
 
+	// two lines (user): its functions, then the pins
 	.scope-bar {
 		flex-shrink: 0;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 4px 6px;
+		gap: 4px;
 		padding: 3px 8px;
-		border-bottom: 1px solid var(--border);
+		border-top: 1px solid var(--border);
 		background: var(--background-ternary);
 
-		> * {
-			flex-shrink: 0;
+		.scope-bar-line {
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 4px 6px;
+
+			> * {
+				flex-shrink: 0;
+			}
 		}
 
-		.x4button {
+		// every control of the bar the same height (user): buttons, the
+		// Record toggle, the lists, the buttons of the pins
+		--scope-control-height: 24px;
+
+		.x4button,
+		.x4checkbox.button,
+		.x4select {
+			height: var(--scope-control-height);
+			box-sizing: border-box;
+			margin: 0;
+		}
+
+		.x4button,
+		.x4checkbox.button {
 			min-width: 0;
-			padding: 1px 8px;
+			padding: 0 8px;
+		}
+
+		// Run while it runs: filled in the accent color
+		.x4checkbox.button.scope-run {
+			--checkbox-button-background-checked: var(--accent-background);
+			--checkbox-button-color-checked: var(--accent-color);
+		}
+
+		// Record while it records: filled in the red of the alerts (x4's
+		// "danger" only tints it at 15 %, too faint to see it is on)
+		.x4checkbox.button.danger {
+			--checkbox-button-background-checked: var(--alert-background);
+			--checkbox-button-color-checked: var(--alert-color);
 		}
 	}
 
@@ -480,12 +616,28 @@ html:not(.x4theme-dark) {
 		flex-wrap: wrap;
 	}
 
+	// the traces scroll up and down in their room; the axis of the times
+	// stays under them; the small font of the scales (the times, the volts)
+	--scope-scale-font-size: 10px;
+
+	.scope-scroller {
+		min-height: 0;
+		overflow-x: hidden;
+		overflow-y: auto;
+		background: #000;
+	}
+
 	// x4's canvas is placed absolutely in its component, which is not
 	// positioned itself: without this, it covers the tool bar
-	.scope-canvas {
+	.scope-canvas,
+	.scope-axis {
 		position: relative;
-		min-height: 0;
+		flex: none;
 		background: #000;
+	}
+
+	.scope-axis {
+		height: 18px;
 	}
 }
 
@@ -522,16 +674,6 @@ html:not(.x4theme-dark) {
 
 .i2c-panel {
 	gap: 6px;
-
-	.i2c-bar {
-		align-items: center;
-		gap: 6px;
-
-		.x4button {
-			min-width: 0;
-			padding: 1px 8px;
-		}
-	}
 
 	// a fixed height, as the log of a UART: it scrolls, it does not grow
 	.i2c-log {

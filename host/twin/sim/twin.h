@@ -13,7 +13,8 @@
 // module of twin_module.cpp).
 //
 // A pin is a line whose level comes from what drives it, in this order:
-//   1. a push-pull output of the program drives its latch;
+//   1. a push-pull output of the program drives its latch, or a PWM output
+//      of the program its square signal (the level at that instant);
 //   2. an open drain of the program at 0 drives 0;
 //   3. the web page forces 0 or 1;
 //   4. a component (the model of a part, host/twin/js/twin.js) drives 0 or 1:
@@ -35,9 +36,11 @@
 #include <stdint.h>
 
 #include "hal_i2c.h"
+#include "hal_rmt.h"
 #include "hal_serial.h"
 #include "hal_usb.h"
 #include "loop.h"
+#include "quickjs.h"
 #include "twin_tcp.h"
 
 namespace twin {
@@ -56,6 +59,11 @@ struct PinState {
     bool    i2c;         // a bus of hal::i2c is open on it (sda or scl)
     bool    adc;         // the program has its analog input open (hal::adc)
     int16_t voltageMv;   // the voltage a component sets on it, in mV; -1: none (its level gives it)
+    bool    pwm;         // an output of hal::pwm drives it (open)
+    bool    pwmInvert;   // that output is active low (pwm)
+    double  pwmDuty;     // its duty cycle, 0 to 1: the share of a period it is active (pwm)
+    // its frequency, Hz, as the hardware makes it (pwm)
+    double  pwmFrequency;
 };
 
 /**
@@ -103,6 +111,35 @@ const char *const *natives();
  * How many native modules natives() gives.
  */
 int nativeCount();
+
+// ### Choices of the page (twin_choices.cpp) #################################
+//
+// What the page chooses for a link (the TCP port of a UART, the PC serial
+// port it is wired to...) is kept in <storage>/twin.json, one JSON object per
+// key ("uart1", "usb0", "serial1"), and read again at the next start. Each
+// link writes only its own key: the others keep what the file held.
+
+// Called by choicesRead() with the object kept for a key (a short-lived
+// context: copy what is needed).
+typedef void ChoiceReader(void *context, JSContext *ctx, JSValueConst choice);
+
+/**
+ * Reads '<storage>/twin.json' (a missing or broken file: no choice).
+ * 'storage' must live as long as the process. Before the links are set up.
+ */
+void choicesLoad(const char *storage);
+
+/**
+ * Calls 'read' with the object kept for 'key'; false (nothing called) when
+ * there is none. Any thread.
+ */
+bool choicesRead(const char *key, ChoiceReader *read, void *context);
+
+/**
+ * Keeps 'json' (an object, as JSON text) for 'key' and writes the file (a
+ * failure is said on stderr). Any thread.
+ */
+void choicesWrite(const char *key, const char *json);
 
 /**
  * Copies the state of the first 'count' pins into 'pins' (page thread).
@@ -164,6 +201,36 @@ void setAdc(int pin, bool open);
  */
 void partVoltage(int pin, int millivolts);
 
+// ### PWM outputs (twin_pwm.cpp) #############################################
+//
+// The board description says what its PWM has ("pwm": { "outputs",
+// "timers", "clock" (Hz), "maxBits" }, the LEDC of the ESP32-S3: 8, 4,
+// 80000000, 14); hal::pwm of the twin rounds and refuses as that hardware
+// (common/hal/pwm_timers.h). Without the section, the board has no PWM
+// output. The signal is not simulated edge by edge: a pin knows its
+// frequency, duty cycle and the time they were set, and its level is
+// computed at the instant it is asked.
+
+/**
+ * Reads "pwm" of the description (optional); false after printing what is
+ * wrong (load(), twin.cpp).
+ */
+bool pwmRead(JSContext *ctx, JSValueConst description, const char *path);
+
+/**
+ * An output of hal::pwm drives 'pin' at 'frequency' (Hz) and 'duty' (0 to 1
+ * active): from now when it starts or changes frequency, from its next
+ * period when only the duty cycle changes, as LEDC (twin_pwm.cpp, JS
+ * thread).
+ */
+void pwmDrive(int pin, bool invert, double frequency, double duty);
+
+/**
+ * The output on 'pin' stopped: the pin stays a program's output at its idle
+ * level (0, or 1 inverted), as on the board.
+ */
+void pwmStop(int pin, bool invert);
+
 // ### I2C buses (twin_i2c.cpp) ###############################################
 //
 // The buses the program opens, and the trace of its transfers for the page:
@@ -220,14 +287,48 @@ uint32_t i2cTrace(uint32_t after, I2cTraceVisitor *visit, void *context);
 // at most SCOPE_RECORDS changes: past that (a pin toggled faster than the
 // page follows), the changes are only counted, and the page draws them as a
 // "busy" band. Times are those of the PC, in µs since the twin started.
+//
+// A PWM output is not recorded edge by edge (at 20 kHz the records would be
+// full at once): its changes are recorded instead (started, another
+// frequency or duty cycle, stopped), and the page draws the signal itself
+// from them (user, 2026-11-13). While a PWM drives a pin, its level is not
+// recorded.
+//
+// An RMT send neither: it is kept as the hal got it (pulses, or bytes and
+// the timing of their bits) with the time it started, and the page computes
+// its edges (user, 2026-11-13: the pulses of a WS2812 last 0.4 µs, less
+// than the µs of the records). Between two reads, at most SCOPE_TRAINS sends
+// are kept (every pin together), the others dropped.
 
 const int SCOPE_RECORDS = 256;           // changes of a pin kept between two reads
+const int SCOPE_TRAINS = 1024;           // RMT sends kept between two reads
 
-// A change of a pin, or its state now.
+// An RMT send, for the analyzer.
+struct ScopeTrain {
+    int                 pin;             // the pin of the channel
+    int64_t             timeUs;          // when the send started, µs since the twin started
+    uint32_t            resolutionHz;    // ticks per second
+    bool                bytes;           // data: bytes (sendBytes); else pulses, 5 bytes each (ticks u32 LE, level)
+    hal::rmt::BitTiming bit0;            // bytes: how a 0 is sent (high, then low)
+    hal::rmt::BitTiming bit1;            // bytes: how a 1 is sent
+    uint32_t            resetTicks;      // bytes: low after them
+    uint8_t            *data;            // owned by the analyzer
+    size_t              size;            // bytes of data
+};
+
+// Called by scopeReadTrains() for each send.
+typedef void TrainVisitor(void *context, const ScopeTrain *train);
+
+// A change of a pin, or its state now: of its level (pwm false), or of the
+// PWM output that drives it (pwm true).
 struct ScopeRecord {
-    int64_t timeUs;                      // when, in µs since the twin started
-    int     level;                       // the level on the line after it
-    int     millivolts;                  // the voltage on the line after it
+    int64_t timeUs;                      // when, in µs since the twin started; a PWM: the start of its first period
+    int     level;                       // the level on the line after it (pwm false)
+    int     millivolts;                  // the voltage on the line after it (pwm false)
+    bool    pwm;                         // a change of the PWM output: the fields below
+    double  pwmFrequency;                // Hz; 0: the output stopped
+    double  pwmDuty;                     // 0 to 1, the share of a period it is active
+    bool    pwmInvert;                   // active low: low during the active share
 };
 
 // What a pin did since the last read.
@@ -239,8 +340,10 @@ struct ScopeChanges {
 };
 
 // Called by scopeRead() for each pin: what it did since the last read
-// (count and dropped 0: nothing) and its state now.
-typedef void ScopeVisitor(void *context, int pin, const ScopeChanges *changes, const ScopeRecord *now);
+// (count and dropped 0: nothing), its level now, and its PWM now (the last
+// PWM change; pwmFrequency 0: none).
+typedef void ScopeVisitor(void *context, int pin, const ScopeChanges *changes, const ScopeRecord *now,
+                          const ScopeRecord *pwmNow);
 
 /**
  * Sets the time 0 of the analyzer (load(), before any change).
@@ -264,11 +367,30 @@ void scopeSetInitial(int pin, int level, int millivolts);
 void scopeRecord(int pin, int level, int millivolts);
 
 /**
+ * Records a change of the PWM output of 'pin': from 'timeUs' (the start of
+ * its first period) at 'frequency' (Hz; 0: it stopped) and 'duty' active
+ * (twin.cpp, the twin's state lock held).
+ */
+void scopeRecordPwm(int pin, int64_t timeUs, double frequency, double duty, bool invert);
+
+/**
  * Calls 'visit' for each of the first 'count' pins with what it did since
  * the last read, then forgets it. One reader only (the page's server).
  * Returns the time of the read, in µs since scopeStart().
  */
 int64_t scopeRead(int count, ScopeVisitor *visit, void *context);
+
+/**
+ * Records an RMT send (its data copied); dropped past SCOPE_TRAINS sends
+ * since the last read (twin_rmt.cpp, JS thread).
+ */
+void scopeRecordTrain(const ScopeTrain *train);
+
+/**
+ * Calls 'visit' for each RMT send since the last read, oldest first, then
+ * forgets them. One reader only (the page's server).
+ */
+void scopeReadTrains(TrainVisitor *visit, void *context);
 
 /**
  * A component drives 'pin' to 0 or 1, or lets it go (-1) (twin's thread).
@@ -401,6 +523,20 @@ enum class UartSource {
     program,                        // the program wrote it
     page,                           // the page sent it to the program
     tcp,                            // the TCP client sent it to the program
+    serial,                         // the PC serial port it is wired to sent it to the program
+};
+
+const int SERIAL_NAME_SIZE = 64;    // bytes of the name of a PC serial port
+const int SERIAL_ERROR_SIZE = 64;   // bytes of SerialState.error
+
+// The PC serial port a UART is wired to (twin_uart_serial.cpp).
+struct SerialState {
+    char port[SERIAL_NAME_SIZE];    // the port chosen ("COM5", "/dev/ttyUSB0"); "": none yet
+    bool connect;                   // wiring asked
+    bool realSpeed;                 // the program's writes take the time the real port takes
+    bool connected;                 // the port is open now (asked, and the program has the UART open)
+    bool fixed;                     // set by the command line or qjsx.json: not saved
+    char error[SERIAL_ERROR_SIZE];  // why the last opening failed; "": none
 };
 
 // What the page reads of a UART.
@@ -408,6 +544,7 @@ struct UartState {
     bool                  link;      // the agent's link of the real board: never opened
     bool                  open;      // the program has it open
     TcpState              tcp;       // its TCP link (all 0 for the agent's link)
+    SerialState           serial;    // the PC serial port it is wired to (all 0 for the agent's link)
     hal::serial::Settings settings;  // as the program opened it (open)
 };
 
@@ -451,10 +588,69 @@ void uartStates(UartState *states, int count);
 uint32_t uartTraffic(int uart, uint32_t after, TrafficVisitor *visit, void *context);
 
 /**
- * The page sends bytes to the program on UART 'uart'. False (dropped) if the
- * program does not have it open.
+ * Bytes for the program on UART 'uart', from 'source' (the page, the PC
+ * serial port). False (dropped) if the program does not have it open. Any
+ * thread.
  */
-bool uartSend(int uart, const uint8_t *bytes, size_t size);
+bool uartReceive(int uart, UartSource source, const uint8_t *bytes, size_t size);
+
+// ### UARTs wired to PC serial ports (twin_uart_serial.cpp) ##################
+//
+// A UART of the twin can be wired to a real serial port of the PC (a USB
+// serial adapter...), its other end: the port is open while the program has
+// the UART open, with the program's settings; what the program writes goes
+// to it (as to the TCP client and the page), what it receives goes to the
+// program. "Real speed": the program's write waits the time the bytes take
+// on the line; otherwise it returns at once and a thread sends them (64 KB
+// waiting at most, the rest lost and said on stderr). Chosen on the page
+// (kept in twin.json), or fixed by "--uart-serial n=PORT" / "twin.uarts" of
+// qjsx.json (real speed, not saved).
+
+/**
+ * Wires UART 'uart' to 'port' from the start, not saved (the command line,
+ * qjsx.json). Before setupSerial(); the caller checked the number.
+ */
+void serialFix(int uart, const char *port, bool realSpeed);
+
+/**
+ * Sets up the wiring of each UART but the agent's link (the choices kept
+ * for the others) and starts their threads. After choicesLoad() and
+ * setupUarts(). False after printing why.
+ */
+bool setupSerial();
+
+/**
+ * The page wires UART 'uart' to 'port', or not ('connect' false), and
+ * chooses the speed; kept in twin.json unless the wiring is fixed. Page
+ * thread.
+ */
+void serialRequest(int uart, const char *port, bool connect, bool realSpeed);
+
+/**
+ * The state of the wiring of UART 'uart'.
+ */
+void serialState(int uart, SerialState *state);
+
+/**
+ * The program opened UART 'uart' with 'settings' (twin_uart.cpp, its thread).
+ */
+void serialUartOpened(int uart, const hal::serial::Settings *settings);
+
+/**
+ * The program closed UART 'uart' (twin_uart.cpp).
+ */
+void serialUartClosed(int uart);
+
+/**
+ * The program writes on UART 'uart': to the PC port when wired (waits the
+ * time of the line at real speed). Program's thread.
+ */
+void serialUartWrite(int uart, const uint8_t *data, size_t size);
+
+/**
+ * Calls 'add' with the name of each serial port of the PC (number -1).
+ */
+void serialPorts(hal::serial::ListHandler *add, void *context);
 
 /**
  * The web page of the twin (host/twin/ui/dist) as a zip archive with stored

@@ -1,25 +1,91 @@
 # TODO
 
-## Où on en est (2026-11-12, à relire en reprenant le travail)
+## Où on en est (2026-11-13, à relire en reprenant le travail)
 
-- [x] **Dernier état (2026-11-12, commit e4fa348 sur `main`, pas encore poussé)** :
-      - **jumeau numérique** (architecture.md 6.6, section « Jumeaux numériques » plus bas) :
-        tout dans `host/twin/` ; page x4js embarquée ; composants = modèle (`qjsx:twin`,
-        API publique) + vue ; modèles button, ws2812, bme280, potentiometer ; composants du
-        projet (`model.js`, `view.js`) ; `qjsx agent` dans un projet (ou `-p`) lit la section
-        `"twin"` de `qjsx.json` ; `"target": "twin"` ; trace I2C ; UART et USB par TCP ;
-        projet de test `tests/fixtures/twinparts` (`qjsx agent -p tests/fixtures/twinparts`,
-        page sur http://127.0.0.1:45695/) ;
-      - **`device/adc`** : ESP32 (ADC1) et jumeau ; firmware compilé, PAS essayé sur la carte ;
-      - **tests** : suite Debug 94 OK + `twinparts` corrigé et relancé seul (21/21) ; refaire
-        une suite complète (Debug puis Release) au début de la prochaine session ;
+- [x] **Dernier état (2026-11-13, rien de commité depuis 87308d5 ; l'utilisateur commite)** :
+      - **tests** : suites Debug ET Release 98 OK le 2026-11-13 au matin ; Debug 99 OK
+        après PWM, le RMT et les modes de l'analyseur (`tests/pwm.test.js` 30/30) ;
+        Release à refaire ; types de la
+        page vérifiés (`tsc --noEmit -p host/twin/ui`, TypeScript 7.0.2 en global, chemin
+        complet dans la mémoire de Claude ; le build x4js ne vérifie pas les types) ;
+      - **`device/pwm`** (FAIT le 2026-11-13, CLAUDE.md, architecture.md 5.4) : module,
+        hal, ESP32 sur LEDC, jumeau avec les limites du S3 (`"pwm"` du JSON de la carte),
+        colonne « pwm 1 kHz 25 % » du tableau des broches. RESTE : compiler le firmware
+        ESP32 (`tools/idf.ps1 reconfigure build` : nouveaux fichiers ; pas d'outil de
+        terminal dans la session du 13), l'essayer sur la carte à l'oscilloscope (fréquence,
+        rapport cyclique, résolution aux extrêmes), `pin.pwm` pour les modèles des pièces,
+        le fondu et `stdlib/servo` (plus tard), le RP2350 ;
+      - **analyseur** (FAIT le 2026-11-13, architecture.md 6.6) : PWM et RMT dessinés à
+        partir de leurs changements / émissions (fronts calculés, à tout zoom, bande avec
+        texte quand c'est trop rapide), VCD en ns plafonné à 1 000 000 de changements ;
+        modes Roll / Normal / Single, déclenchement sur un front d'une broche affichée,
+        à 10 %, trait pointillé, holdoff d'une fenêtre ; barre sur deux lignes (fonctions,
+        broches) ; Save / Clear dans un menu contextuel des traces ; colonnes du tableau
+        des broches retaillables (`Header` x4js, « part » flexible). Démos : `temp/pwmdemo`
+        (4 PWM + LED RGB qui tourne, déployée sur l'agent de `temp/togglestress`, page sur
+        http://127.0.0.1:45711/) ; `temp/togglestress` (boucle infinie de `toggle()` :
+        l'interface ne sature pas, `twin.state` renvoyé à chaque tour = 127 Ko/s, à
+        améliorer si l'utilisateur le veut) ;
+      - tooltip de Run corrigé (utilisateur, 2026-11-13 : Maj + molette ne fait rien
+        pendant Run, seulement sur une vue figée) ;
+      - **build** : configuration `Profile` (= Release + infos de débogage, pour
+        `tools/profile/profile.sh`) ; Release sans infos de débogage et strippé (qjsx
+        10,9 → 2,5 Mo) ;
+      - **jumeau, UART branchées sur de vrais ports série du PC** (détail dans « Jumeaux
+        numériques » plus bas) : `host/twin/sim/twin_uart_serial.cpp`, `twin_choices.cpp`
+        (commun pour `twin.json`), `--uart-serial 1=COM5`, `"twin.uarts"` de `qjsx.json`,
+        `tests/twinwire.test.js` + 2 vérifications dans run-tests.sh. PAS essayé avec un
+        vrai port (aucun sur le PC) : à essayer avec un adaptateur USB-série, TX relié à RX ;
+      - **page du jumeau** (`host/twin/ui`) :
+        - UART et I2C : icône réglages (sans bordure ni fond) dans la barre de titre de la
+          section ; menu avec les sous-menus « TCP » et « PC port » (champs dans les menus),
+          « Show in hexadecimal », « Clear the traffic » ; I2C : « Clear the transfers » ;
+          un refus s'affiche en Notification (`notify.ts`) ;
+        - sections déplaçables par leur barre de titre (dragManager de x4js), ordre gardé
+          par le navigateur ;
+        - analyseur (`scopeview.ts`) : barre en bas, Run et Record en boutons à bascule
+          remplis ; Record n'efface pas l'affichage, son arrêt arrête Run et fige la vue sur
+          l'enregistrement ; Save → VCD (`vcd.ts`) ; états compacts en tableaux typés
+          (`scopetrace.ts`) ; voies défilantes (molette), axe des temps fixe, Ctrl + molette
+          = zoom, Maj + molette = déplacement dans le temps (vue figée seulement, rien
+          pendant Run) ; échelle analogique (lignes vref / 0 V, police 10px) ; vue figée :
+          la grille et les temps suivent le déplacement, 0 = début de l'enregistrement
+          (comme le VCD), sinon l'instant de l'arrêt (utilisateur, 2026-11-13) ;
+        - panneau des broches : défilement horizontal quand il est étroit ; crédits x4js
+          dans README.md ;
+        - journaux (trace I2C, trafic UART, console des pièces) : `controls/logview.ts`,
+          seul le journal défile (`scrollIntoView` faisait descendre toute la vue de la
+          carte à chaque ligne) ; il suit sa dernière ligne tant que l'utilisateur le
+          laisse en bas, remonté il reste où il est ;
+        - menu du bouton d'une broche de l'analyseur : sous-menu « Color », sous-menu
+          « Switch pin » (une autre broche à sa place, même couleur ; celles que la liste
+          « add a pin » propose), puis « Remove » ;
+      - **démo de l'analyseur** : `temp/scopedemo` (`qjsx agent -p temp/scopedemo`, page sur
+        http://127.0.0.1:45701/) ; autre projet d'essai : `tests/fixtures/twinparts` (page
+        sur http://127.0.0.1:45695/) ;
+      - **en attente des décisions de l'utilisateur** : appliquer le menu réglages aux
+        lignes TCP des fonctions USB ;
+      - **défauts x4js relevés (pour l'utilisateur, x4js est en lecture seule pour nous)** :
+        `.x4canvas` sans `position: relative` et `CanvasProps` non documenté ; un sous-menu
+        qui ne tient pas à droite ne s'ouvre pas à gauche (`Popup.displayAt`) ; la bande du
+        `DockingView` ne rétrécit pas avec la fenêtre ; pas d'outil de téléchargement (à
+        mettre à côté de `MessageBox`) ; la copie de glisser du dragManager déborde
+        (`position: fixed`) ; À VÉRIFIER : `dispatchEvent` (`core_dom.ts`) semble
+        distribuer deux fois un événement qui remonte quand un ancêtre a un gestionnaire
+        du même type (seul `preventDefault` l'évite) ;
       - **à essayer sur la carte** : `device/adc` (un potentiomètre sur GPIO1-10),
-        `device/i2c` avec un vrai composant ;
-      - **analyseur des broches** (FAIT le 2026-11-12, version simple) : panneau
-        « Analyzer » en bas de la page du jumeau, traces logiques et analogiques (ADC) ;
+        `device/i2c` avec un vrai composant, `device/serial` sur un UART ;
       - **prochaines pistes** (détail plus bas) : SSD1306 dans le jumeau, vitesse de la carte
-        simulée, DAC (avec l'analyseur), scénarios et signaux, manuel utilisateur, éditeur
-        Monaco pour les devices.
+        simulée, DAC (avec l'analyseur), mode Auto et décodeurs de l'analyseur, scénarios
+        et signaux, le jumeau dans VS Code, manuel utilisateur, éditeur Monaco pour les
+        devices, composant « flash », assistant de conception d'une carte.
+
+- [x] **État précédent (2026-11-12, commit e4fa348)** : jumeau numérique (architecture.md
+      6.6) : tout dans `host/twin/`, page x4js embarquée, composants = modèle (`qjsx:twin`,
+      API publique) + vue, modèles button, ws2812, bme280, potentiometer, composants du
+      projet (`model.js`, `view.js`), section `"twin"` de `qjsx.json`, `"target": "twin"`,
+      trace I2C, UART et USB par TCP, analyseur des broches ; `device/adc` (ESP32 ADC1 et
+      jumeau, firmware compilé, pas essayé sur la carte).
 
 - [x] **Projet renommé `qjsx`** (ex-`espjs`) le 2026-11-11 : commande `qjsx`, fichier de
       projet `qjsx.json`, modules de l'outil `qjsx:nom`, macros `QJSX_*`, marqueur `qjsx:`
@@ -570,18 +636,49 @@
             programme ou avec un composant dessus est tracée en volts (ADC) ; changements
             horodatés en µs par le jumeau (`host/twin/sim/twin_scope.cpp`, message
             `twin.scope.data`), 256 par broche toutes les 50 ms, au-delà une bande
-            « occupé » ; architecture.md 6.6. Pas fait : déclenchement, se déplacer dans
-            l'historique (Stop fige la vue, Run repart de zéro), impulsions RMT, décodeurs ;
-            le temps est celui du PC ;
-      - [ ] **x4js dans les crédits** (utilisateur, 2026-11-12) : mentionner x4js (la page du
-            jumeau, `host/twin/ui`) dans la section « Credits and license » de README.md, à
-            côté de QuickJS ;
-      - [ ] **redimensionnement du panneau des broches** (utilisateur, 2026-11-12) : à gérer.
-            Constaté : la bande de droite garde ses 460 px quand la fenêtre est étroite et
-            écrase le panneau de la carte et l'analyseur (vu à 560 px de large) ;
+            « occupé » ; architecture.md 6.6. Ajouté le 2026-11-13 (utilisateur) : vue figée
+            mobile (Ctrl + molette = zoom autour du pointeur, Maj + molette = défiler
+            dans le temps ; pas de glisser), voies défilantes verticalement (molette) au-dessus de l'axe des temps
+            fixe, échelle des voies analogiques (lignes à vref et 0 V, petite police), Record (bascule :
+            tout garder à partir de maintenant sans effacer l'affichage, sans limite de 20 s,
+            jusqu'à 1 000 000 de changements ; arrêté : l'enregistrement est copié à part et
+            Run s'arrête aussi, la vue figée dessus ; états rangés en
+            tableaux typés, ~11 Mo pour un million) et Save
+            (fichier VCD pour PulseView / GTKWave). Ajouté le 2026-11-13 après midi : PWM et
+            impulsions RMT (fronts calculés par la page), modes Roll / Normal / Single avec
+            déclenchement (voir « Où on en est »). Pas fait : mode Auto, holdoff et position
+            du déclenchement réglables, décodeurs dans la page ; le temps est celui du PC ;
+      - [ ] **le jumeau dans VS Code** (utilisateur, 2026-11-12) : embarquer la page du
+            jumeau à l'intérieur de VS Code (aujourd'hui dans un navigateur, sur
+            `http://127.0.0.1:<ports.ui>/`) ; à concevoir ;
+      - [x] **x4js dans les crédits** (utilisateur, 2026-11-12) : FAIT le 2026-11-13, un
+            paragraphe dans « Credits and license » de README.md, après QuickJS ;
+      - [x] **redimensionnement du panneau des broches** (utilisateur, 2026-11-12) : FAIT le
+            2026-11-13 (utilisateur : « mets une scroll hz ») : le tableau garde sa largeur, un
+            panneau plus étroit défile horizontalement, en-tête et lignes ensemble. Reste, côté
+            x4js (à toi) : la bande de droite garde sa largeur quand la fenêtre rétrécit et
+            écrase la zone du milieu (`DockingView` : le milieu a `min-width: 0` ; la borne
+            « place − MIN_AREA » du séparateur n'est pas appliquée au redimensionnement de la
+            fenêtre) ;
+      - [x] **UART du jumeau branchées sur de vrais ports série du PC** (utilisateur,
+            2026-11-13) : FAIT le même jour (`host/twin/sim/twin_uart_serial.cpp`,
+            architecture.md 6.6) : sous-menu « PC port » (port, connect, real speed) du menu
+            d'une icône réglages dans la barre de titre de chaque UART, à côté du sous-menu
+            « TCP » (utilisateur, 2026-11-13 : moins de place, des champs dans les menus ;
+            avertissements par Notification), choix gardé dans `twin.json` (`twin_choices.cpp`, commun
+            aux liens TCP) ; `--uart-serial 1=COM5` et `"twin.uarts"` de `qjsx.json`
+            branchent dès le démarrage sans rien garder ; vitesse réelle par défaut ou
+            immédiate ; TCP et port du PC ensemble. Testé sans port réel
+            (`tests/twinwire.test.js`, 18 vérifications : états, erreurs, `twin.json`) ;
+            À ESSAYER avec un adaptateur USB-série (TX relié à RX) ;
       - [x] jumeau choisi dans `qjsx.json` (FAIT le 2026-11-12 : section `"twin"`, `qjsx
             agent` dans le dossier ou `-p`) ;
       - [ ] d'autres cartes (PICO2-XXL...) ;
+      - [ ] **assistant de conception d'une carte** (utilisateur, 2026-11-13) : un
+            assistant qui fabrique la description JSON d'une carte du jumeau
+            (`boards/<carte>.json` : broches, UART, ADC, PWM, natifs, pièces) ; à préciser ;
+      - [ ] **composant « flash »** (utilisateur, 2026-11-13) : créer un composant (modèle
+            + vue) flash ; à préciser avec l'utilisateur (quel composant, quel bus) ;
       - [x] la page reconstruit le tableau des broches à chaque changement (RÉGLÉ le
             2026-11-12 : la page x4js construit les lignes une fois et les met à jour).
 

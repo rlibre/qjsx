@@ -14,6 +14,7 @@
 #include "platform.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -33,6 +34,7 @@ struct Pin {
     bool partWatched;                    // a component watches it (bridge events)
     hal::gpio::ChangeHandler *handler;   // called when its level changes (watched)
     uint8_t latch;                       // what an output or open drain drives
+    int64_t pwmStartUs;                  // when its PWM got its frequency, duty cycle (scopeNowUs)
 };
 
 // What a change of a pin calls once the lock is released.
@@ -82,15 +84,49 @@ uint8_t pullLevel(const Pin *pin) {
 }
 
 /**
+ * The level of the square signal of a PWM pin at 'nowUs': each period
+ * starts active for its duty cycle (high, low when inverted). Before the
+ * start of its setting (a new duty cycle waits for the next period,
+ * pwmDrive), the periods are counted back from it: the new duty cycle on
+ * the same phase. stateLock held.
+ */
+uint8_t pwmLevel(const Pin *pin, int64_t nowUs) {
+    const PinState *state = &pin->state;
+    uint8_t active = state->pwmInvert ? 0 : 1;
+    uint8_t idle = (uint8_t)(active ^ 1);
+
+    // always active, never active
+    if (state->pwmDuty >= 1.0) {
+        return active;
+    }
+    if (state->pwmDuty <= 0.0 || state->pwmFrequency <= 0.0) {
+        return idle;
+    }
+
+    // where the instant falls in its period (fmod keeps the sign: a time
+    // before the start is brought into the period)
+    double periodUs = 1000000.0 / state->pwmFrequency;
+    double elapsedUs = (double)(nowUs - pin->pwmStartUs);
+    double intoPeriodUs = fmod(elapsedUs, periodUs);
+    if (intoPeriodUs < 0) {
+        intoPeriodUs += periodUs;
+    }
+    return intoPeriodUs / periodUs < state->pwmDuty ? active : idle;
+}
+
+/**
  * The level of a pin from what drives it, in the order of twin.h; marks a
  * conflict between the program and a component. stateLock held.
  */
 uint8_t computeLevel(Pin *pin) {
-    // what the program drives: a push-pull output, or an open drain at 0
+    // what the program drives: a PWM output, a push-pull output, or an open
+    // drain at 0
     bool output = pin->state.configured && pin->state.mode == (uint8_t)hal::gpio::Mode::output;
     bool openDrain = pin->state.configured && pin->state.mode == (uint8_t)hal::gpio::Mode::openDrain;
     int programLevel = -1;
-    if (output) {
+    if (pin->state.pwm) {
+        programLevel = pwmLevel(pin, scopeNowUs());
+    } else if (output) {
         programLevel = pin->latch;
     } else if (openDrain && pin->latch == 0) {
         programLevel = 0;
@@ -129,7 +165,8 @@ int voltageOf(const Pin *pin) {
  * Computes the level of pin 'index' again after a change; returns what to
  * call once the lock is released (the program's handler of a watched pin,
  * the components watching it), when the level changed. A change goes to
- * the analyzer. stateLock held.
+ * the analyzer, unless a PWM drives the pin (the analyzer has its changes,
+ * pwmDrive). stateLock held.
  */
 Change update(int index) {
     Pin *pin = &pinTable[index];
@@ -141,7 +178,9 @@ Change update(int index) {
     if (changed) {
         change.handler = pin->watched ? pin->handler : nullptr;
         change.tellParts = pin->partWatched;
-        scopeRecord(index, pin->state.level, voltageOf(pin));
+        if (!pin->state.pwm) {
+            scopeRecord(index, pin->state.level, voltageOf(pin));
+        }
     }
 
     return change;
@@ -307,8 +346,8 @@ bool readDescription(JSContext *ctx, JSValueConst description, const char *path)
     // drive and pull the pins
     JS_FreeValue(ctx, nativesValue);
 
-    // the analog inputs
-    return readAdc(ctx, description, path);
+    // the analog inputs, the PWM outputs
+    return readAdc(ctx, description, path) && pwmRead(ctx, description, path);
 }
 
 } // namespace
@@ -597,9 +636,10 @@ void partVoltage(int pin, int millivolts) {
     int previous = voltageOf(target);
     target->state.voltageMv = (int16_t)bounded;
 
-    // to the analyzer when it changed
+    // to the analyzer when it changed (not under a PWM: its changes are
+    // recorded instead)
     int now = voltageOf(target);
-    if (now != previous) {
+    if (now != previous && !target->state.pwm) {
         scopeRecord(pin, target->state.level, now);
     }
 
@@ -617,6 +657,78 @@ void setI2c(int pin, bool used) {
     stateLock.lock();
     pinTable[pin].state.i2c = used;
     stateLock.unlock();
+}
+
+/**
+ * A PWM output drives a pin: a program's output whose level is the square
+ * signal (pwmLevel). Started, or at another frequency, the signal starts
+ * now; at the same frequency, the new duty cycle starts with the next
+ * period, the phase kept, as LEDC does (user, 2026-11-13).
+ */
+void pwmDrive(int pin, bool invert, double frequency, double duty) {
+    if (pin < 0 || pin >= pins) {
+        return;
+    }
+
+    stateLock.lock();
+
+    // when the new setting starts: now, or the next period at the same
+    // frequency (rounded to the µs of the analyzer)
+    Pin *target = &pinTable[pin];
+    int64_t startUs = scopeNowUs();
+    bool sameFrequency = target->state.pwm && target->state.pwmFrequency == frequency;
+    if (sameFrequency) {
+        double periodUs = 1000000.0 / frequency;
+        double periods = ceil((double)(startUs - target->pwmStartUs) / periodUs);
+        startUs = target->pwmStartUs + llround(periods * periodUs);
+    }
+
+    // an output of the program, its signal
+    target->state.configured = true;
+    target->state.mode = (uint8_t)hal::gpio::Mode::output;
+    target->state.pull = (uint8_t)hal::gpio::Pull::none;
+    target->state.pwm = true;
+    target->state.pwmInvert = invert;
+    target->state.pwmFrequency = frequency;
+    target->state.pwmDuty = duty;
+    target->pwmStartUs = startUs;
+
+    // its level now; the analyzer told the new signal
+    Change change = update(pin);
+    scopeRecordPwm(pin, target->pwmStartUs, frequency, duty, invert);
+    stateLock.unlock();
+
+    notify(change, pin);
+}
+
+/**
+ * The PWM output of a pin stopped: a plain output of the program at the
+ * idle level.
+ */
+void pwmStop(int pin, bool invert) {
+    if (pin < 0 || pin >= pins) {
+        return;
+    }
+
+    stateLock.lock();
+
+    // a plain output at the idle level; the analyzer told the signal ended
+    Pin *target = &pinTable[pin];
+    target->state.pwm = false;
+    target->latch = invert ? 1 : 0;
+    scopeRecordPwm(pin, scopeNowUs(), 0, 0, invert);
+
+    // its level now: recorded by update() when it differs from the level
+    // computed last during the PWM, else here (the analyzer needs the level
+    // after the signal)
+    uint8_t before = target->state.level;
+    Change change = update(pin);
+    if (target->state.level == before) {
+        scopeRecord(pin, target->state.level, voltageOf(target));
+    }
+    stateLock.unlock();
+
+    notify(change, pin);
 }
 
 } // namespace twin
@@ -655,11 +767,12 @@ bool configure(int pin, Mode mode, Pull pull) {
 }
 
 /**
- * The level on the line.
+ * The level on the line; a PWM output's at this instant.
  */
 int read(int pin) {
     twin::stateLock.lock();
-    int level = twin::pinTable[pin].state.level;
+    const twin::Pin *target = &twin::pinTable[pin];
+    int level = target->state.pwm ? twin::pwmLevel(target, twin::scopeNowUs()) : target->state.level;
     twin::stateLock.unlock();
     return level;
 }

@@ -6,14 +6,22 @@
  */
 
 // What the section of one UART of the board shows (device/serial in the
-// twin): its TCP link (port, listening, client), the log of its traffic (what the
-// program wrote, what it received from the page or from TCP), shown as text
-// or in hexadecimal, and a line to send bytes to the program, as text with a
-// line ending or as hexadecimal bytes.
-import { BoxProps, Button, Checkbox, HBox, Label, Select, TextEdit, VBox } from "x4js";
+// twin): the log of its traffic (what the program wrote, what it received
+// from the page, TCP or the PC port), shown as text or in hexadecimal, and a
+// line to send bytes to the program, as text with a line ending or as
+// hexadecimal bytes. Its settings are in the menu of a button the section
+// shows on its title line (menuButton), marked when a link is on or failed:
+// a sub menu "TCP" (the TCP port) and a sub menu "PC port" (the wiring to a
+// serial port of the PC), each titled with what is on, then the log shown in
+// hexadecimal (checked) and clearing the log.
+import { BoxProps, Button, Checkbox, HBox, Label, Menu, MenuElement, Select, TextEdit, VBox } from "x4js";
+import { LogView } from "./controls/logview";
 import { sendToUart, UartRecord, UartState } from "./messages";
+import { SerialControl } from "./serialcontrol";
 import { TcpControl } from "./tcpcontrol";
 import { tx } from "./texts";
+
+import gearIcon from "./assets/gear.svg";
 
 // Lines kept in the log; the oldest go first.
 const MAX_LINES = 500;
@@ -39,13 +47,31 @@ function pinsOf(state: UartState) {
 
 /**
  * The title line of the section of a UART: "closed", or "9600 8E1 · tx 17
- * rx 18", then its TCP link when it listens: "· tcp 8094, client connected".
+ * rx 18", then its TCP link when it listens: "· tcp 8094, client connected",
+ * the PC port it is wired to when connected: "· COM5", and what failed:
+ * "· COM5: no such port".
  */
 export function uartSummary(state: UartState) {
     const opened = `${formatOf(state)}${state.flowControl ? " rts/cts" : ""} · ${pinsOf(state)}`;
     const client = state.tcp.client ? tx.twin.tcp_client : tx.twin.tcp_waiting;
     const tcp = state.tcp.listening ? ` · tcp ${state.tcp.port}, ${client}` : "";
-    return `${state.open ? opened : tx.twin.uart_closed}${tcp}`;
+    const tcpError = state.tcp.error !== "" ? ` · tcp: ${state.tcp.error}` : "";
+    const serial = state.serial.connected ? ` · ${state.serial.port}` : "";
+    const serialError = state.serial.error !== "" ? ` · ${state.serial.port}: ${state.serial.error}` : "";
+    return `${state.open ? opened : tx.twin.uart_closed}${tcp}${tcpError}${serial}${serialError}`;
+}
+
+/**
+ * The word of the source of what the program received, in the log (read
+ * when needed: the texts are declared after the modules load).
+ */
+function originOf(source: string) {
+    const origins: Record<string, string> = {
+        page:   tx.twin.uart_from_page,
+        tcp:    tx.twin.uart_from_tcp,
+        serial: tx.twin.uart_from_serial,
+    };
+    return origins[source] ?? source;
 }
 
 /**
@@ -86,9 +112,7 @@ function parseHex(text: string): Uint8Array | null {
 
 export class UartPanel extends VBox {
     declare protected refs: {
-        tcp: TcpControl;
-        hexView: Checkbox;
-        log: VBox;
+        log: LogView;
         input: TextEdit;
         ending: Select;
         hexInput: Checkbox;
@@ -97,6 +121,14 @@ export class UartPanel extends VBox {
 
     private _uart: number;                  // the number of the UART
     private _records: UartRecord[] = [];    // shown in the log (the last MAX_LINES)
+    private _hexView = false;               // the log shows the bytes in hexadecimal
+    private _state: UartState = null;       // the last state, for the menu of the links
+    private _ports: string[] = [];          // the PC's serial ports, as last given
+    private _links: { tcp: TcpControl; serial: SerialControl } = null;   // the controls of the last menu opened
+
+    // The settings button, for the title line of the section: its menu holds
+    // the TCP port, the PC port, how the traffic is shown.
+    readonly menuButton: Button;
 
     /**
      * What the section of UART 'uart' shows, closed until the first state.
@@ -109,23 +141,17 @@ export class UartPanel extends VBox {
         const endingTexts = [tx.twin.uart_ending_none, tx.twin.uart_ending_lf, tx.twin.uart_ending_crlf];
         const endingItems = ENDINGS.map((ending, index) => ({ id: ending, text: endingTexts[index] }));
 
+        // the settings button, shown by the section
+        this.menuButton = new Button({
+            cls: "outline menu-button",
+            icon: gearIcon,
+            tooltip: tx.twin.uart_links_tooltip,
+            menu: () => this._linksMenu(),
+        });
+
         this.setContent([
-            // the TCP link
-            this.refs.tcp = new TcpControl("uart", uart),
-
-            // the display, clear
-            new HBox({ cls: "uart-bar", content: [
-                new Label({ cls: "uart-log-title", flex: true, text: tx.twin.uart_log }),
-                this.refs.hexView = new Checkbox({
-                    label: tx.twin.uart_hex_view,
-                    tooltip: tx.twin.uart_hex_view_tooltip,
-                    change: () => this._redraw(),
-                }),
-                new Button({ cls: "outline", label: tx.twin.uart_clear, click: () => this._clear() }),
-            ] }),
-
             // the log
-            this.refs.log = new VBox({ cls: "uart-log" }),
+            this.refs.log = new LogView({ cls: "uart-log" }),
 
             // what the page sends
             this.refs.sendBar = new HBox({ cls: "uart-bar", disabled: true, content: [
@@ -145,16 +171,75 @@ export class UartPanel extends VBox {
     }
 
     /**
-     * Shows the TCP link of the UART; the page can send only while the
-     * program has it open.
+     * Takes the state of the UART ('ports': the PC's serial ports): the
+     * button of the links marked (a link on, a link failed), the menu updated
+     * if it is open; the page can send only while the program has it open.
      */
-    setState(state: UartState) {
-        this.refs.tcp.setState(state.tcp);
+    setState(state: UartState, ports: string[]) {
+        this._state = state;
+        this._ports = ports;
+
+        // the button: a link on, a link failed
+        const failed = state.tcp.error !== "" || state.serial.error !== "";
+        const on = state.tcp.listening || state.serial.connected;
+        this.menuButton.setClass("error", failed);
+        this.menuButton.setClass("on", on && !failed);
+
+        // the menu, while it is open
+        this._showLinks();
         this.refs.sendBar.enable(state.open);
     }
 
     /**
-     * Adds records of the traffic to the log, the newest in view.
+     * The menu of the section, built at each opening (the controls of the
+     * links kept up to date while open): a sub menu per link, its title
+     * saying what is on ("TCP · 8094", "PC port · COM5"), then the log in
+     * hexadecimal (checked when it is) and clearing it.
+     */
+    private _linksMenu(): MenuElement[] {
+        // the controls, with the last state
+        const tcp = new TcpControl("uart", this._uart);
+        const serial = new SerialControl(this._uart);
+        this._links = { tcp, serial };
+        this._showLinks();
+
+        // what is on, for the titles
+        const tcpOn = this._state?.tcp.listening ? ` · ${this._state.tcp.port}` : "";
+        const serialOn = this._state?.serial.connected ? ` · ${this._state.serial.port}` : "";
+
+        // a sub menu each, then the log
+        return [
+            { text: `${tx.twin.uart_link_tcp}${tcpOn}`, menu: new Menu({ items: [new HBox({ cls: "link-menu", content: tcp })] }) },
+            { text: `${tx.twin.serial_port}${serialOn}`, menu: new Menu({ items: [new HBox({ cls: "link-menu", content: serial })] }) },
+            "-",
+            { text: tx.twin.uart_hex_view, checked: this._hexView, click: () => this._setHexView(!this._hexView) },
+            { text: tx.twin.uart_clear, click: () => this._clear() },
+        ];
+    }
+
+    /**
+     * The log in hexadecimal or as text.
+     */
+    private _setHexView(hex: boolean) {
+        this._hexView = hex;
+        this._redraw();
+    }
+
+    /**
+     * Shows the last state in the controls of the menu (none before the first
+     * opening; those of a closed menu are no longer seen).
+     */
+    private _showLinks() {
+        if (this._links === null || this._state === null) {
+            return;
+        }
+        this._links.tcp.setState(this._state.tcp);
+        this._links.serial.setState(this._state.serial, this._ports);
+    }
+
+    /**
+     * Adds records of the traffic to the log, the newest in view unless the
+     * user scrolled up (LogView).
      */
     addRecords(records: UartRecord[]) {
         // the lines, the oldest dropped past MAX_LINES
@@ -168,18 +253,18 @@ export class UartPanel extends VBox {
         }
 
         // the newest in view
-        this.refs.log.lastChild<Label>()?.scrollIntoView({ block: "nearest" });
+        this.refs.log.followNewest();
     }
 
     /**
-     * The line of a record: "→ text" for what the program wrote, "← page text"
-     * or "← tcp text" for what it received.
+     * The line of a record: "→ text" for what the program wrote, "← page
+     * text", "← tcp text" or "← serial text" for what it received.
      */
     private _line(record: UartRecord) {
         const fromProgram = record.source === "program";
-        const origin = record.source === "page" ? tx.twin.uart_from_page : tx.twin.uart_from_tcp;
+        const origin = originOf(record.source);
         const prefix = fromProgram ? "→" : `← ${origin}`;
-        const bytes = this.refs.hexView.getCheck() ? asHex(record.bytes) : asText(record.bytes);
+        const bytes = this._hexView ? asHex(record.bytes) : asText(record.bytes);
         return new Label({ cls: `uart-line ${fromProgram ? "out" : "in"}`, text: `${prefix} ${bytes}` });
     }
 
@@ -188,7 +273,7 @@ export class UartPanel extends VBox {
      */
     private _redraw() {
         this.refs.log.setContent(this._records.map(record => this._line(record)));
-        this.refs.log.lastChild<Label>()?.scrollIntoView({ block: "nearest" });
+        this.refs.log.followNewest();
     }
 
     /**
@@ -196,7 +281,7 @@ export class UartPanel extends VBox {
      */
     private _clear() {
         this._records = [];
-        this.refs.log.clearContent();
+        this.refs.log.clearLines();
     }
 
     /**

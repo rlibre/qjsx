@@ -46,6 +46,7 @@ extern "C" void app_main(void) {
     rt::registerNativeModule("device/rmt", &jsNewModule_rmt);
     rt::registerNativeModule("device/i2c", &jsNewModule_i2c);
     rt::registerNativeModule("device/adc", &jsNewModule_adc);
+    rt::registerNativeModule("device/pwm", &jsNewModule_pwm);
     setSerialDriver(hal::serial::boardDriver());
     rt::registerNativeModule("device/serial", &jsNewModule_serial);
 #if QJSX_HAS_USB

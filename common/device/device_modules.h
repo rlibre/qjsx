@@ -51,6 +51,12 @@ JSModuleDef *jsNewModule_i2c(JSContext *ctx, const char *moduleName);
 JSModuleDef *jsNewModule_adc(JSContext *ctx, const char *moduleName);
 
 /**
+ * Creates the module "device/pwm" (pwm_module.cpp, JS_MODULE): the class
+ * Pwm. Needs hal_pwm.h.
+ */
+JSModuleDef *jsNewModule_pwm(JSContext *ctx, const char *moduleName);
+
+/**
  * Creates the module "device/serial" (serial_module.cpp, JS_MODULE): list()
  * and the class Serial, through the driver given to setSerialDriver().
  */

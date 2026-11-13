@@ -15,6 +15,8 @@
 //   twin.pin.force  page -> twin   { pin, level: 0 | 1 | -1 (let go) }
 //   twin.uart.data  twin -> page   { uart, records }: the traffic of a UART (UartRecord)
 //   twin.uart.send  page -> twin   { uart, bytes }: bytes for the program
+//   twin.uart.serial page -> twin  { uart, port, connect, realSpeed }: wires a UART to a
+//                                  serial port of the PC, or not (kept by the twin)
 //   twin.tcp.listen page -> twin   { kind, index, port, listen }: the TCP link of a UART
 //                                  or of a USB serial function (kept by the twin)
 //   twin.parts      twin -> page   the parts on the board (PartInfo[])
@@ -32,6 +34,7 @@ export const MSG = {
     forcePin: "twin.pin.force",
     uartData: "twin.uart.data",
     uartSend: "twin.uart.send",
+    uartSerial: "twin.uart.serial",
     tcpListen: "twin.tcp.listen",
     parts:     "twin.parts",
     partState: "twin.part.state",
@@ -97,6 +100,24 @@ export interface PinState {
     i2c:        boolean;        // a bus of device/i2c is open on it
     adc:        boolean;        // the program has its analog input open (device/adc)
     voltage:    number;         // the voltage on it, in volts
+    pwm:        PwmState | null;   // an output of device/pwm drives it; null: none
+}
+
+// The PWM output on a pin.
+export interface PwmState {
+    frequency:  number;         // Hz, as the hardware makes it
+    duty:       number;         // 0 to 1: the share of a period the output is active
+    invert:     boolean;        // active low
+}
+
+// The wiring of a UART to a serial port of the PC.
+export interface SerialState {
+    port:      string;          // the port chosen ("COM5"); "": none yet
+    connect:   boolean;         // wiring asked
+    realSpeed: boolean;         // the program's writes take the time of the line
+    connected: boolean;         // the port is open now
+    fixed:     boolean;         // set by the command line or qjsx.json: not saved
+    error:     string;          // why the last opening failed; "": none
 }
 
 // One UART now (the settings are those of its last open).
@@ -105,6 +126,7 @@ export interface UartState {
     link:        boolean;       // the agent's link of the real board
     open:        boolean;       // the program has it open
     tcp:         TcpState;      // its TCP link
+    serial:      SerialState;   // its wiring to a serial port of the PC
     baudRate:    number;
     dataBits:    number;
     parity:      string;        // "none", "even", "odd"
@@ -119,7 +141,7 @@ export interface UartState {
 // A record of the traffic of a UART.
 export interface UartRecord {
     sequence: number;           // its number, per UART
-    source:   string;           // "program" (it wrote), "page" or "tcp" (it received from them)
+    source:   string;           // "program" (it wrote), "page", "tcp" or "serial" (it received from them)
     bytes:    number[];
 }
 
@@ -145,6 +167,7 @@ export interface UsbState {
 export interface TwinState {
     pins:  PinState[];
     uarts: UartState[];
+    serialPorts: string[];      // the names of the PC's serial ports
     usb:   UsbState;
     i2c:   I2cBusState[];
 }
@@ -176,9 +199,32 @@ export interface I2cRecord {
 // What a pin did since the last twin.scope.data.
 export interface ScopeChange {
     pin:          number;
-    records:      number[];     // its first changes: [time (µs), level, millivolts, ...]
+    records:      number[];     // its first changes of level: [time (µs), level, millivolts, ...]
+    pwm:          number[];     // those of its PWM output: [time (µs), frequency (0: stopped), duty, invert (0, 1), ...]
     dropped:      number;       // changes after them, only counted (the pin moved too fast)
     droppedUntil: number;       // time of the last of them, in µs
+}
+
+// A PWM output running when the twin.scope.data was read.
+export interface ScopePwm {
+    pin:        number;
+    since:      number;         // the start of its first period, µs
+    frequency:  number;         // Hz
+    duty:       number;         // 0 to 1, the share of a period it is active
+    invert:     boolean;        // active low
+}
+
+// An RMT send, as the twin's hal got it: pulses, or bytes (most significant
+// bit first, each bit high then low) and the reset low after them.
+export interface ScopeRmt {
+    pin:        number;
+    time:       number;         // when it started, µs
+    resolution: number;         // ticks per second
+    pulses?:    number[];       // a send of pulses: [ticks, level, ...]
+    bytes?:     number[];       // a send of bytes
+    bit0?:      number[];       // bytes: [high, low] ticks of a 0
+    bit1?:      number[];       // bytes: [high, low] ticks of a 1
+    reset?:     number;         // bytes: ticks low after them
 }
 
 // What the pins did since the last message (twin.scope.data); times in µs
@@ -187,6 +233,8 @@ export interface ScopeData {
     now:        number;         // time of the read
     levels:     number[];       // the level of every pin now
     millivolts: number[];       // the voltage of every pin now
+    pwm:        ScopePwm[];     // the PWM outputs running now
+    rmt:        ScopeRmt[];     // the RMT sends since the last message
     changes:    ScopeChange[];  // the pins that changed
 }
 
@@ -252,6 +300,14 @@ export function forcePin(pin: number, level: number) {
  */
 export function sendToUart(uart: number, bytes: Uint8Array) {
     Application.fireGlobal(MSG.uartSend, { uart, bytes: Array.from(bytes) });
+}
+
+/**
+ * Wires UART 'uart' to the PC serial port 'port', or not, at real speed or
+ * not (the twin keeps the choice).
+ */
+export function wireUart(uart: number, port: string, connect: boolean, realSpeed: boolean) {
+    Application.fireGlobal(MSG.uartSerial, { uart, port, connect, realSpeed });
 }
 
 /**

@@ -407,7 +407,10 @@ Existing entry points useful to the debugger (lines of the original `quickjs.c`,
 
 - Toolchain: Windows, gcc 13.1 mingw64, premake5 5.0.0. The makefiles are
   generated with `premake5 gmake --cc=gcc --shell=posix`, then `make -C build config=release`
-  (or `config=debug`).
+  (or `config=debug`, `config=profile`). Three configurations: Debug (no optimization,
+  debug info, asserts), Release (optimized, no debug info, symbols stripped: about 2.5 MB
+  for `qjsx` instead of 10.9 MB with its debug info), Profile (the code of Release with its
+  debug info, for `tools/profile/profile.sh`, whose addr2line needs it).
 - `premake5.lua` builds the engine as two static libraries, `qjsx-engine` and
   `qjsx-engine-target` (the same without `compiler/`, with `QJSX_NO_COMPILER`), and the tool
   (section 6). `CONFIG_VERSION` comes from `engine/qjsx/VERSION`.
@@ -1173,13 +1176,15 @@ the device where it makes sense.
 | `device/usb` | ESP32 with USB OTG (S2, S3, P4), the twin | class `Usb`: the board as a composite USB device (`serial()`, `start()`, `close()`); class `UsbCdc`: a serial function (`onData`, `onLineState`, `write`, `lineState`) |
 | `stdlib/usb` | boards with `device/usb` (standard library, in JS) | re-exports `Usb`, `UsbCdc`; class `UsbSerial extends Usb`: one serial function, started at once |
 | `device/i2c` | ESP32, the twin | class `I2c`: an I2C master bus (`device`, `probe`, `probeSync`, `reset`, `close`); class `I2cDevice`: `write`, `read`, `writeRead` (promises) and their `Sync` versions, `close` |
+| `device/adc` | ESP32 (ADC1), the twin | class `Adc`: `read`, `readVoltage`, `bits`, `close` |
+| `device/pwm` | ESP32 (LEDC), the twin | class `Pwm`: `setDuty`, `setFrequency`, `setPulseWidth`, `duty`, `frequency`, `bits`, `close` |
 
 `process` is a global, on every platform. `process.versions` (2026-11-12) holds `qjsx` (the
 version of the tool or of the firmware), `quickjs` (the engine) and, for a package run,
 `build` (its build id: a hash of the bytecode of its modules).
 
 **Hardware modules** (2026-11-11): three layers. An interface of the hardware in
-`common/hal/` (`hal_gpio.h`, `hal_rmt.h`, `hal_usb.h`, `hal_i2c.h`: free functions, called on the JS thread; events
+`common/hal/` (`hal_gpio.h`, `hal_rmt.h`, `hal_usb.h`, `hal_i2c.h`, `hal_adc.h`, `hal_pwm.h`: free functions, called on the JS thread; events
 reported by an event task of the hal), one implementation per port
 (`ports/esp32/main/hal_*_esp32.cpp`, `ports/rp2350/main/hal_gpio_rp2350.cpp`), and the JS
 class written once with the binding
@@ -1331,6 +1336,48 @@ reader.port();                                             // 2 ("COM3" on the P
   as plain GPIO (`gpio_reset_pin`). `qjsx.bin` of the YD-ESP32-S3 with it: 0xdf000 bytes.
 - **Twin**: each UART is a TCP port and a panel of the page (section 6.6), tested by
   `tests/serial.test.js`.
+
+**`device/pwm`** (2026-11-13; design agreed with the user, built for the ESP32 and the twin;
+the firmware not built yet, not tried on a board; RP2350 later):
+
+```js
+import { Pwm } from "device/pwm";
+const led = new Pwm(5, { frequency: 1000, duty: 0, invert: false });
+led.setDuty(0.25);          // duty cycle, 0 to 1 (0 and 1: really off, really on)
+led.setFrequency(50);       // Hz; the duty cycle is kept
+led.setPulseWidth(1500);    // µs active per period (servos), as a duty cycle
+led.duty; led.frequency;    // what the hardware does (rounded)
+led.bits;                   // resolution of the duty cycle
+led.close();
+```
+
+- **Values**: the duty cycle is the share of a period the output is active (high, low when
+  `invert`), 0 to 1, independent of the resolution and of the chip (user); the
+  resolution is the highest the frequency allows, chosen by the hal; `duty` and
+  `frequency` give what the hardware really does. Everything is synchronous. A fade
+  (`fade(duty, ms)`) and `stdlib/servo` are for later.
+- **Errors**: a RangeError for a duty cycle out of 0 to 1 or a pulse longer than the
+  period; `EINVAL` for a pin without output or a frequency out of reach; `EBUSY` for a pin
+  that is an output already, or no output or timer free for that frequency. Outputs may
+  share a timer, hence a frequency (ESP32: 4 timers for 8 outputs; RP2350: the two
+  outputs of a slice): a frequency no timer can take is an error, never a change of the
+  other outputs (user).
+- **End**: `close()`, and the end of the program (the finalizer), stop the output: the pin
+  stays driven at its idle level (0, or 1 inverted), the timer is freed (user: a motor
+  must not keep running). Different from `device/gpio`, whose outputs keep their state.
+- **hal** (`common/hal/hal_pwm.h`): `open(pin, frequency, duty, invert)`, `close`,
+  `setFrequency` (the duty cycle kept, on the new resolution), `setDuty`; each says what
+  the output does (`Output`: frequency, duty, bits). `common/hal/pwm_timers.h`: the model
+  of the LEDC of the ESP32 (a counter of 2^bits steps, a fractional divider of the clock
+  with 8 bits of fraction and 10 of integer, timers shared by frequency), shared by its hal
+  and by the twin, so that the twin rounds and refuses exactly as the board.
+- **ESP32** (`ports/esp32/main/hal_pwm_esp32.cpp`): LEDC, low speed mode, the APB clock (80
+  MHz); 8 channels on any output pin through the GPIO matrix, 4 timers, 14 bits at most on
+  the S3 (14 bits at 1 kHz, 11 at 20 kHz, 1 at 40 MHz; under about 5 Hz out of reach);
+  inverted by the matrix; closed, the channel stops at its idle level, then the pin
+  becomes a plain GPIO output at that level.
+- **Twin**: the board's `"pwm"` section (section 6.6), tested by `tests/pwm.test.js`
+  (rounding, limits of the S3, the pins on the page, the levels once stopped).
 
 **Naming rule:**
 
@@ -1612,7 +1659,7 @@ application).
 
 - **Starting it**:
   - `qjsx agent --board <name | file.json> [--ui-port 8090] [--usb-port <port>]
-    [--uart-port <port>]`: the bare board;
+    [--uart-port <port>] [--uart-serial <uart>=<PC port>]...`: the bare board;
   - `qjsx agent` in the folder of a project whose `qjsx.json` has a `"twin"` section, or
     `qjsx agent -p <folder>` / `--project <folder>` from elsewhere (qjsx installed
     globally): the board it names, with the parts it wires and its ports. `--board` wins
@@ -1624,6 +1671,7 @@ application).
   "twin": {
       "board": "yd-esp32-s3",
       "ports": { "agent": 5555, "ui": 8090, "usb": 8091, "uart": 8093 },
+      "uarts": { "1": "COM5", "2": { "port": "COM6", "realSpeed": false } },
       "parts": [
           { "id": "meteo", "model": "bme280", "label": "Weather", "i2c": { "sda": 8, "scl": 9 },
             "address": "0x76", "initial": { "temperature": 21.5 } },
@@ -1633,13 +1681,15 @@ application).
   ```
 
   `ports` is optional: each port comes from the command line, else `twin.ports`, else its
-  default. `"target": "twin"` sends `deploy`, `debug`, `monitor`, `device` to the twin of
+  default. `uarts` (optional) wires UARTs to serial ports of the PC from the start (below,
+  `twin_uart_serial.cpp`); `--uart-serial` wins over it, UART by UART. `"target": "twin"` sends `deploy`, `debug`, `monitor`, `device` to the twin of
   the project on this PC (`tcp:127.0.0.1:<twin.ports.agent, 5555>`). `qjsx build` checks
   the shape of the section only; the agent checks the rest when it starts (below).
 - **Board description**: `boards/<name>.json` (copied next to the executable by the build,
   in `bin/<config>/boards/`): `name`, `chip`, `description`, `platform`
   (`process.platform` of the program), `pins` (GPIO count), `uarts`, `linkUart`, `adc` (`{
-  pins, bits, spans (the ranges its converter reads, in mV), vref (volts) }`), `natives`
+  pins, bits, spans (the ranges its converter reads, in mV), vref (volts) }`), `pwm` (`{
+  outputs, timers, clock (Hz), maxBits }`: 8, 4, 80000000, 14 for the S3), `natives`
   (the native modules of the board's firmware), `parts` (the parts soldered on the board,
   as the project's: `{ id, model, label, ... }`; the YD-ESP32-S3: BOOT, a `button` on
   GPIO0, and RGB, a `ws2812` on GPIO48).
@@ -1651,7 +1701,8 @@ application).
 - **Simulated hardware** (`host/twin/sim/`), behind the interfaces of `common/hal`, so that
   the modules of `common/device/` run unchanged:
   - `twin.cpp`, `hal::gpio`: the level of a pin comes from what drives it, in this order:
-    a push-pull output of the program; an open drain of the program at 0; what the page
+    a push-pull output of the program, or a PWM output of the program (its square signal,
+    the level computed at the instant it is asked); an open drain of the program at 0; what the page
     forces; what a part drives (a button pressed); the pulls (the program's, else a
     part's); a floating line reads 0. A program's output and a part driving the other
     level is a short on a real board: the pin is marked `conflict` (shown on the page). A
@@ -1664,7 +1715,14 @@ application).
     (`ETIMEDOUT` after); the twin's thread never waits for the program's;
   - `twin_rmt.cpp`, `hal::rmt`: 8 channels; a send lasts the time the hardware would take
     (its ticks over the resolution, at least 1 ms), then the done handler is called on a
-    thread "twin rmt"; what is sent goes to the parts (a WS2812 decodes its colors);
+    thread "twin rmt"; what is sent goes to the parts (a WS2812 decodes its colors) and to
+    the analyzer, as sent (pulses, or bytes and the timing of their bits);
+  - `twin_pwm.cpp`, `hal::pwm`: the board's `"pwm"` section, rounded and refused as the
+    LEDC of the ESP32 (`common/hal/pwm_timers.h`, shared with its hal); any pin can be an
+    output. A pin knows its frequency, duty cycle and the time they were set: at the
+    same frequency a new duty cycle starts with the next period, the phase kept, as LEDC
+    (user, 2026-11-13); started, or at another frequency, the period starts at once.
+    Closed: the pin stays a program's output at its idle level;
   - `twin_i2c.cpp`, `hal::i2c`: two buses on the board's pins; a transfer goes to the part
     attached at that address on the bus of those pins (by its pins, not by the port
     number the program chose), a NACK (`ENXIO`) when none; a probe is a transfer of
@@ -1673,28 +1731,53 @@ application).
   - `twin_adc.cpp`, `hal::adc`: the analog inputs the description lists; a read converts
     the voltage on the pin (what a part sets, else its level times vref) over the span
     chosen for the range, saturating above it, as the ESP32-S3 does;
+  - `twin_choices.cpp`, the choices of the page kept in `<storage>/twin.json`: one JSON
+    object per key (`"uart1"`, `"usb0"`, `"serial1"`); each link writes only its own key,
+    the others keep what the file held (a link fixed by the command line is never
+    written);
   - `twin_tcp.cpp`, the TCP links of the twin: a program of the PC plays the other end of
     a UART or of a USB serial function through a TCP port, one client at a time. The page
     chooses each port and turns its listening on or off (`twin.tcp.listen`); the twin
-    keeps the choices in `<storage>/twin.json`; `--uart-port` / `--usb-port` make a group
-    listen from the start on consecutive ports instead (tests, scripts);
+    keeps the choices in `twin.json`; `--uart-port` / `--usb-port` make a group listen
+    from the start on consecutive ports instead (tests, scripts);
   - `twin_usb.cpp`, `hal::usb`: each serial function is a TCP link ("usb0", "usb1"), which
     listens only while the program has the device started. A client that connects plays
     the host opening the port (DTR and RTS at 1). A real tablet cannot reach the twin this
     way: a USB relay board is in TODO.md;
   - `twin_uart.cpp`, the driver of `device/serial` (`hal_serial.h`): the UARTs of the
     board (`"linkUart"`, the agent's link of the real board, is refused with EBUSY). Each
-    UART is a TCP link and a panel of the page; nothing is timed. The traffic is kept as
-    numbered records (the last 16 KB per UART) for the page;
+    UART is a TCP link, a panel of the page and, when wired, a serial port of the PC;
+    nothing is timed (but the PC port at real speed). The traffic is kept as numbered
+    records (the last 16 KB per UART) for the page;
+  - `twin_uart_serial.cpp` (user, 2026-11-13), a UART wired to a real serial port of the
+    PC (a USB serial adapter), through the PC's serial driver (`host::serialDriver()`):
+    the port is open while the program has the UART open, with its settings (flow control
+    when it wired RTS and CTS); what the program writes goes to it, besides TCP and the
+    page; what it receives goes to the program (source `"serial"` in the traffic). Real
+    speed (the default): the program's write waits the time the bytes take on the line
+    (start, data, parity, stop bits over the baud rate); else it returns at once and a
+    thread sends them (64 KB waiting at most, the rest lost and said once on stderr). A
+    port that cannot open (`no such port`, `port busy`, `settings refused`) turns the
+    wiring off with the error. Chosen on the page (`twin.uart.serial`, kept in `twin.json`
+    under `"serial<n>"`), or fixed from the start, at real speed and not saved, by
+    `--uart-serial 1=COM5` or `"twin.uarts"`. TCP and a PC port may be wired to one UART
+    at the same time. Two threads per UART: "twin serial n" owns the port (opens, reads,
+    closes), "twin serial n out" sends the queue. Tested by `tests/twinwire.test.js` with
+    ports that do not exist (states, errors, `twin.json`); the bytes through a real port
+    are to try by hand (an adapter with TX wired to RX);
   - `twin_scope.cpp`, the analyzer of the pins: each change of a pin (its level, in
     `update()`, or the voltage a component sets) is recorded with its time, in µs of the
     PC since the twin started (performance counter / `CLOCK_MONOTONIC`), with the level
     and the voltage after it. Between two reads of the page's server (every 50 ms) a pin
     keeps its first 256 changes; the others are only counted, with the time of the last
     (a pin toggled faster than that: the page draws a "busy" band). Two sets of changes,
-    swapped by the reader: the program never waits for the page. The RMT does not change
-    the level of its pin (its pulses go to the parts only), so the analyzer does not show
-    them; I2C and UARTs are not played bit by bit either.
+    swapped by the reader: the program never waits for the page. A PWM output is not
+    recorded edge by edge: its changes are (started, another setting, stopped: frequency,
+    duty cycle, inversion, from the start of its first period), its level is not while it
+    runs, and the page computes the signal (user, 2026-11-13). An RMT send neither: it is
+    kept as sent, with the time it started (at most 1024 between two reads), and the page
+    computes its pulses (those of a WS2812 last 0.4 µs, less than the µs of the records).
+    I2C and UARTs are not played bit by bit.
 - **Parts and their models**: a part is a component wired on the board: a model (its
   emulation, JS) and a view (its section on the page). The models run in the twin's
   runtime, never in the program's: the program cannot reach them, the debugger does not
@@ -1741,10 +1824,14 @@ application).
     kept for a page that connects), `twin.state` (pins, UARTs, USB device, I2C buses with
     the parts on them; polled every 50 ms, sent when it changed), `twin.uart.data`,
     `twin.i2c.data` (new records of the traces; a page that connects gets those kept),
-    `twin.scope.data` (every 50 ms: `{ now, levels, millivolts, changes: [{ pin, records:
-    [time, level, millivolts, ...], dropped, droppedUntil }] }`, times in µs);
+    `twin.scope.data` (every 50 ms: `{ now, levels, millivolts, pwm, rmt, changes: [{ pin,
+    records: [time, level, millivolts, ...], pwm: [time, frequency, duty, invert, ...],
+    dropped, droppedUntil }] }`, times in µs; `pwm` the outputs running now, `rmt` the
+    sends since the last message);
   - from the page: `twin.part.action` (`{ id, action, args }`), `twin.pin.force` (`{
-    pin, level }`: 0, 1, or -1), `twin.uart.send`, `twin.tcp.listen`.
+    pin, level }`: 0, 1, or -1), `twin.uart.send`, `twin.uart.serial` (`{ uart, port,
+    connect, realSpeed }`), `twin.tcp.listen`. `twin.state` also gives `serialPorts`, the
+    PC's serial ports (looked at once a second).
 
   The page's runtime prints nothing: the output sink is one per process (the device
   program's output).
@@ -1755,11 +1842,20 @@ application).
     status bar) and the analyzer as tabs at the bottom; a context menu (right click) shows / hides the panels or
     resets the layout; the layout and the settings (`settings.ts`: theme, used pins only;
     a `SettingsView` in a `Dialog`) are kept by the browser;
-  - `boardview.ts`: one folding section per device (`controls/section.ts`): the push
+  - `boardview.ts`: one folding section per device (`controls/section.ts`), all in one
+    list the user reorders by dragging a section by its title line (x4js `dragManager`;
+    an accent line shows where it drops; the order kept by the browser by the keys of
+    the sections, an unknown section at the end; user, 2026-11-13): the push
     buttons together in a section "Buttons"; each other part, titled "label · model",
     its summary showing what the program uses each of its pins for ("GPIO6 adc 1.65 V",
     "GPIO8 i2c"); the USB device (`usbview.ts`); each UART but the agent's link
-    (`uartpanel.ts`); each I2C bus the program opened with no part on it (`i2cpanel.ts`:
+    (`uartpanel.ts`: its log and the line to send; its links in the menu of a settings
+    icon on the title line of its section, a sub menu "TCP" (`tcpcontrol.ts`) and a sub
+    menu "PC port" (`serialcontrol.ts`), each titled with what is on, then "Show in
+    hexadecimal" (checked) and "Clear the traffic" (user, 2026-11-13); the icon marked
+    when a link is on or failed, a refused choice shown by a Notification (`notify.ts`);
+    `controls/section.ts` takes such tools at the right of its title line); each I2C bus
+    (the same settings icon: "Clear the transfers" in its menu) the program opened with no part on it (`i2cpanel.ts`:
     its pins and frequencies, the trace of its transfers);
   - `partview.ts`, the view of a part, three levels: no view and no controls, its state
     as name / value; controls declared by the model (`static controls = [{ name, type:
@@ -1770,9 +1866,14 @@ application).
     `import()`, given x4js and `part = { id, label, model, onState(fn), send(action,
     args) }`);
   - `pintable.ts`: one row per pin built once and updated in place: level, mode ("adc
-    1.65 V", "i2c", "rmt", or the gpio mode), pull, parts, force buttons on / off / free
+    1.65 V", "pwm 1 kHz 25 %", "i2c", "rmt", or the gpio mode), pull, parts, force buttons on / off / free
     in one segmented control (a tooltip says what "free" means); a pin a part drives is
-    marked, a conflict in red;
+    marked, a conflict in red. The columns are resized from an x4js `Header` (user,
+    2026-11-13), which sets their widths as CSS variables of the table; the part column
+    takes the room left; the panel scrolls horizontally below the fixed columns and 60 px;
+  - `controls/logview.ts`: the logs (the I2C trace, the traffic of a UART, the console of
+    the parts) scroll by themselves only (`scrollIntoView` scrolled the whole board view
+    at each line), following their newest line while the user leaves them at the bottom;
   - `scopeview.ts`, the analyzer (user, 2026-11-12: "simple"): the pins added in its tool
     bar (the button of a pin, marked with the color of its trace, opens a menu: its color
     among eight, remove), one trace each under the other on black, each in its color (the
@@ -1781,8 +1882,42 @@ application).
     starts a new acquisition), Clear; the tool bar wraps when narrow; the pins chosen,
     their colors and the time base kept by the browser. A pin with an analog input that the program reads, or with a part on it, is
     drawn as its voltage (0 to vref), the others as their level. 20 s of history kept.
+    The traces scroll up and down (the wheel) above the axis of the times, a canvas of its
+    own that stays; Ctrl + wheel zooms through the time bases, around the pointer in a
+    frozen view; Shift + wheel moves a frozen view in time (nothing while running; no
+    drag, user); a tooltip on the traces says so. An analog trace has a line at
+    vref and one at 0 V, ticked and labelled at its left in the small font of the scales
+    (`--scope-scale-font-size`, 10px, the times too; user, 2026-11-13), with a margin
+    above and below; its name is on the line of vref. Record (user, 2026-11-13; a toggle) keeps everything from now on,
+    the display untouched, without the 20 s limit, up to 1,000,000 changes (then it stops,
+    with a Notification); turned off (or Run released), what was recorded is copied apart and
+    Run is released too: the view freezes on the recording (user, 2026-11-13; Run
+    released later freezes it on the last recording, else on the live history); Save gives the recording, the pins shown, as a VCD file (`vcd.ts`: a wire
+    per logic pin, `x` while busy, a real in volts per analog pin, times in µs from the
+    start; read by PulseView and GTKWave; the channels merged with a cursor each, the
+    text given in parts), offered by `download.ts` (a Blob and a link: x4js has nothing
+    for it); Clear forgets the recording too. The states are kept compact
+    (`scopetrace.ts`: one typed array per field, 11 bytes a state instead of about 50 as
+    objects: about 11 MB for a million). Its tool bar is at the bottom, under the traces and
+    the times (as on a scope; user, 2026-11-13), every control 24 px high; Run and Record
+    are toggles with a fixed label, filled while on (Run in the accent color, Record in
+    the red of the alerts).
+    Since 2026-11-13 (user): the tool bar on two lines, its functions then the pins; Save
+    and Clear in the menu of a right click on the traces; the menu of the button of a pin
+    has sub menus "Color" and "Switch pin" (another pin in its place). A frozen view
+    counts its times from the start of its recording (as the VCD), else from when it froze,
+    its grid and times moving with it. A PWM output is drawn from its changes, an RMT send
+    from its pulses (computed for the window only), at any zoom; too fast for the pixels,
+    a band says what it is ("1 kHz · 25 %", "RMT · 3 bytes"). The VCD writes their edges,
+    times in ns, at most 1,000,000 changes (a Notification says where it stops). Modes:
+    Roll (the view follows the twin), Normal (it stays on the last trigger), Single
+    (armed when chosen or when Run is pressed, it freezes on the first trigger); the
+    trigger is an edge (rising, falling, both) of a pin shown, any edge the analyzer knows
+    (levels, PWM, RMT), at a tenth of the view from its left, marked by a dashed line,
+    the times counted from it; the triggers are a window apart at least (the holdoff of a
+    scope); mode, pin and edge kept by the browser.
     Drawn in an x4js `Canvas` (whose inner canvas is absolute: its component gets
-    `position: relative`);
+    `position: relative`); the traces' types in `scopetrace.ts`;
   - `controls/`: our own components (`Led`: a bezel and a lens with a highlight, a glow
     when lit; `HoldButton`; `Section`); `model.ts`: the only `fetch` of the page;
     `texts.ts`: the texts (`addTranslation`, English); `messages.ts`: the messages.
@@ -1799,8 +1934,8 @@ application).
   (`twin::uiArchive()`). To work on the page without linking qjsx again: `npm run build`
   in `host/twin/ui`, and the hidden option `qjsx agent ... --ui-dir host/twin/ui/dist`.
 - **Not done**: other parts (a display: SSD1306), SPI and UART devices played by models,
-  in the analyzer a trigger, moving in the history, the RMT pulses and decoders, the
-  speed of the board simulated, test
+  in the analyzer the Auto mode, an adjustable holdoff and position of the trigger,
+  decoders; `pin.pwm` for the models of the parts; the speed of the board simulated, test
   scenarios, signals (values that change over time, scripted in the page), other boards
   than the YD-ESP32-S3 (TODO.md).
 

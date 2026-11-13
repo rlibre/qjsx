@@ -1,0 +1,8 @@
+{
+    "name": "twinwire",
+    "twin": {
+        "board": "yd-esp32-s3",
+        "ports": { "agent": 45696, "ui": 45697 },
+        "uarts": { "2": "QJSX-NO-SUCH-PORT" }
+    }
+}

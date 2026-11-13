@@ -32,6 +32,7 @@ idf_component_register(
         ${QJSX_DEVICE_RMT_SOURCES}
         ${QJSX_DEVICE_I2C_SOURCES}
         ${QJSX_DEVICE_ADC_SOURCES}
+        ${QJSX_DEVICE_PWM_SOURCES}
         ${QJSX_DEVICE_SERIAL_SOURCES}
         ${QJSX_USB_SOURCES}
         "main.cpp"
@@ -41,6 +42,7 @@ idf_component_register(
         "hal_rmt_esp32.cpp"
         "hal_i2c_esp32.cpp"
         "hal_adc_esp32.cpp"
+        "hal_pwm_esp32.cpp"
         "hal_serial_esp32.cpp"
     INCLUDE_DIRS
         "."
@@ -50,6 +52,7 @@ idf_component_register(
         esp_adc
         esp_driver_gpio
         esp_driver_i2c
+        esp_driver_ledc
         esp_driver_rmt
         esp_driver_uart
         esp_partition

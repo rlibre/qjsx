@@ -16,7 +16,7 @@ export type ThemeChoice = "system" | "light" | "dark";
 // A type, not an interface: a State needs an implicit index signature.
 export type TwinSettings = {
     theme:        ThemeChoice;   // the theme of the page
-    usedPinsOnly: boolean;       // the pins table hides the pins nothing uses
+    usedPinsOnly: boolean;       // the pins table and the analyzer's "add a pin" list leave out the pins nothing uses
 };
 
 export const DEFAULT_SETTINGS: TwinSettings = {

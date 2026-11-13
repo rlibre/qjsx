@@ -49,7 +49,7 @@ export class TwinView extends VBox {
         const board = this.refs.board = new BoardView({ cls: "board" });
         const pins = this.refs.pins = new PinTable({ cls: "pins" }, this._settings);
         const console = this.refs.console = new ConsoleView({ cls: "console" });
-        const scope = this.refs.scope = new ScopeView({ cls: "scope" });
+        const scope = this.refs.scope = new ScopeView({ cls: "scope" }, this._settings);
 
         this.setContent([
             this.refs.header = new AppHeader({ settings: () => openSettings(this._settings) }),
@@ -100,7 +100,7 @@ export class TwinView extends VBox {
         } else if (event.msg === MSG.state) {
             const state = event.params as TwinState;
             this.refs.board.setUsb(state.usb);
-            this.refs.board.setUarts(state.uarts);
+            this.refs.board.setUarts(state.uarts, state.serialPorts ?? []);
             this.refs.board.setI2c(state.i2c);
             this.refs.pins.setPins(state.pins);
             this.refs.board.setPins(state.pins);

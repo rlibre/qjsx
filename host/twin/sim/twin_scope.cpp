@@ -15,7 +15,10 @@
 // Threads: scopeRecord on any thread (with the twin's state lock held: lock
 // is taken after it), scopeRead on the page's server thread only.
 #include "twin.h"
+#include "memory.h"
 #include "platform.h"
+
+#include <string.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -31,8 +34,13 @@ const int MAX_PINS = 64;                 // pins the twin can have (as twin.cpp)
 
 ScopeChanges sets[2][MAX_PINS];          // the two sets of changes, one per pin
 ScopeChanges *filling = sets[0];         // lock: the set the changes go into
-ScopeRecord current[MAX_PINS];           // lock: the state of each pin now
-ScopeRecord readStates[MAX_PINS];        // the states copied by scopeRead (its thread only)
+ScopeRecord current[MAX_PINS];           // lock: the level of each pin now
+ScopeRecord currentPwm[MAX_PINS];        // lock: the last PWM change of each pin (pwmFrequency 0: none)
+ScopeRecord readStates[MAX_PINS];        // the levels copied by scopeRead (its thread only)
+ScopeRecord readPwm[MAX_PINS];           // the PWM changes copied by scopeRead (its thread only)
+ScopeTrain trainSets[2][SCOPE_TRAINS];   // the RMT sends: one set filled, the other read
+int trainCounts[2];                      // sends in each set (lock for the set filled)
+int fillingTrains = 0;                   // lock: the set the sends go into
 platform::Mutex lock;                    // filling, current
 int64_t startUs = 0;                     // the clock at scopeStart()
 
@@ -82,12 +90,31 @@ void scopeSetInitial(int pin, int level, int millivolts) {
     }
 
     lock.lock();
-    current[pin] = ScopeRecord{ scopeNowUs(), level, millivolts };
+    current[pin] = ScopeRecord{ scopeNowUs(), level, millivolts, false, 0, 0, false };
     lock.unlock();
 }
 
+namespace {
+
 /**
- * Records a change: in the records while there is room, else only counted.
+ * Keeps a change of a pin in the records while there is room, else only
+ * counts it. lock held.
+ */
+void keepChange(int pin, const ScopeRecord *change) {
+    ScopeChanges *changes = &filling[pin];
+    if (changes->count < SCOPE_RECORDS) {
+        changes->records[changes->count] = *change;
+        changes->count++;
+    } else {
+        changes->dropped++;
+        changes->droppedUntilUs = change->timeUs;
+    }
+}
+
+} // namespace
+
+/**
+ * Records a change of level: the pin's level now, and kept.
  */
 void scopeRecord(int pin, int level, int millivolts) {
     if (pin < 0 || pin >= MAX_PINS) {
@@ -95,21 +122,24 @@ void scopeRecord(int pin, int level, int millivolts) {
     }
 
     lock.lock();
-
-    // the pin's state now
-    ScopeRecord change = { scopeNowUs(), level, millivolts };
+    ScopeRecord change = { scopeNowUs(), level, millivolts, false, 0, 0, false };
     current[pin] = change;
+    keepChange(pin, &change);
+    lock.unlock();
+}
 
-    // kept while there is room, else counted
-    ScopeChanges *changes = &filling[pin];
-    if (changes->count < SCOPE_RECORDS) {
-        changes->records[changes->count] = change;
-        changes->count++;
-    } else {
-        changes->dropped++;
-        changes->droppedUntilUs = change.timeUs;
+/**
+ * Records a change of the PWM output: the pin's PWM now, and kept.
+ */
+void scopeRecordPwm(int pin, int64_t timeUs, double frequency, double duty, bool invert) {
+    if (pin < 0 || pin >= MAX_PINS) {
+        return;
     }
 
+    lock.lock();
+    ScopeRecord change = { timeUs, 0, 0, true, frequency, duty, invert };
+    currentPwm[pin] = change;
+    keepChange(pin, &change);
     lock.unlock();
 }
 
@@ -127,13 +157,14 @@ int64_t scopeRead(int count, ScopeVisitor *visit, void *context) {
     filling = filling == sets[0] ? sets[1] : sets[0];
     for (int pin = 0; pin < pins; pin++) {
         readStates[pin] = current[pin];
+        readPwm[pin] = currentPwm[pin];
     }
     int64_t nowUs = scopeNowUs();
     lock.unlock();
 
     // each pin
     for (int pin = 0; pin < pins; pin++) {
-        visit(context, pin, &full[pin], &readStates[pin]);
+        visit(context, pin, &full[pin], &readStates[pin], &readPwm[pin]);
     }
 
     // empty for the next turn
@@ -143,6 +174,43 @@ int64_t scopeRead(int count, ScopeVisitor *visit, void *context) {
     }
 
     return nowUs;
+}
+
+/**
+ * Records an RMT send: a copy of it in the set filled, while there is room.
+ */
+void scopeRecordTrain(const ScopeTrain *train) {
+    lock.lock();
+    int *count = &trainCounts[fillingTrains];
+    if (*count < SCOPE_TRAINS) {
+        ScopeTrain *kept = &trainSets[fillingTrains][*count];
+        *kept = *train;
+        kept->data = (uint8_t *)memory::allocate(train->size > 0 ? train->size : 1);
+        memcpy(kept->data, train->data, train->size);
+        (*count)++;
+    }
+    lock.unlock();
+}
+
+/**
+ * 1. swaps the sets of sends, under the lock;
+ * 2. visits the sends of the set read, lock released;
+ * 3. frees their data, the set empty for its next turn.
+ */
+void scopeReadTrains(TrainVisitor *visit, void *context) {
+    // swap the sets
+    lock.lock();
+    int full = fillingTrains;
+    fillingTrains = full == 0 ? 1 : 0;
+    lock.unlock();
+
+    // each send, then its data freed
+    for (int i = 0; i < trainCounts[full]; i++) {
+        ScopeTrain *train = &trainSets[full][i];
+        visit(context, train);
+        memory::release(train->data);
+    }
+    trainCounts[full] = 0;
 }
 
 } // namespace twin

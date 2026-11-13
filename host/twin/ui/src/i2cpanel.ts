@@ -9,20 +9,19 @@
 // program on it, one line each: when, the address, the bytes written and
 // read (hexadecimal), and the result (NACK, timeout...). The section is
 // shown only for a bus the program opened with no part wired on its pins
-// (a part has a section of its own: boardview.ts).
-import { BoxProps, Button, Flex, HBox, Label, VBox } from "x4js";
+// (a part has a section of its own: boardview.ts). Clearing the trace is in
+// the menu of a settings button the section shows on its title line
+// (menuButton), as for a UART.
+import { BoxProps, Button, Label, VBox } from "x4js";
+import { LogView } from "./controls/logview";
+import { frequencyText } from "./frequency";
 import { I2cBusState, I2cRecord } from "./messages";
 import { tx } from "./texts";
 
+import gearIcon from "./assets/gear.svg";
+
 // Lines kept in the trace; the oldest go first.
 const MAX_LINES = 500;
-
-/**
- * A frequency as text: "100 kHz", "1 MHz".
- */
-function frequencyText(hz: number) {
-    return hz >= 1000000 ? `${hz / 1000000} MHz` : `${hz / 1000} kHz`;
-}
 
 /**
  * The title line of the section of a bus: "closed", or "sda 8 · scl 9 · 100
@@ -82,28 +81,35 @@ function recordText(record: I2cRecord) {
 }
 
 export class I2cPanel extends VBox {
-    declare protected refs: { log: VBox };
+    declare protected refs: { log: LogView };
 
     private _lines: Label[] = [];   // the lines shown, oldest first
 
+    // The settings button, for the title line of the section: its menu
+    // clears the trace.
+    readonly menuButton: Button;
+
     /**
-     * An empty trace; Clear in the bar above it.
+     * An empty trace, and the settings button its section shows.
      */
     constructor(props: BoxProps) {
         super({ ...props, cls: `i2c-panel ${props.cls ?? ""}` });
 
+        this.menuButton = new Button({
+            cls: "outline menu-button",
+            icon: gearIcon,
+            tooltip: tx.twin.i2c_menu_tooltip,
+            menu: () => [{ text: tx.twin.i2c_clear, click: () => this.clear() }],
+        });
+
         this.setContent([
-            new HBox({ cls: "i2c-bar", content: [
-                new Label({ cls: "i2c-log-title", text: tx.twin.i2c_trace }),
-                new Flex(),
-                new Button({ cls: "outline", label: tx.twin.uart_clear, click: () => this.clear() }),
-            ] }),
-            this.refs.log = new VBox({ cls: "i2c-log" }),
+            this.refs.log = new LogView({ cls: "i2c-log" }),
         ]);
     }
 
     /**
-     * Adds transfers to the trace, the newest in view.
+     * Adds transfers to the trace, the newest in view unless the user
+     * scrolled up (LogView).
      */
     addRecords(records: I2cRecord[]) {
         // the lines, the oldest dropped past MAX_LINES
@@ -117,7 +123,7 @@ export class I2cPanel extends VBox {
         }
 
         // the newest in view
-        this._lines[this._lines.length - 1]?.scrollIntoView({ block: "nearest" });
+        this.refs.log.followNewest();
     }
 
     /**
@@ -125,6 +131,6 @@ export class I2cPanel extends VBox {
      */
     clear() {
         this._lines = [];
-        this.refs.log.clearContent();
+        this.refs.log.clearLines();
     }
 }

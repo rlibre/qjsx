@@ -23,6 +23,7 @@
 #   QJSX_DEVICE_USB_SOURCES   the module device/usb (common/hal/hal_usb.h)
 #   QJSX_DEVICE_I2C_SOURCES   the module device/i2c (common/hal/hal_i2c.h)
 #   QJSX_DEVICE_ADC_SOURCES   the module device/adc (common/hal/hal_adc.h)
+#   QJSX_DEVICE_PWM_SOURCES   the module device/pwm (common/hal/hal_pwm.h)
 #   QJSX_DEVICE_SERIAL_SOURCES the module device/serial (common/hal/hal_serial.h:
 #                             the port gives its driver, hal::serial::boardDriver)
 #   QJSX_INCLUDE_DIRS      every source folder (headers are included by name)
@@ -62,6 +63,7 @@ set(QJSX_DEVICE_RMT_SOURCES "${QJSX_ROOT}/common/device/rmt_module.cpp")
 set(QJSX_DEVICE_USB_SOURCES "${QJSX_ROOT}/common/device/usb_module.cpp")
 set(QJSX_DEVICE_I2C_SOURCES "${QJSX_ROOT}/common/device/i2c_module.cpp")
 set(QJSX_DEVICE_ADC_SOURCES "${QJSX_ROOT}/common/device/adc_module.cpp")
+set(QJSX_DEVICE_PWM_SOURCES "${QJSX_ROOT}/common/device/pwm_module.cpp")
 set(QJSX_DEVICE_SERIAL_SOURCES "${QJSX_ROOT}/common/device/serial_module.cpp")
 
 set(QJSX_INCLUDE_DIRS

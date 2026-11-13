@@ -6,12 +6,12 @@
  */
 
 // The TCP links of the digital twin (see twin_tcp.h): each link, the
-// "twin tcp" thread that serves them all, and the choices kept in
-// <storage>/twin.json:
+// "twin tcp" thread that serves them all, and their choices, kept in
+// <storage>/twin.json through twin_choices.cpp, one key per link:
 //
-//   { "uart1": { "port": 8094, "listen": true }, "usb0": { ... } }
+//   "uart1": { "port": 8094, "listen": true }
 #include "twin_tcp.h"
-#include "files.h"
+#include "twin.h"
 #include "memory.h"
 
 #include <errno.h>
@@ -26,20 +26,11 @@ namespace {
 
 const int MAX_LINKS = 16;                    // links the thread serves
 const int POLL_MS = 10;                      // the thread looks at the sockets that often
-const size_t FILE_SIZE = 2048;               // largest twin.json written
+const size_t CHOICE_SIZE = 64;               // largest JSON text of the choice of a link
 
-// A link served by the thread, with what twin.json holds for it.
-struct Entry {
-    TcpLink *link;                           // static
-    bool     hasSaved;                       // twin.json has an entry for it
-    int      savedPort;                      // its port there
-    bool     savedListen;                    // its listening there
-};
-
-Entry entries[MAX_LINKS];                    // written before the thread starts, then by it only
-int entryCount = 0;                          // entries used
+TcpLink *links[MAX_LINKS];                   // written before the thread starts, then read by it only
+int linkCount = 0;                           // entries used
 const char *listenHost = "127.0.0.1";        // address of the links (set by startTcp)
-char *choicesPath = nullptr;                 // <storage>/twin.json, owned
 
 /**
  * Reads the integer property 'name' of 'object' into *value (unchanged if
@@ -57,109 +48,46 @@ void readInt(JSContext *ctx, JSValueConst object, const char *name, int *value) 
 }
 
 /**
- * Reads the choices of twin.json into the entries (a missing or broken file
- * is no choice at all); the persisted links take them.
+ * The choice kept for a link ({ port, listen }): the link takes it.
  */
-void loadChoices() {
-    // the file
-    size_t size = 0;
-    uint8_t *text = files::readAll(choicesPath, &size);
-    if (text == nullptr) {
+void takeChoice(void *context, JSContext *ctx, JSValueConst choice) {
+    TcpLink *link = (TcpLink *)context;
+
+    int port = 0;
+    readInt(ctx, choice, "port", &port);
+    JSValue listenValue = JS_GetPropertyStr(ctx, choice, "listen");
+    bool listen = JS_ToBool(ctx, listenValue) == 1;
+    JS_FreeValue(ctx, listenValue);
+
+    link->request(port, listen);
+}
+
+/**
+ * Keeps what is asked of a persisted link (nothing while no port was
+ * chosen).
+ */
+void saveChoice(TcpLink *link) {
+    TcpState state = link->state();
+    if (state.port == 0) {
         return;
     }
 
-    char *json = (char *)memory::allocate(size + 1);
-    memcpy(json, text, size);
-    json[size] = 0;
-    memory::release(text);
-
-    // parsed with a short-lived QuickJS context
-    JSRuntime *runtime = JS_NewRuntime();
-    JSContext *ctx = JS_NewContext(runtime);
-    JSValue choices = JS_ParseJSON(ctx, json, size, choicesPath);
-
-    // one object per link
-    for (int i = 0; i < entryCount && JS_IsObject(choices); i++) {
-        Entry *entry = &entries[i];
-        JSValue choice = JS_GetPropertyStr(ctx, choices, entry->link->key());
-        if (JS_IsObject(choice)) {
-            readInt(ctx, choice, "port", &entry->savedPort);
-            JSValue listenValue = JS_GetPropertyStr(ctx, choice, "listen");
-            entry->savedListen = JS_ToBool(ctx, listenValue) == 1;
-            JS_FreeValue(ctx, listenValue);
-            entry->hasSaved = true;
-        }
-
-        JS_FreeValue(ctx, choice);
-
-        // a persisted link takes its choice
-        if (entry->hasSaved && entry->link->persisted()) {
-            entry->link->request(entry->savedPort, entry->savedListen);
-        }
-    }
-
-    JS_FreeValue(ctx, choices);
-    JS_FreeContext(ctx);
-    JS_FreeRuntime(runtime);
-    memory::release(json);
+    char json[CHOICE_SIZE];
+    snprintf(json, sizeof(json), "{ \"port\": %d, \"listen\": %s }", state.port, state.listen ? "true" : "false");
+    choicesWrite(link->key(), json);
 }
 
 /**
- * Writes twin.json: the choices of the persisted links, and what the file
- * held for the others (a group the command line set this run).
- */
-void saveChoices() {
-    char *json = (char *)memory::allocate(FILE_SIZE);
-    size_t used = (size_t)snprintf(json, FILE_SIZE, "{");
-    bool first = true;
-
-    for (int i = 0; i < entryCount; i++) {
-        // the persisted links: what is asked now
-        Entry *entry = &entries[i];
-        if (entry->link->persisted()) {
-            TcpState state = entry->link->state();
-            entry->savedPort = state.port;
-            entry->savedListen = state.listen;
-            entry->hasSaved = state.port != 0;
-        }
-
-        if (!entry->hasSaved || used >= FILE_SIZE) {
-            continue;
-        }
-
-        // "key": { "port": n, "listen": b }
-        used += (size_t)snprintf(json + used, FILE_SIZE - used, "%s\n    \"%s\": { \"port\": %d, \"listen\": %s }",
-                                 first ? "" : ",", entry->link->key(), entry->savedPort,
-                                 entry->savedListen ? "true" : "false");
-        first = false;
-    }
-
-    if (used < FILE_SIZE) {
-        used += (size_t)snprintf(json + used, FILE_SIZE - used, "\n}\n");
-    }
-
-    // a failure is only said: the twin goes on
-    size_t length = strlen(json);
-    if (!files::writeAll(choicesPath, json, length)) {
-        fprintf(stderr, "qjsx twin: cannot write %s\n", choicesPath);
-    }
-
-    memory::release(json);
-}
-
-/**
- * The "twin tcp" thread: one look at every link, then twin.json written if
- * a choice changed; for the life of the process.
+ * The "twin tcp" thread: one look at every link, a persisted link whose
+ * choice changed saved; for the life of the process.
  */
 void serveLinks(void *) {
     for (;;) {
-        bool changed = false;
-        for (int i = 0; i < entryCount; i++) {
-            changed = entries[i].link->poll(listenHost) || changed;
-        }
-
-        if (changed) {
-            saveChoices();
+        for (int i = 0; i < linkCount; i++) {
+            bool changed = links[i]->poll(listenHost);
+            if (changed && links[i]->persisted()) {
+                saveChoice(links[i]);
+            }
         }
 
         platform::sleepMs(POLL_MS);
@@ -357,21 +285,22 @@ bool TcpLink::poll(const char *host) {
  * Adds a link to those the thread serves.
  */
 void registerTcpLink(TcpLink *link) {
-    if (entryCount < MAX_LINKS) {
-        entries[entryCount++] = Entry{ link, false, 0, false };
+    if (linkCount < MAX_LINKS) {
+        links[linkCount++] = link;
     }
 }
 
 /**
- * Reads twin.json, then starts the thread.
+ * The persisted links take their kept choices, then the thread starts.
  */
-bool startTcp(const char *host, const char *storage) {
+bool startTcp(const char *host) {
     // the choices kept
     listenHost = host;
-    size_t size = strlen(storage) + strlen("/twin.json") + 1;
-    choicesPath = (char *)memory::allocate(size);
-    snprintf(choicesPath, size, "%s/twin.json", storage);
-    loadChoices();
+    for (int i = 0; i < linkCount; i++) {
+        if (links[i]->persisted()) {
+            choicesRead(links[i]->key(), &takeChoice, links[i]);
+        }
+    }
 
     // the thread
     if (!platform::startThread(&serveLinks, nullptr, platform::defaultThreadOptions("twin tcp"))) {
@@ -386,9 +315,9 @@ bool startTcp(const char *host, const char *storage) {
  * The link 'key'.
  */
 TcpLink *findTcpLink(const char *key) {
-    for (int i = 0; i < entryCount; i++) {
-        if (strcmp(entries[i].link->key(), key) == 0) {
-            return entries[i].link;
+    for (int i = 0; i < linkCount; i++) {
+        if (strcmp(links[i]->key(), key) == 0) {
+            return links[i];
         }
     }
 

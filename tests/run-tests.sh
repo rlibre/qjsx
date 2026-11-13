@@ -6,7 +6,7 @@
 #    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
 
 # Runs every test. The executables must be built (make -C build config=release).
-# Usage: tests/run-tests.sh [Release|Debug]
+# Usage: tests/run-tests.sh [Release|Debug|Profile]
 set -u
 
 CONFIG=${1:-Release}
@@ -296,8 +296,8 @@ done
 
 # --- the digital twin of a board: the agent with --board, its page driven
 # over HTTP and WebSocket (tests/twin.test.js), its USB device over TCP
-# (tests/usb.test.js), its I2C buses (tests/i2c.test.js), its UARTs over TCP
-# and on the page (tests/serial.test.js)
+# (tests/usb.test.js), its I2C buses (tests/i2c.test.js), its PWM outputs
+# (tests/pwm.test.js), its UARTs over TCP and on the page (tests/serial.test.js)
 TWIN_PORT=45679
 TWIN_UI_PORT=45680
 TWIN_USB_PORT=45681
@@ -317,12 +317,14 @@ check "USB device of the twin (device/usb, stdlib/usb, host over TCP)" \
     "$BIN/qjsx" run -A tests/usb.test.js "tcp:127.0.0.1:$TWIN_PORT" "$TWIN_USB_PORT"
 check "I2C buses of the twin (device/i2c, nothing answers)" \
     "$BIN/qjsx" run -A tests/i2c.test.js "tcp:127.0.0.1:$TWIN_PORT"
+check "PWM outputs of the twin (device/pwm, the limits of the ESP32-S3)" \
+    "$BIN/qjsx" run -A tests/pwm.test.js "tcp:127.0.0.1:$TWIN_PORT" "$TWIN_UI_PORT"
 check "UARTs of the twin (device/serial, TCP and the page)" \
     "$BIN/qjsx" run -A tests/serial.test.js "tcp:127.0.0.1:$TWIN_PORT" "$TWIN_UART_PORT" "$TWIN_UI_PORT"
 kill "$TWIN_PID" 2> /dev/null
 wait "$TWIN_PID" 2> /dev/null
 rm -rf tests/fixtures/twin/build tests/fixtures/twinusb/build tests/fixtures/twini2c/build \
-    tests/fixtures/twinserial/build
+    tests/fixtures/twinserial/build tests/fixtures/twinpwm/build
 
 # --- the TCP links of the twin chosen from the page (no --uart-port nor
 # --usb-port): set, kept in twin.json, taken again after a restart
@@ -342,6 +344,31 @@ for round in set kept; do
     kill "$TWIN_PID" 2> /dev/null
     wait "$TWIN_PID" 2> /dev/null
 done
+
+# --- the UARTs of the twin wired to PC serial ports: "twin.uarts" of a
+# project's qjsx.json, the page's choice kept in twin.json; no real port
+# needed (the ports do not exist: their errors are checked)
+TWINWIRE=tests/fixtures/twinwire
+TWINWIRE_PORT=45696        # "twin.ports" of its qjsx.json
+TWINWIRE_UI_PORT=45697
+rm -rf "$TWINWIRE/build"
+"$BIN/qjsx" agent -p "$TWINWIRE" > build/twinwire-out.txt 2>&1 &
+TWIN_PID=$!
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    grep -q listening build/twinwire-out.txt 2>/dev/null && break
+    sleep 0.2
+done
+check "UARTs of the twin wired to PC serial ports (qjsx.json, the page, twin.json)" \
+    "$BIN/qjsx" run -A tests/twinwire.test.js "tcp:127.0.0.1:$TWINWIRE_PORT" "$TWINWIRE_UI_PORT" "$TWINWIRE/build/agent" 45698
+kill "$TWIN_PID" 2> /dev/null
+wait "$TWIN_PID" 2> /dev/null
+rm -rf "$TWINWIRE/build"
+check "--uart-serial refuses the agent's link" \
+    bash -c "! '$BIN/qjsx' agent --board yd-esp32-s3 --port 0 --ui-port 0 --storage build/test-twin-wire --uart-serial 0=COM1 > /dev/null 2> build/twinwire-link.txt && grep -q 'agent.s link' build/twinwire-link.txt"
+check "--uart-serial refuses what is not <uart>=<PC port>" \
+    bash -c "! '$BIN/qjsx' agent --board yd-esp32-s3 --uart-serial COM5 > /dev/null 2> build/twinwire-bad.txt && grep -q 'expected <uart>=<PC port>' build/twinwire-bad.txt"
+rm -rf build/test-twin-wire
+
 # --- the twin of a project: "qjsx agent -p" reads the "twin" section of its
 # qjsx.json (board, parts, ports); the program reads a BME280 (a model of
 # qjsx) and an echo device (a model of the project) over I2C; "target":

@@ -8,7 +8,8 @@
 // The table of the pins: level, mode, pull, part, and buttons to force a pin
 // to 0 or 1 or let it go. One row per pin, built once and updated in place
 // (a click is never lost to a rebuild).
-import { BoxProps, Button, HBox, Label, StateProxy, VBox } from "x4js";
+import { BoxProps, Button, HBox, Header, Label, StateProxy, VBox } from "x4js";
+import { frequencyText, percentText } from "./frequency";
 import { BoardInfo, forcePin, PartInfo, PinState } from "./messages";
 import { TwinSettings } from "./settings";
 import { tx } from "./texts";
@@ -36,12 +37,17 @@ function forceTooltip(level: number) {
 
 /**
  * What the program uses a pin for: an analog input with its voltage ("adc
- * 1.65 V"), a bus or a channel ("i2c", "rmt"), else its gpio mode, "-" when
- * it does not use it.
+ * 1.65 V"), a PWM output ("pwm 1 kHz 25 %", "inv" when active low), a bus
+ * or a channel ("i2c", "rmt"), else its gpio mode, "-" when it does not use
+ * it.
  */
 export function pinMode(state: PinState) {
     if (state.adc) {
         return `adc ${state.voltage.toFixed(2)} V`;
+    }
+    if (state.pwm !== null) {
+        const inverted = state.pwm.invert ? " inv" : "";
+        return `pwm ${frequencyText(state.pwm.frequency)} ${percentText(state.pwm.duty)}${inverted}`;
     }
     if (state.i2c) {
         return "i2c";
@@ -73,9 +79,10 @@ class PinRow extends HBox {
             });
         });
 
+        // a cell per column of the header (the dot of the level in its own)
         this.setContent([
             new Label({ cls: "number", text: String(pin) }),
-            this.refs.level = new Label({ cls: "level", text: "" }),
+            new HBox({ cls: "level-cell", content: this.refs.level = new Label({ cls: "level", text: "" }) }),
             this.refs.mode = new Label({ cls: "mode", text: "" }),
             this.refs.pull = new Label({ cls: "pull", text: "" }),
             this.refs.part = new Label({ cls: "part-name", text: "" }),
@@ -122,20 +129,28 @@ export class PinTable extends VBox {
 
     /**
      * An empty table, until setBoard(); 'settings' says which pins it shows.
+     * The columns are resized from the header (x4js Header): it sets the
+     * width of each as a CSS variable of the table, --pin-<column>-width,
+     * that the cells of the rows take (main.scss).
      */
     constructor(props: BoxProps, settings: StateProxy<TwinSettings>) {
         super(props);
         this._settings = settings;
 
+        // the columns: their variable, title, first width in px; the part
+        // takes the room left (a negative width: flex, x4js)
+        const columns = [
+            { name: "pin-number", title: tx.twin.gpio, width: 48 },
+            { name: "pin-level", title: "", width: 24 },
+            { name: "pin-mode", title: tx.twin.mode, width: 160 },
+            { name: "pin-pull", title: tx.twin.pull, width: 52 },
+            { name: "pin-part", title: tx.twin.part, width: -1 },
+            { name: "pin-force", title: tx.twin.force, width: 130 },
+        ];
+
+        // the header, then the rows
         this.setContent([
-            new HBox({ cls: "pin-row header", content: [
-                new Label({ cls: "number", text: tx.twin.gpio }),
-                new Label({ cls: "level", text: "" }),
-                new Label({ cls: "mode", text: tx.twin.mode }),
-                new Label({ cls: "pull", text: tx.twin.pull }),
-                new Label({ cls: "part-name", text: tx.twin.part }),
-                new Label({ cls: "force", text: tx.twin.force }),
-            ] }),
+            new Header({ cls: "pin-header", target: this, items: columns }),
             this.refs.rows = new VBox({ cls: "rows" }),
         ]);
 
@@ -188,10 +203,19 @@ export class PinTable extends VBox {
     private _filter() {
         const usedOnly = this._settings.usedPinsOnly;
         this._rows.forEach((row, pin) => {
-            const state = this._last[pin];
-            const inUse = state !== undefined && (state.configured || state.rmt || state.i2c || state.adc || state.forced !== null);
-            const shown = !usedOnly || inUse || this._partOfPin[pin] !== "";
+            const shown = !usedOnly || pinInUse(this._last[pin], this._partOfPin[pin] !== "");
             row.show(shown);
         });
     }
+}
+
+/**
+ * Whether something uses a pin: the program configured it (gpio, rmt, i2c,
+ * adc), the page forces it, or a part is on it ('hasPart'). The setting
+ * "used pins only" shows only those (the table, the analyzer's list).
+ */
+export function pinInUse(state: PinState | undefined, hasPart: boolean): boolean {
+    const usedByProgram = state !== undefined && (state.configured || state.rmt || state.i2c || state.adc);
+    const forced = state !== undefined && state.forced !== null;
+    return usedByProgram || forced || hasPart;
 }

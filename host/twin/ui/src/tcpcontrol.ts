@@ -11,6 +11,7 @@
 // choices (messages.ts: setTcpLink); this control shows what the twin says.
 import { Checkbox, EvFocus, HBox, Label, TextEdit } from "x4js";
 import { setTcpLink, TcpKind, TcpState } from "./messages";
+import { warn } from "./notify";
 import { tx } from "./texts";
 
 export class TcpControl extends HBox {
@@ -30,9 +31,8 @@ export class TcpControl extends HBox {
 
         this.setContent([
             this.refs.port = new TextEdit({
-                cls: "tcp-port",
+                cls: "link-field",
                 label: tx.twin.tcp_port,
-                inputWidth: 80,
                 type: "number",
                 min: 1,
                 max: 65535,
@@ -43,12 +43,12 @@ export class TcpControl extends HBox {
                 },
             }),
             this.refs.listen = new Checkbox({
-                cls: "button",
+                cls: "button link-action",
                 label: tx.twin.tcp_listen,
                 tooltip: tx.twin.tcp_listen_tooltip,
                 change: () => this._request(this.refs.listen.getCheck()),
             }),
-            this.refs.status = new Label({ cls: "tcp-status", text: tx.twin.tcp_off }),
+            this.refs.status = new Label({ cls: "link-status", text: tx.twin.tcp_off }),
         ]);
 
         // Enter in the port applies it
@@ -101,14 +101,13 @@ export class TcpControl extends HBox {
 
     /**
      * Asks the twin for the port typed and listening on or off; listening
-     * without a port is refused here.
+     * without a port is refused here, with a warning.
      */
     private _request(listen: boolean) {
         const port = this._typedPort();
         if (listen && port === 0) {
             this.refs.listen.setCheck(false);
-            this.refs.status.setText(tx.twin.tcp_no_port);
-            this.refs.status.setClass("error", true);
+            warn(tx.twin.tcp_port, tx.twin.tcp_no_port);
             return;
         }
         setTcpLink(this._kind, this._index, port, listen);

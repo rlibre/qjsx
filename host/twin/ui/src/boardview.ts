@@ -14,7 +14,11 @@
 //     (uartpanel.ts);
 //   - each I2C bus the program opened with no part on it, when the firmware
 //     has device/i2c (i2cpanel.ts: the trace of the transfers).
-import { BoxProps, HBox, Label, VBox } from "x4js";
+// The sections can be moved: a section dragged by its title line drops
+// before or after another (a line shows where); the order is kept by the
+// browser by the keys of the sections, a section it does not know at the
+// end.
+import { BoxProps, Component, dragManager, DropInfo, HBox, Label, VBox } from "x4js";
 import { Section } from "./controls/section";
 import { I2cPanel, i2cSummary } from "./i2cpanel";
 import { BoardInfo, I2cBusState, I2cRecord, PartInfo, PartState, PinState, UartRecord, UartState, UsbState } from "./messages";
@@ -26,6 +30,15 @@ import { usbSummary, UsbView } from "./usbview";
 
 // The model of the push buttons: they share one section.
 const BUTTON_MODEL = "button";
+
+// Name under which the browser keeps the order of the sections.
+const ORDER_KEY = "qjsx.twin.sections";
+
+// Where a dragged section would drop: before or after a section.
+interface DropPlace {
+    section: Section;
+    after:   boolean;
+}
 
 // I2C buses of a board with device/i2c (as twin_i2c.cpp).
 const I2C_BUSES = 2;
@@ -58,7 +71,12 @@ function partSummary(part: PartInfo, pins: PinState[]) {
 }
 
 export class BoardView extends VBox {
-    declare protected refs: { name: Label; description: Label; parts: VBox; sections: VBox };
+    declare protected refs: { name: Label; description: Label; sections: VBox };
+
+    private _order: { keys: string[] };                         // the keys of the sections, as the user put them (kept by the browser)
+    private _partList: Section[] = [];                           // the sections of the parts (setParts)
+    private _deviceList: Section[] = [];                         // the sections of the devices (setBoard)
+    private _dropPlace: DropPlace = null;                        // where the section dragged would drop
 
     private _parts = new Map<string, PartView>();                // by id of the part
     private _partSections: { part: PartInfo; section: Section }[] = [];   // the sections of the parts (not the buttons)
@@ -73,13 +91,20 @@ export class BoardView extends VBox {
      */
     constructor(props: BoxProps) {
         super(props);
+        this._order = this.loadPState(ORDER_KEY, { keys: [] });
 
         this.setContent([
             this.refs.name = new Label({ cls: "board-name", text: "" }),
             this.refs.description = new Label({ cls: "board-description", text: "" }),
-            this.refs.parts = new VBox({ cls: "sections" }),
             this.refs.sections = new VBox({ cls: "sections" }),
         ]);
+
+        // a section dragged by its title line drops among the others
+        dragManager.registerDropTarget(
+            this.refs.sections,
+            (command, dragged, infos) => this._onDrop(command, dragged, infos),
+            dragged => this._sectionOf(dragged) !== null,
+        );
     }
 
     /**
@@ -109,7 +134,12 @@ export class BoardView extends VBox {
                 continue;
             }
             const view = new UartPanel({}, uart);
-            const section = new Section({ title: `${tx.twin.uart} ${uart}`, persist: `uart${uart}`, content: view });
+            const section = new Section({
+                title: `${tx.twin.uart} ${uart}`,
+                persist: `uart${uart}`,
+                content: view,
+                tools: [view.menuButton],
+            });
             this._uarts.set(uart, { section, view });
             sections.push(section);
         }
@@ -119,13 +149,19 @@ export class BoardView extends VBox {
         const busCount = board.natives.includes("device/i2c") ? I2C_BUSES : 0;
         for (let bus = 0; bus < busCount; bus++) {
             const view = new I2cPanel({});
-            const section = new Section({ title: `${tx.twin.i2c} ${bus}`, persist: `i2c${bus}`, content: view });
+            const section = new Section({
+                title: `${tx.twin.i2c} ${bus}`,
+                persist: `i2c${bus}`,
+                content: view,
+                tools: [view.menuButton],
+            });
             section.hide();
             this._i2c.set(bus, { section, view });
             sections.push(section);
         }
 
-        this.refs.sections.setContent(sections);
+        this._deviceList = sections;
+        this._arrange();
     }
 
     /**
@@ -184,8 +220,110 @@ export class BoardView extends VBox {
             sections.push(section);
         }
 
-        this.refs.parts.setContent(sections);
+        this._partList = sections;
+        this._arrange();
         this.setPins(this._pins);
+    }
+
+    // ### Moving the sections ################################################
+
+    /**
+     * Shows every section in the order kept: the known keys first, in that
+     * order, then the others as they come (the parts, then the devices).
+     */
+    private _arrange() {
+        const all = [...this._partList, ...this._deviceList];
+        const rank = (section: Section) => {
+            const index = this._order.keys.indexOf(section.key);
+            return index < 0 ? this._order.keys.length : index;
+        };
+        const sorted = all.map((section, index) => ({ section, index }))
+            .sort((a, b) => rank(a.section) - rank(b.section) || a.index - b.index)
+            .map(entry => entry.section);
+        this.refs.sections.setContent(sorted);
+    }
+
+    /**
+     * The section whose title line is 'dragged', or null (not a section of
+     * this board).
+     */
+    private _sectionOf(dragged: Component): Section {
+        const section = dragged?.parentElement(Section) ?? null;
+        const ours = section !== null && [...this._partList, ...this._deviceList].includes(section);
+        return ours ? section : null;
+    }
+
+    /**
+     * A section dragged over the list: the line where it would drop follows
+     * the pointer (before or after the section under it, by its half); on
+     * the drop, the section moves there and the order is kept.
+     */
+    private _onDrop(command: "enter" | "leave" | "drag" | "drop", dragged: Component, infos: DropInfo) {
+        if (command === "leave") {
+            this._showDropPlace(null);
+            return;
+        }
+        if (command !== "drag" && command !== "drop") {
+            return;
+        }
+
+        // the place under the pointer
+        const moving = this._sectionOf(dragged);
+        const place = this._placeAt(infos.pt.y, moving);
+        if (command === "drag") {
+            this._showDropPlace(place);
+            return;
+        }
+
+        // the drop
+        this._showDropPlace(null);
+        if (moving !== null && place !== null) {
+            this._move(moving, place);
+        }
+    }
+
+    /**
+     * Where a section dropped at 'y' (page coordinates) would go: before or
+     * after the shown section under it; null over the section itself.
+     */
+    private _placeAt(y: number, moving: Section): DropPlace {
+        const shown = this.refs.sections.enumChildComponents(false).filter(child => child.isVisible()) as Section[];
+        for (const section of shown) {
+            const rect = section.getBoundingRect();
+            const top = rect.top + window.scrollY;
+            if (y < top + rect.height) {
+                const after = y > top + rect.height / 2;
+                return section === moving ? null : { section, after };
+            }
+        }
+        const last = shown[shown.length - 1];
+        return last === undefined || last === moving ? null : { section: last, after: true };
+    }
+
+    /**
+     * Marks the section where the drop would go (a line above or under it),
+     * the previous mark taken off.
+     */
+    private _showDropPlace(place: DropPlace) {
+        if (this._dropPlace !== null) {
+            this._dropPlace.section.removeClass("drop-before drop-after");
+        }
+        this._dropPlace = place;
+        if (place !== null) {
+            place.section.addClass(place.after ? "drop-after" : "drop-before");
+        }
+    }
+
+    /**
+     * Moves a section before or after another, keeps the order of every
+     * section shown or not, and shows them again in it.
+     */
+    private _move(moving: Section, place: DropPlace) {
+        const order = (this.refs.sections.enumChildComponents(false) as Section[]).filter(section => section !== moving);
+        const index = order.indexOf(place.section) + (place.after ? 1 : 0);
+        order.splice(index, 0, moving);
+        this._order.keys = order.map(section => section.key);
+        this._arrange();
     }
 
     /**
@@ -218,13 +356,13 @@ export class BoardView extends VBox {
     }
 
     /**
-     * Shows the UARTs.
+     * Shows the UARTs ('ports': the PC's serial ports they can be wired to).
      */
-    setUarts(uarts: UartState[]) {
+    setUarts(uarts: UartState[], ports: string[]) {
         for (const state of uarts) {
             const shown = this._uarts.get(state.number);
             shown?.section.setSummary(uartSummary(state));
-            shown?.view.setState(state);
+            shown?.view.setState(state, ports);
         }
     }
 

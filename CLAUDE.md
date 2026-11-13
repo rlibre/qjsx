@@ -491,6 +491,17 @@ keeps the old name: `C:\Sandbox\espjs`.
     on consecutive ports and nothing of it is saved that run. The rows of the USB
     functions say plainly whether the program uses them ("unused: the device is not
     started", "unused: the program did not declare it", "used, ..."), with an icon.
+  - UARTs wired to real PC serial ports (user, 2026-11-13, IMPLEMENTED the same day,
+    `host/twin/sim/twin_uart_serial.cpp`, `tests/twinwire.test.js`; not tried with a real
+    port: none on the PC): a settings icon on the title line of each UART section
+    opens a menu with two sub menus holding their fields, "TCP" and "PC port" (port,
+    connect, real speed) (user: less room, edits in the menus; x4js pushes a sub menu
+    that does not fit back over its menu, so the sub menus are narrow, on several
+    lines); a refused choice (no port) is a Notification; the port is open while the program has the UART open, with its settings;
+    real speed (default: the write waits the line time) or immediate (64 KB queue);
+    TCP and PC port at the same time; `--uart-serial 1=COM5` and `"twin.uarts"` of
+    qjsx.json wire from the start, not saved (command line wins); `twin.json` is now
+    shared through `twin_choices.cpp` (one key per link: "uart1", "usb0", "serial1").
 - `device/rmt` + `stdlib/rgbled` (user, 2026-11-11, DONE the same day and tried on the board:
   colors and a rainbow on GPIO48; `setHsv` / `fillHsv` added, user's idea), for the WS2812 LED of the
   YD-ESP32-S3 on GPIO48 (only connected when the "RGB" solder bridge of the board is closed):
@@ -532,6 +543,28 @@ keeps the old name: `C:\Sandbox\espjs`.
   ONLY (user: ADC2 fails with WiFi), attenuation from the range, curve / line fitting
   calibration), twin `host/twin/sim/twin_adc.cpp` (saturates at the span, as the S3).
   RP2350 later. DAC: postponed (our boards have none; with the twin's oscilloscope).
+- `device/pwm` (agreed by the user 2026-11-13, IMPLEMENTED the same day for the ESP32
+  and the twin, `doc/architecture.md` 5.4, `tests/pwm.test.js`; ESP32 firmware NOT built
+  yet (no terminal tool that session), not tried on the board): `new Pwm(pin, { frequency
+  = 1000, duty = 0, invert = false })`, `setDuty(0..1)`, `setFrequency(hz)` (duty kept),
+  `setPulseWidth(us)` (servos), fields `duty` / `frequency` / `bits` = what the hardware
+  does (rounded); resolution chosen by the hal; a frequency no shared timer can take is
+  EBUSY (never a change of the other outputs); `close()` AND the end of the program stop
+  the output, pin driven at its idle level (unlike Gpio); fade and `stdlib/servo` later.
+  `common/hal/hal_pwm.h`; `common/hal/pwm_timers.h` = the LEDC model (2^bits counter,
+  divider 8.10 bits, timers shared by frequency) shared by `hal_pwm_esp32.cpp` (LEDC, APB
+  80 MHz, low speed) and the twin's `twin_pwm.cpp` (board JSON `"pwm": { outputs, timers,
+  clock, maxBits }`). Twin: same frequency = new duty from the next period (phase kept,
+  as LEDC).
+- Analyzer of the twin (user, 2026-11-13): PWM and RMT NOT recorded edge by edge: the twin
+  records PWM changes (frequency, duty, invert, from a time) and RMT sends as sent
+  (pulses, or bytes + bit timings), the page computes the edges for the window, the VCD
+  (ns) for the file (cap 1,000,000 changes, Notification). Modes Roll / Normal / Single;
+  trigger = an edge (rising, falling, both) of a shown pin, any edge known (levels, PWM,
+  RMT), at 10 % of the view, dashed line, times counted from it, holdoff = one window;
+  Auto, adjustable holdoff / position later. Tool bar on two lines (functions, then pins);
+  Save / Clear in a context menu of the traces. Pins table columns resized by an x4js
+  `Header`, the part column flex.
 - `device/i2c` (API agreed by the user 2026-11-12, IMPLEMENTED the same day for the ESP32
   and the twin, `doc/architecture.md` 5.4, `tests/i2c.test.js`; not tried on a board: no I2C
   component; RP2350 later): `new I2c(port,
@@ -602,7 +635,7 @@ Top level: `engine/` (QuickJS), `common/` (portable code built for the host AND 
   JS_CallInternal to the frame, every opcode; same in upstream QuickJS): about -10 %.
   The same flag may help the ESP32 (Xtensa) build: not tried.
   Measures on the PC (user, 2026-11-12: "fais les tests en local pas sur les cartes"):
-  `bash tools/profile/profile.sh [Release]` runs `tools/profile/bench.js` with qjsx-tests
+  `bash tools/profile/profile.sh [Profile]` runs `tools/profile/bench.js` with qjsx-tests
   (module `profile_test`, tests/native/profile_module.cpp: sampling thread with
   SuspendThread / GetThreadContext, Windows only; empty native functions to time calls),
   resolves addresses with addr2line. Findings in known-bugs.md "Speed" (`let` costs 30 %).
@@ -700,13 +733,16 @@ in the include path (no two headers share a name; keep it so).
 - Toolchain: Windows, gcc 13.1 mingw64, premake5 5.0.0, node 26. Makefiles are generated with
   `premake5 gmake --cc=gcc --shell=posix` (the user's "unix makefiles").
 - Project build: `premake5 gmake --cc=gcc --shell=posix` then `make -C build config=release`
-  (or `config=debug`). Projects: `qjsx-engine` (engine/qjsx), `qjsx-engine-target`
+  (or `config=debug`, `config=profile`). Configurations (user, 2026-11-12): Debug (-O0,
+  debug info, asserts), Release (optimized, NO debug info, every executable stripped
+  with -s: qjsx 10.9 MB -> 2.5 MB), Profile (the code of Release WITH its debug
+  info: what tools/profile/profile.sh uses, addr2line needs it). Projects: `qjsx-engine` (engine/qjsx), `qjsx-engine-target`
   (the same without compiler/, QJSX_NO_COMPILER: no eval, like the targets), `qjsx` (the
   tool), `qjsx-tests`, `qjsx-target` (qjsx without its compiler module, linked with
   qjsx-engine-target: runs packages like a
   target; checked by run-tests.sh with tests/fixtures/nocompiler), `qjsx-runtime` (2026-11-12:
   the runner of `qjsx build --executable`, engine without compiler + runtime + PC native
-  modules, its own main in host/runtime/, no tool JS, stripped in Release (-s), 1.25 MB;
+  modules, its own main in host/runtime/, no tool JS, 1.25 MB in Release;
   the package is appended to a copy of it with a trailer "QJSXPKG1" + 64-bit LE size;
   argv = [exe, exe, args]). JS modules embedded as
   source (`qjsx:*`, `stdlib/*`) only work on the host; a target gets library modules as

@@ -197,7 +197,9 @@ premake5 gmake --cc=gcc --shell=posix
 make -C build config=release
 ```
 
-The tool is then in `bin/Release/`. To run the tests:
+The tool is then in `bin/Release/` (`config=debug`: `bin/Debug/`, with debug info and
+asserts; `config=profile`: the code of Release with its debug info, for
+`tools/profile/profile.sh`). To run the tests:
 
 ```bash
 bash tests/run-tests.sh Release
@@ -224,5 +226,8 @@ The detailed documentation is in the [`doc/`](doc/) folder:
 qjsx is built on [QuickJS](https://bellard.org/quickjs/), by Fabrice Bellard and Charlie
 Gordon, distributed under the MIT license. Its original version, unmodified, is kept in
 `engine/qjs-bellard/`.
+
+The page of the digital twin (`host/twin/ui/`) is built with [x4js](https://x4js.org), by
+R-libre ingénierie, distributed under the MIT license.
 
 The project is distributed under the MIT license: see [LICENSE](LICENSE).

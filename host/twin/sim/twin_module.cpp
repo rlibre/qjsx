@@ -69,11 +69,12 @@ js::Str board() {
 
 /**
  * JS pins(): one object per pin, { configured, mode, pull, level, forced,
- * partDrive, partPull, conflict, rmt, i2c, adc, voltage } (forced, partDrive: 0, 1 or null;
+ * partDrive, partPull, conflict, rmt, i2c, adc, voltage, pwm } (forced, partDrive: 0, 1 or null;
  * partPull: "none", "up", "down"; conflict: the program and a component
  * drive different levels; rmt: a channel of device/rmt drives it; i2c: a
  * bus of device/i2c is open on it; adc: the program has its analog input
- * open; voltage: the voltage on it, in volts).
+ * open; voltage: the voltage on it, in volts; pwm: an output of device/pwm
+ * drives it, { frequency (Hz), duty (0 to 1 active), invert }, else null).
  */
 js::Value pins() {
     JSContext *ctx = js::context();
@@ -102,6 +103,16 @@ js::Value pins() {
         JS_SetPropertyStr(ctx, pin, "i2c", JS_NewBool(ctx, state->i2c));
         JS_SetPropertyStr(ctx, pin, "adc", JS_NewBool(ctx, state->adc));
         JS_SetPropertyStr(ctx, pin, "voltage", JS_NewFloat64(ctx, twin::pinVoltage(i) / 1000.0));
+
+        // the PWM output on it
+        JSValue pwm = JS_NULL;
+        if (state->pwm) {
+            pwm = JS_NewObject(ctx);
+            JS_SetPropertyStr(ctx, pwm, "frequency", JS_NewFloat64(ctx, state->pwmFrequency));
+            JS_SetPropertyStr(ctx, pwm, "duty", JS_NewFloat64(ctx, state->pwmDuty));
+            JS_SetPropertyStr(ctx, pwm, "invert", JS_NewBool(ctx, state->pwmInvert));
+        }
+        JS_SetPropertyStr(ctx, pin, "pwm", pwm);
         JS_SetPropertyUint32(ctx, array, (uint32_t)i, pin);
     }
 
@@ -363,10 +374,26 @@ JSValue tcpValue(JSContext *ctx, const twin::TcpState *state) {
 }
 
 /**
+ * The JS object of the wiring of a UART to a PC serial port: { port,
+ * connect, realSpeed, connected, fixed, error } (port "" when none chosen;
+ * error: why the last opening failed, "" if it did not).
+ */
+JSValue serialValue(JSContext *ctx, const twin::SerialState *state) {
+    JSValue serial = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, serial, "port", JS_NewString(ctx, state->port));
+    JS_SetPropertyStr(ctx, serial, "connect", JS_NewBool(ctx, state->connect));
+    JS_SetPropertyStr(ctx, serial, "realSpeed", JS_NewBool(ctx, state->realSpeed));
+    JS_SetPropertyStr(ctx, serial, "connected", JS_NewBool(ctx, state->connected));
+    JS_SetPropertyStr(ctx, serial, "fixed", JS_NewBool(ctx, state->fixed));
+    JS_SetPropertyStr(ctx, serial, "error", JS_NewString(ctx, state->error));
+    return serial;
+}
+
+/**
  * JS uarts(): one object per UART of the board, { number, link, open, tcp,
- * baudRate, dataBits, parity, stopBits, flowControl, tx, rx, rts, cts } (tcp:
- * see tcpValue; the settings are those of the last open; a pin not wired is
- * null).
+ * serial, baudRate, dataBits, parity, stopBits, flowControl, tx, rx, rts,
+ * cts } (tcp: see tcpValue; serial: see serialValue; the settings are those
+ * of the last open; a pin not wired is null).
  */
 js::Value uarts() {
     JSContext *ctx = js::context();
@@ -386,6 +413,7 @@ js::Value uarts() {
         JS_SetPropertyStr(ctx, uart, "link", JS_NewBool(ctx, state->link));
         JS_SetPropertyStr(ctx, uart, "open", JS_NewBool(ctx, state->open));
         JS_SetPropertyStr(ctx, uart, "tcp", tcpValue(ctx, &state->tcp));
+        JS_SetPropertyStr(ctx, uart, "serial", serialValue(ctx, &state->serial));
         JS_SetPropertyStr(ctx, uart, "baudRate", JS_NewInt32(ctx, settings->baudRate));
         JS_SetPropertyStr(ctx, uart, "dataBits", JS_NewInt32(ctx, settings->dataBits));
         JS_SetPropertyStr(ctx, uart, "parity", JS_NewString(ctx, parityName(settings->parity)));
@@ -417,6 +445,7 @@ void addRecord(void *context, uint32_t sequence, twin::UartSource source, const 
     // who wrote it
     const char *sourceName = source == twin::UartSource::program ? "program"
                            : source == twin::UartSource::page    ? "page"
+                           : source == twin::UartSource::serial  ? "serial"
                                                                  : "tcp";
 
     // { sequence, source, bytes }
@@ -431,7 +460,7 @@ void addRecord(void *context, uint32_t sequence, twin::UartSource source, const 
 /**
  * JS uartTraffic(uart, after): { sequence, records } — the records of the
  * UART numbered after 'after', each { sequence, source: "program" | "page" |
- * "tcp", bytes }; sequence is the number of its newest record.
+ * "tcp" | "serial", bytes }; sequence is the number of its newest record.
  */
 js::Value uartTraffic(js::Range<int, 0, twin::MAX_UARTS - 1> uart, double after) {
     JSContext *ctx = js::context();
@@ -557,65 +586,167 @@ js::Value i2cTrace(double after) {
 struct ScopeResult {
     JSValue  levels;                     // the level of each pin now
     JSValue  millivolts;                 // the voltage of each pin now
+    JSValue  pwm;                        // the PWM outputs now: one object each
+    uint32_t pwmCount;                   // entries of pwm
     JSValue  changes;                    // the pins that changed: one object each
     uint32_t changeCount;                // entries of changes
 };
 
 /**
- * Adds a pin to a ScopeResult: its state now and, when it changed, its
- * records as one flat array [time, level, millivolts, ...].
+ * Appends a PWM change to a flat array [time, frequency, duty, invert, ...]
+ * ('count' entries in it so far).
  */
-void addScopePin(void *context, int pin, const twin::ScopeChanges *changes, const twin::ScopeRecord *now) {
+void addPwmChange(JSContext *ctx, JSValue array, uint32_t count, const twin::ScopeRecord *record) {
+    uint32_t slot = count * 4;
+    JS_SetPropertyUint32(ctx, array, slot, JS_NewFloat64(ctx, (double)record->timeUs));
+    JS_SetPropertyUint32(ctx, array, slot + 1, JS_NewFloat64(ctx, record->pwmFrequency));
+    JS_SetPropertyUint32(ctx, array, slot + 2, JS_NewFloat64(ctx, record->pwmDuty));
+    JS_SetPropertyUint32(ctx, array, slot + 3, JS_NewInt32(ctx, record->pwmInvert ? 1 : 0));
+}
+
+/**
+ * Adds a pin to a ScopeResult: its state now (level, PWM) and, when it
+ * changed, its records as two flat arrays: the changes of level [time,
+ * level, millivolts, ...], those of its PWM [time, frequency, duty, invert,
+ * ...].
+ */
+void addScopePin(void *context, int pin, const twin::ScopeChanges *changes, const twin::ScopeRecord *now,
+                 const twin::ScopeRecord *pwmNow) {
     ScopeResult *result = (ScopeResult *)context;
     JSContext *ctx = js::context();
 
-    // its state now
+    // its state now: level, voltage, its PWM when one runs
     JS_SetPropertyUint32(ctx, result->levels, (uint32_t)pin, JS_NewInt32(ctx, now->level));
     JS_SetPropertyUint32(ctx, result->millivolts, (uint32_t)pin, JS_NewInt32(ctx, now->millivolts));
+    if (pwmNow->pwmFrequency > 0) {
+        JSValue running = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, running, "pin", JS_NewInt32(ctx, pin));
+        JS_SetPropertyStr(ctx, running, "since", JS_NewFloat64(ctx, (double)pwmNow->timeUs));
+        JS_SetPropertyStr(ctx, running, "frequency", JS_NewFloat64(ctx, pwmNow->pwmFrequency));
+        JS_SetPropertyStr(ctx, running, "duty", JS_NewFloat64(ctx, pwmNow->pwmDuty));
+        JS_SetPropertyStr(ctx, running, "invert", JS_NewBool(ctx, pwmNow->pwmInvert));
+        JS_SetPropertyUint32(ctx, result->pwm, result->pwmCount++, running);
+    }
 
     bool changed = changes->count > 0 || changes->dropped > 0;
     if (!changed) {
         return;
     }
 
-    // its records, three numbers each
+    // its records: the changes of level, three numbers each, those of its
+    // PWM, four numbers each
     JSValue records = JS_NewArray(ctx);
+    JSValue pwm = JS_NewArray(ctx);
+    uint32_t levelCount = 0;
+    uint32_t pwmCount = 0;
     for (int i = 0; i < changes->count; i++) {
         const twin::ScopeRecord *record = &changes->records[i];
-        uint32_t slot = (uint32_t)i * 3;
+        if (record->pwm) {
+            addPwmChange(ctx, pwm, pwmCount++, record);
+            continue;
+        }
+
+        uint32_t slot = levelCount++ * 3;
         JS_SetPropertyUint32(ctx, records, slot, JS_NewFloat64(ctx, (double)record->timeUs));
         JS_SetPropertyUint32(ctx, records, slot + 1, JS_NewInt32(ctx, record->level));
         JS_SetPropertyUint32(ctx, records, slot + 2, JS_NewInt32(ctx, record->millivolts));
     }
 
-    // { pin, records, dropped, droppedUntil }
+    // { pin, records, pwm, dropped, droppedUntil }
     JSValue item = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, item, "pin", JS_NewInt32(ctx, pin));
     JS_SetPropertyStr(ctx, item, "records", records);
+    JS_SetPropertyStr(ctx, item, "pwm", pwm);
     JS_SetPropertyStr(ctx, item, "dropped", JS_NewUint32(ctx, changes->dropped));
     JS_SetPropertyStr(ctx, item, "droppedUntil", JS_NewFloat64(ctx, (double)changes->droppedUntilUs));
     JS_SetPropertyUint32(ctx, result->changes, result->changeCount++, item);
 }
 
 /**
+ * A JS array of numbers from 'count' unsigned values.
+ */
+JSValue numberArray(JSContext *ctx, const uint32_t *values, int count) {
+    JSValue array = JS_NewArray(ctx);
+    for (int i = 0; i < count; i++) {
+        JS_SetPropertyUint32(ctx, array, (uint32_t)i, JS_NewUint32(ctx, values[i]));
+    }
+    return array;
+}
+
+/**
+ * Appends an RMT send to the TrafficList 'context' (its array and count):
+ * { pin, time, resolution, pulses: [ticks, level, ...] } for a send of
+ * pulses; { pin, time, resolution, bytes: [...], bit0: [high, low], bit1:
+ * [high, low], reset } for a send of bytes.
+ */
+void addTrain(void *context, const twin::ScopeTrain *train) {
+    TrafficList *list = (TrafficList *)context;
+    JSContext *ctx = js::context();
+
+    // where, when, at which resolution
+    JSValue item = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, item, "pin", JS_NewInt32(ctx, train->pin));
+    JS_SetPropertyStr(ctx, item, "time", JS_NewFloat64(ctx, (double)train->timeUs));
+    JS_SetPropertyStr(ctx, item, "resolution", JS_NewUint32(ctx, train->resolutionHz));
+
+    // a send of bytes: the bytes and the timing of their bits
+    if (train->bytes) {
+        JSValue bytes = JS_NewArray(ctx);
+        for (size_t i = 0; i < train->size; i++) {
+            JS_SetPropertyUint32(ctx, bytes, (uint32_t)i, JS_NewInt32(ctx, train->data[i]));
+        }
+        uint32_t bit0[2] = { train->bit0.high, train->bit0.low };
+        uint32_t bit1[2] = { train->bit1.high, train->bit1.low };
+        JS_SetPropertyStr(ctx, item, "bytes", bytes);
+        JS_SetPropertyStr(ctx, item, "bit0", numberArray(ctx, bit0, 2));
+        JS_SetPropertyStr(ctx, item, "bit1", numberArray(ctx, bit1, 2));
+        JS_SetPropertyStr(ctx, item, "reset", JS_NewUint32(ctx, train->resetTicks));
+    }
+
+    // a send of pulses: ticks and level of each (packed 5 bytes each:
+    // ticks u32 little endian, then the level)
+    if (!train->bytes) {
+        JSValue pulses = JS_NewArray(ctx);
+        size_t count = train->size / 5;
+        for (size_t i = 0; i < count; i++) {
+            const uint8_t *entry = train->data + i * 5;
+            uint32_t ticks = entry[0] | (uint32_t)entry[1] << 8 | (uint32_t)entry[2] << 16 | (uint32_t)entry[3] << 24;
+            JS_SetPropertyUint32(ctx, pulses, (uint32_t)(i * 2), JS_NewUint32(ctx, ticks));
+            JS_SetPropertyUint32(ctx, pulses, (uint32_t)(i * 2 + 1), JS_NewInt32(ctx, entry[4]));
+        }
+        JS_SetPropertyStr(ctx, item, "pulses", pulses);
+    }
+
+    JS_SetPropertyUint32(ctx, list->array, list->count++, item);
+}
+
+/**
  * JS scope(): what the pins did since the last call (one caller: the page's
- * server), { now, levels, millivolts, changes: [{ pin, records, dropped,
- * droppedUntil }] }: times in µs since the twin started; levels and
- * millivolts the state of every pin now; records [time, level, millivolts,
- * ...] the first changes of a pin; dropped the changes after them, only
- * counted, the last at droppedUntil.
+ * server), { now, levels, millivolts, pwm, rmt, changes: [{ pin, records,
+ * pwm, dropped, droppedUntil }] }: times in µs since the twin started;
+ * levels and millivolts the state of every pin now; pwm the PWM outputs
+ * running now, [{ pin, since (the start of their first period), frequency,
+ * duty, invert }]; rmt the RMT sends since the last call (addTrain); records
+ * [time, level, millivolts, ...] the first changes of level of a pin, pwm
+ * [time, frequency (0: stopped), duty, invert (0 or 1), ...] those of its
+ * PWM; dropped the changes after them, only counted, the last at
+ * droppedUntil.
  */
 js::Value scope() {
     JSContext *ctx = js::context();
 
-    // every pin
-    ScopeResult result = { JS_NewArray(ctx), JS_NewArray(ctx), JS_NewArray(ctx), 0 };
+    // every pin, then the RMT sends
+    ScopeResult result = { JS_NewArray(ctx), JS_NewArray(ctx), JS_NewArray(ctx), 0, JS_NewArray(ctx), 0 };
     int64_t nowUs = twin::scopeRead(twin::pinCount(), &addScopePin, &result);
+    TrafficList trains = { JS_NewArray(ctx), 0 };
+    twin::scopeReadTrains(&addTrain, &trains);
 
     JSValue value = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, value, "now", JS_NewFloat64(ctx, (double)nowUs));
     JS_SetPropertyStr(ctx, value, "levels", result.levels);
     JS_SetPropertyStr(ctx, value, "millivolts", result.millivolts);
+    JS_SetPropertyStr(ctx, value, "pwm", result.pwm);
+    JS_SetPropertyStr(ctx, value, "rmt", trains.array);
     JS_SetPropertyStr(ctx, value, "changes", result.changes);
     return js::Value(ctx, value);
 }
@@ -625,7 +756,41 @@ js::Value scope() {
  * the program does not have the UART open.
  */
 bool uartSend(js::Range<int, 0, twin::MAX_UARTS - 1> uart, js::Bytes bytes) {
-    return twin::uartSend((int)uart, bytes.data(), bytes.size());
+    return twin::uartReceive((int)uart, twin::UartSource::page, bytes.data(), bytes.size());
+}
+
+/**
+ * JS uartSerial(uart, port, connect, realSpeed): the page wires a UART to the
+ * PC serial port 'port', or not, and chooses the speed (kept in twin.json
+ * unless the wiring is fixed). Applied within 50 ms.
+ */
+void uartSerial(js::Range<int, 0, twin::MAX_UARTS - 1> uart, js::Str port, bool connect, bool realSpeed) {
+    twin::serialRequest((int)uart, port.data(), connect, realSpeed);
+}
+
+// The JS array serialPorts() fills.
+struct PortList {
+    JSValue  array;                 // owned by serialPorts()
+    uint32_t count;                 // names in it
+};
+
+/**
+ * Appends the name of a PC serial port to the PortList 'context'.
+ */
+void addPortName(void *context, const char *name, int) {
+    PortList *list = (PortList *)context;
+    JSContext *ctx = js::context();
+    JS_SetPropertyUint32(ctx, list->array, list->count++, JS_NewString(ctx, name));
+}
+
+/**
+ * JS serialPorts(): the names of the PC's serial ports (["COM3", "COM5"]).
+ */
+js::Value serialPorts() {
+    JSContext *ctx = js::context();
+    PortList list = { JS_NewArray(ctx), 0 };
+    twin::serialPorts(&addPortName, &list);
+    return js::Value(ctx, list.array);
 }
 
 /**
@@ -708,6 +873,8 @@ JS_MODULE(twinboard, module) {
     JS_FUNCTION(module, uarts);
     JS_FUNCTION(module, uartTraffic);
     JS_FUNCTION(module, uartSend);
+    JS_FUNCTION(module, uartSerial);
+    JS_FUNCTION(module, serialPorts);
     JS_FUNCTION(module, i2cBuses);
     JS_FUNCTION(module, i2cTrace);
     JS_FUNCTION(module, scope);

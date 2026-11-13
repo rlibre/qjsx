@@ -40,30 +40,40 @@
 //                                  them; bytes: an array of numbers); a page that
 //                                  connects gets what is kept, then the new records
 //   twin.uart.send  page -> twin   { uart, bytes: [numbers] }: bytes for the program
+//   twin.uart.serial page -> twin  { uart, port, connect, realSpeed }: wires a UART to
+//                                  a serial port of the PC, or not (kept by the twin)
 //   twin.i2c.data   twin -> page   { records: [{ sequence, time, bus, address, status,
 //                                  writeSize, readSize, written, read }] }: the I2C
 //                                  transfers of the program (bytes as arrays of numbers;
 //                                  the first 32 of each); a page that connects gets
 //                                  what is kept, then the new records
-//   twin.scope.data twin -> page   { now, levels, millivolts, changes: [{ pin, records,
-//                                  dropped, droppedUntil }] }: what the pins did
-//                                  since the last message, for the analyzer, every
-//                                  POLL_MS (times in µs since the twin started;
-//                                  records [time, level, millivolts, ...]; dropped:
-//                                  changes after the records, only counted, the last
-//                                  at droppedUntil; levels, millivolts: every pin now)
+//   twin.scope.data twin -> page   { now, levels, millivolts, pwm, rmt, changes: [{ pin,
+//                                  records, pwm, dropped, droppedUntil }] }: what the
+//                                  pins did since the last message, for the analyzer,
+//                                  every POLL_MS (times in µs since the twin started;
+//                                  records [time, level, millivolts, ...]; pwm of a
+//                                  change [time, frequency (0: stopped), duty, invert,
+//                                  ...]; dropped: changes after the records, only
+//                                  counted, the last at droppedUntil; levels,
+//                                  millivolts: every pin now; pwm: the PWM outputs
+//                                  now, [{ pin, since, frequency, duty, invert }];
+//                                  rmt: the RMT sends, [{ pin, time, resolution,
+//                                  pulses: [ticks, level, ...] } or { ..., bytes,
+//                                  bit0: [high, low], bit1, reset }])
 //   twin.tcp.listen page -> twin   { kind: "uart" | "usb", index, port, listen }: the
 //                                  TCP link of a UART or of a USB serial function
 //                                  (the twin keeps the choice in its storage folder)
 //
 // The state: { pins: [{ configured, mode, pull, level, forced, partDrive, partPull,
-//                       conflict, rmt }],
-//              uarts: [{ number, link, open, tcp, baudRate, dataBits, parity,
+//                       conflict, rmt, i2c, adc, voltage, pwm }],
+//              uarts: [{ number, link, open, tcp, serial, baudRate, dataBits, parity,
 //                        stopBits, flowControl, tx, rx, rts, cts }],
+//              serialPorts: [names of the PC's serial ports],
 //              usb: { started, manufacturer, product, serialNumber, vendorId,
 //                     productId, serials, functions: [{ tcp }] },
 //              i2c: [{ bus, open, sda, scl, parts: [{ address, id }] }] }
-// where tcp = { port, listen, listening, client, error }.
+// where tcp = { port, listen, listening, client, error } and serial = { port,
+// connect, realSpeed, connected, fixed, error }.
 //
 // Silent: what this runtime prints would go where the device program's
 // output goes (one output sink per process). The agent prints the address.
@@ -75,6 +85,10 @@ import * as twinboard from "qjsx:twinboard";
 
 // How often the state is read for the open pages, in ms.
 const POLL_MS = 50;
+
+// How often the list of the PC's serial ports is read again, in ms (it takes
+// a look at the system: not at every state).
+const PORTS_MS = 1000;
 
 // Lines of the parts (twin.log) kept for a page that connects later.
 const KEPT_LINES = 200;
@@ -105,9 +119,30 @@ function readI2c(board) {
     });
 }
 
+// The PC's serial ports, read again every PORTS_MS.
+let serialPorts = [];
+let serialPortsRead = -Infinity;
+
+// The names of the PC's serial ports, from the last look (a new look every
+// PORTS_MS).
+function pcSerialPorts() {
+    const now = Date.now();
+    if (now - serialPortsRead >= PORTS_MS) {
+        serialPorts = twinboard.serialPorts();
+        serialPortsRead = now;
+    }
+    return serialPorts;
+}
+
 // The state of the board now (see the top of the file).
 function readState(board) {
-    return { pins: twinboard.pins(), uarts: twinboard.uarts(), usb: twinboard.usb(), i2c: readI2c(board) };
+    return {
+        pins: twinboard.pins(),
+        uarts: twinboard.uarts(),
+        serialPorts: pcSerialPorts(),
+        usb: twinboard.usb(),
+        i2c: readI2c(board),
+    };
 }
 
 // The twin.i2c.data message of records of the I2C trace (bytes as arrays of
@@ -172,6 +207,16 @@ function sendToUart(params) {
     }
 }
 
+// twin.uart.serial: a UART wired to a PC serial port, or not.
+function wireUart(params) {
+    const { uart, port, connect, realSpeed } = params ?? {};
+    const validUart = Number.isInteger(uart) && uart >= 0 && uart < twinboard.uarts().length;
+    const validPort = typeof port === "string" && port.length < 64;
+    if (validUart && validPort && typeof connect === "boolean" && typeof realSpeed === "boolean") {
+        twinboard.uartSerial(uart, port, connect, realSpeed);
+    }
+}
+
 // twin.pin.force: a pin forced to 0 or 1, or let go.
 function forcePin(params) {
     const { pin, level } = params ?? {};
@@ -200,6 +245,10 @@ function onPageMessage(text, actOnPart) {
     }
     case "twin.tcp.listen": {
         setTcpLink(message.params);
+        break;
+    }
+    case "twin.uart.serial": {
+        wireUart(message.params);
         break;
     }
     case "twin.pin.force": {
