@@ -11,6 +11,7 @@
 
 #include "jsbind.h"
 #include "modules.h"
+#include "device_modules.h"
 
 namespace {
 
@@ -250,6 +251,23 @@ int keptAliveCount() {
     return js::keptAliveCount();
 }
 
+/**
+ * Number of native modules registered (tests/types.test.js lists them).
+ */
+int nativeModuleCount() {
+    return rt::countNativeModules();
+}
+
+/**
+ * Name of the native module at 'index', or "" past the end.
+ */
+const char *nativeModuleName(int index) {
+    if (index < 0 || index >= rt::countNativeModules()) {
+        return "";
+    }
+    return rt::nativeModuleNameAt(index);
+}
+
 } // namespace
 
 /**
@@ -261,6 +279,8 @@ JS_MODULE(jsbind_test, module) {
     JS_FUNCTION(module, gc);
     JS_FUNCTION(module, destroyedCount);
     JS_FUNCTION(module, keptAliveCount);
+    JS_FUNCTION(module, nativeModuleCount);
+    JS_FUNCTION(module, nativeModuleName);
 }
 
 /**
@@ -280,8 +300,17 @@ void registerProfileTestModule();   // profile_module.cpp
 
 /**
  * Registers the native test modules; called by main() in qjsx-tests only.
+ * The modules of a board (device/gpio...) too, registered elsewhere only in
+ * the digital twin: tests/types.test.js compares their exports with their
+ * typings (creating a module only defines its classes, no hardware is used).
  */
 void registerTestModules() {
+    rt::registerNativeModule("device/gpio", &jsNewModule_gpio);
+    rt::registerNativeModule("device/rmt", &jsNewModule_rmt);
+    rt::registerNativeModule("device/usb", &jsNewModule_usb);
+    rt::registerNativeModule("device/i2c", &jsNewModule_i2c);
+    rt::registerNativeModule("device/adc", &jsNewModule_adc);
+    rt::registerNativeModule("device/pwm", &jsNewModule_pwm);
     rt::registerNativeModule("jsbind_test", &jsNewModule_jsbind_test);
     registerDebugTestModule();
     registerRegionHeapTestModule();

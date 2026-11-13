@@ -274,6 +274,76 @@ keeps the old name: `C:\Sandbox\espjs`.
   its target): `removeTree` already used lstat. Tests: never a destructive probe outside
   the test's own folder (user); Git Bash turns a "/" argument into its own folder, so the
   disk root test uses "C:/" on Windows and a script granted nothing.
+- Persistent storage on a device (design agreed by the user 2026-11-13, NOT implemented):
+  - `sys/fs` unchanged, on LittleFS in the `data` partition mounted on `/data`
+    (`board::dataDirectory()`; fs goes through fopen / stat, so the ESP-IDF VFS is enough);
+    component `joltwallet/littlefs` (version pinned in `idf_component.yml`, download at
+    implementation time); formatted automatically when the mount fails. LittleFS commits a
+    file at its close: a power cut keeps the old content whole. No migration of the NVS
+    of a client's former C firmware (user);
+  - `fs` CONFINED to `/data` on the boards too (`confineFiles()` true, as the desktop agent
+    and the twin): the ESP32 VFS also holds `/dev/uart/0`, the agent's link. A program
+    cannot read or change its own code: packages and firmware are raw partitions, no
+    compiler on the device, `import()` refused;
+  - tool commands (names chosen by the user): `qjsx device ls [folder]`, `read <file>
+    [local]` (no local: printed), `write <local> [file]`, `rm <file | empty folder>`,
+    `mkdir <folder>`, `mv <from> <to>` (replaces an existing file, as Node's renameSync;
+    a folder never replaces a file nor the reverse); paths relative to `/data`, `..` and paths outside
+    refused by the agent; `qjsx device info` adds used / total of `/data`;
+  - agent messages on every link: FILE_LIST, FILE_READ (chunks bounded by the message size
+    of HELLO), FILE_WRITE_BEGIN / CHUNK / END (temporary file renamed at END: atomic),
+    FILE_REMOVE, FILE_MKDIR, FILE_RENAME; Node-like error codes; allowed while the
+    program runs; same on the desktop agent and the twin (`<storage>/data`);
+  - project data folder: `"data"` in `qjsx.json` (e.g. `"data/"`), sent by `qjsx deploy
+    --data`: every file of the folder written, same names overwritten, the other files of
+    `/data` kept (what the program wrote itself stays);
+  - SD card later: FatFS on `/sd` (readable on a PC; LittleFS is slow on large volumes),
+    confinement extended to the list of mount points; on RP2350 / STM32 (no VFS) one small
+    layer of ours routes paths to LittleFS or FatFS.
+- `device/board` (agreed by the user 2026-11-13, NOT implemented; name chosen by the user
+  among device/board, device/system, device/identity, sys/os): what belongs to the board
+  the program runs on:
+  - `board.id()` -> `Uint8Array`, the unique id of the chip (ESP32: base MAC from the
+    eFuses, 6 bytes; RP2350: unique id of the flash, 8 bytes; STM32: UID, 12 bytes); the
+    program formats it itself;
+  - `board.mac(kind)` (ESP32): `"base" | "wifi" | "ap" | "bluetooth" | "ethernet"` ->
+    `Uint8Array` of 6 bytes (ESP-IDF derives them from the base MAC);
+  - `board.restart()`: restarts the chip (exact behaviour to agree: what is flushed first);
+  - twin and desktop agent: the id / base MAC is kept in `<storage>`; when missing, drawn
+    at random once and saved (same installation = same id);
+  - later, with WiFi: `networkInterfaces()` as Node's (with `mac`) in `sys/os`;
+  - random bytes: the web standard `crypto.getRandomValues(typedArray)` (global, as in
+    Node and browsers), agreed in principle; source to design (ESP-IDF: the hardware RNG
+    is truly random only with RF on or the SAR ADC entropy source enabled: to check).
+- JS developer manual and typings (user, 2026-11-13, IMPLEMENTED the same day):
+  - `.d.ts` WRITTEN BY HAND (user chose this over generation from jsbind: the API still
+    moves, callbacks / js::Value need hand types anyway), one NEXT TO EACH MODULE (see
+    "TYPINGS" in the coding rules), `@module <name>` in the comment before `declare
+    module` (TypeDoc names the module by it); written by three agents from the code,
+    then checked by tsc;
+  - embedded in `qjsx` as `qjsx:types` (`tools/embed-types.lua`, TYPING_FILES; premake
+    rule on `common/runtime/modules/globals.d.ts`);
+  - `qjsx build` (cli.js, `host/js/typings.js` = `qjsx:typings`) writes them FIRST (even
+    when the build fails) to `<project>/.qjsx/types/index.d.ts` (NOT node_modules/@types:
+    npm's name space, and npm install removes it, user) and, when the project has no
+    jsconfig.json / tsconfig.json, a jsconfig.json with `"types": ["./.qjsx/types"]`
+    (needed: TypeScript 6+ loads no types package by itself; an entry of `types` is
+    loaded whatever `include`), `lib: ["esnext"]` (no DOM). An existing configuration is
+    NEVER changed: a FRAMED warning (user: "bien visible") gives the line to add; a
+    failure to write them is a framed warning too, never a failed build. Checked with tsc
+    on a project: real errors found ("open-drain" -> did you mean "openDrain"?);
+  - DRIFT TEST `tests/types.test.js` (run by qjsx-tests, which also registers the
+    device/* modules for it): every sys/ device/ stdlib module has a typing and the
+    reverse; exports, prototype and static names of each class (a JS class of the stdlib
+    may set declared properties per instance), members of the global namespaces (own
+    names: process / console properties are not enumerable), non-standard globals;
+  - manual: `doc/jsmanual/` (Astro 7 + Starlight 0.42 + starlight-typedoc, versions pinned
+    in package.json, node_modules / dist / .astro git-ignored): guides written by hand
+    in `src/content/docs/guides/`, API reference generated from the typings
+    (`tsconfig.typedoc.json` and the list in `astro.config.mjs`: add a new module to both;
+    `api-readme.md` = its introduction, needed or the module pages are dropped);
+    `npm run build` / `npm run dev` there (`.claude/launch.json` "jsmanual", port 4321).
+    Not published (GitHub Pages: later, with the CI).
 - Conditional breakpoints, logpoints and hit counts are compiled by the proxy and evaluated on
   the ESP itself (no round trip per hit).
 - Proxy core without CDP (API agreed by the user 2026-11-11, IMPLEMENTED the same day in
@@ -544,8 +614,8 @@ keeps the old name: `C:\Sandbox\espjs`.
   calibration), twin `host/twin/sim/twin_adc.cpp` (saturates at the span, as the S3).
   RP2350 later. DAC: postponed (our boards have none; with the twin's oscilloscope).
 - `device/pwm` (agreed by the user 2026-11-13, IMPLEMENTED the same day for the ESP32
-  and the twin, `doc/architecture.md` 5.4, `tests/pwm.test.js`; ESP32 firmware NOT built
-  yet (no terminal tool that session), not tried on the board): `new Pwm(pin, { frequency
+  and the twin, `doc/architecture.md` 5.4, `tests/pwm.test.js`; ESP32 firmware built and
+  flashed, VERIFIED on the YD board by the user with an oscilloscope, 2026-11-13): `new Pwm(pin, { frequency
   = 1000, duty = 0, invert = false })`, `setDuty(0..1)`, `setFrequency(hz)` (duty kept),
   `setPulseWidth(us)` (servos), fields `duty` / `frequency` / `bits` = what the hardware
   does (rounded); resolution chosen by the hal; a frequency no shared timer can take is
@@ -586,7 +656,8 @@ keeps the old name: `C:\Sandbox\espjs`.
   build }` (a plain object, as Node's; `build` = the package's build id, a hash of its
   bytecode, set by startPackage for every package run; absent for `qjsx run script.js`).
 - `device/gpio` (user, 2026-11-11, IMPLEMENTED the same day on the ESP32, see TODO): a class `new Gpio(pin, { mode, pull })`
-  (`init(...)` of the binding library), mode "input" | "output" | "open-drain", pull "up" |
+  (`init(...)` of the binding library), mode "input" | "output" | "openDrain" (the
+  JS_ENUM name: "open-drain" is refused, found 2026-11-13), pull "up" |
   "down" | "none" (JS_ENUM); `read()`, `write(level)`, `toggle()`, `close()`;
   `onChange(callback(level), { edge: "rising" | "falling" | "both", debounce })` (event);
   `waitFor(level, { timeout })` (promise). Pins by their GPIO number only (a table of names
@@ -833,6 +904,10 @@ in the include path (no two headers share a name; keep it so).
   check that `make` succeeded first.
 - After adding or removing a source file of `common/` or `ports/`, the ESP-IDF build needs a
   CMake pass (ninja keeps the old file list): `tools/idf.ps1 reconfigure build`.
+- ESP-IDF minimal build (user, 2026-11-13): `ports/esp32/CMakeLists.txt` sets
+  `MINIMAL_BUILD`, only `main` and its REQUIRES are built: an ESP-IDF component used by
+  main (e.g. esp_wifi later) must be added to the REQUIRES of `ports/esp32/main/CMakeLists.txt`.
+  `tools/idf.ps1` sets `PYTHONUTF8=1` (else the IDF profile warns about Unicode).
 - Pitfalls met: `JS_NewTypedArray` reads offset/length even when argc is 1 (always pass 3
   arguments); `JS_ThrowPlainError` and `JS_NewModuleValue` do not exist in this QuickJS; on
   32-bit (ESP) JSValue is a plain uint64_t (never specialize templates on JSValue); members
@@ -842,6 +917,19 @@ in the include path (no two headers share a name; keep it so).
   https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz, for qjs.c, quickjs-libc.c, repl.js, tests/).
 
 ## Coding rules
+
+- TYPINGS (user, 2026-11-13): every JS module has its hand-written `.d.ts` NEXT TO ITS
+  SOURCE (`common/device/gpio_module.d.ts` next to `gpio_module.cpp`,
+  `lib/stdlib/src/path.d.ts` next to `path.js`; the globals and `process` in
+  `common/runtime/modules/globals.d.ts`). ANY change of what JS sees (a module, a class, a
+  method, an option, a global, `process`) changes its `.d.ts` in the same work, types AND
+  doc comments; a new module comes with its `.d.ts` (and its line in TYPING_FILES of
+  `tools/embed-types.lua` if in a new folder). `tests/types.test.js` fails when names
+  differ; types and comments are not checked: keep them right by hand. Where a module
+  exists (PC, ESP32, RP2350, twin) is NOT written in its description (user, 2026-11-13)
+  but in a `@compatibility` table, last before `@module` in the module comment (a block
+  tag declared to TypeDoc: rendered at the bottom of the description), and in the table
+  of `doc/jsmanual/api-readme.md`: update both when a port gains a module.
 
 The full rules, with examples, are in `doc/coding-rules.md` (written to be reused in other
 C / C++ projects). Summary of what was agreed:

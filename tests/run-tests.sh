@@ -32,6 +32,7 @@ check() {
 }
 
 check "binding library" "$BIN/qjsx-tests" run -A tests/jsbind.test.js
+check "typings: the names of every module and global match the runtime" "$BIN/qjsx-tests" run -A tests/types.test.js
 check "debugger support of the engine" "$BIN/qjsx-tests" run -A tests/debug.test.js
 check "region heap (JS heap of a raw region)" "$BIN/qjsx-tests" run -A tests/region_heap.test.js
 check "runtime library" "$BIN/qjsx" run -A tests/runtime.test.js
@@ -47,7 +48,10 @@ check "process.exit: qjsx run returns its code, nothing runs after it"     bash 
 # the package (bytecode, like the ESP): the outputs must be identical.
 DEMO=tests/fixtures/demo
 rm -rf "${DEMO:?}/build"
+rm -f "$DEMO/jsconfig.json"
 check "build demo" "$BIN/qjsx" build "$DEMO"
+check "build writes the typings for VS Code" test -s "$DEMO/.qjsx/types/index.d.ts"
+check "build writes a jsconfig.json naming them when the project has none" grep -q '"./.qjsx/types"' "$DEMO/jsconfig.json"
 PACKAGE=$(ls "$DEMO"/build/packages/*.qjspkg 2>/dev/null | head -1)
 "$BIN/qjsx" run "$DEMO/src/main.js" > build/demo-source.txt 2>&1
 "$BIN/qjsx" run "$PACKAGE" > build/demo-package.txt 2>&1

@@ -174,7 +174,7 @@ The twin runs at the speed of the PC, not of the board.
 | Libraries (`.qjslib`) | works |
 | Debugger on the board | works |
 | Debugger in VS Code (`qjsx debug`) | works (conditional breakpoints and logpoints to do) |
-| Hardware modules | `device/gpio`, `device/rmt` and RGB LEDs (`stdlib/rgbled`), `device/usb` on the ESP32; `device/i2c` and `device/adc` written (not tried with a real component yet); SPI, PWM, WiFi to do |
+| Hardware modules | `device/gpio`, `device/rmt` and RGB LEDs (`stdlib/rgbled`), `device/usb`, `device/pwm` on the ESP32; `device/i2c` and `device/adc` written (not tried with a real component yet); SPI, WiFi to do |
 | Files on the board | to do |
 | Native USB link, WiFi link | to do |
 | RP2350 board (Olimex PICO2-XXL) | works (USB link, JS heap in PSRAM); slow for now |
@@ -212,6 +212,9 @@ the `ports/esp32` folder.
 
 The detailed documentation is in the [`doc/`](doc/) folder:
 
+- [jsmanual/](doc/jsmanual/): the manual of the JS developer, a site (guides, and the API
+  reference of every module generated from its typings): `npm install` then `npm run dev`
+  in that folder;
 - [architecture.md](doc/architecture.md): how it is all designed, and the status of each part;
 - [engine-changes.md](doc/engine-changes.md): what was changed in QuickJS, and why;
 - [new-device.md](doc/new-device.md): how to run qjsx on a new board or a new chip;

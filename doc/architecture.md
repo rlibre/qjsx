@@ -1338,7 +1338,7 @@ reader.port();                                             // 2 ("COM3" on the P
   `tests/serial.test.js`.
 
 **`device/pwm`** (2026-11-13; design agreed with the user, built for the ESP32 and the twin;
-the firmware not built yet, not tried on a board; RP2350 later):
+verified on the YD-ESP32-S3 with an oscilloscope by the user the same day; RP2350 later):
 
 ```js
 import { Pwm } from "device/pwm";
@@ -1613,8 +1613,9 @@ A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with
 
 ### 6.5 VS Code integration
 
-> **Status: the attach works through `qjsx debug` (3.9), not tried in VS Code itself yet.
-> `.d.ts` and `--wait-debugger` not done.**
+> **Status: the attach works through `qjsx debug` (3.9), tried in VS Code by the user on
+> 2026-11-11. Typings done 2026-11-13 (below). `--wait-debugger` replaced by `qjsx debug
+> --restart`.**
 
 - "attach" configuration of type **`node`** (not `chrome`: js-debug answers the `Target.*`
   commands itself for a Node target), in the `.vscode/launch.json` of the project, with
@@ -1636,10 +1637,21 @@ A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with
   ```
 
 - The scripts are announced with `file:///` URLs to the local sources.
-- `qjsx build` writes the `.d.ts` of the native modules.
+- **Typings** (2026-11-13): every JS module has a `.d.ts` written by hand next to its
+  source (`common/device/gpio_module.d.ts`, `lib/stdlib/src/path.d.ts`; the globals and
+  `process` in `common/runtime/modules/globals.d.ts`), embedded in `qjsx` as `qjsx:types`
+  (`tools/embed-types.lua`). `qjsx build` writes them first, even when the build then
+  fails, to `<project>/.qjsx/types/index.d.ts` (not `node_modules/@types`: npm's name
+  space, emptied by `npm install`), and a `jsconfig.json` with
+  `"types": ["./.qjsx/types"]` and `lib: ["esnext"]` (no DOM names) when the project has
+  no configuration. TypeScript 6 and later load no types package by themselves: an
+  existing configuration must name the folder in its `types`; it is never changed, a
+  framed warning gives the line to add. `tests/types.test.js` compares the names of every
+  module, class, method and global with the runtime (types and comments are not checked).
+- **Manual of the JS developer**: `doc/jsmanual/`, an Astro + Starlight site; guides by
+  hand, the API reference generated from the same typings by TypeDoc (starlight-typedoc).
 - The proxy keeps the breakpoints and re-applies them on `SCRIPT_LOADED` and after a device
   restart.
-- `--wait-debugger`: see 3.8.
 
 ### 6.6 The digital twin of a board (`qjsx agent --board`, `qjsx agent -p`)
 

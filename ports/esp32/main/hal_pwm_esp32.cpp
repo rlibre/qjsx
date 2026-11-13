@@ -157,7 +157,6 @@ Opened open(int pin, uint32_t frequency, double duty, bool invert) {
     config.gpio_num = pin;
     config.speed_mode = MODE;
     config.channel = (ledc_channel_t)free;
-    config.intr_type = LEDC_INTR_DISABLE;
     config.timer_sel = (ledc_timer_t)timer;
     config.duty = dutySteps(duty, settings[timer].bits);
     config.hpoint = 0;

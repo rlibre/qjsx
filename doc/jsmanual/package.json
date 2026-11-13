@@ -1,0 +1,23 @@
+{
+  "name": "qjsx-jsmanual",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.11",
+    "astro": "7.4.11",
+    "sharp": "0.35.5"
+  },
+  "devDependencies": {
+    "starlight-typedoc": "0.23.2",
+    "typedoc": "0.28.20",
+    "typedoc-plugin-markdown": "4.14.1"
+  }
+}

@@ -2,18 +2,41 @@
 
 ## Où on en est (2026-11-13, à relire en reprenant le travail)
 
-- [x] **Dernier état (2026-11-13, rien de commité depuis 87308d5 ; l'utilisateur commite)** :
+- [x] **Dernier état (2026-11-13 après-midi ; tout le matin est commité dans 3d95c7d ;
+      l'utilisateur commite)** :
+      - **depuis 3d95c7d** (non commité) : `host/twin/ui/dist/sources.crc32` remis (perdu
+        quand la page avait été reconstruite à la main par `npm run build`, qui vide
+        `dist/` ; le build Debug l'a réécrit) ; `intr_type` (obsolète dans ESP-IDF 6.1)
+        retiré de `hal_pwm_esp32.cpp` ; `tools/idf.ps1` met `PYTHONUTF8=1` (plus de
+        message « not configured to handle Unicode ») ;
+      - **firmware ESP32 avec `device/pwm`** : COMPILÉ (949 Ko ; aucun avertissement masqué :
+        restent ceux d'ESP-IDF et le `fallthrough` de json.c, plus bas) et FLASHÉ sur la YD le 2026-11-13, port COM14 ce jour-là (plus COM11) ; PWM
+        VÉRIFIÉE à l'oscilloscope par l'utilisateur le 2026-11-13 ;
+      - **manuel du développeur JS et `.d.ts`** (FAIT le 2026-11-13, voir le Backlog) :
+        `.d.ts` à côté des modules, `qjsx build` les écrit dans `.qjsx/types/`, site
+        `doc/jsmanual/` (`npm run dev` : http://localhost:4321/) ; suites Debug ET
+        Release 102 OK ; RIEN de commité ;
+      - **conçus, pas codés** (CLAUDE.md) : stockage persistant (LittleFS sur `/data`,
+        `qjsx device ls | read | write | rm | mkdir | mv`, `deploy --data`), module
+        `device/board` (`id()`, `mac()`, `restart()`) ; restent à concevoir : le hasard
+        (`crypto.getRandomValues`), le comportement de `restart()` ;
+      - **« minimal build » d'ESP-IDF** (utilisateur, FAIT le 2026-11-13) :
+        `idf_build_set_property(MINIMAL_BUILD ON)` dans `ports/esp32/CMakeLists.txt`, seuls
+        `main` et ses REQUIRES (77 composants au lieu d'environ 150) : plus les
+        avertissements CMake esp_wifi / wpa_supplicant d'ESP-IDF (ils reviendront avec le
+        WiFi), firmware 943 Ko ; compilé (`fullclean build`), PAS flashé. Reste un
+        avertissement `fallthrough` dans `engine/qjsx/builtins/json.c:1205` (code de
+        Bellard, pas touché) ;
       - **tests** : suites Debug ET Release 98 OK le 2026-11-13 au matin ; Debug 99 OK
         après PWM, le RMT et les modes de l'analyseur (`tests/pwm.test.js` 30/30) ;
-        Release à refaire ; types de la
+        Release 99 OK l'après-midi (exécutables reconstruits) ; types de la
         page vérifiés (`tsc --noEmit -p host/twin/ui`, TypeScript 7.0.2 en global, chemin
         complet dans la mémoire de Claude ; le build x4js ne vérifie pas les types) ;
       - **`device/pwm`** (FAIT le 2026-11-13, CLAUDE.md, architecture.md 5.4) : module,
         hal, ESP32 sur LEDC, jumeau avec les limites du S3 (`"pwm"` du JSON de la carte),
-        colonne « pwm 1 kHz 25 % » du tableau des broches. RESTE : compiler le firmware
-        ESP32 (`tools/idf.ps1 reconfigure build` : nouveaux fichiers ; pas d'outil de
-        terminal dans la session du 13), l'essayer sur la carte à l'oscilloscope (fréquence,
-        rapport cyclique, résolution aux extrêmes), `pin.pwm` pour les modèles des pièces,
+        colonne « pwm 1 kHz 25 % » du tableau des broches ; firmware compilé et flashé
+        l'après-midi du 13, vérifié à l'oscilloscope par l'utilisateur. RESTE : `pin.pwm`
+        pour les modèles des pièces,
         le fondu et `stdlib/servo` (plus tard), le RP2350 ;
       - **analyseur** (FAIT le 2026-11-13, architecture.md 6.6) : PWM et RMT dessinés à
         partir de leurs changements / émissions (fronts calculés, à tout zoom, bande avec
@@ -320,8 +343,10 @@
         `onChange` / `waitFor` pas essayés ;
         le firmware ESP32 recompile avec le module partagé, pas reflashé ;
       - ensuite `device/rmt` sur PIO.
-- [ ] **Carte client ESP32-S3** (utilisateur, 2026-11-12) : ESP32-S3, 4 Mo de flash, PAS de
-      PSRAM (tas JS en RAM interne, chemin jamais essayé : à mesurer), deux ports USB comme
+- [ ] **Carte client ESP32-S3** (utilisateur, 2026-11-12) : module ESP32-S3-MINI-1U-N8
+      (lu par esptool le 2026-11-13) : 8 Mo de flash intégrée (son firmware C n'en
+      configure que 4), PAS de PSRAM (tas JS en RAM interne, chemin jamais essayé : à
+      mesurer), deux ports USB comme
       la YD : un port de debug (pont USB-série sur UART0, la liaison de l'agent) et l'USB
       natif pour la tablette du client, qui ne parle qu'en USB. Les détails (firmware C
       d'origine, brochage, liste de ce qu'il faut porter) sont dans les notes du dossier de
@@ -350,7 +375,8 @@
             COBS(...) | 0x00` ; côté jumeau `qjsx agent --board ... --usb-relay COM11`, un
             second hal USB qui parle au relais au lieu du TCP. La vraie tablette parle alors
             au programme JS du jumeau, debugger compris ;
-      - [ ] la board : `sdkconfig.board` (4 Mo sans PSRAM), `board_config.h` et le JSON du
+      - [ ] la board : `sdkconfig.board` (8 Mo, `partitions/8MB.csv`, sans PSRAM),
+            `board_config.h` et le JSON du
             jumeau (dossier et fichier ignorés par git) ;
       - [x] `device/serial` sur un UART de carte (un lecteur sur UART). FAIT le 2026-11-12
             pour l'ESP32 et le jumeau (CLAUDE.md, architecture.md 5.4 et 6.6) : un seul
@@ -414,8 +440,37 @@
               transferts bloquants d'ESP-IDF, `common/device/i2c_module.cpp`) ; jumeau : au
               début aucune adresse ne répond (`ENXIO`), composants simulés au backlog ;
       - [ ] **convertir le firmware C de la carte en JS** (demande de l'utilisateur,
-            2026-11-12 ; liste de ce qu'il faut porter dans les notes de la carte). Il manque
-            encore pour ça un stockage sur la carte et le WiFi.
+            2026-11-12 ; liste de ce qu'il faut porter dans les notes de la carte). Analyse
+            du 2026-11-13 (firmware C relu en entier, détail dans les notes de la carte) :
+            environ 80 % se fait avec les modules actuels (i2c, serial, rgbled, gpio, usb,
+            crypto). MANQUE, bloquant, à concevoir avec l'utilisateur :
+            - un stockage persistant (quelques chaînes : uid, plan des LED, réglages).
+              DÉCIDÉ (utilisateur, 2026-11-13) : `sys/fs` sur LittleFS dans la partition
+              `data`, montée sur `/data` (= `board::dataDirectory()`, le module `fs` ne
+              change pas : il passe par fopen / stat) ; composant `joltwallet/littlefs`
+              (version fixée dans `idf_component.yml`) ; partition formatée automatiquement
+              si le montage échoue ; PAS de reprise des réglages de la NVS du firmware C
+              (l'uid se réenregistre à la première authentification) ; `fs` CONFINÉ à
+              `/data` sur les cartes (`confineFiles()` vrai, comme l'agent de bureau et le
+              jumeau : la VFS de l'ESP32 contient aussi `/dev/uart/0`) ; commandes `qjsx
+              device ls | read | write | rm | mkdir | mv` et dossier de données du projet
+              (`"data"` de `qjsx.json`, `qjsx deploy --data`) : voir CLAUDE.md « Persistent
+              storage on a device ». Carte SD plus tard : FatFS sur `/sd` (pas LittleFS) ;
+            - l'adresse MAC de la carte, lue du JS : DÉCIDÉ (2026-11-13), module
+              `device/board` (`id()`, `mac(kind)`, `restart()`, CLAUDE.md) ; jumeau et
+              agent de bureau : identifiant gardé dans `<storage>`, tiré au hasard s'il
+              manque ;
+            - un hasard cryptographique : `crypto.getRandomValues` (standard du web,
+              accord de principe) ; la source reste à concevoir (sur l'ESP32, le
+              générateur matériel n'est vraiment aléatoire qu'avec la radio ou la source
+              d'entropie de l'ADC : à vérifier) ;
+            - redémarrer la carte depuis le programme : `board.restart()` ; ce qui part
+              avant (réponse USB en cours...) reste à convenir ;
+            - une lecture série avec délai (trames du lecteur RFID), en JS dans la stdlib.
+            PLUS TARD (utilisateur, 2026-11-13) : le WiFi et un serveur TCP sur la carte
+            (mode debug du firmware C) ; la mise à jour du programme par la tablette (une
+            API JS qui reçoit et installe un `.qjspkg`, signature à décider). Le secret
+            d'authentification en clair dans le code : rien à faire (utilisateur).
 - [ ] **Vitesse du moteur, pistes algorithmiques** (2026-11-12, mesures sur le PC :
       `bash tools/profile/profile.sh`, test costaud `tools/profile/workload.js`) :
       - [x] contrôles de zone morte des `let` / `const` retirés quand inutiles (modification
@@ -685,7 +740,30 @@
 - [ ] **Éditeur Monaco pour les devices** (utilisateur, 2026-11-12) : à préciser. x4js a un
       composant `MonacoEditor` (`x4js/monaco`).
 
-- [ ] **Manuel utilisateur** (utilisateur, 2026-11-12) : à préciser.
+- [x] **Manuel du développeur JS + `.d.ts`** (utilisateur, 2026-11-12 ; FAIT le 2026-11-13,
+      CLAUDE.md « JS developer manual and typings » et règle « TYPINGS », architecture.md
+      6.5) : un `.d.ts` écrit à la main À CÔTÉ DE CHAQUE MODULE (15 fichiers), embarqués
+      dans `qjsx` (`qjsx:types`) ; `qjsx build` les écrit dans `<projet>/.qjsx/types/`
+      (+ `jsconfig.json` avec `"types": ["./.qjsx/types"]` s'il manque ; sinon
+      avertissement encadré avec la ligne à ajouter) ; essayé avec tsc sur un projet ;
+      `tests/types.test.js` (297 vérifications) ; site Astro + Starlight dans
+      `doc/jsmanual/` (7 guides + référence générée par TypeDoc), vu dans le navigateur.
+      Suite Debug 102 OK. Restent : publier le site (GitHub Pages, avec la CI) ; les
+      défauts relevés par les agents en écrivant les `.d.ts` (known-bugs.md) ; un module
+      de plus = son `.d.ts` + sa ligne dans `doc/jsmanual/tsconfig.typedoc.json` et
+      `astro.config.mjs`.
+
+- [ ] **Livetrace des ports** (utilisateur, 2026-11-13) : à préciser.
+
+- [ ] **Retirer le mode standalone** (utilisateur, 2026-11-13 : « ça a un intérêt
+      discutable ») : compris comme `qjsx build --executable` (le runner `qjsx-runtime` +
+      le paquet collé à la fin, CLAUDE.md « qjsx-runtime ») ; à retirer avec ses tests
+      (run-tests.sh), sa doc (architecture.md, guide « Programs of the PC » du manuel,
+      aide de `qjsx`) et la section `desktop` de `qjsx.json` si elle ne sert plus qu'à
+      lui (elle sert aussi à `qjsx run` d'un paquet : à voir).
+
+- [ ] **Article LinkedIn** (utilisateur, 2026-11-13) : rédiger un article assez complet pour
+      LinkedIn, avec de belles images : le jumeau numérique, l'architecture, etc.
 
 - [x] **Entrées ADC** (utilisateur, 2026-11-12 ; FAIT le même jour, pas encore essayé sur la
       carte) : `device/adc` (`new Adc(pin, { range })`, `read()` brut, `readVoltage()` en volts,

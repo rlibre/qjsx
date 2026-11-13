@@ -151,6 +151,48 @@ read back) and the debugger tests (72 / 30 / 53) work. Open:
   watches the pin without debounce, and it is the first watch of the pin since boot. Next
   step: three `waitFor(0)` without timeout, printing each press.
 
+### Found while writing the typings (2026-11-13)
+
+Read in the code by the agents that wrote the `.d.ts` files; the typings document the
+behaviour as it is. Nothing fixed.
+
+- **Error codes are uneven**: `Adc` and `Pwm` throw with a `code` (EINVAL, EBUSY);
+  the constructors of `Gpio`, `Rmt`, `I2c` throw plain `Error`s (a bus already open is
+  not EBUSY, nor "no free RMT channel"); "usb: busy", "usb: the device is not started",
+  "Serial: port closed", the rejections of `gpio.waitFor` (timeout, close) and of a
+  close while an RMT / I2C operation is pending carry no `code`.
+- **Errors thrown instead of a rejected promise**: "closed", "already pending", "a send
+  is already in progress", "too many transfers pending" are thrown at once by methods
+  that return a promise. `bus.probe()` rejects (ETIMEDOUT, EIO), unlike the comment of
+  i2c_module.cpp ("never throws").
+- **Writable fields**: `Adc.bits`, `Pwm.duty`, `Pwm.frequency`, `Pwm.bits` are not
+  `const`: JS may write them, and a written `pwm.frequency` changes what
+  `setPulseWidth()` computes.
+- **`rmt.send`**: a fractional tick count or level (1.5) is truncated, not refused.
+- **No ENOSYS in jsbind's errno names**: on a board without file system, `sys/fs` errors
+  carry `code: "EUNKNOWN"`, not "ENOSYS" as CLAUDE.md says.
+- **Node differences**: `existsSync` throws EACCES without read permission (Node never
+  throws); `process` and `console` properties are not enumerable; `TextDecoder` ignores
+  `fatal` / `ignoreBOM`; `net.connect` throws EACCES at once (not a rejection), an unknown
+  host is ENOENT (Node: ENOTFOUND); `path.basename(p, ext)` does not check `ext`;
+  `path.resolve` on Windows keeps "/a" without drive and joins "C:a" as a name;
+  `path.relative` compares case on Windows.
+- **Every jsbind class can be built from JS** (`new Stats()`, `new Connection()`...):
+  empty, useless objects.
+- **`isOpen()` stays true after `close()`** (net Connection, Serial) until the close
+  message is handled, while `write()` already throws.
+- **Callbacks cannot be removed**: `onData(null)` / `onClose(undefined)` throw a
+  TypeError; a callback can only be replaced.
+- **`stdlib/rgbled`**: a `type` such as "toString" finds a key of the prototype of the
+  table of models (no RangeError); `this.model` is shared by every strip of a type.
+- **`stdlib/usb`**: a `UsbSerial` whose `start()` fails stays the existing Usb until
+  collected, so a new try throws "usb: busy"; `Usb.close()` of an object never started
+  does not stop a device left started by a previous program.
+- **Docs**: the function numbers of the compiler follow the order in which functions are
+  finished (children first), not "creation order" (CLAUDE.md); the header of
+  `common/runtime/permissions.h` says a device program has no limit, but the desktop
+  agent and the twin confine files (`confineFiles`).
+
 ## Minor and differences with Node or the web
 
 The local fixes of this section were made on 2026-11-11 (`history.md`); the ones left

@@ -19,9 +19,15 @@ build/
 # pico-sdk builds of the RP2350 firmware, one folder per board
 /ports/rp2350/build-*/
 
-# npm packages of the twin's page (host/twin/ui); its build (dist/) IS kept:
-# a machine without Node builds qjsx with it
-/host/twin/ui/node_modules/
+# npm packages (the twin's page host/twin/ui, the JS manual doc/jsmanual).
+# The build of the twin's page (dist/) IS kept: a machine without Node builds
+# qjsx with it
+node_modules/
+
+# What "qjsx build" writes in a project for VS Code: the typings
+# (.qjsx/types), and a jsconfig.json in the test projects that have none
+.qjsx/
+/tests/fixtures/*/jsconfig.json
 
 # Scratch files of the work sessions (test scripts, logs...)
 /temp/

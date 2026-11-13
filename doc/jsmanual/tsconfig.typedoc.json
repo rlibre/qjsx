@@ -1,0 +1,29 @@
+{
+    "compilerOptions": {
+        "noEmit": true,
+        "strict": true,
+        "target": "esnext",
+        "module": "esnext",
+        "moduleResolution": "bundler",
+        "lib": ["esnext"],
+        "types": [],
+        "skipLibCheck": true
+    },
+    "files": [
+        "../../common/runtime/modules/globals.d.ts",
+        "../../common/runtime/modules/fs.d.ts",
+        "../../common/runtime/modules/crypto.d.ts",
+        "../../host/modules/net.d.ts",
+        "../../host/modules/compiler_module.d.ts",
+        "../../common/device/gpio_module.d.ts",
+        "../../common/device/pwm_module.d.ts",
+        "../../common/device/adc_module.d.ts",
+        "../../common/device/i2c_module.d.ts",
+        "../../common/device/rmt_module.d.ts",
+        "../../common/device/serial_module.d.ts",
+        "../../common/device/usb_module.d.ts",
+        "../../lib/stdlib/src/path.d.ts",
+        "../../lib/stdlib/src/rgbled.d.ts",
+        "../../lib/stdlib/src/usb.d.ts"
+    ]
+}

@@ -1,0 +1,36 @@
+---
+title: qjsx
+description: JavaScript for devices — the manual of the JS developer.
+template: splash
+hero:
+  tagline: Write modern JavaScript for ESP32 and RP2350 boards, try it on a digital twin of the board, debug it from VS Code.
+  actions:
+    - text: Getting started
+      link: /guides/getting-started/
+      icon: right-arrow
+    - text: API reference
+      link: /api/readme/
+      icon: open-book
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid>
+	<Card title="Modern JavaScript" icon="seti:javascript">
+		QuickJS by Fabrice Bellard: ES modules, classes, async / await, BigInt. Programs
+		are compiled on the PC: the device only runs bytecode.
+	</Card>
+	<Card title="The hardware, in JS" icon="setting">
+		`device/gpio`, `device/pwm`, `device/i2c`, `device/serial`, `device/usb`,
+		`device/adc`, `device/rmt` and RGB LEDs, with promises and callbacks.
+	</Card>
+	<Card title="A digital twin" icon="laptop">
+		Run the program of a board on the PC, its pins, parts, buses and UARTs simulated,
+		on a page of your browser.
+	</Card>
+	<Card title="Debugged from VS Code" icon="puzzle">
+		Breakpoints, stepping, variables, evaluation, on the board itself, over its
+		serial link.
+	</Card>
+</CardGrid>

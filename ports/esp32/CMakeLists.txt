@@ -34,4 +34,11 @@ string(REGEX MATCH "\"([^\"]+)\"" QJSX_VERSION_QUOTED "${QJSX_VERSION_LINE}")
 set(PROJECT_VER "${CMAKE_MATCH_1}")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+
+# minimal build: only main and the components it REQUIRES (main/CMakeLists.txt),
+# not every component of ESP-IDF; faster, and without the CMake warnings of
+# components we do not use (esp_wifi / wpa_supplicant: they will come back
+# with the WiFi). A component used by main must be listed in its REQUIRES.
+idf_build_set_property(MINIMAL_BUILD ON)
+
 project(qjsx)

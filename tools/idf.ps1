@@ -13,6 +13,10 @@
 # builds in ports/esp32/build-NAME. The output also goes to
 # C:\temp\idf-build.log (UTF-16) and the exit code to C:\temp\idf-status.txt
 # (written last).
+
+# Python of ESP-IDF in UTF-8 (this process only): otherwise the profile warns
+# "Your environment is not configured to handle Unicode characters"
+$env:PYTHONUTF8 = '1'
 . 'C:\Espressif\tools\Microsoft.v6.1.PowerShell_profile.ps1'
 Set-Location 'C:\Sandbox\espjs\ports\esp32'
 Remove-Item 'C:\temp\idf-status.txt' -ErrorAction SilentlyContinue

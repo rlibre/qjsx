@@ -43,6 +43,20 @@ TWIN_UI_INPUTS = table.filter(TWIN_UI_INPUTS, function(file)
     return path.getname(file) ~= "sources.crc32"
 end)
 
+-- The TypeScript declarations of the JS API, one next to each module
+-- (TYPING_FILES of tools/embed-types.lua), embedded as the module
+-- "qjsx:types". A .d.ts added needs premake again.
+local EMBED_TYPES_TOOL = path.getabsolute("tools/embed-types.lua")
+local TYPES_INPUTS = table.join(
+    { EMBED_TYPES_TOOL },
+    os.matchfiles("common/runtime/modules/*.d.ts"),
+    os.matchfiles("common/device/*.d.ts"),
+    os.matchfiles("host/modules/*.d.ts"),
+    os.matchfiles("lib/stdlib/src/*.d.ts"))
+TYPES_INPUTS = table.translate(TYPES_INPUTS, function(file)
+    return path.getabsolute(file)
+end)
+
 workspace "qjsx"
     configurations { "Debug", "Release", "Profile" }
     location "build"
@@ -148,6 +162,7 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
             "host/twin/parts/*/model.js",
             "host/twin/ui/x4.config.json",
             "lib/stdlib/src/*.js",
+            "common/runtime/modules/globals.d.ts",
         }
         files(extraFiles)
         removefiles(excludedFiles)
@@ -228,6 +243,20 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
             buildoutputs { "%{cfg.objdir}/stdlib-%{file.basename}.js.cpp" }
             buildinputs { EMBED_TOOL }   -- regenerate when the tool changes
             compilebuildoutputs "On"
+
+        -- The TypeScript declarations of the JS API (a .d.ts next to each
+        -- module), embedded as "qjsx:types": "qjsx build" writes them in the
+        -- project for VS Code. The rule hangs on the one of the globals; it
+        -- depends on all.
+        filter "files:common/runtime/modules/globals.d.ts"
+            buildmessage "embedding the typings (qjsx:types)"
+            buildcommands {
+                'premake5 --file="' .. EMBED_TYPES_TOOL .. '" embed-types --input="' .. path.getabsolute(".") .. '"'
+                    .. ' --output="%{cfg.objdir}/types.cpp"',
+            }
+            buildoutputs { "%{cfg.objdir}/types.cpp" }
+            buildinputs(TYPES_INPUTS)
+            compilebuildoutputs "On"
         filter {}
         filter "system:windows"
             links { "ws2_32" }
@@ -273,5 +302,6 @@ hostApplication("qjsx-runtime", "qjsx-engine-target", { "host/runtime/*.cpp" },
       "host/twin/sim/*.cpp", "common/device/gpio_module.cpp", "common/device/rmt_module.cpp",
       "common/device/usb_module.cpp", "common/device/i2c_module.cpp", "common/device/adc_module.cpp",
       "common/device/pwm_module.cpp", "host/js/*.js", "host/twin/js/*.js",
-      "host/twin/api/twin.js", "host/twin/parts/*/model.js", "host/twin/ui/x4.config.json", "lib/stdlib/src/*.js" },
+      "host/twin/api/twin.js", "host/twin/parts/*/model.js", "host/twin/ui/x4.config.json", "lib/stdlib/src/*.js",
+      "common/runtime/modules/globals.d.ts" },
     { "QJSX_NO_COMPILER" })

@@ -18,6 +18,7 @@ import { warningText } from "qjsx:compile";
 import { qjsxVersion } from "sys/compiler";
 import { makeLibrary } from "qjsx:library";
 import { makeExecutable } from "qjsx:executable";
+import { writeTypings } from "qjsx:typings";
 import { loadProject, PROJECT_FILE } from "qjsx:project";
 import { Device } from "qjsx:device";
 import { upload, latestPackage, reducePackage } from "qjsx:deploy";
@@ -41,7 +42,10 @@ commands:
                                           a package adds the "desktop" section of qjsx.json
   build [directory] [--executable]             compile the project (qjsx.json) into a .qjspkg;
                                                --executable: also an executable of the PC
-                                               that runs it (<output>/<name>[.exe])
+                                               that runs it (<output>/<name>[.exe]); also
+                                               writes the typings of qjsx for VS Code
+                                               (.qjsx/types, jsconfig.json when the
+                                               project has none)
   mklib [directory] [--output <file>]          compile a library project into a .qjslib
   deploy [package] [options]                   send a package to a device and start it
       --target <target>   device (default: "target" of qjsx.json)
@@ -126,6 +130,41 @@ function targetOf(options, project) {
 
 function status(text) {
     console.error(`qjsx: ${text}`);
+}
+
+// A warning that must not be missed, framed with '*' (ASCII: readable in any
+// console and log), its text cut into lines of 70 characters at most; 'fix'
+// (optional) is a text to copy, on its own line, never cut.
+const FRAME_WIDTH = 74;
+
+function visibleWarning(text, fix) {
+    // the words of the text, gathered into lines
+    const lines = [];
+    let line = "WARNING:";
+    for (const word of text.split(/\s+/)) {
+        if (line.length + 1 + word.length > FRAME_WIDTH - 4) {
+            lines.push(line);
+            line = word;
+        } else {
+            line += ` ${word}`;
+        }
+    }
+    lines.push(line);
+    if (fix !== undefined && fix !== null) {
+        lines.push("");
+        lines.push(`    ${fix}`);
+        lines.push("");
+    }
+
+    // the frame, between blank lines
+    const border = "*".repeat(FRAME_WIDTH);
+    console.error("");
+    status(border);
+    for (const content of lines) {
+        status(`* ${content}`.trimEnd());
+    }
+    status(border);
+    console.error("");
 }
 
 // Opens the device and the session. 'monitor' gets the program output.
@@ -325,7 +364,24 @@ function buildCommand(args) {
         throw new Error("usage: qjsx build [directory] [--executable]");
     }
 
+    // the typings for VS Code first: written even when the build fails; not
+    // writing them (.qjsx is a file, a folder that cannot be written) is a
+    // warning, never a failure of the build
     const directory = positional[0] ?? ".";
+    const project = loadProject(directory);
+    try {
+        const typings = writeTypings(project.directory, project.output);
+        if (typings.configWritten !== null) {
+            status(`wrote ${typings.configWritten} (VS Code: the typings of qjsx, no DOM names)`);
+        }
+        if (typings.warning !== null) {
+            visibleWarning(`VS Code will not see the typings of qjsx: ${typings.warning}`, typings.fix);
+        }
+    } catch (error) {
+        visibleWarning(`the typings of qjsx were not written (${error.message}): VS Code will not see them.`);
+    }
+
+    // the package
     const result = build(directory);
     printWarnings(result.warnings);
     for (const note of result.notes) {
@@ -335,7 +391,6 @@ function buildCommand(args) {
     console.log(`  ${result.scriptCount} module(s), ${result.size} bytes, build ${result.buildId.slice(0, 12)}`);
 
     if (options.executable) {
-        const project = loadProject(directory);
         const name = process.platform === "win32" ? `${project.name}.exe` : project.name;
         const executable = makeExecutable(result.file, join(project.directory, project.output, name));
         console.log(`built ${executable.file} (${executable.size} bytes)`);
