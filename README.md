@@ -4,7 +4,7 @@
 
 *Think CircuitPython or MicroPython, but in modern JavaScript — with a real debugger in VS Code.*
 
-qjsx runs JavaScript programs on small boards such as the ESP32-S3. You write the program on
+qjsx runs JavaScript programs on small boards such as the ESP32-S3 or the Teensy 4.0. You write the program on
 your computer, one command prepares it, another sends it to the board, and it starts.
 
 The JavaScript engine is [QuickJS](https://bellard.org/quickjs/) by Fabrice Bellard: classes,
@@ -97,7 +97,8 @@ the board does not have.
 
 - **`qjsx`, a command-line tool**: a single executable to build, send, start, stop and watch a
   program.
-- **A firmware for the ESP32-S3**, which receives programs over the serial port and runs them.
+- **Firmwares for the boards**: ESP32-S3 (over its serial port), Teensy 4.0 and RP2350 (over
+  their own USB port). Each one receives programs and runs them.
 - **Libraries**: the standard library (`stdlib`) comes with the tool, and you can make your
   own with `qjsx mklib`. Only the modules a program really imports go to the board (see
   below).
@@ -165,19 +166,22 @@ The twin runs at the speed of the PC, not of the board.
 | `qjsx` tool on Windows | works |
 | `qjsx` tool on Linux and macOS | written, not tried yet |
 | ESP32-S3 firmware (YD-ESP32-S3 board, 16 MB flash, 8 MB PSRAM) | works |
+| ESP32-S3 firmware (Espressif ESP32-S3-DevKitC-1, N8R8: 8 MB flash, 8 MB PSRAM) | works |
+| Teensy 4.0 firmware (NXP i.MX RT1062, 600 MHz, 1 MB RAM, no PSRAM) | works: USB link, debugger, `device/gpio`, `device/pwm`, `device/board`; 2 to 7 times faster than the ESP32-S3 |
 | Sending and running a program over the serial port | works |
 | Libraries (`.qjslib`) | works |
 | Debugger on the board | works |
 | Debugger in VS Code (`qjsx debug`) | works (conditional breakpoints and logpoints to do) |
-| Hardware modules | `device/gpio`, `device/rmt` and RGB LEDs (`stdlib/rgbled`), `device/usb`, `device/pwm` on the ESP32; `device/i2c` and `device/adc` written (not tried with a real component yet); SPI, WiFi to do |
-| Files on the board | to do |
-| Native USB link, WiFi link | to do |
+| Hardware modules | `device/gpio`, `device/rmt` and RGB LEDs (`stdlib/rgbled`), `device/usb`, `device/pwm` on the ESP32; `device/gpio` and `device/pwm` on the Teensy 4.0; `device/i2c` and `device/adc` written (not tried with a real component yet); SPI, WiFi to do |
+| Files on the board | works on the ESP32 (LittleFS on `/data`); to do on the others |
+| Native USB link | works on the Teensy 4.0 and the RP2350; to do on the ESP32 |
+| WiFi link | to do |
 | RP2350 board (Olimex PICO2-XXL) | works (USB link, JS heap in PSRAM); slow for now |
 | Digital twin of a board on the PC (`qjsx agent`) | works: pins, parts (button, LEDs, BME280, potentiometer, your own), I2C, ADC, UARTs and USB over TCP, in a web page |
 | Permissions of a program run on the PC (Deno-like: files, network, environment, serial ports) | works |
 
-In short: today you can run JavaScript on the board, debug it from VS Code, drive its pins and
-light its RGB LED; most of the other hardware is still to come.
+In short: today you can run JavaScript on an ESP32-S3 or a Teensy 4.0, debug it from VS Code,
+drive its pins, its PWM outputs and its RGB LED; most of the other hardware is still to come.
 
 ## Building
 
@@ -200,8 +204,16 @@ asserts; `config=profile`: the code of Release with its debug info, for
 bash tests/run-tests.sh Release
 ```
 
-The firmware is built with [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) 6.1, from
-the `ports/esp32` folder.
+The firmwares, one per board:
+
+| Boards | Folder | Built with |
+|---|---|---|
+| ESP32-S3: YD-ESP32-S3, ESP32-S3-DevKitC-1 | `ports/esp32` | [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) 6.1 (`tools/idf.ps1`) |
+| Teensy 4.0 (i.MX RT1062) | `ports/imxrt1062` | NXP's [MCUXpresso SDK](https://github.com/nxp-mcuxpresso) 26.06 LTS, FreeRTOS, the Arm GNU toolchain; flashed with `teensy_loader_cli` (`tools/teensy.ps1`) |
+| RP2350: Olimex PICO2-XXL | `ports/rp2350` | the pico-sdk, FreeRTOS, the Arm GNU toolchain (`tools/pico.ps1`) |
+
+A Teensy running qjsx is flashed again without its button: the tool asks it for its loader
+through its USB serial port.
 
 ## Going further
 

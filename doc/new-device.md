@@ -15,7 +15,8 @@ What exists today:
 
 | Target | Where | State |
 |---|---|---|
-| ESP32-S3, ESP-IDF 6.1 | `ports/esp32/` | works on one real board: VCC-GND YD-ESP32-S3, WROOM-1 N16R8 module (16 MB flash, 8 MB octal PSRAM), wired by its UART0 / COM port |
+| ESP32-S3, ESP-IDF 6.1 | `ports/esp32/` | works on real boards: VCC-GND YD-ESP32-S3, WROOM-1 N16R8 module (16 MB flash, 8 MB octal PSRAM), and Espressif ESP32-S3-DevKitC-1, WROOM-1 N8R8 (8 MB flash, 8 MB octal PSRAM; folder `esp32-s3-devkitc-n8r8`, made in a few minutes as section 3 says), both wired by their UART0 / COM port |
+| i.MX RT1062 (PJRC Teensy 4.0, FreeRTOS + NXP MCUXpresso SDK) | `ports/imxrt1062/` | works on the board (2026-11-16): USB CDC link, packages in flash (the boot ROM's flash API), JS heap in OCRAM, debugger tests pass, `device/gpio`, `device/pwm`, `device/board` |
 | Desktop "board" (`qjsx agent`) | `host/platform/board_host.cpp`, `host/platform/platform_host.cpp` | works; a stand-in for a board, and a second implementation of the same interfaces |
 | RP2350 (Olimex PICO2-XXL, FreeRTOS SMP + pico-sdk) | `ports/rp2350/` | works on the board (2026-11-12): USB CDC link, packages in flash, JS heap in PSRAM, debugger tests pass |
 
@@ -28,7 +29,9 @@ Two cases:
    interfaces (`platform.h` and `board.h`) and an entry point. Read
    [section 2](#2-what-a-device-firmware-is-made-of), then
    [section 4](#4-case-2-a-new-chip-a-new-port). The RP2350 is the first port written
-   this way (`ports/rp2350/`, see architecture.md 5.5).
+   this way (`ports/rp2350/`, see architecture.md 5.5), the i.MX RT1062 the second
+   (`ports/imxrt1062/`: with a chip SDK that gives no runtime, the port also brings
+   newlib's system calls, the blocks of `thread_local` variables and 64-bit atomics).
 
 An ESP32 that is not an ESP32-S3 (ESP32, ESP32-C3, ESP32-C6...) is between the two cases: only
 the `esp32s3` target has been built. See [3.7](#37-what-a-board-description-cannot-change-yet).
