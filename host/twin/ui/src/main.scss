@@ -98,8 +98,39 @@ html:not(.x4theme-dark) {
 		}
 	}
 
+	// LEDs (partview.ts ledControl): a table of cells of one LED, on one line
+	// while they fit in the width, else on as many rows as needed; an LED keeps
+	// its size and stays round (a flex line squeezed 256 of them into slivers)
 	.leds {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, 26px);
 		gap: 8px;
+
+		// a strip (several LEDs): small flat squares, close together, in the
+		// plain color of the LED (no bezel, highlight nor glow: user)
+		&.strip {
+			grid-template-columns: repeat(auto-fill, 14px);
+			gap: 4px;
+
+			.twinled {
+				width: 14px;
+				height: 14px;
+				padding: 0;
+				border: 1px solid #555;
+				border-radius: 2px;
+				background: none;
+
+				&::after {
+					border-radius: 1px;
+					background: var(--led-color);
+					box-shadow: none;
+				}
+
+				&.off::after {
+					background: #2a2a2a;
+				}
+			}
+		}
 	}
 
 	// a part (partview.ts): a row per control or per field of its state

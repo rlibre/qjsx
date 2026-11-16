@@ -102,7 +102,7 @@ async function get(path) {
 const socket = await connect({ port: PAGE_PORT, path: "/ws", protocol: "messaging" });
 socket.onMessage(onPageMessage);
 const parts = await message(item => item.msg === "twin.parts");
-equal(parts?.map(part => part.id).join(","), "boot,rgb,meteo,echo,strip,gain", "the page gets the board's parts then the project's");
+equal(parts?.map(part => part.id).join(","), "boot,reset,rgb,meteo,echo,strip,gain", "the page gets the board's parts then the project's");
 const meteo = parts?.find(part => part.id === "meteo");
 equal(meteo?.controls.map(control => control.type).join(","), "knob,knob,knob,value", "the bme280 declares its controls");
 equal(JSON.stringify(meteo?.pins), "[8,9]", "... and is on the pins of its bus");

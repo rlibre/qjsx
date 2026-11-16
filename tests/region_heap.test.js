@@ -51,6 +51,12 @@ equal(heap.usedBytes(), 0, "nothing used after releasing all");
 equal(heap.largestFree(), emptyLargest, "the whole region is free again");
 check(heap.peak() > 600, "the peak remembers the most used");
 
+// --- an empty heap starts a new peak (a device: the peak of the current run)
+const small = heap.allocate(16);
+check(heap.peak() < 100, "the first block of an empty heap starts a new peak");
+heap.release(small);
+heap.check();
+
 // --- exhaustion: no room gives -1, the heap stays usable
 equal(heap.allocate(emptyLargest + 1), -1, "a request larger than the region");
 const whole = heap.allocate(emptyLargest);

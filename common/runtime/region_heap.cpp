@@ -621,9 +621,17 @@ RegionBlock *RegionHeap::ownedBlock(void *payload) const {
 }
 
 /**
- * Updates the used bytes and their peak.
+ * Updates the used bytes and their peak. An empty heap starts a new peak: on
+ * a device the JS region serves one runtime at a time and a run frees every
+ * block of it, so the peak is the current run's, not the most of every run
+ * since the boot.
  */
 void RegionHeap::countUsed(size_t added, size_t removed) {
+    // the first block of an empty heap: a new peak
+    if (_used == 0) {
+        _peak = 0;
+    }
+
     _used = _used + added - removed;
     _peak = _used > _peak ? _used : _peak;
 }

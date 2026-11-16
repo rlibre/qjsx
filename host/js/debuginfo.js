@@ -121,6 +121,30 @@ function readManifest(file) {
     }
 }
 
+// The name the source gives a function the compiler left without one (it
+// names methods and functions stored in a variable only when they run),
+// from the source around its start (a byte offset of 'sourceBytes'):
+//   async _breathe(self) {          -> "_breathe"   (a method, at its start)
+//   const lasts = () => ...         -> "lasts"      (stored in a variable or
+//   this.onData = async (bytes) =>  -> "onData"      a property, before it)
+// undefined when neither applies (a callback given to a call).
+const METHOD_START = /^(?:async\s+)?(?:static\s+)?(?:get\s+|set\s+)?\*?\s*(#?[A-Za-z_$][\w$]*)\s*\(/;
+const STORED_BEFORE = /([A-Za-z_$][\w$]*)\s*(?<![=!<>])(?:=|:)\s*(?:async\s*)?$/;
+const AROUND = 80;   // bytes looked at on each side of the start
+
+function inferFunctionName(sourceBytes, start) {
+    const decoder = new TextDecoder();
+    const after = decoder.decode(sourceBytes.subarray(start, start + AROUND));
+    const method = METHOD_START.exec(after);
+    if (method !== null && method[1] !== "function") {
+        return method[1];
+    }
+
+    const before = decoder.decode(sourceBytes.subarray(Math.max(0, start - AROUND), start));
+    const stored = STORED_BEFORE.exec(before);
+    return stored === null ? undefined : stored[1];
+}
+
 function decodeJson(bytes) {
     return JSON.parse(new TextDecoder().decode(bytes));
 }
@@ -193,7 +217,8 @@ export class ScriptInfo {
     }
 
     // Name shown for a function: its name, "<module>" for the code of the
-    // module, "(anonymous)" otherwise.
+    // module, the name its source gives it (see inferFunctionName),
+    // "(anonymous)" otherwise.
     functionName(number) {
         const info = this.functions[number];
         if (info === undefined) {
@@ -204,7 +229,8 @@ export class ScriptInfo {
         if (isModuleCode) {
             return "<module>";
         }
-        return info.name ?? "(anonymous)";
+        this.sourceBytes ??= new TextEncoder().encode(this.source);   // positions are byte offsets
+        return info.name ?? inferFunctionName(this.sourceBytes, info.start) ?? "(anonymous)";
     }
 
     // Source offset (bytes) of the bytecode offset 'pc' of function

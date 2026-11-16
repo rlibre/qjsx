@@ -467,6 +467,10 @@ size_t measuredUsableSize(const void *block) {
 // The board's allocator with the JS heap recorded after each call.
 const JSMallocFunctions measuredAllocator = { &measuredMalloc, &measuredFree, &measuredRealloc, &measuredUsableSize };
 
+// The measure of the JS heap of the run of this thread (currentHeapUsage());
+// nullptr when not measured.
+thread_local const JsHeapUsage *currentHeap = nullptr;
+
 // ### Runtime #################################################################
 
 /**
@@ -486,11 +490,19 @@ Runtime createRuntime(Session *session) {
     if (measured) {
         __atomic_store_n(&usage->used, 0, __ATOMIC_RELAXED);
         __atomic_store_n(&usage->peak, 0, __ATOMIC_RELAXED);
+        currentHeap = usage;
         created.runtime = JS_NewRuntime2(&measuredAllocator, usage);
     } else if (allocator != nullptr) {
         created.runtime = JS_NewRuntime2(allocator, nullptr);
     } else {
         created.runtime = JS_NewRuntime();
+    }
+
+    // a heap of a fixed size (a region of a board without PSRAM): its size
+    // is QuickJS's limit, so that the cycles are collected before it is full
+    size_t heapLimit = board::jsHeapLimit();
+    if (heapLimit > 0) {
+        JS_SetMemoryLimit(created.runtime, heapLimit);
     }
 
     // the names of the package, before anything makes a name: its bytecode
@@ -520,6 +532,13 @@ Runtime createRuntime(Session *session) {
     // current loop of the thread)
     JS_SetModuleLoaderFunc2(created.runtime, nullptr, &loadModule, nullptr, session);
     created.loop = new Loop(created.ctx);
+
+    // where the load of the JS thread is published, if the hooks ask (from 0)
+    JsLoadUsage *loadUsage = session->hooks != nullptr ? session->hooks->loadUsage : nullptr;
+    if (loadUsage != nullptr) {
+        *loadUsage = JsLoadUsage{ 0, 0, 0, 0, 1 };   // working: the main module is evaluated first
+        created.loop->publishLoadTo(loadUsage);
+    }
     return created;
 }
 
@@ -541,9 +560,17 @@ void destroyRuntime(Runtime runtime) {
 
     // so the loop object goes last; it no longer touches JS
     delete runtime.loop;
+    currentHeap = nullptr;
 }
 
 } // namespace
+
+/**
+ * The JS heap of the run of the calling JS thread, as measured.
+ */
+const JsHeapUsage *currentHeapUsage() {
+    return currentHeap;
+}
 
 /**
  * Sets import.meta.url and import.meta.main of a module.

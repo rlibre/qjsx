@@ -108,6 +108,87 @@ private:
     int              _references;  // the loop + producer threads; atomic
 };
 
+// ### Load of the JS thread ###################################################
+
+// The load of a JS thread (Loop::load()).
+struct LoadStats {
+    double  load;        // share of the last second the JS thread worked, 0 to 1
+    double  peak;        // the most of 'load' over a full second since the loop started
+    int64_t busyMs;      // ms worked since the loop started
+    int64_t elapsedMs;   // ms since the loop started
+};
+
+// The load as other threads read it (the agent's INFO): written by the JS
+// thread at each wait of the loop, read with atomic loads.
+struct JsLoadUsage {
+    int64_t busyMs;         // ms worked since the run started
+    int64_t elapsedMs;      // ms since the run started
+    int32_t loadPermille;   // load of the last second, 0 to 1000
+    int32_t peakPermille;   // the most of it over a full second, 0 to 1000
+    int32_t working;        // 1 while the JS thread works, 0 while the loop waits (the profiler)
+};
+
+// Measures the load of the JS thread: the time between two waits of the loop
+// is work (the debugger holding the program paused counts too). The last
+// second is kept as SLOTS slots of SLOT_MS, each holding the work that ended
+// in it: a long piece of work counts where it ends, its second is then full.
+// JS thread only.
+class LoadMeter {
+public:
+    /**
+     * The loop starts: it works from 'nowMs' (monotonicMs()).
+     */
+    void             start(int64_t nowMs);
+
+    /**
+     * The loop is about to wait: the work since it woke up is counted, and
+     * published.
+     */
+    void             waitBegins(int64_t nowMs);
+
+    /**
+     * The loop woke up: it works from now.
+     */
+    void             waitEnds(int64_t nowMs);
+
+    /**
+     * The load now, the work in progress included.
+     */
+    LoadStats        stats(int64_t nowMs);
+
+    /**
+     * See Loop::publishLoadTo().
+     */
+    void             publishTo(JsLoadUsage *usage) {
+        _published = usage;
+    }
+
+private:
+    static const int     SLOTS = 10;     // slots of the last second
+    static const int64_t SLOT_MS = 100;  // ms of a slot
+
+    /**
+     * Moves the current slot to the one of 'nowMs'; the slots skipped are
+     * emptied.
+     */
+    void             advance(int64_t nowMs);
+
+    /**
+     * Share of the last second worked, with 'workingMs' of work in progress
+     * (0 to 1; less than a second since the start: the share of that time).
+     */
+    double           windowLoad(int64_t workingMs, int64_t nowMs) const;
+
+    int64_t          _startMs = 0;        // when the loop started
+    int64_t          _slotStartMs = 0;    // when the current slot started
+    int              _current = 0;        // index of the current slot
+    int64_t          _slots[SLOTS] = {};  // ms of work that ended in each slot
+    int64_t          _workSince = -1;     // when the work in progress began; -1: waiting
+    int64_t          _busyMs = 0;         // ms worked since the start (ended pieces)
+    double           _peak = 0;           // the most of a full second's load
+    JsLoadUsage     *_published = nullptr;  // where waitBegins() publishes; nullptr: nowhere
+};
+
 class Loop {
 public:
     /**
@@ -230,6 +311,21 @@ public:
      */
     void         shutdown();
 
+    // ### load (JS thread) ####################################################
+
+    /**
+     * The load of the JS thread now (see LoadMeter); the call itself is work.
+     */
+    LoadStats    load();
+
+    /**
+     * Where the load is also published for other threads, at each wait
+     * (nullptr: nowhere); borrowed, must outlive the loop.
+     */
+    void         publishLoadTo(JsLoadUsage *usage) {
+        _load.publishTo(usage);
+    }
+
 private:
     struct Timer;
     struct Source {
@@ -301,6 +397,7 @@ private:
     bool         _exitRequested;   // true once exit() was called
     int          _exitCode;        // given to exit(); 0 by default
     bool         _exitOnUncaught;  // true: an uncaught exception stops the loop (code 1)
+    LoadMeter    _load;            // the load of the JS thread
 };
 
 } // namespace rt

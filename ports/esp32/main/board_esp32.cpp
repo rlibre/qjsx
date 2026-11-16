@@ -630,6 +630,22 @@ const JSMallocFunctions *jsAllocator() {
 }
 
 /**
+ * The size of the JS region, once reserved; 0 when the heap shares the RAM
+ * or is in PSRAM.
+ */
+size_t jsHeapLimit() {
+#if JS_HEAP_REGION
+    if (jsRegionSize > 0) {
+        memory::HeapStats stats = {};
+        jsRegion.stats(&stats);
+        return stats.total;
+    }
+#endif
+
+    return 0;
+}
+
+/**
  * 64 KB with PSRAM; without it, a small one: the receive buffer of the
  * agent and the copies of a message being sent take internal RAM.
  */

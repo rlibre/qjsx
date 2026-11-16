@@ -34,8 +34,8 @@ of the wrong type, is an error.
 | `env` | — | `process.env` of the program on a device (strings only) |
 | `libraries` | `[]` | `.qjslib` files the program may import, besides the standard library |
 | `data` | — | a folder of the project whose files `qjsx deploy --data` writes to the data folder of the device (`/data`), at the same paths |
-| `desktop` | — | the program as a program of the PC: root folder and permissions ([Programs of the PC](/guides/pc-programs/)) |
-| `twin` | — | the digital twin of the project: board, parts, ports ([The digital twin](/guides/twin/)) |
+| `desktop` | — | the program as a program of the PC: root folder and permissions ([Programs of the PC](../pc-programs/)) |
+| `twin` | — | the digital twin of the project: board, parts, ports ([The digital twin](../twin/)) |
 
 ## Targets
 

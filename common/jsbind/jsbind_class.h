@@ -458,16 +458,33 @@ template<class T> Created<T> create(JSContext *ctx = nullptr);
 
 namespace detail {
 
+// The methods of a class as a QuickJS function list (JS_SetPropertyFunctionList):
+// each one becomes a property of the prototype whose function QuickJS makes at
+// its first read, so a method the program never uses costs no function object
+// (fields and module functions are still made at once). QuickJS keeps pointers
+// to the entries: the list lives as long as the thread, one per class and per
+// thread like 'names', whose indexes its entries hold. The first context of
+// the thread fills it, the next ones use it as it is.
+struct MethodList {
+    JSCFunctionListEntry *entries;   // memory::allocate'd, never freed
+    int                   count;     // entries filled
+    int                   capacity;  // entries allocated
+    bool                  built;     // complete: the next contexts only install it
+};
+
 /**
- * Defines the members of a class on its prototype.
+ * Defines the members of a class on its prototype: fields at once, methods in
+ * the class's MethodList (installed by ClassAccess::prototype).
  */
 template<class T>
 class ClassBuilder {
 public:
     /**
-     * Builder for 'prototype' (borrowed: the caller keeps it alive).
+     * Builder for 'prototype' (borrowed: the caller keeps it alive), filling
+     * 'methods' unless it is built already.
      */
-    ClassBuilder(JSContext *ctx, JSValueConst prototype) : _ctx(ctx), _prototype(prototype), _ok(true) {}
+    ClassBuilder(JSContext *ctx, JSValueConst prototype, MethodList *methods)
+        : _ctx(ctx), _prototype(prototype), _methods(methods), _ok(true) {}
 
     /**
      * False if a member could not be added (its exception is pending).
@@ -493,19 +510,14 @@ public:
         int nameIndex = registerName(T::jsClassName, name);
 
         if constexpr (Traits::isMethod) {
-            // a method: a function property calling methodTrampoline<M>
-            constexpr int arity = JsArity<typename Traits::Arguments>::value;
-            JSValue function = JS_NewCFunctionMagic(_ctx, &methodTrampoline<M>, name, arity,
-                                                    JS_CFUNC_generic_magic, nameIndex);
-            if (JS_IsException(function)) {
-                _ok = false;
+            // a method: an entry of the list (the function calls
+            // methodTrampoline<M>), unless an earlier context built it
+            if (_methods->built) {
                 return;
             }
 
-            // (the property takes the function, even on failure)
-            int defined = JS_DefinePropertyValueStr(_ctx, _prototype, name, function,
-                                                    JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-            _ok = defined >= 0;
+            constexpr int arity = JsArity<typename Traits::Arguments>::value;
+            addMethod(name, arity, &methodTrampoline<M>, nameIndex);
         } else {
             // a field: a getter, plus a setter unless the field is const
             using Field = typename Traits::Field;
@@ -537,6 +549,35 @@ public:
     }
 
 private:
+    // The trampoline of a method, as QuickJS calls a function with 'magic'.
+    typedef JSValue MethodFunction(JSContext *ctx, JSValueConst thisValue, int argc, JSValueConst *argv, int magic);
+
+    /**
+     * Appends method 'name' to the list: a writable, configurable property
+     * whose function QuickJS makes on first read ('magic': the index of its
+     * name). The list grows by doubling while it is built.
+     */
+    void addMethod(const char *name, int arity, MethodFunction *function, int nameIndex) {
+        // make room
+        if (_methods->count == _methods->capacity) {
+            _methods->capacity = _methods->capacity == 0 ? 8 : _methods->capacity * 2;
+            size_t size = _methods->capacity * sizeof(JSCFunctionListEntry);
+            _methods->entries = (JSCFunctionListEntry *)memory::reallocate(_methods->entries, size);
+        }
+
+        // the entry, as JS_CFUNC_MAGIC_DEF of QuickJS describes it
+        JSCFunctionListEntry *entry = &_methods->entries[_methods->count];
+        memset(entry, 0, sizeof(*entry));
+        entry->name = name;
+        entry->prop_flags = JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE;
+        entry->def_type = JS_DEF_CFUNC;
+        entry->magic = (int16_t)nameIndex;
+        entry->u.func.length = (uint8_t)arity;
+        entry->u.func.cproto = JS_CFUNC_generic_magic;
+        entry->u.func.cfunc.generic_magic = function;
+        _methods->count++;
+    }
+
     /**
      * C++ object behind 'this'; nullptr (with a TypeError thrown by QuickJS)
      * if 'this' is not an object of class T.
@@ -608,7 +649,8 @@ private:
     }
 
     JSContext   *_ctx;        // context of the class registration
-    JSValueConst _prototype;  // prototype receiving the members; borrowed
+    JSValueConst _prototype;  // prototype receiving the fields; borrowed
+    MethodList  *_methods;    // the methods of the class (filled unless built); borrowed
     bool         _ok;         // false once a member could not be added
 };
 
@@ -709,6 +751,14 @@ struct ClassAccess {
     }
 
     /**
+     * The methods of the class in this thread (see MethodList).
+     */
+    static MethodList *methodList() {
+        static thread_local MethodList list = { nullptr, 0, 0, false };
+        return &list;
+    }
+
+    /**
      * Prototype of the class in this context, created on first use (the
      * exported members are added then). Returns a new reference, or
      * JS_EXCEPTION with the exception pending (nothing stored: the next use
@@ -729,10 +779,23 @@ struct ClassAccess {
             return JS_EXCEPTION;
         }
 
-        // add the exported members
-        ClassBuilder<T> builder(ctx, created);
+        // add the exported members: the fields, and the methods to the list
+        // (the first time in this thread; a failure leaves it to be filled
+        // again)
+        MethodList *methods = methodList();
+        ClassBuilder<T> builder(ctx, created, methods);
         registerSlots<1>(builder);
         if (!builder.ok()) {
+            if (!methods->built) {
+                methods->count = 0;
+            }
+            JS_FreeValue(ctx, created);
+            return JS_EXCEPTION;
+        }
+        methods->built = true;
+
+        // then the methods, each made by QuickJS at its first read
+        if (JS_SetPropertyFunctionList(ctx, created, methods->entries, methods->count) < 0) {
             JS_FreeValue(ctx, created);
             return JS_EXCEPTION;
         }

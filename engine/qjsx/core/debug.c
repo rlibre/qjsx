@@ -622,6 +622,23 @@ int JS_DebugGetFrame(JSContext *ctx, int level, JSDebugFrame *frame)
     return 0;
 }
 
+int JS_DebugSampleStack(JSContext *ctx, JSDebugSampleFrame *frames, int max)
+{
+    JSStackFrame *sf;
+    JSFunctionBytecode *b;
+    int count = 0;
+
+    for (sf = ctx->rt->current_stack_frame; sf != NULL && count < max; sf = sf->prev_frame) {
+        b = js_debug_frame_bytecode(sf);
+        if (b == NULL)
+            continue;
+        frames[count].module_name = b->filename;
+        frames[count].function_number = b->function_number;
+        count++;
+    }
+    return count;
+}
+
 JSValue JS_DebugGetFrameFunction(JSContext *ctx, int level)
 {
     JSStackFrame *sf = js_debug_frame_at(ctx->rt, level);

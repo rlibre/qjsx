@@ -27,6 +27,7 @@
 //   board.i2c({ sda, scl }) attach(address, { onTransfer(written, readLength) }), detach(address)
 //   board.rmt(pin)          onBytes(bytes => ...), onPulses(pulses => ...)
 //   board.now()             ms since the twin started
+//   board.restart()         restarts the device (its reset button)
 //
 // Threads: everything here runs on the twin's thread, one call at a time.
 // onTransfer is synchronous: the program waits for its answer, so it must
@@ -266,6 +267,15 @@ export class Board {
      */
     now() {
         return Date.now() - this._start;
+    }
+
+    /**
+     * Restarts the device, as its reset button (the EN pin of an ESP32): a
+     * program loaded in RAM is dropped, the installed one runs again. The
+     * parts stay as they are.
+     */
+    restart() {
+        twinboard.reset();
     }
 
     /**

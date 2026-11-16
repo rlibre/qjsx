@@ -39,11 +39,32 @@ void yieldIfDue() {
 
 namespace platform {
 
+namespace {
 /**
- * Milliseconds since the system started (GetTickCount64): never goes back.
+ * Ticks per second of the performance counter (fixed at boot).
+ */
+int64_t counterFrequency() {
+    LARGE_INTEGER frequency;
+    QueryPerformanceFrequency(&frequency);
+    return (int64_t)frequency.QuadPart;
+}
+} // namespace
+
+/**
+ * Milliseconds since the system started, from the performance counter: never
+ * goes back, and moves every millisecond. Not GetTickCount64, which moves by
+ * steps of 15.6 ms: a timer of the loop due in 10 ms then expired only at the
+ * next step, 15.6 ms later.
  */
 int64_t monotonicMs() {
-    return (int64_t)GetTickCount64();
+    static const int64_t frequency = counterFrequency();
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter(&counter);
+
+    // whole seconds, then the rest: counter * 1000 could overflow
+    int64_t seconds = (int64_t)counter.QuadPart / frequency;
+    int64_t rest = (int64_t)counter.QuadPart % frequency;
+    return seconds * 1000 + rest * 1000 / frequency;
 }
 
 /**

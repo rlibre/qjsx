@@ -25,10 +25,17 @@ const TYPINGS = [
 	'../../common/device/usb_module.d.ts',
 	'../../lib/stdlib/src/path.d.ts',
 	'../../lib/stdlib/src/rgbled.d.ts',
+	'../../lib/stdlib/src/tasks.d.ts',
 	'../../lib/stdlib/src/usb.d.ts',
 ];
 
 export default defineConfig({
+	// Published on GitHub Pages as a project page: https://rlibre.github.io/qjsx/
+	// (.github/workflows/manual.yml, doc/manual-publishing.md). The base is the
+	// same locally (http://localhost:4321/qjsx/), so a link that ignores it is
+	// broken there too: links written by hand in the pages are RELATIVE.
+	site: 'https://rlibre.github.io',
+	base: '/qjsx',
 	integrations: [
 		starlight({
 			title: 'qjsx',
@@ -61,6 +68,8 @@ export default defineConfig({
 						{ label: 'Getting started', slug: 'guides/getting-started' },
 						{ label: 'The project file', slug: 'guides/project' },
 						{ label: 'Programs on a device', slug: 'guides/devices' },
+						{ label: 'Small tasks', slug: 'guides/tasks' },
+						{ label: 'Good practices', slug: 'guides/good-practices' },
 						{ label: 'The digital twin', slug: 'guides/twin' },
 						{ label: 'Debugging in VS Code', slug: 'guides/debugging' },
 						{ label: 'Libraries', slug: 'guides/libraries' },

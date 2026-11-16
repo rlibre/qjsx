@@ -1,6 +1,38 @@
 # TODO
 
-## Où on en est (2026-11-13, à relire en reprenant le travail)
+## Où on en est (2026-11-16, à relire en reprenant le travail)
+
+- [x] **Dernier état (2026-11-16 au soir ; rien de commité depuis 277fd22 ; l'utilisateur
+      commite)** :
+      - **charge du fil JS de la carte cliente : 93 % → 26,7 %** : flash en QIO (×1,6 sur
+        les attentes), Ticker de `stdlib/tasks` allégé (une promesse et un timer par pas),
+        bande de LEDs endormie sur une boîte aux lettres quand rien ne clignote ni ne bouge,
+        power good (GPIO3) par interruption SANS anti-rebond (commuté électroniquement,
+        utilisateur), LED d'état à 25 Hz. Reste : respiration ≈ 9 %, scrutation RFID
+        ≈ 15 % (utilisateur : on n'y touche pas pour l'instant) ;
+      - **LED d'état de la carte cliente** : codes d'erreur (un blanc, x rouges, 1 s de
+        pause ; erreur 1 = pas de 12 V), respiration vert d'eau d'une période de 2 s, éteinte
+        sans erreur quand power.global est à 0 ;
+      - **profileur échantillonneur** `qjsx profile` (moteur U, `QJSX_PROFILER` : ON sur PC,
+        OFF sur les cartes) ; le firmware actuel de la carte cliente a été compilé avec ON :
+        à repasser à OFF avant une livraison. Noms des méthodes déduits de la source (aussi
+        dans la pile du débogueur). Plus tard : vue Profiler de VS Code (CDP) ;
+      - **`device/board` `memory()` et `load()`**, charge dans `qjsx device info` ; tâches
+        d'E/S de l'ESP32 sur le cœur 0, le programme seul sur le cœur 1 ;
+      - **GC plafonné par la limite mémoire** (moteur T) : avant, aucun cycle n'était
+        ramassé dans la région de 248 Ko ;
+      - méthodes jsbind créées à la première lecture (≈ −1 Ko, loin des 7 Ko estimés) ;
+      - flash QIO sur la carte cliente ET la YD ; boucle de `toggle()` sur GPIO20 : 244 kHz en
+        DIO comme en QIO ;
+      - horloge du PC par QueryPerformanceCounter (les pas de 15,6 ms de Windows faussaient
+        les timers) ; pic d'une `RegionHeap` par exécution ; pièces du jumeau trouvées sans
+        `-p` ; message d'un manque de mémoire lisible ;
+      - **jumeau** : bouton RESET dans la description des deux cartes (pièce `button` avec
+        `"reset": true`), bande de LEDs en grille de carrés plats, couleur d'une LED
+        (racine cubique par canal, puis matrice des trois LEDs du WS2812 vers sRGB : le blanc
+        reste blanc ; à affiner plus tard par une table, utilisateur) ;
+      - **en cours** : GC au repos (mesure d'un passage sur l'application cliente), lenteurs
+        du tas en région remesurées en QIO.
 
 - [x] **Dernier état (2026-11-13 après-midi ; tout le matin est commité dans 3d95c7d ;
       l'utilisateur commite)** :
@@ -37,9 +69,16 @@
         temp/histo/map-clean.txt) : trois poches de RAM trouvées, rien de corrigé :
         1. pile de la tâche JS 48 Ko dont 41,3 Ko jamais utilisés ; 2. un tas de 32 Ko
         (0x3fcf0000) et le tas RTC de 7,8 Ko entièrement libres, que la région JS (un seul
-        bloc du tas principal) ne peut pas prendre ; 3. pic du tas JS au chargement :
-        211 Ko, pour 166 Ko une fois les modules chargés (45 Ko transitoires, cause à
-        trouver). Statique : 72,6 Ko de RAM (code en RAM 43,5 Ko, .data 16,5, .bss 12,6).
+        bloc du tas principal) ne peut pas prendre ; 3. « pic du tas JS au chargement
+        211 Ko pour 166 Ko chargés » : ARTEFACT DE MESURE (2026-11-16) : le pic de la
+        région comptait depuis le démarrage, et le relevé suivait la fin du programme
+        installé avant (l'application en marche, ≈ 211 Ko). Sur le jumeau, pic de
+        l'exécution = utilisé juste après le chargement (284,2 Ko, PC 64 bits), puis
+        300-304 Ko en marche (316 au plus). Les +45 Ko entre « loaded » et « running »
+        sont la mémoire vivante de l'application (≈ 57 fonctions async en attente,
+        102 fermetures, 313 objets, 55 formes, 4 ArrayBuffer). CORRIGÉ : le pic d'une
+        `RegionHeap` repart de zéro quand elle a été vidée (sur une carte : le pic de
+        l'exécution en cours). Statique : 72,6 Ko de RAM (code en RAM 43,5 Ko, .data 16,5, .bss 12,6).
       - **optimiseur de bytecode : constantes, FAIT le 2026-11-16** (engine-changes.md R,
         `compiler/fold.c`) : marche 1 (calcul des expressions de littéraux) et marche 2
         (`const` de module remplacées par leur valeur, sans variable si non exportées),
@@ -55,8 +94,20 @@
         lire une constante avant sa déclaration ne lève plus d'erreur, un point d'arrêt
         sur la ligne glisse à l'instruction suivante. Opcodes fusionnés : plus tard,
         après mesure sur la carte. Sondes : temp/heapmap/optprobe.c, ophisto.c.
-      - **tâches préemptées (« faux threads »)** (idée de l'utilisateur, 2026-11-16, à
-        étudier, rien de fait) : une tâche = un générateur ; au point de contrôle que
+      - **`stdlib/tasks` FAIT le 2026-11-16** (CLAUDE.md « stdlib/tasks ») : le but de
+        l'utilisateur était de simplifier l'écriture des petites tâches ; une
+        bibliothèque JS suffit (task / stop / join / sleep / every / mailbox, Mutex
+        withLock). Application cliente réécrite avec (LED d'état, bande et chenillard,
+        protocole, surveillance de l'alimentation, RFID ; `tasks.js` remplacé par
+        `sleep.js`), essayée sur le jumeau (chenillard, coupure du 12 V), puis sur la
+        carte le même jour. Suite Debug 114 OK. Constat : sur PC un pas de 10 ms dure ≈ 15 ms
+        (horloge de Windows), même avant. Reste à voir : une option pour qu'une
+        erreur n'arrête pas la boucle d'une tâche (aujourd'hui try / catch à la main).
+      - **tâches préemptées (« faux threads »)** (idée de l'utilisateur, 2026-11-16,
+        ÉTUDIÉE, REPORTÉE : inutile pour les petites tâches ; faisable : coupure à un
+        saut dans un cadre de générateur marqué, nouveau code FUNC_RET_PREEMPT, reprise
+        sans valeur, coût seulement sur le chemin lent ; `return()` impossible sur une
+        tâche préemptée) : une tâche = un générateur ; au point de contrôle que
         l'interpréteur a déjà (saut en arrière, appel : interpreter.c:81, celui du
         débogueur et de yieldIfDue), si la tranche de temps est écoulée et que le cadre en
         cours est celui d'un générateur, sortir avec un nouveau code de retour
@@ -69,7 +120,7 @@
         fin de la garantie « un callback n'est pas interrompu »), interpréteur sans pile
         (réécriture du cœur), workers (≈ 62 Ko par moteur).
       - **optimiseur de bytecode** (utilisateur, 2026-11-16 : « pour la suite, réfléchir
-        à un optimiseur de bytecode ») : à étudier, rien de fait.
+        à un optimiseur de bytecode ») : marches 1 et 2 FAITES (moteur R, plus haut).
       - **paquet exécuté en place, marches 1 et 2 FAITES le 2026-11-16** (engine-changes.md
         S) : `qjsx build` lie les modules (`link()` de sys/compiler) : une table de noms
         pour tout le paquet (entrée `names.bin`, alignée sur 8, `names` dans le manifeste),

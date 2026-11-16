@@ -542,6 +542,23 @@ static __maybe_unused void js_malloc_iter(JSMallocContext *s, JSMallocIterFunc *
 
 /* end JS malloc */
 
+/* qjsx: the threshold of the next GC once 'size' bytes are in use: 1.5 x
+   'size' as QuickJS, but never past halfway from 'size' to the memory limit
+   when one is set (JS_SetMemoryLimit). Without it, a heap smaller than the
+   first threshold (256 KB: a board without PSRAM) never collects its cycles,
+   and a heap close to its limit fills up before the next GC. */
+static size_t js_next_gc_threshold(JSRuntime *rt, size_t size)
+{
+    size_t threshold = size + (size >> 1);
+    size_t limit = rt->malloc_ctx.malloc_state.malloc_limit;
+    if (limit != (size_t)-1 && size < limit) {
+        size_t halfway = size + (limit - size) / 2;
+        if (threshold > halfway)
+            threshold = halfway;
+    }
+    return threshold;
+}
+
 void js_trigger_gc(JSRuntime *rt, size_t size)
 {
     BOOL force_gc;
@@ -557,8 +574,8 @@ void js_trigger_gc(JSRuntime *rt, size_t size)
                (uint64_t)rt->malloc_ctx.malloc_state.malloc_size);
 #endif
         JS_RunGC(rt);
-        rt->malloc_gc_threshold = rt->malloc_ctx.malloc_state.malloc_size +
-            (rt->malloc_ctx.malloc_state.malloc_size >> 1);
+        /* qjsx: capped by the memory limit, if any */
+        rt->malloc_gc_threshold = js_next_gc_threshold(rt, rt->malloc_ctx.malloc_state.malloc_size);
     }
 }
 
@@ -935,7 +952,15 @@ JSRuntime *JS_NewRuntime(void)
 
 void JS_SetMemoryLimit(JSRuntime *rt, size_t limit)
 {
+    size_t next;
+
     rt->malloc_ctx.malloc_state.malloc_limit = limit;
+
+    /* qjsx: the next GC before the heap is half full (see
+       js_next_gc_threshold), unless the automatic GC is disabled */
+    next = js_next_gc_threshold(rt, rt->malloc_ctx.malloc_state.malloc_size);
+    if (rt->malloc_gc_threshold != (size_t)-1 && rt->malloc_gc_threshold > next)
+        rt->malloc_gc_threshold = next;
 }
 
 /* use -1 to disable automatic GC */

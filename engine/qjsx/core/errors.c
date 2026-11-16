@@ -534,6 +534,13 @@ no_inline __exception int __js_poll_interrupts(JSContext *ctx)
     return 0;
 }
 
+/* qjsx: see quickjs.h. The interpreter only decrements the counter and polls
+   when it reaches 0: a plain store of 0 is enough. */
+void JS_RequestInterrupt(JSContext *ctx)
+{
+    *(volatile int *)&ctx->interrupt_counter = 0;
+}
+
 /* return the zero based line and column number in the source. */
 /* Note: we no longer support '\r' as line terminator */
 int get_line_col(int *pcol_num, const uint8_t *buf, size_t len)

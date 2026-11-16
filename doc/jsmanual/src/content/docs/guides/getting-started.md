@@ -21,7 +21,7 @@ qjsx run hello.js
 
 `qjsx run` runs a script on the PC. It reaches nothing but what you grant, as Deno does:
 no file, network, environment variable or serial port without `-R`, `-W`, `-N`, `-E`,
-`--allow-serial`, or `-A` for everything (see [Programs of the PC](/guides/pc-programs/)).
+`--allow-serial`, or `-A` for everything (see [Programs of the PC](../pc-programs/)).
 
 ## A project
 
@@ -51,7 +51,7 @@ setInterval(() => led.toggle(), 500);
 ```
 
 Every key of `qjsx.json` is optional: `main` is `src/main.js`, the sources are
-`src/**/*.js` (see [The project file](/guides/project/)).
+`src/**/*.js` (see [The project file](../project/)).
 
 ## Build
 
@@ -96,7 +96,7 @@ qjsx deploy --monitor
 ```
 
 `"target": "twin"` sends the package to the twin of the project; `--monitor` shows the
-output of the program. See [The digital twin](/guides/twin/).
+output of the program. See [The digital twin](../twin/).
 
 ## Run it on the board
 
@@ -117,4 +117,4 @@ starts again at each power on. `--ram` loads it in RAM only, for a quick try.
 qjsx debug
 ```
 
-then attach VS Code to port 9339: see [Debugging in VS Code](/guides/debugging/).
+then attach VS Code to port 9339: see [Debugging in VS Code](../debugging/).

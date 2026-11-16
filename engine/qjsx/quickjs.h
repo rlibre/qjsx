@@ -992,6 +992,11 @@ void JS_SetHostPromiseRejectionTracker(JSRuntime *rt, JSHostPromiseRejectionTrac
 /* return != 0 if the JS code needs to be interrupted */
 typedef int JSInterruptHandler(JSRuntime *rt, void *opaque);
 void JS_SetInterruptHandler(JSRuntime *rt, JSInterruptHandler *cb, void *opaque);
+/* qjsx: makes the interpreter running in 'ctx' call the interrupt handler at
+   its next check (a jump or a call) instead of after thousands of them. Any
+   thread may call it (a sampling profiler asks for its samples this way); a
+   request that races with the interpreter may be lost, the next one comes. */
+void JS_RequestInterrupt(JSContext *ctx);
 /* if can_block is TRUE, Atomics.wait() can be used */
 void JS_SetCanBlock(JSRuntime *rt, JS_BOOL can_block);
 /* select which debug info is stripped from the compiled code */

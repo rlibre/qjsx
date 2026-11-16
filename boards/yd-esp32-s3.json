@@ -11,6 +11,7 @@
     "natives": ["sys/fs", "sys/crypto", "device/board", "device/gpio", "device/rmt", "device/usb", "device/i2c", "device/adc", "device/pwm", "device/serial"],
     "parts": [
         { "id": "boot", "model": "button", "label": "BOOT", "pin": 0, "activeLow": true },
+        { "id": "reset", "model": "button", "label": "RESET", "reset": true },
         { "id": "rgb", "model": "ws2812", "label": "RGB", "pin": 48, "count": 1 }
     ]
 }

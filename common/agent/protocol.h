@@ -68,6 +68,10 @@ enum Kind {
     KIND_FILE_REMOVE = 75,
     KIND_FILE_MKDIR = 76,
     KIND_FILE_RENAME = 77,
+
+    // the sampling profiler (agent::profiler, firmwares with QJSX_PROFILER)
+    KIND_PROFILE_START = 80,
+    KIND_PROFILE_STOP = 81,
 };
 
 // Largest piece of a file read by one FILE_READ.
@@ -135,6 +139,15 @@ enum Key {
     KEY_PSRAM_FREE = 55,
     KEY_PSRAM_LARGEST = 56,
     KEY_JS_HEAP_SIZE = 57,
+    KEY_JS_LOAD = 58,
+    KEY_JS_LOAD_PEAK = 59,
+    KEY_INTERVAL = 60,
+    KEY_SAMPLES = 61,
+    KEY_IDLE = 62,
+    KEY_OVERFLOW = 63,
+    KEY_MODULES = 64,
+    KEY_STACKS = 65,
+    KEY_DURATION = 66,
 };
 
 enum Stream {

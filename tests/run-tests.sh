@@ -36,6 +36,9 @@ check "typings: the names of every module and global match the runtime" "$BIN/qj
 check "debugger support of the engine" "$BIN/qjsx-tests" run -A tests/debug.test.js
 check "region heap (JS heap of a raw region)" "$BIN/qjsx-tests" run -A tests/region_heap.test.js
 check "runtime library" "$BIN/qjsx" run -A tests/runtime.test.js
+check "tasks of the standard library (stop, ticker, mailbox, mutex)" "$BIN/qjsx" run -A tests/tasks.test.js
+check "cycles collected in a heap of a fixed size (GC threshold capped by the limit)" \
+    env QJSX_JS_HEAP_MB=1 "$BIN/qjsx" run -A tests/gclimit.test.js
 check "temporal dead zone (let / const checks kept where needed)" "$BIN/qjsx" run -A tests/tdz.test.js
 check "constant folding (literal expressions computed by the compiler)" "$BIN/qjsx" run -A tests/fold.test.js
 check "constants of a module replaced by their value" "$BIN/qjsx" run -A tests/modconst.test.js
@@ -294,6 +297,7 @@ check "deploy --reset restarts the device, the package starts at boot" bash -c "
 check "debugger stub (breakpoints, steps, pause, values)" "$BIN/qjsx" run -A tests/debugger.test.js "$AGENT_TARGET"
 check "debugger proxy core (lines, names, evaluation)" "$BIN/qjsx" run -A tests/proxy.test.js "$AGENT_TARGET"
 check "debugger CDP server (as js-debug)" "$BIN/qjsx" run -A tests/cdp.test.js "$AGENT_TARGET"
+check "sampling profiler of the agent (qjsx profile)" "$BIN/qjsx" run -A tests/profile.test.js "$AGENT_TARGET"
 check "device info gives the JS heap of the program" bash -c "'$BIN/qjsx' device info --target '$AGENT_TARGET' 2>/dev/null | grep -q '^JS heap:  .* at most (last run)'"
 
 # --- small messages, as a board without PSRAM: stops split, long console
@@ -446,6 +450,22 @@ check '"target": "twin" reaches the twin of the project' \
 kill "$TWIN_PID" 2> /dev/null
 wait "$TWIN_PID" 2> /dev/null
 rm -rf "$TWINPARTS/build"
+
+# --- the same project as the current folder (no -p): the project folder is
+# then ".", and the models of its parts must still be found (import() once
+# resolved "./echo/model.js" from qjsx:twin/parts)
+(cd "$TWINPARTS" && exec "$BIN/qjsx" agent) > build/twinparts-cwd.txt 2>&1 &
+TWIN_PID=$!
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    grep -q -E "listening|part" build/twinparts-cwd.txt 2>/dev/null && break
+    sleep 0.2
+done
+check "twin of the project of the current folder: the models of its parts are found" \
+    grep -q "listening on 127.0.0.1:$TWINPARTS_PORT" build/twinparts-cwd.txt
+kill "$TWIN_PID" 2> /dev/null
+wait "$TWIN_PID" 2> /dev/null
+rm -rf "$TWINPARTS/build"
+
 check "a twin whose parts are wrong does not start" \
     bash -c "! '$BIN/qjsx' agent -p tests/fixtures/twinbad --port 0 --ui-port 0 > /dev/null 2> build/twinbad.txt && grep -q 'another part has this id' build/twinbad.txt"
 rm -rf tests/fixtures/twinbad/build

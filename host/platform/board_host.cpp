@@ -632,18 +632,41 @@ bool macAddress(MacKind kind, uint8_t *out) {
 }
 
 /**
+ * The region heap of QJSX_JS_HEAP_MB, made once, the first time
+ * (thread-safe static initialization); nullptr: malloc.
+ */
+memory::RegionHeap *testJsHeap() {
+    static memory::RegionHeap *heap = makeTestJsHeap();
+    return heap;
+}
+
+/**
  * malloc, counted as QuickJS counts, or a RegionHeap when QJSX_JS_HEAP_MB is
  * set (tests). Runtimes may live on several threads: the region heap is
  * locked.
  */
 const JSMallocFunctions *jsAllocator() {
-    // made once, the first time (thread-safe static initialization)
-    static memory::RegionHeap *testHeap = makeTestJsHeap();
-    if (testHeap == nullptr) {
+    memory::RegionHeap *heap = testJsHeap();
+    if (heap == nullptr) {
         return &systemAllocator;
     }
 
-    return memory::jsAllocator(testHeap, true);
+    return memory::jsAllocator(heap, true);
+}
+
+/**
+ * The size of the region of QJSX_JS_HEAP_MB (shared by every runtime of the
+ * process: each one gets all of it as its limit); 0 with malloc.
+ */
+size_t jsHeapLimit() {
+    memory::RegionHeap *heap = testJsHeap();
+    if (heap == nullptr) {
+        return 0;
+    }
+
+    memory::HeapStats stats = {};
+    heap->stats(&stats);
+    return stats.total;
 }
 
 /**

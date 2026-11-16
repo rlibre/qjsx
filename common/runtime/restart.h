@@ -25,7 +25,9 @@ void setRestartHandler(RestartHandler *handler, void *opaque);
 /**
  * Asks for a restart, from the JS thread: does not return on a target; on
  * the desktop the installed program will run again once this run ends.
- * False when there is no handler (not a device).
+ * False when there is no handler (not a device). The twin also calls it
+ * from the thread of its page (the reset button of a board): the handler does what
+ * the agent's RESET does from its transport thread.
  */
 bool requestRestart();
 

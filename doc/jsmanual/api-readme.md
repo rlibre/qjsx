@@ -27,6 +27,7 @@ your project for VS Code.
 | `device/usb` | — | ✓ S2, S3, P4 | — | ✓ |
 | `stdlib/path` | ✓ | ✓ | ✓ | ✓ |
 | `stdlib/rgbled` | — | ✓ | — | ✓ |
+| `stdlib/tasks` | ✓ | ✓ | ✓ | ✓ |
 | `stdlib/usb` | — | ✓ S2, S3, P4 | — | ✓ |
 
 ¹ The module is there, but the RP2350 has no file system yet: every call fails.

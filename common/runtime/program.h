@@ -24,6 +24,7 @@ namespace rt {
 
 class Loop;
 class Permissions;
+struct JsLoadUsage;
 
 // Optional control over a run (all fields may be null / false).
 // The JS heap of a run (RunHooks::heapUsage), in bytes as QuickJS counts
@@ -58,7 +59,18 @@ struct RunHooks {
     // Not measured either on a board whose allocator is QuickJS's default
     // (board::jsAllocator() nullptr).
     JsHeapUsage        *heapUsage;
+    // Where the load of the JS thread of the run is published (set to 0
+    // when the runtime is created; see LoadMeter in loop.h); borrowed, must
+    // outlive the run. nullptr: not published.
+    JsLoadUsage        *loadUsage;
 };
+
+/**
+ * The JS heap of the run of the calling JS thread (JS thread), as measured:
+ * nullptr when it is not (no RunHooks::heapUsage, or QuickJS's own
+ * allocator). device/board's memory() reads it.
+ */
+const JsHeapUsage *currentHeapUsage();
 
 // Evaluates the main module of a program. Returns false after reporting the error.
 typedef bool StartFunction(JSContext *ctx, void *startOpaque);

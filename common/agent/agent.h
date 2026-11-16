@@ -121,6 +121,13 @@ public:
      * thread.
      */
     virtual void jsHeap(size_t *used, size_t *peak) = 0;
+
+    /**
+     * The load of the JS thread of the running program, or of the last one,
+     * in thousandths: of the last second in *load, the most over a full
+     * second in *peak (0 when none ran). Any thread.
+     */
+    virtual void jsLoad(int *load, int *peak) = 0;
 };
 
 struct Identity {
@@ -312,6 +319,11 @@ private:
      * FILE_REMOVE, FILE_MKDIR, FILE_RENAME: one operation on a path.
      */
     void            handleFileChange(int64_t kind, int64_t id, const Fields *fields);
+
+    /**
+     * PROFILE_START, PROFILE_STOP: the sampling profiler (agent::profiler).
+     */
+    void            handleProfile(int64_t kind, int64_t id, const Fields *fields);
 
     /**
      * ERROR answer for a failed file operation: MESSAGE "<CODE>: <system

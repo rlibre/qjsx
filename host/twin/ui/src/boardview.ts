@@ -334,8 +334,11 @@ export class BoardView extends VBox {
         for (const { part, section } of this._partSections) {
             section.setSummary(partSummary(part, pins));
         }
+        // the buttons on a pin ("BOOT: GPIO0"); the reset button, on none,
+        // is not listed
         if (this._buttonSection !== null) {
-            const summaries = this._buttonSection.parts.map(part => `${part.label}: ${partSummary(part, pins)}`);
+            const onPins = this._buttonSection.parts.filter(part => part.pins.length > 0);
+            const summaries = onPins.map(part => `${part.label}: ${partSummary(part, pins)}`);
             this._buttonSection.section.setSummary(summaries.join(", "));
         }
     }

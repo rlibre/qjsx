@@ -25,6 +25,7 @@ import { listFiles, readFile, writeFile, removeFile, makeDirectory, renameFile, 
 import { upload, latestPackage, reducePackage } from "qjsx:deploy";
 import { KIND, KEY, STREAM, kindName } from "qjsx:protocol";
 import { PackageIndex } from "qjsx:debuginfo";
+import { readReport, profileText } from "qjsx:profile";
 import { CdpServer } from "qjsx:cdp";
 
 const HELP = `usage: qjsx <command> [arguments]
@@ -71,6 +72,14 @@ commands:
       --restart           start the program again when VS Code attaches (debug its startup)
       --no-upload         debug what the device runs (default: load the latest
                           package of the project in RAM first)
+  profile [options]                            sample the JS thread of the device for a while, then
+                                               print the functions that take its time (a firmware
+                                               needs QJSX_PROFILER; the desktop agent and the twin
+                                               have it)
+      --target, --token
+      --duration <s>      default 5
+      --interval <ms>     between two samples, default 1
+      --top <n>           functions shown, default 20
   targets                                      list the serial ports
   agent [--host h] [--port p] [--storage dir] [--token t]
                                                desktop device agent (stand-in for an ESP)
@@ -397,6 +406,15 @@ async function deviceInfo(device) {
         console.log(`JS heap:  ${formatSize(heapUsed)} used, ${formatSize(heapPeak)} at most (${when})${ofRegion}`);
     }
 
+    // the load of the JS thread (an older firmware does not say): of the last
+    // second, and the most over a full second
+    const load = answer.get(KEY.JS_LOAD);
+    if (load !== undefined) {
+        const when = answer.get(KEY.RUNNING) === true ? "this run" : "last run";
+        const percent = thousandths => `${(thousandths / 10).toFixed(1)} %`;
+        console.log(`JS load:  ${percent(load)} (last second), ${percent(answer.get(KEY.JS_LOAD_PEAK))} at most (${when})`);
+    }
+
     // the free memory of the board (not the desktop's)
     const ramFree = answer.get(KEY.RAM_FREE);
     if (ramFree !== undefined) {
@@ -645,9 +663,48 @@ async function twinUiCommand(args) {
     return 0;
 }
 
+// qjsx profile: samples the JS thread of the device for a while (the
+// profiler of its agent), then prints the functions that take its time,
+// named with the debug files of the package it runs when this project has
+// it.
+async function profileCommand(args) {
+    const { options, positional } = parseArguments(args, { values: ["target", "token", "duration", "interval", "top"] });
+    const duration = Number(options.duration ?? 5);
+    const interval = Number(options.interval ?? 1);
+    const top = Number(options.top ?? 20);
+    const valid = duration > 0 && Number.isInteger(interval) && interval >= 1 && Number.isInteger(top) && top >= 1;
+    if (positional.length > 0 || !valid) {
+        throw new Error("usage: qjsx profile [--target <target>] [--token <token>] [--duration <s>] [--interval <ms>] [--top <n>]");
+    }
+
+    const project = currentProject();
+    const device = await openDevice(targetOf(options, project), options.token, {});
+    try {
+        // the package it runs, to name the functions (a project's own only)
+        const info = await device.request(KIND.INFO);
+        const buildId = info.get(KEY.BUILD_ID);
+        let pkg = undefined;
+        if (project !== undefined && buildId !== undefined) {
+            const index = new PackageIndex([join(project.directory, project.output)], { sourceRoot: project.directory });
+            pkg = index.find(buildId);
+        }
+
+        // sample for a while
+        await device.request(KIND.PROFILE_START, { [KEY.INTERVAL]: interval });
+        status(`profiling for ${duration} s...`);
+        await new Promise(resolve => setTimeout(resolve, duration * 1000));
+        const answer = await device.request(KIND.PROFILE_STOP);
+
+        console.log(profileText(readReport(answer), pkg, top));
+    } finally {
+        device.close();
+    }
+}
+
 const COMMANDS = {
     "twin-ui": twinUiCommand,
     debug: debugCommand,
+    profile: profileCommand,
     build: buildCommand,
     mklib: mklibCommand,
     deploy: deployCommand,

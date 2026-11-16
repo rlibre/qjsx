@@ -3,6 +3,69 @@
 A fixed defect leaves `known-bugs.md` and arrives here, with what was done. The most recent
 one comes first.
 
+## 2026-11-16
+
+### Unclear report of an out of memory, and errors reported twice
+
+- **Defect.** Out of memory, the engine throws `null` when it has no room left to make
+  the error (`JS_ThrowError2`): the program printed "Uncaught (in promise) null". An
+  error made out of memory has no backtrace, and its `stack` (null) was printed as
+  "null" glued to the next line; a text that could not be made printed "(exception)".
+  An error thrown by the main module itself was printed twice: it rejects the promise
+  of the module's evaluation and the module's own, with the same reason.
+- **Fix.** `js::reportException` (`common/jsbind/jsbind_error.h`) says "null (out of
+  memory? ...)" for a thrown null, "an exception whose text could not be made: out of
+  memory?" when the text fails, and prints the stack only when it is a string.
+  `Loop::reportRejections` (`common/runtime/loop.cpp`) skips a rejection whose reason (an
+  object, or null) is the one just reported.
+- **Verified.** By hand: a module that throws prints once; a loop that fills a 1 MB
+  heap prints the out of memory line once. Tests in Debug.
+
+### Timers of the PC 15.6 ms late (Windows)
+
+- **Defect.** `platform::monotonicMs()` read `GetTickCount64`, which moves by steps of
+  15 to 16 ms. A timer of the loop due in 1 to 10 ms woke up on time (the wait itself is
+  precise), saw the clock unchanged, and expired only at the next step: every
+  `setTimeout(1..15)` lasted about 15.6 ms on Windows (qjsx run, desktop agent, twin), and
+  so did a send of the twin's RMT (its end is computed with the same clock). Found when
+  the status LED of the client board's twin breathed in 1.5 s instead of 1 s.
+- **Fix.** `monotonicMs()` reads `QueryPerformanceCounter` (`host/platform/platform_host.cpp`;
+  19 ns per read instead of 1.4 ns, a few reads per turn of the loop).
+- **Verified.** `setTimeout(10)` 15.53 -> 10.40 ms, `setTimeout(1)` 15.60 -> 1.46 ms;
+  the twin's status LED breathes in 1.000 s; tests in Debug. High resolution waitable
+  timers were measured too: not needed on this PC (a timed wait of 10 ms already lasts
+  10.4 ms), kept aside in case a PC waits by steps of 15.6 ms.
+
+### Peak of the JS region counted since the boot
+
+- **Defect.** `RegionHeap` kept its peak since `init()`, and the ESP32 reserves the JS
+  region once per boot. The memory map (`__memoryMap`, `QJSX_MEMORY_MAP`) printed as "peak"
+  the most used by every program since the boot: a map taken while the client board's
+  application was loading showed a 211 KB peak for 166 KB used, read as a 45 KB transient
+  of the loading, when it was the previous run of the same application (≈ 211 KB once
+  running). On the twin, the peak of a run equals what is used right after the loading.
+- **Fix.** The peak starts again when the heap was empty (`RegionHeap::countUsed`,
+  `common/runtime/region_heap.cpp`): the JS region serves one runtime at a time and a run
+  frees every block, so the peak is the current run's. The desktop heap
+  (`QJSX_JS_HEAP_MB`), shared by several runtimes, is never empty: its peak still counts
+  from the start of the process.
+- **Verified.** `tests/region_heap.test.js` (a block in an empty heap starts a new peak),
+  tests in Debug. Not tried on a board.
+
+### Twin: the parts of the project not found without `-p`
+
+- **Defect.** `qjsx agent` run in the folder of a project (no `-p`) has the project folder
+  ".", so the model of a part `"./twin/supply"` was imported as
+  `"././twin/supply/model.js"`: `import()` resolved it from the importing module,
+  `qjsx:twin/parts`, and failed ("could not load module 'qjsx:twin/twin/supply/model.js'").
+  With `-p` and a path without "./" the name was read from the disk as is, so the tests
+  did not see it.
+- **Fix.** `modelFolder()` (`host/twin/js/parts.js`) gives an absolute folder
+  (`resolve` of `stdlib/path`).
+- **Verified.** The twin of the client board's application starts from its folder, page
+  tried in the browser pane; new check in `tests/run-tests.sh` (the twinparts project run
+  from its folder), tests in Debug.
+
 ## 2026-11-11
 
 ### Answer to `RESET` lost on the ESP32

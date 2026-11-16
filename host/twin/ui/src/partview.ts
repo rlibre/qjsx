@@ -198,7 +198,8 @@ function valueControl(control: PartControl): ControlRow {
 }
 
 /**
- * LEDs: one per color of the value ([r, g, b], or a list of them).
+ * LEDs: one per color of the value ([r, g, b], or a list of them). Several
+ * are a strip, drawn as small squares (main.scss).
  */
 function ledControl(): ControlRow {
     const line = new HBox({ cls: "control leds" });
@@ -211,6 +212,7 @@ function ledControl(): ControlRow {
             if (leds.length !== colors.length) {
                 leds = colors.map(() => new Led({}));
                 line.setContent(leds);
+                line.setClass("strip", leds.length > 1);
             }
             colors.forEach((color, index) => leds[index].setColor(color[0], color[1], color[2]));
         },

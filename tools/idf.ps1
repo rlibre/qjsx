@@ -48,6 +48,11 @@ if ($tool -eq 'ninja') {
     ninja -C $buildDir @rest 2>&1 | Tee-Object -FilePath 'C:\temp\idf-build.log'
 } elseif ($tool -eq 'esptool') {
     python -m esptool @rest 2>&1 | Tee-Object -FilePath 'C:\temp\idf-build.log'
+} elseif ($tool -eq 'objdump') {
+    # the disassembler of the Xtensa toolchain of the IDF environment, e.g.
+    # objdump -d <file.obj>: its text goes to C:\temp\idf-objdump.log (UTF-16;
+    # a file of its own, so that a build running meanwhile does not mix in)
+    xtensa-esp32s3-elf-objdump @rest 2>&1 | Out-File -FilePath 'C:\temp\idf-objdump.log'
 } else {
     idf.py -B $buildDir -D "QJSX_BOARD=$board" @words 2>&1 | Tee-Object -FilePath 'C:\temp\idf-build.log'
 }

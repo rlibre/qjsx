@@ -108,6 +108,15 @@ bool macAddress(MacKind kind, uint8_t *out);
 const JSMallocFunctions *jsAllocator();
 
 /**
+ * The most the JS heap can hold, in bytes, once jsAllocator() was called:
+ * the size of a region reserved for it. The runtime gives it to QuickJS as
+ * its memory limit, so that the cycles are collected before the heap is
+ * full (engine change T). 0: no fixed size (the heap shares a larger
+ * memory: PSRAM, the PC), QuickJS keeps its own thresholds.
+ */
+size_t jsHeapLimit();
+
+/**
  * Largest message of the agent's link, both ways, in bytes (at least
  * agent::MIN_MAX_MESSAGE): the agent's receive buffer is sized by it, its
  * answers and events stay below it, the host learns it from HELLO and

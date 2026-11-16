@@ -78,18 +78,68 @@ An exception nobody catches in a callback is printed and the program goes on.
 
 ## Memory
 
-A board without PSRAM gives the program its internal RAM only: a few hundred kilobytes,
-shared with the firmware. `qjsx device info` shows what the program's JS heap uses now
-and the most it used in this run (or the last one), and the free memory of the board:
+### The JS heap
+
+A board with PSRAM puts the JS heap there: several megabytes. A board without PSRAM gives
+the program its internal RAM only: when the first program starts, the firmware reserves
+one region of it for the JS heap (the largest free block, less 16 KB it keeps for itself),
+about 250 KB on an ESP32-S3. `qjsx device info` shows what the program's JS heap uses now,
+the most it used in this run (or the last one), the size of that region, and the free
+memory left to the firmware:
 
 ```text
-JS heap:  182.4 KB used, 197.0 KB at most (this run)
-RAM:      61.3 KB free, largest block 31.7 KB, lowest 40.2 KB since the boot
+JS heap:  180.4 KB used, 180.9 KB at most (this run), of 248.0 KB
+RAM:      46.5 KB free, largest block 31.0 KB, lowest 44.5 KB since the boot
+```
+
+The program reads the same figures itself with `memory()` of `device/board`, and the
+load of its JS thread with `load()`: the share of the last second it worked rather than
+waited for an event, its highest value over a full second, and the milliseconds worked
+and elapsed, to compute it over any time.
+
+```js
+import { memory, load } from "device/board";
+
+const { jsHeap, jsHeapSize } = memory();
+console.log(`heap ${jsHeap} of ${jsHeapSize} bytes, load ${Math.round(load().js * 100)} %`);
 ```
 
 The digital twin shows the JS heap too, but measured on the PC: values and pointers
 take twice the room there, so the figure is larger than on the board. It is still useful
-to compare two versions of a program.
+to compare two versions of a program. The twin does not limit the heap either: a program
+that runs out of memory on a board may run on the twin.
+
+### The code stays in flash
+
+`qjsx build` links the modules of the program into one package: their bytecode and the
+names they use (of functions, properties, variables) are read in place from the flash of
+the board, not copied into the JS heap. The heap holds what the program makes as it runs:
+its objects, arrays and strings, its functions and closures, the async functions that
+wait (a task, a loop that awaits), and some tables of each function. A larger program
+costs flash much more than RAM.
+
+What saves RAM:
+
+- constants of a module (see [Constants cost nothing](#constants-cost-nothing));
+- functions made once, not in a loop or at each call (each closure is an object);
+- few long-lived waiting async functions: each one keeps its frame;
+- no function that refers to itself made over and over (a timer that clears itself, a
+  callback that removes itself from a set): such a cycle is only freed by the cycle
+  collector, later, and fills a small heap meanwhile. `stdlib/tasks` avoids it.
+
+### When memory runs out
+
+An allocation that does not fit throws `InternalError: out of memory` in the code that
+asked for it; a task stops with it, a callback prints it and the program goes on. The
+agent of the board does not use the JS heap: `qjsx deploy`, `qjsx device info` and the
+debugger still reach the board.
+
+### The stack
+
+Each board gives the JS task a stack of its own size (48 KB on most ESP32 boards, 32 KB
+on a board without PSRAM that needs the RAM). A JS call takes about 360 bytes of it: a
+32 KB stack holds about 66 nested calls, and `JSON.parse` about 270 levels of nested
+arrays. Deeper, the engine throws a `RangeError` instead of crashing the board.
 
 ## Native modules of a board
 
@@ -120,6 +170,6 @@ qjsx device info                    # also: the space used in /data, the memory
 ```
 
 `qjsx deploy --data` also writes the files of the project's `"data"` folder (see
-[The project file](/guides/project/)): files of the same name are replaced, the others
+[The project file](../project/)): files of the same name are replaced, the others
 (what the program wrote itself) are kept. A file is written to a temporary file then put
 in place: a cut transfer never leaves half a file.

@@ -163,8 +163,8 @@ equal(stateMessage.pins[2].level, 1, "... then twin.state");
 
 // --- the parts of the board: their models (button, ws2812)
 const parts = await message(item => item.msg === "twin.parts", "twin.parts");
-equal(parts.map(part => `${part.id}:${part.model}`).join(","), "boot:button,rgb:ws2812", "a page gets the board's parts");
-equal(JSON.stringify(parts.map(part => part.pins)), "[[0],[48]]", "... and the pins they are on");
+equal(parts.map(part => `${part.id}:${part.model}`).join(","), "boot:button,reset:button,rgb:ws2812", "a page gets the board's parts");
+equal(JSON.stringify(parts.map(part => part.pins)), "[[0],[],[48]]", "... and the pins they are on (none for the reset button)");
 equal(parts[0].controls[0]?.type, "button", "... with the controls their models declare");
 const lit = await partState("rgb", state => state.colors?.[0]?.[0] !== 0).catch(() => undefined);
 equal(JSON.stringify(lit?.state.colors), "[[10,20,30]]", "the ws2812 model decodes the color the program sent (GRB)");
@@ -218,6 +218,19 @@ equal(scopeChanges(5).map(change => change.level).join(","), "1,0", "... and the
 const lastScope = scopeMessages[scopeMessages.length - 1];
 equal(lastScope.levels[0], 1, "... each message gives the level of every pin now");
 equal(lastScope.millivolts[0], 3300, "... and its voltage");
+
+// --- the reset button of the board: released, it restarts the device, the
+// installed program runs again from its start
+lines.length = 0;
+socket.send(JSON.stringify({ msg: "twin.part.action", params: { id: "reset", action: "set", args: { pressed: true } } }));
+socket.send(JSON.stringify({ msg: "twin.part.action", params: { id: "reset", action: "set", args: { pressed: false } } }));
+let restarted = true;
+try {
+    await printed("waiting for boot");
+} catch {
+    restarted = false;
+}
+check(restarted, "the reset button, released, restarts the program");
 
 socket.close();
 device.close();

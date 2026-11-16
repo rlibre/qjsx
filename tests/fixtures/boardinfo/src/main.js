@@ -6,8 +6,9 @@
  */
 
 // device/board (tests/board.test.js): prints the id and the MAC addresses,
-// then restarts once; a file of its data folder says it already did.
-import { id, mac, restart } from "device/board";
+// its memory and its load after 200 ms of work and 300 ms of wait, then
+// restarts once; a file of its data folder says it already did.
+import { id, mac, restart, memory, load } from "device/board";
 import * as fs from "sys/fs";
 
 // the id and the addresses
@@ -21,6 +22,15 @@ try {
 } catch (error) {
     console.log(`mac radio: ${error.name}`);
 }
+
+// the memory, then the load after 200 ms of work and 300 ms of wait
+console.log(`memory: ${JSON.stringify(memory())}`);
+const workEnd = Date.now() + 200;
+while (Date.now() < workEnd) {
+    // work
+}
+await new Promise(resolve => setTimeout(resolve, 300));
+console.log(`load: ${JSON.stringify(load())}`);
 
 // restart once: nothing after restart() may run, finally included
 if (fs.existsSync("restarted")) {

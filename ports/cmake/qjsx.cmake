@@ -99,8 +99,15 @@ if(QJSX_ALLOC_HISTOGRAM)
     list(APPEND QJSX_DEFINES "QJSX_ALLOC_HISTOGRAM")
 endif()
 
+# the sampling profiler of the agent ("qjsx profile", common/agent/profiler.*):
+# off by default on a board; idf.py -DQJSX_PROFILER=ON (stays in the CMake cache)
+if(QJSX_PROFILER)
+    list(APPEND QJSX_DEFINES "QJSX_PROFILER")
+endif()
+
 # measure (temporary, 2026-11-16): the memory map of the board, global
-# __memoryMap(title); idf.py -DQJSX_MEMORY_MAP=ON (stays in the CMake cache)
+# __memoryMap(title), and one pass of the GC, global __gc();
+# idf.py -DQJSX_MEMORY_MAP=ON (stays in the CMake cache)
 if(QJSX_MEMORY_MAP)
     list(APPEND QJSX_DEFINES "QJSX_MEMORY_MAP")
 endif()

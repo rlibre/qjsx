@@ -16,6 +16,7 @@
 #include "hal_gpio.h"
 #include "loop.h"
 #include "memory.h"
+#include "restart.h"
 
 namespace {
 
@@ -124,6 +125,16 @@ js::Value pins() {
  */
 void force(js::Range<int, 0, 63> pin, js::Range<int, -1, 1> level) {
     twin::force((int)pin, (int)level);
+}
+
+/**
+ * JS reset(): restarts the board, as "qjsx device reset" (the restart
+ * handler of the device runner: the package in RAM dropped, the installed
+ * program run again). Used by board.restart() of qjsx:twin (the reset
+ * button of a board).
+ */
+void reset() {
+    rt::requestRestart();
 }
 
 // ### The components (qjsx:twin, host/twin/js/twin.js) #######################
@@ -863,6 +874,7 @@ JS_MODULE(twinboard, module) {
     JS_FUNCTION(module, board);
     JS_FUNCTION(module, pins);
     JS_FUNCTION(module, force);
+    JS_FUNCTION(module, reset);
     JS_FUNCTION(module, pinDrive);
     JS_FUNCTION(module, pinPull);
     JS_FUNCTION(module, pinWatch);

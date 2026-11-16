@@ -50,6 +50,17 @@ device.close();
 // --- this checks
 throws(() => Device.prototype.readChar.call({}), /TypeError/, "method on a wrong object");
 
+// --- methods made on first read (a function list of QuickJS): they are
+// properties of the prototype as before, one function each, kept once made
+const methodNames = Object.getOwnPropertyNames(Device.prototype);
+check(methodNames.includes("readChar") && methodNames.includes("byteCount"), "the methods are properties of the prototype");
+const readChar = Device.prototype.readChar;
+equal(typeof readChar, "function", "a method read is a function");
+equal(readChar.name, "readChar", "... named after the method");
+check(Device.prototype.readChar === readChar, "... the same function at each read");
+const descriptor = Object.getOwnPropertyDescriptor(Device.prototype, "byteCount");
+check(descriptor.writable && descriptor.configurable && !descriptor.enumerable, "... writable, configurable, not enumerable");
+
 // --- first error wins
 throws(() => device.twoErrors(), /^TypeError: first$/, "first error wins");
 

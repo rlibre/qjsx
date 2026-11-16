@@ -25,6 +25,7 @@
         "../../common/device/usb_module.d.ts",
         "../../lib/stdlib/src/path.d.ts",
         "../../lib/stdlib/src/rgbled.d.ts",
+        "../../lib/stdlib/src/tasks.d.ts",
         "../../lib/stdlib/src/usb.d.ts"
     ]
 }

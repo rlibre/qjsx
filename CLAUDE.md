@@ -228,7 +228,19 @@ keeps the old name: `C:\Sandbox\espjs`.
   the twin's runtime (pins watched by parts, RMT bytes / pulses, I2C transfers waited
   synchronously by the program's thread, timeout = the transfer's; the twin never waits
   for the program); pin priority: program output > open drain at 0 > page force > part
-  drive > pulls (program's, then part's), `conflict` flag. Boards: `kind` -> `model` + `id`
+  drive > pulls (program's, then part's), `conflict` flag. RESET button (user,
+  2026-11-16: in the board description, not in the page header): a `button` part with
+  `"reset": true` and no pin, released = `board.restart()` of qjsx:twin
+  (`twinboard.reset()` -> `rt::requestRestart()`, as `qjsx device reset`), in both
+  boards. A strip of several LEDs is drawn as small flat squares in a grid (user: no
+  glass effect), a single LED as a round lens. Color of a lit LED on the page
+  (controls/led.ts): the values are LED light; cube root of EACH channel (a weak
+  one counts more: [5, 25, 12] nearly cyan on the board), then a matrix from the
+  WS2812's LEDs (625 / 520 / 470 nm, CIE 1931) to linear sRGB, rows summing to 1
+  (equal values = white: [64, 64, 64] is white on the board), out-of-gamut
+  colors brought back by adding white, then sRGB; brightness = cube root of the
+  strongest channel from 0.35 (user, 2026-11-16, replaces a blue x 2 that made
+  white light blue; to refine later: a table, user). Boards: `kind` -> `model` + `id`
   (`boot` button, `rgb` ws2812), `"adc"` section. Project: `qjsx agent` in the folder (or
   `-p / --project`) reads `"twin"` of `qjsx.json` (`board`, `parts`, optional `ports` {
   agent, ui, usb, uart }); `"target": "twin"` = tcp:127.0.0.1:<ports.agent | 5555>. Page:
@@ -533,8 +545,9 @@ keeps the old name: `C:\Sandbox\espjs`.
   The client board's console is at 921600 bauds: `serial:COM10@921600`.
 - Stack of the JS task, a setting of each ESP32 board (user, 2026-11-16: 32 KB for the
   client board; FLASHED and measured there: 66 nested JS calls, 270 levels for
-  JSON.parse, JS region 232 -> 248 KB; a flash needs the user's explicit yes each time,
-  the classifier refuses it otherwise): `JS_TASK_STACK` in each
+  JSON.parse, JS region 232 -> 248 KB; flashing the client board (COM10, MAC checked
+  first) and the YD (COM11) needs no confirmation since 2026-11-16 (user), nor a
+  restoration of the program after a probe; other boards: ask): `JS_TASK_STACK` in each
   `boards/<board>/board_config.h` (YD 48 KB), `JS_STACK_LIMIT = JS_TASK_STACK -
   JS_NATIVE_STACK_MARGIN` (8 KB, board_esp32.h). Measured on the client board with 48 KB:
   112 nested JS calls (about 366 bytes each), 480 levels of nested arrays for
@@ -654,6 +667,78 @@ keeps the old name: `C:\Sandbox\espjs`.
   through the same interrupt point: debugger pause, stop, deploy); only native code spinning
   is. Rejected: disabling the idle check of core 1, JS task at priority 0. Open: a time
   budget for a stuck script on a standalone device. See `doc/architecture.md` 5.5.
+- Sampling profiler (agreed by the user 2026-11-16, IMPLEMENTED the same day; the user:
+  optimize algorithms first, measure before): `qjsx profile [--duration s] [--interval ms]
+  [--top n]` prints the functions that take the JS thread's time (self, total), named
+  with the package's debug files (`qjsx:profile`, host/js/profile.js). Device side
+  `common/agent/profiler.{h,cpp}`, compiled with `QJSX_PROFILER` (user: ON on the PC,
+  premake5.lua; OFF on boards, `idf.py -DQJSX_PROFILER=ON`): a sampling thread asks the
+  interpreter for an interrupt every interval (engine change U, `JS_RequestInterrupt`)
+  unless the loop waits (idle sample, `JsLoadUsage::working`); the runner's interrupt
+  handler records the stack (`JS_DebugSampleStack`, 8 frames) in a table of 128
+  distinct stacks (~5 KB, allocated by PROFILE_START, freed after PROFILE_STOP).
+  Agent: KIND_PROFILE_START (80) / PROFILE_STOP (81), keys 60-66; a firmware without the
+  option answers an error. Names of methods and of functions stored in a variable are
+  inferred from the source (`inferFunctionName`, debuginfo.js: the compiler only names
+  them at run time), which also names them in the debugger's call stack.
+  tests/profile.test.js (13). VS Code view (CDP `Profiler`): later, on the same table.
+- Speed of the client board (2026-11-16): its JS is about 100 times slower than the PC's
+  (an `await null` 304 us, a setTimeout(0) awaited 1000 us, a 10 ms ticker loop with
+  nothing in it 35.6 % of the JS thread), so the client's program, three loops at
+  100 Hz, saturates the JS thread (92-94 %). Flash in QIO (user; sdkconfig.board of
+  the client board; the YD and the defaults are still DIO): about x1.6 (195 us, 20.5 %),
+  the program stays saturated (88-89 %). The user: optimize algorithms, not low level
+  (no IRAM / cache tuning for now). Guided by `qjsx profile` (2026-11-16): the ticker
+  of stdlib/tasks no longer makes an object, a closure and a Set entry per step (one
+  promise via Promise.withResolvers and one timer; a Ticker registers once with its
+  task); the client's strip sleeps on a doorbell mailbox when nothing blinks or moves,
+  power good by gpio.onChange (no debounce: switched electronically, user), status LED at 25 Hz (STEP 40, holds end
+  at the closest step). Board: JS thread 92.7 % -> 26.7 % busy; left: breath ~9 %,
+  RFID polling ~15 % (user: not touched for now).
+- Memory and load read by the program (user, 2026-11-16, DONE the same day):
+  `device/board` `memory()` -> `{ jsHeap, jsHeapPeak, jsHeapSize, ramFree, ramLargest,
+  ramLowest, psramFree }` (bytes, null when the board cannot tell) and `load()` -> `{ js,
+  jsPeak, busy, elapsed }` (0 to 1 over the last second; peak over full seconds only;
+  ms counters to compute any interval). Load of the JS thread only, no per-core
+  statistics (user). `rt::LoadMeter` in loop.{h,cpp}: the time between two waits of the
+  loop is work (debugger pause and blocking native calls included), 10 slots of
+  100 ms; published to the agent (`RunHooks::loadUsage`, INFO keys JS_LOAD /
+  JS_LOAD_PEAK in thousandths, `qjsx device info` "JS load:");
+  `rt::currentHeapUsage()`. ESP32: every task but the JS one (agent-uart, i2c,
+  serial-read, rmt-events: ANY_CORE) is pinned to core 0 on a dual-core chip
+  (`IO_TASK_CORE`, platform_esp32.cpp), so that core 1 runs the program only.
+- jsbind methods made on first read (user, 2026-11-16, DONE the same day): the methods of
+  a bound class are a QuickJS function list (`JS_SetPropertyFunctionList`, autoinit
+  properties), one `MethodList` per class and per thread (QuickJS keeps pointers into
+  it; built by the first context of the thread). Fields (accessors) and module functions
+  stay made at once (QuickJS cannot defer them). Measured on the client board: about
+  1 KB of JS heap less (194.5 -> 193.5 KB at most), far from the 7 KB estimated.
+- GC threshold capped by the memory limit (engine change T, agreed by the user 2026-11-16,
+  option A of five, IMPLEMENTED and flashed on the client board the same day): QuickJS's
+  first GC threshold (256 KB) was above the 248 KB region of a board without PSRAM, so
+  no cycle was ever collected there. `js_next_gc_threshold()` caps the next threshold
+  halfway to the limit; `board::jsHeapLimit()` (region size; 0 = PSRAM / malloc / RP2350)
+  is given by `createRuntime()` to `JS_SetMemoryLimit`. tests/gclimit.test.js
+  (`QJSX_JS_HEAP_MB=1`). Board: 20,000 cycles ran out of memory before, 2.3 s with T
+  (about 13 ms a GC pass with a small live heap, estimated). Idle GC (user's idea): to
+  propose with a measure of a pass on the client's program, not done.
+- `stdlib/tasks` (agreed by the user 2026-11-16, IMPLEMENTED the same day; goal: write the
+  small tasks of a board as sequential code that waits, not state machines called by
+  timers): `task(name, async self => ...)` -> Task (`name`, `stopped`, `stop()` asks and
+  returns nothing, `join()` waits: the value, or rejects with the error, which the task
+  also prints as `<name>: ended by an error: <error>` (user, 2026-11-16: the end must
+  be visible when a try / catch was forgotten); a warning when not finished 5 s after stop();
+  `sleep(ms)`, `every(period)` -> Ticker `next()` (fixed rate from its creation, late
+  steps skipped), `mailbox(size)` -> Mailbox `send()` never waits (false when full or
+  stopped), `receive()`, `for await`); stop() ends at once the waits made by the module;
+  the loop is written `while (!self.stopped) { ...; await tick.next(); }` (user: only
+  `self.stopped`, no `tick.stopped`). `Mutex` with `withLock(job)` ONLY (user: no
+  lock()/unlock(); "run" was a bad name): FIFO, an error does not stop the next jobs,
+  not reentrant. Pure JS (`lib/stdlib/src/tasks.{js,d.ts}`), tests/tasks.test.js,
+  guide `doc/jsmanual/.../guides/tasks.md`. Note: an error ends a task (a Repeater went
+  on): loops that must survive a failed step catch it themselves. Pre-emption of
+  generator tasks (interrupt at a jump of a flagged generator frame, FUNC_RET_PREEMPT):
+  feasible, studied, POSTPONED (not needed for small tasks).
 - Async styles in modules: callbacks for spontaneous events (`uart.onData(fn)`), promises for
   operations started by the script (`await uart.readLine({ timeout })`); a module may offer
   both. Async iteration (`for await`) maybe later, built on promises.

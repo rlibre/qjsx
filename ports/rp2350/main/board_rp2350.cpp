@@ -536,6 +536,14 @@ const JSMallocFunctions *jsAllocator() {
 }
 
 /**
+ * No limit given to QuickJS yet (the RP2350 has its own pass): its heap is
+ * the whole PSRAM, far above QuickJS's thresholds.
+ */
+size_t jsHeapLimit() {
+    return 0;
+}
+
+/**
  * 64 KB with the PSRAM; without it (it did not answer at boot), a small
  * one: the agent's buffers take SRAM.
  */

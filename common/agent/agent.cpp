@@ -16,6 +16,7 @@
 #include "board.h"
 #include "debugger.h"
 #include "jsbind_error.h"
+#include "profiler.h"
 #include "modules.h"
 #include "protocol.h"
 #include "ram_storage.h"
@@ -361,11 +362,75 @@ void Agent::handle(int64_t kind, int64_t id, const Fields *fields) {
             handleFileChange(kind, id, fields);
             break;
         }
+        case KIND_PROFILE_START:
+        case KIND_PROFILE_STOP: {
+            handleProfile(kind, id, fields);
+            break;
+        }
         default: {
             respondError(id, "unknown request");
             break;
         }
     }
+}
+
+/**
+ * PROFILE_START: INTERVAL? (ms, 1 by default) -> empty. PROFILE_STOP ->
+ * DURATION, INTERVAL, SAMPLES, IDLE, OVERFLOW, MODULES (names by index),
+ * STACKS ([count, frame...] each, innermost first, frame = module index <<
+ * 16 | function number). A firmware without QJSX_PROFILER answers an error.
+ */
+void Agent::handleProfile(int64_t kind, int64_t id, const Fields *fields) {
+#ifdef QJSX_PROFILER
+    // start: the interval asked
+    if (kind == KIND_PROFILE_START) {
+        int64_t interval = 1;
+        fields->integer(KEY_INTERVAL, &interval);
+        profiler::start((int)interval);
+        respondEmpty(id);
+        return;
+    }
+
+    // stop: the report, then the table is freed
+    profiler::Report report = {};
+    profiler::stop(&report);
+
+    cbor::Writer payload;
+    payload.integer(KEY_DURATION);
+    payload.integer(report.durationMs);
+    payload.integer(KEY_INTERVAL);
+    payload.integer(report.intervalMs);
+    payload.integer(KEY_SAMPLES);
+    payload.integer(report.samples);
+    payload.integer(KEY_IDLE);
+    payload.integer(report.idle);
+    payload.integer(KEY_OVERFLOW);
+    payload.integer(report.overflow);
+
+    payload.integer(KEY_MODULES);
+    payload.array((uint64_t)report.moduleCount);
+    for (int i = 0; i < report.moduleCount; i++) {
+        payload.text(report.modules[i]);
+    }
+
+    payload.integer(KEY_STACKS);
+    payload.array((uint64_t)report.stackCount);
+    for (int i = 0; i < report.stackCount; i++) {
+        const profiler::Stack *stack = &report.stacks[i];
+        payload.array((uint64_t)stack->depth + 1);
+        payload.integer(stack->count);
+        for (int level = 0; level < stack->depth; level++) {
+            payload.integer(stack->frames[level]);
+        }
+    }
+
+    respond(id, &payload, 7);
+    profiler::release();
+#else
+    (void)kind;
+    (void)fields;
+    respondError(id, "this firmware has no profiler (build it with QJSX_PROFILER)");
+#endif
 }
 
 /**
@@ -484,6 +549,16 @@ void Agent::handleInfo(int64_t id) {
     payload.integer((int64_t)heapUsed);
     payload.integer(KEY_JS_HEAP_PEAK);
     payload.integer((int64_t)heapPeak);
+    fieldCount += 2;
+
+    // the load of its JS thread: the last second, the most over a full one
+    int load = 0;
+    int loadPeak = 0;
+    _controller->jsLoad(&load, &loadPeak);
+    payload.integer(KEY_JS_LOAD);
+    payload.integer(load);
+    payload.integer(KEY_JS_LOAD_PEAK);
+    payload.integer(loadPeak);
     fieldCount += 2;
 
     // the free memory of the board, when it can tell; PSRAM only if it has some

@@ -10,8 +10,10 @@
 
 CONFIG_IDF_TARGET="esp32s3"
 
-# flash and partitions
+# flash and partitions; the flash in QIO (4 data lines; DIO, the default, uses
+# 2): the code runs from flash through a 16 KB cache (user, 2026-11-16)
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/16MB.csv"
 
 # PSRAM: octal, only through heap_caps_malloc(MALLOC_CAP_SPIRAM), for the JS heap

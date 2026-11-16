@@ -16,7 +16,7 @@ import * as fs from "sys/fs";
 import { build } from "qjsx:build";
 import { Device } from "qjsx:device";
 import { upload } from "qjsx:deploy";
-import { KIND } from "qjsx:protocol";
+import { KEY, KIND } from "qjsx:protocol";
 import { check, equal, report } from "./assert.js";
 
 const TARGET = process.argv[2];
@@ -79,6 +79,26 @@ equal(answers("mac ap")[0], addToMac(kept, 1), "mac('ap') is base + 1");
 equal(answers("mac bluetooth")[0], addToMac(kept, 2), "mac('bluetooth') is base + 2");
 equal(answers("mac ethernet")[0], addToMac(kept, 3), "mac('ethernet') is base + 3");
 equal(answers("mac radio")[0], "TypeError", "an unknown kind is a TypeError");
+
+// --- memory(): the JS heap measured; the PC's RAM is not the board's
+const memoryReport = JSON.parse(answers("memory")[0] ?? "{}");
+check(memoryReport.jsHeap > 0, `memory().jsHeap is measured (${memoryReport.jsHeap})`);
+check(memoryReport.jsHeapPeak >= memoryReport.jsHeap, "... jsHeapPeak at least jsHeap");
+equal(memoryReport.ramFree, null, "... ramFree null in the twin (the PC's RAM says nothing)");
+equal(memoryReport.psramFree, null, "... psramFree null");
+check("jsHeapSize" in memoryReport && "ramLargest" in memoryReport && "ramLowest" in memoryReport, "... every field there");
+
+// --- load(): 200 ms of work and 300 ms of wait since the start (less than
+// a second: the share of that time)
+const loadReport = JSON.parse(answers("load")[0] ?? "{}");
+check(loadReport.busy >= 200 && loadReport.elapsed >= 500, `load(): busy and elapsed in ms (${loadReport.busy}, ${loadReport.elapsed})`);
+check(loadReport.js > 0.25 && loadReport.js < 0.9, `... js is the share of the time worked (${loadReport.js})`);
+equal(loadReport.jsPeak, 0, "... no full second yet: no peak");
+
+// --- INFO gives the load too
+const info = await device.request(KIND.INFO);
+check(info.get(KEY.JS_LOAD) >= 0 && info.get(KEY.JS_LOAD) <= 1000, "INFO: the load of the JS thread, in thousandths");
+check(info.get(KEY.JS_LOAD_PEAK) !== undefined, "INFO: its peak");
 
 // --- nothing ran after restart()
 check(!lines.includes("after restart"), "nothing runs after restart()");

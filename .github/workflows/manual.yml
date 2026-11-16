@@ -1,0 +1,80 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
+# Builds the JS developer manual (doc/jsmanual, Astro + Starlight) and publishes
+# it on GitHub Pages: https://rlibre.github.io/qjsx/ (doc/manual-publishing.md).
+#
+# Runs when main receives a change of the manual, of a typing (the API
+# reference is generated from the .d.ts files next to the modules, anywhere in
+# the repository) or of this file; or by hand (Actions tab, "Run workflow").
+#
+# Actions pinned by commit SHA (the tag in the comment): a tag can be moved, a
+# SHA cannot. Checked 2026-11-16: official actions of GitHub, latest stable
+# versions, no security advisory.
+name: Manual
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "doc/jsmanual/**"
+      - "**/*.d.ts"
+      - ".github/workflows/manual.yml"
+  workflow_dispatch:
+
+# Only what Pages needs: read the repository, publish, and prove who publishes.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One publication at a time; a running one is never cancelled halfway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: doc/jsmanual
+    steps:
+      # The whole repository: the typings live outside doc/jsmanual.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Node 26 (LTS), as on the development machine; Astro 7 needs 22.23.4+.
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: doc/jsmanual/package-lock.json
+
+      # Exactly the versions of package-lock.json.
+      - name: Install
+        run: npm ci
+
+      # Generates the API reference from the typings, then the site in dist/.
+      - name: Build
+        run: npm run build
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: doc/jsmanual/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish on GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

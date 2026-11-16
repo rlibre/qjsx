@@ -188,6 +188,18 @@ typedef struct JSDebugFrame {
    hook is not running). */
 int JS_DebugGetFrame(JSContext *ctx, int level, JSDebugFrame *frame);
 
+/* A bytecode frame of the running stack, for a sampling profiler. */
+typedef struct JSDebugSampleFrame {
+    JSAtom module_name;      /* borrowed, JS_ATOM_NULL if unknown */
+    int function_number;
+} JSDebugSampleFrame;
+
+/* Fills 'frames' with the bytecode frames running now, innermost first
+   (native frames skipped), 'max' at most; returns how many. Unlike
+   JS_DebugGetFrame it works outside the hook: from the interrupt handler,
+   on the JS thread. */
+int JS_DebugSampleStack(JSContext *ctx, JSDebugSampleFrame *frames, int max);
+
 /* The function object of the frame at 'level' (new reference), or
    JS_UNDEFINED. */
 JSValue JS_DebugGetFrameFunction(JSContext *ctx, int level);

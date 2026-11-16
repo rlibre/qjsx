@@ -578,6 +578,15 @@ void memoryMap(js::Str title) {
     printf("MAP end\n");
     fflush(stdout);
 }
+
+/**
+ * Measure (temporary, QJSX_MEMORY_MAP): one full pass of the garbage
+ * collector, as the engine runs it when its threshold is reached; the caller
+ * times it (idle GC study, 2026-11-16).
+ */
+void collectGarbage() {
+    JS_RunGC(JS_GetRuntime(js::context()));
+}
 #endif
 
 #ifdef QJSX_ALLOC_HISTOGRAM
@@ -636,6 +645,7 @@ JS_GLOBALS(runtime, globals) {
 #ifdef QJSX_MEMORY_MAP
     // measure (temporary): the memory map of the board and of the JS heap
     JS_FUNCTION_AS(globals, memoryMap, "__memoryMap");
+    JS_FUNCTION_AS(globals, collectGarbage, "__gc");
 #endif
 
 #ifdef QJSX_ALLOC_HISTOGRAM

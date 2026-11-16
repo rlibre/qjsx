@@ -134,6 +134,10 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
             "host/twin/sim",
         }
         defines { 'CONFIG_VERSION="' .. QUICKJS_VERSION .. '"' }
+        -- the sampling profiler of the agent ("qjsx profile"): on the PC
+        -- always (desktop agent, twin); a firmware asks for it
+        -- (idf.py -DQJSX_PROFILER=ON)
+        defines { "QJSX_PROFILER" }
         defines(extraDefines)
         buildoptions { "-fno-exceptions", "-fno-rtti", "-Wall" }
         files {

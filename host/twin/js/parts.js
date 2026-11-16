@@ -16,6 +16,7 @@
 // its own fields (pins taken by two parts, an I2C address taken twice). The
 // first error stops the twin.
 import * as fs from "sys/fs";
+import { resolve } from "stdlib/path";
 import { Board } from "qjsx:twin";
 
 // What an id may be: lower case letters, digits, '-' and '_'.
@@ -32,11 +33,13 @@ function isProjectModel(model) {
 }
 
 /**
- * The folder of a project model, absolute.
+ * The folder of a project model, absolute: import() resolves a relative
+ * path from the importing module (qjsx:twin/parts), not from the current
+ * folder, and the project folder may be relative ("." when "qjsx agent" runs
+ * in the project, or "-p ../app").
  */
 function modelFolder(projectDir, model) {
-    const absolute = model.startsWith("/") || /^[A-Za-z]:/.test(model);
-    return absolute ? model : `${projectDir}/${model}`;
+    return resolve(projectDir, model);
 }
 
 /**

@@ -385,22 +385,35 @@ inline void setErrorWriter(ErrorWriter *writer) {
 
 /**
  * Prints the exception pending in ctx with its stack (through the ErrorWriter),
- * and clears it.
+ * and clears it. Out of memory, the engine may have thrown null (it had no
+ * room to make the error), or the text of the error may not be made: both
+ * are said plainly.
  */
 inline void reportException(JSContext *ctx, const char *prefix = "Uncaught") {
-    // take the exception (this clears it) and print "<prefix> <message>",
-    // truncated to 511 bytes
+    // take the exception (this clears it) and its text; a text that cannot
+    // be made leaves an exception of its own, dropped
     JSValue exception = JS_GetException(ctx);
     const char *text = JS_ToCString(ctx, exception);
+    if (text == nullptr) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+
+    // "<prefix> <message>", truncated to 511 bytes
     char line[512];
-    snprintf(line, sizeof(line), "%s %s\n", prefix, text != nullptr ? text : "(exception)");
+    if (text == nullptr) {
+        snprintf(line, sizeof(line), "%s (an exception whose text could not be made: out of memory?)\n", prefix);
+    } else if (JS_IsNull(exception)) {
+        snprintf(line, sizeof(line), "%s null (out of memory? the engine throws null when it has no room left to make the error)\n", prefix);
+    } else {
+        snprintf(line, sizeof(line), "%s %s\n", prefix, text);
+    }
     detail::writeError(line);
     JS_FreeCString(ctx, text);
 
-    // then its stack, which only Error objects have
+    // then its stack, when it has one (an error made out of memory has none)
     if (JS_IsError(ctx, exception)) {
         JSValue stack = JS_GetPropertyStr(ctx, exception, "stack");
-        if (!JS_IsUndefined(stack)) {
+        if (JS_IsString(stack)) {
             const char *stackText = JS_ToCString(ctx, stack);
             if (stackText != nullptr) {
                 detail::writeError(stackText);

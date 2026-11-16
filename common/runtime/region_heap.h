@@ -43,7 +43,7 @@ namespace memory {
 struct HeapStats {
     size_t total;         // bytes the blocks can use (the region less alignment and end marker)
     size_t used;          // bytes of the allocated blocks, headers included
-    size_t peak;          // highest 'used' since init()
+    size_t peak;          // highest 'used' since the heap was last empty (init(), or every block released)
     size_t largestFree;   // largest request allocate() can serve now, bytes
     size_t usedBlocks;    // allocated blocks
     size_t freeBlocks;    // free blocks
@@ -116,7 +116,7 @@ private:
     uint32_t      _bitmap[BITMAP_WORDS] = {};         // bit set: the list of that class is not empty
     size_t        _total = 0;                         // bytes of blocks (_end - _start)
     size_t        _used = 0;                          // bytes of allocated blocks
-    size_t        _peak = 0;                          // highest _used
+    size_t        _peak = 0;                          // highest _used since the heap was last empty
     size_t        _usedBlocks = 0;                    // allocated blocks
     size_t        _freeBlocks = 0;                    // blocks in the lists
 };

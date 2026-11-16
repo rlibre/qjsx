@@ -16,6 +16,7 @@
 #include "modules.h"
 #include "permissions.h"
 #include "platform.h"
+#include "profiler.h"
 #include "program.h"
 #include "ram_storage.h"
 #include "restart.h"
@@ -143,6 +144,15 @@ public:
     }
 
     /**
+     * The load of the JS thread, as the loop publishes it at each wait (any
+     * thread: atomic loads).
+     */
+    void jsLoad(int *load, int *peak) override {
+        *load = __atomic_load_n(&_load.loadPermille, __ATOMIC_RELAXED);
+        *peak = __atomic_load_n(&_load.peakPermille, __ATOMIC_RELAXED);
+    }
+
+    /**
      * JS thread: waits for run requests and runs the package, forever.
      */
     void mainLoop() {
@@ -241,6 +251,7 @@ private:
         hooks.device = true;            // argv and env come from the package manifest
         hooks.permissions = &_permissions;
         hooks.heapUsage = &_heap;       // INFO reports it
+        hooks.loadUsage = &_load;       // INFO reports it too
 
         // run it until it ends or is stopped, then give the package back
         *exitCode = rt::runPackage(package, size, &hooks, 0, nullptr);
@@ -263,6 +274,11 @@ private:
         // keep the loop for onControl() (JS thread only)
         Runner *runner = (Runner *)opaque;
         runner->_loop = loop;
+
+#ifdef QJSX_PROFILER
+        // the profiler samples this run
+        profiler::attach(loop->context(), &runner->_load);
+#endif
 
         // under _signal: retain the mailbox and add the control source, so
         // that stopLocked() can now end the loop
@@ -294,6 +310,11 @@ private:
         Runner *runner = (Runner *)opaque;
         runner->_debugger->finish();
 
+#ifdef QJSX_PROFILER
+        // no more samples of this run: its context is about to be freed
+        profiler::detach();
+#endif
+
         // under _signal: release the mailbox; stopLocked() no longer posts
         runner->_signal.lock();
         runner->_mailbox->release();
@@ -311,6 +332,13 @@ private:
     static int interrupt(JSRuntime *, void *opaque) {
         Runner *runner = (Runner *)opaque;
         runner->_debugger->poll();   // debugger requests that run no JS code
+
+#ifdef QJSX_PROFILER
+        // the sample the profiler asked for, if any
+        if (runner->_loop != nullptr) {
+            profiler::sample(runner->_loop->context());
+        }
+#endif
 
         // JS code that computes for a long time must not starve the idle task
         // of its core (task watchdog of the RTOS); no-op on the desktop
@@ -354,6 +382,7 @@ private:
     rt::Loop        *_loop = nullptr;             // JS thread only
     rt::Permissions  _permissions;                // data folder of the programs, no limit (setDataFolder())
     rt::JsHeapUsage  _heap = { 0, 0 };            // JS heap of the current or last run (JS thread writes, atomic)
+    rt::JsLoadUsage  _load = { 0, 0, 0, 0, 0 };   // load of the JS thread, current or last run (JS thread writes, atomic)
 };
 
 /**

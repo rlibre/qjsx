@@ -761,6 +761,56 @@ in its package in flash.
   still copied in the heap; the agent does not compare the fingerprint at the upload
   (the loader refuses the package when it starts).
 
+## T. GC threshold capped by the memory limit
+
+2026-11-16, agreed with the user (option A of five: limit given to the engine, threshold
+capped; rejected: the runtime lowering the threshold between turns of the loop or running
+the GC between callbacks, which miss a long synchronous computation; a GC inside a
+failing allocation, unsafe in the middle of building an object). QuickJS runs its cycle
+collector only from `js_trigger_gc` (object creation), when the heap passes
+`malloc_gc_threshold`: 256 KB at first, then 1.5 x the heap after each GC. The JS region
+of an ESP32-S3 without PSRAM holds 248 KB: the heap never reached the threshold, and no
+cycle (an object and its callback, a closure that refers to itself) was collected before
+the end of the program; a program making such cycles ran out of memory (found with
+`stdlib/tasks`, whose first version made one per wait).
+
+- `js_next_gc_threshold(rt, size)` (`core/runtime.c`, new): 1.5 x `size` as QuickJS, but
+  when a memory limit is set (`malloc_limit` not -1) never past halfway from `size` to the
+  limit. Used by `js_trigger_gc` after each GC, and by `JS_SetMemoryLimit`, which lowers
+  the threshold to it (unless the automatic GC is disabled, -1). Without a limit, QuickJS
+  behaves as before. Near the limit the GCs come more often (halfway of what is left).
+- The runtime gives the limit: `board::jsHeapLimit()` (new in `board.h`; the size of the
+  JS region on an ESP32 without PSRAM, of `QJSX_JS_HEAP_MB` on the PC, 0 elsewhere:
+  PSRAM, malloc, the RP2350 for now), `JS_SetMemoryLimit` in `createRuntime()`
+  (`common/runtime/program.cpp`) right after the runtime is made.
+- Bytecode unchanged: no BC_VERSION bump.
+- `tests/gclimit.test.js` (`QJSX_JS_HEAP_MB=1`: 450 pieces of live data, then 60,000
+  cycles): with the original threshold 400 to 600 pieces run out of memory, with the cap
+  they all pass. Bellard's tests 7/7.
+- On the board (ESP32-S3 without PSRAM, 248 KB region, 2026-11-16), a probe making 20,000
+  cycles (an object, an array of 4 and a closure that refer to each other): the firmware
+  of before runs out of memory (it cannot even format the message); with T, 2341 ms,
+  against 475 ms for 20,000 objects without cycle. The difference also holds the cost of
+  making a closure in a loop (about 1.1 s for 20,000 on that board): the GC itself is
+  roughly 0.7 s for some 50 passes, about 13 ms a pass with a small live heap. The
+  client's program (193 KB with its sub boards powered) runs as before.
+
+## U. Interrupt on request and the running stack, for a sampling profiler
+
+2026-11-16, agreed with the user (the profiler of the agent, `qjsx profile`, compiled
+with `QJSX_PROFILER`: on the PC by default, `idf.py -DQJSX_PROFILER=ON` for a firmware).
+
+- `JS_RequestInterrupt(ctx)` (`quickjs.h`, `core/errors.c`): stores 0 in the interrupt
+  counter of the context, so that the interpreter calls the interrupt handler at its
+  next check (a jump or a call) instead of after thousands of them. Any thread may call
+  it (the sampling thread of the profiler); a request that races with the interpreter's
+  decrement may be lost, the next one comes.
+- `JS_DebugSampleStack(ctx, frames, max)` (`quickjs-debug.h`, `core/debug.c`): the
+  bytecode frames running now, innermost first (module name atom, function number),
+  native frames skipped. Unlike `JS_DebugGetFrame`, which reads the frames of a pause of
+  the debugger only, it walks `rt->current_stack_frame`: the interrupt handler calls it.
+- Bytecode unchanged; nothing runs unless the profiler asks. Bellard's tests 7/7.
+
 ## Limits and items not done
 
 - **"Uncaught" prediction**: done statically (section M), not with the planned

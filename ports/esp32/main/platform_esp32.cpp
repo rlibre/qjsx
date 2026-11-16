@@ -29,6 +29,16 @@ namespace {
 const uint32_t DEFAULT_TASK_STACK = 4096;      // bytes (ESP-IDF counts stacks in bytes)
 const UBaseType_t DEFAULT_TASK_PRIORITY = 5;   // above the idle task, like the IDF examples
 
+// The core of a task that does not ask for one (ANY_CORE): every task but
+// the JS one (pinned to board::JS_TASK_CORE, 1) waits for I/O, the agent's
+// link, I2C, UARTs, RMT ends. On a chip with two cores they go to core 0, so
+// that core 1 runs the program only (user, 2026-11-16); one core: no choice.
+#if CONFIG_FREERTOS_UNICORE
+const BaseType_t IO_TASK_CORE = tskNO_AFFINITY;
+#else
+const BaseType_t IO_TASK_CORE = 0;
+#endif
+
 // What startThread() gives to the new task (malloc'd, freed by the task).
 struct ThreadStart {
     ThreadFunction *run;   // thread function
@@ -70,7 +80,7 @@ void fatal(const char *message) {
 
 /**
  * Starts a FreeRTOS task running run(argument), pinned to options.core
- * unless ANY_CORE. False if it cannot start.
+ * (ANY_CORE: IO_TASK_CORE). False if it cannot start.
  */
 bool startThread(ThreadFunction *run, void *argument, ThreadOptions options) {
     // the start record is freed by the new task (or below if it cannot start)
@@ -82,7 +92,7 @@ bool startThread(ThreadFunction *run, void *argument, ThreadOptions options) {
     bool defaultPriority = options.priority == DEFAULT_PRIORITY;
     uint32_t stack = defaultStack ? DEFAULT_TASK_STACK : (uint32_t)options.stackSize;
     UBaseType_t priority = defaultPriority ? DEFAULT_TASK_PRIORITY : (UBaseType_t)options.priority;
-    BaseType_t core = options.core == ANY_CORE ? tskNO_AFFINITY : (BaseType_t)options.core;
+    BaseType_t core = options.core == ANY_CORE ? IO_TASK_CORE : (BaseType_t)options.core;
 
     // create the task; nobody waits for it
     BaseType_t created = xTaskCreatePinnedToCore(&taskEntry, options.name, stack, start, priority, nullptr, core);

@@ -31,7 +31,7 @@ export const KIND = {
     HELLO: 10,          // { PROTOCOL, TOKEN? } -> { PROTOCOL, AGENT, ENGINE, VERSION?, MAX_MESSAGE, NATIVES? }
     INFO: 11,           // {} -> { RUNNING, BUILD_ID, PACKAGE_SIZE, VOLATILE, DATA_USED?, DATA_TOTAL?,
                         //        JS_HEAP_USED?, JS_HEAP_PEAK?, RAM_FREE?, RAM_LARGEST?, RAM_LOWEST?,
-                        //        PSRAM_FREE?, PSRAM_LARGEST?, JS_HEAP_SIZE? }
+                        //        PSRAM_FREE?, PSRAM_LARGEST?, JS_HEAP_SIZE?, JS_LOAD?, JS_LOAD_PEAK? }
     // deployment
     UPLOAD_BEGIN: 20,   // { SIZE, SHA256, BUILD_ID, BYTECODE } -> {}; refused if the device reads another bytecode
     UPLOAD_CHUNK: 21,   // { OFFSET, DATA } -> {}
@@ -91,6 +91,11 @@ export const KIND = {
     FILE_REMOVE: 75,      // { PATH } -> {}   a file, or an empty folder
     FILE_MKDIR: 76,       // { PATH } -> {}
     FILE_RENAME: 77,      // { PATH, TO } -> {}   a file replaces a file; folders never replace
+    // the sampling profiler (firmwares with QJSX_PROFILER; others answer an error)
+    PROFILE_START: 80,    // { INTERVAL? (ms, 1) } -> {}
+    PROFILE_STOP: 81,     // {} -> { DURATION, INTERVAL, SAMPLES, IDLE, OVERFLOW, MODULES, STACKS }
+                          //   STACKS: [count, frame...] each, innermost first,
+                          //   frame = index in MODULES << 16 | function number (0xFFFF: unknown module)
 };
 
 // Largest piece of a file read by one FILE_READ (common/agent/protocol.h).
@@ -154,6 +159,15 @@ export const KEY = {
     PSRAM_FREE: 55,     // INFO answer: free PSRAM (absent without PSRAM)
     PSRAM_LARGEST: 56,  // INFO answer: largest free block of PSRAM
     JS_HEAP_SIZE: 57,   // INFO answer: region reserved for the JS heap (absent when it shares the RAM)
+    JS_LOAD: 58,        // INFO answer: load of the JS thread over the last second, in thousandths
+    JS_LOAD_PEAK: 59,   // INFO answer: the most of it over a full second, current or last run, thousandths
+    INTERVAL: 60,       // PROFILE_START / STOP: ms between two samples
+    SAMPLES: 61,        // PROFILE_STOP: samples taken while the JS thread worked
+    IDLE: 62,           // PROFILE_STOP: samples while it waited in its loop
+    OVERFLOW: 63,       // PROFILE_STOP: samples whose stack had no room in the table
+    MODULES: 64,        // PROFILE_STOP: module names, by index
+    STACKS: 65,         // PROFILE_STOP: the distinct stacks and their counts
+    DURATION: 66,       // PROFILE_STOP: ms from start to stop
 };
 
 export const STREAM = { STDOUT: 1, STDERR: 2 };

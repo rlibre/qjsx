@@ -175,6 +175,9 @@ Loop::Loop(JSContext *ctx)
     // loop, shutdown() removes it
     currentLoop = this;
     JS_SetHostPromiseRejectionTracker(JS_GetRuntime(ctx), &rejectionTracker, this);
+
+    // the JS thread works from now (the main module is evaluated before run())
+    _load.start(platform::monotonicMs());
 }
 
 /**
@@ -545,16 +548,29 @@ void Loop::reportRejections() {
         return;
     }
 
-    // each rejection still listed has no handler
+    // each rejection still listed has no handler. Two in a row may share
+    // their reason: an error thrown by the main module itself rejects the
+    // promise of its evaluation and the one of the module; printed once
+    // (an object, or null: what the engine throws out of memory)
+    JSValue lastReason = JS_UNDEFINED;
+    bool hasLast = false;
     while (_firstRejection != nullptr) {
         // unlink it
         Rejection *rejection = _firstRejection;
         _firstRejection = rejection->next;
 
-        // throw its reason again so that js::reportException() prints it,
-        // then free it
-        JS_Throw(_ctx, JS_DupValue(_ctx, rejection->reason));
-        js::reportException(_ctx, "Uncaught (in promise)");
+        // throw its reason again so that js::reportException() prints it
+        // (not the same reason twice in a row), then free it
+        bool shared = JS_IsObject(rejection->reason) || JS_IsNull(rejection->reason);
+        bool repeated = hasLast && shared && JS_StrictEq(_ctx, lastReason, rejection->reason);
+        if (!repeated) {
+            JS_Throw(_ctx, JS_DupValue(_ctx, rejection->reason));
+            js::reportException(_ctx, "Uncaught (in promise)");
+        }
+
+        JS_FreeValue(_ctx, lastReason);
+        lastReason = JS_DupValue(_ctx, rejection->reason);
+        hasLast = true;
         JS_FreeValue(_ctx, rejection->promise);
         JS_FreeValue(_ctx, rejection->reason);
         memory::release(rejection);
@@ -565,6 +581,8 @@ void Loop::reportRejections() {
             exit(1);
         }
     }
+
+    JS_FreeValue(_ctx, lastReason);
 }
 
 /**
@@ -642,14 +660,128 @@ int Loop::run() {
         }
 
         // wait for a message until the next timer is due, then dispatch it
-        // (nullptr: a timer is due, or an early wake up)
+        // (nullptr: a timer is due, or an early wake up); the wait is the
+        // time the JS thread does not work
+        _load.waitBegins(platform::monotonicMs());
         Message *message = _mailbox->take(nextTimerDelay());
+        _load.waitEnds(platform::monotonicMs());
         if (message != nullptr) {
             dispatch(message);
         }
     }
 
     return _exitCode;
+}
+
+/**
+ * The load of the JS thread now.
+ */
+LoadStats Loop::load() {
+    return _load.stats(platform::monotonicMs());
+}
+
+// ### load of the JS thread ###################################################
+
+/**
+ * Starts the count: no work yet, working from now.
+ */
+void LoadMeter::start(int64_t nowMs) {
+    _startMs = nowMs;
+    _slotStartMs = nowMs;
+    _workSince = nowMs;
+}
+
+/**
+ * Counts the work since the loop woke up in the current slot, updates the
+ * peak once a full second has passed, and publishes.
+ */
+void LoadMeter::waitBegins(int64_t nowMs) {
+    // the work that ends now
+    advance(nowMs);
+    if (_workSince >= 0) {
+        int64_t worked = nowMs - _workSince;
+        _slots[_current] += worked;
+        _busyMs += worked;
+        _workSince = -1;
+    }
+
+    // the load of the last second; the peak only over full seconds (the
+    // first moments, all work, would read as 1)
+    double load = windowLoad(0, nowMs);
+    bool fullSecond = nowMs - _startMs >= SLOTS * SLOT_MS;
+    if (fullSecond && load > _peak) {
+        _peak = load;
+    }
+
+    // published for the other threads
+    if (_published != nullptr) {
+        __atomic_store_n(&_published->busyMs, _busyMs, __ATOMIC_RELAXED);
+        __atomic_store_n(&_published->elapsedMs, nowMs - _startMs, __ATOMIC_RELAXED);
+        __atomic_store_n(&_published->loadPermille, (int32_t)(load * 1000), __ATOMIC_RELAXED);
+        __atomic_store_n(&_published->peakPermille, (int32_t)(_peak * 1000), __ATOMIC_RELAXED);
+        __atomic_store_n(&_published->working, 0, __ATOMIC_RELAXED);
+    }
+}
+
+/**
+ * The loop woke up: work from now.
+ */
+void LoadMeter::waitEnds(int64_t nowMs) {
+    advance(nowMs);
+    _workSince = nowMs;
+
+    if (_published != nullptr) {
+        __atomic_store_n(&_published->working, 1, __ATOMIC_RELAXED);
+    }
+}
+
+/**
+ * The load now, counting the work in progress (the caller is working).
+ */
+LoadStats LoadMeter::stats(int64_t nowMs) {
+    advance(nowMs);
+    int64_t working = _workSince >= 0 ? nowMs - _workSince : 0;
+    return LoadStats{ windowLoad(working, nowMs), _peak, _busyMs + working, nowMs - _startMs };
+}
+
+/**
+ * Moves to the slot of 'nowMs': each slot passed starts empty; after a whole
+ * second without a wait or a check, all of them.
+ */
+void LoadMeter::advance(int64_t nowMs) {
+    int64_t passed = (nowMs - _slotStartMs) / SLOT_MS;
+    if (passed <= 0) {
+        return;
+    }
+
+    // the slots passed, emptied
+    int emptied = passed < SLOTS ? (int)passed : SLOTS;
+    for (int i = 0; i < emptied; i++) {
+        _current = (_current + 1) % SLOTS;
+        _slots[_current] = 0;
+    }
+
+    _slotStartMs += passed * SLOT_MS;
+}
+
+/**
+ * Work of the slots (and in progress) over the last second, or over the
+ * time since the start when it is shorter; at most 1.
+ */
+double LoadMeter::windowLoad(int64_t workingMs, int64_t nowMs) const {
+    // the work of the window
+    int64_t worked = workingMs;
+    for (int i = 0; i < SLOTS; i++) {
+        worked += _slots[i];
+    }
+
+    // over the window, or the time since the start (at least 1 ms)
+    int64_t window = SLOTS * SLOT_MS;
+    int64_t span = nowMs - _startMs < window ? nowMs - _startMs : window;
+    span = span > 0 ? span : 1;
+
+    double load = (double)worked / (double)span;
+    return load < 1 ? load : 1;
 }
 
 } // namespace rt
