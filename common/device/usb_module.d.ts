@@ -35,9 +35,9 @@
  * usb.close();                                // the host sees it go away
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | — | ✓ ¹ | — | ✓ ² |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | — | ✓ ¹ | — | — | ✓ ² |
  *
  * ¹ The chips with USB OTG: ESP32-S2, S3, P4.
  *

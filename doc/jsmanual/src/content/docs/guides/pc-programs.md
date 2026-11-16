@@ -1,12 +1,11 @@
 ---
 title: Programs of the PC
-description: qjsx run, standalone executables, permissions.
+description: qjsx run, permissions.
 ---
 
-qjsx also runs programs on the PC (Windows, macOS, Linux): scripts with `qjsx run`, or a
-project delivered as a standalone executable with `qjsx build --executable`. A program of
-the PC reaches nothing it was not granted, on the model of Deno: a bug in a script must
-not be able to wipe a disk.
+qjsx also runs programs on the PC (Windows, macOS, Linux) with `qjsx run`: a script, or the
+package of a project. A program of the PC reaches nothing it was not granted, on the model
+of Deno: a bug in a script must not be able to wipe a disk.
 
 ## qjsx run
 
@@ -27,14 +26,10 @@ qjsx run [options] <script.js | package.qjspkg> [arguments of the program]
 Options before the script are qjsx's; after it, they belong to the program
 (`process.argv`).
 
-## Standalone executables
+## Permissions of a package
 
-```bash
-qjsx build --executable
-```
-
-writes `build/packages/<name>.exe` (or `<name>`): a small runner with the package inside.
-Its permissions come from the `desktop` section of `qjsx.json`, baked in:
+A package (`qjsx build`, then `qjsx run build/packages/<name>-<build>.qjspkg`) also gets
+the `desktop` section of `qjsx.json`, copied into it by the build:
 
 ```json
 "desktop": {
@@ -51,10 +46,10 @@ Its permissions come from the `desktop` section of `qjsx.json`, baked in:
 
 - Nothing is allowed by default. A `rootFolder` without `permissions` may be read, not
   written. A root at the root of a disk is refused.
-- Variables: `${executableFolder}`, `${userAppDataFolder}` (`%APPDATA%/<name>`,
-  `~/Library/Application Support/<name>`, `~/.local/share/<name>`), `${currentFolder}`,
-  `${rootFolder}`.
+- Variables: `${executableFolder}` (the folder of the package file),
+  `${userAppDataFolder}` (`%APPDATA%/<name>`, `~/Library/Application Support/<name>`,
+  `~/.local/share/<name>`), `${currentFolder}`, `${rootFolder}`.
 - `process.cwd()` is the root folder: relative paths of `sys/fs` start there.
-- The only option of an executable is `--qjsx-root-folder=<folder>` (or the variable
-  `QJSX_ROOT_FOLDER`): two copies of a program can work on two folders.
+- `--qjsx-root-folder=<folder>` (or the variable `QJSX_ROOT_FOLDER`) replaces the root
+  folder: two copies of a program can work on two folders.
 - Paths are compared as real paths (links resolved).

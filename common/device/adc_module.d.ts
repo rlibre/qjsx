@@ -13,9 +13,9 @@
  * catches typos), a missing field takes its default.
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | — | ✓ ADC1 only ¹ | — | ✓ |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | — | ✓ ADC1 only ¹ | — | — | ✓ |
  *
  * ¹ ADC2 does not work while the WiFi is on.
  *

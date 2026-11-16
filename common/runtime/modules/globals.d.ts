@@ -18,9 +18,9 @@
  * (`qjsx monitor`, `qjsx debug`), else to the board's console.
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | ✓ | ✓ | ✓ | ✓ |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | ✓ | ✓ | ✓ | ✓ | ✓ |
  *
  * @module globals
  */
@@ -231,8 +231,6 @@ declare namespace process {
      *
      * - `qjsx run script.js a b`: `["<path of qjsx>", "script.js", "a", "b"]`
      *   (the options of `qjsx run`, before the script, are left out);
-     * - an executable made by `qjsx build --executable`: `[exe, exe, ...args]`
-     *   (`--qjsx-root-folder=...` is removed);
      * - a device (and the desktop agent, the twin): always
      *   `["qjsx", "<main module of the package>"]`.
      *
@@ -259,7 +257,7 @@ declare namespace process {
      * runs; no timer, callback or promise job runs any more. What was written
      * so far is flushed first.
      *
-     * `qjsx run` and an executable return the code to the system. On a device
+     * `qjsx run` returns the code to the system. On a device
      * the agent reports the end to the PC (EXITED) and stays alive; the
      * program is not restarted.
      *

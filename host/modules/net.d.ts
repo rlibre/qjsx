@@ -35,9 +35,9 @@
  * client.write("hello");
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | ✓ | — | — | — |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | ✓ | — | — | — | — |
  *
  * @module sys/net
  */

@@ -33,15 +33,15 @@
  * const settings = JSON.parse(readFileSync("settings.json", "utf8"));
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | ✓ what the program was granted | ✓ /data ¹ | ✓ ² | ✓ its data folder |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | ✓ what the program was granted | ✓ /data ¹ | ✓ ² | ✓ ² | ✓ its data folder |
  *
  * ¹ LittleFS on the "data" partition, mounted on `/data` (`process.cwd()`); a program
  * reaches nothing outside it. A file is committed when it is closed: a power cut during
  * `writeFileSync` keeps the old content whole.
  *
- * ² No file system on the RP2350 yet: every function throws (`code` `"ENOSYS"`) except
+ * ² No file system on the RP2350 and the i.MX RT1062 yet: every function throws (`code` `"ENOSYS"`) except
  * `existsSync`, which returns false.
  *
  * @module sys/fs

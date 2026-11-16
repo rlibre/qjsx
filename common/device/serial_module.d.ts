@@ -9,11 +9,10 @@
  * Serial ports: one class, {@link Serial}, for the serial ports of the PC and
  * for the UARTs of a board.
  *
- * - On the PC (`qjsx run`, an executable made by `qjsx build --executable`,
- *   the desktop agent `qjsx agent`): the ports of the system, by name
- *   (`"COM3"`, `"/dev/ttyUSB0"`). A program needs the permission to use them:
- *   `qjsx run --allow-serial[=ports]` (or `-A`), `"serial"` in the
- *   `desktop.permissions` of `qjsx.json` for an executable; refused:
+ * - On the PC (`qjsx run`, the desktop agent `qjsx agent`): the ports of the
+ *   system, by name (`"COM3"`, `"/dev/ttyUSB0"`). A program needs the
+ *   permission to use them: `qjsx run --allow-serial[=ports]` (or `-A`),
+ *   `"serial"` in the `desktop.permissions` of `qjsx.json` for a package; refused:
  *   a system error with code `EACCES`. The desktop agent needs none.
  * - On a board (ESP32 today) and in the digital twin of a board: the UARTs of
  *   the chip, by number, on the pins the program gives. No permission. The
@@ -37,9 +36,9 @@
  * port.close();
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | ✓ ports of the system | ✓ UARTs, not UART0 | — | ✓ UARTs of the board |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | ✓ ports of the system | ✓ UARTs, not UART0 | — | — | ✓ UARTs of the board |
  *
  * @module device/serial
  */

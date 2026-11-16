@@ -15,19 +15,7 @@ The JavaScript engine is [QuickJS](https://bellard.org/quickjs/) by Fabrice Bell
 
 ## The idea
 
-```mermaid
-flowchart LR
-    subgraph PC["Your PC"]
-        S["JavaScript sources"] --> B["qjsx build"]
-        B --> P["Package .qjspkg"]
-        T["Console"]
-    end
-    subgraph C["The board"]
-        A["Agent"] --> M["JavaScript engine"]
-    end
-    P -- "qjsx deploy" --> A
-    A -. "program output" .-> T
-```
+![The PC builds a package and sends it to the board, which runs it; VS Code debugs it through qjsx debug](doc/images/overview.svg)
 
 - **The PC does the heavy work.** It compiles the program and keeps everything that debugging
   needs (sources, variable names, positions).
@@ -76,12 +64,6 @@ The same program also runs on the PC, without a board:
 qjsx run src/main.js
 ```
 
-or becomes a program of its own for the PC (about 1.3 MB, nothing else to install):
-
-```bash
-qjsx build --executable
-```
-
 To debug it in VS Code, start the debugger server of the project (`--restart` starts the
 program again each time VS Code attaches, so that its startup code can be debugged):
 
@@ -106,17 +88,27 @@ then attach VS Code to it, with this configuration in `.vscode/launch.json`:
 }
 ```
 
+VS Code does not talk to the board itself: `qjsx debug` stands in between, with everything
+the board does not have.
+
+![VS Code talks CDP to qjsx debug on the PC, which talks the agent protocol to the debugger stub on the board](doc/images/debugger.svg)
+
 ## What is inside
 
 - **`qjsx`, a command-line tool**: a single executable to build, send, start, stop and watch a
   program.
 - **A firmware for the ESP32-S3**, which receives programs over the serial port and runs them.
 - **Libraries**: the standard library (`stdlib`) comes with the tool, and you can make your
-  own with `qjsx mklib`. Only the modules a program really imports go to the board.
+  own with `qjsx mklib`. Only the modules a program really imports go to the board (see
+  below).
 - **What it takes to write native modules**: a small C++ library that exposes C++ code to
   JavaScript without the usual pain.
 - **The foundations of a debugger**: breakpoints, stepping, pause, reading and changing
   variables already work on the board.
+
+What `qjsx build` produces, and what of it reaches the board:
+
+![qjsx build follows the imports and writes a package: manifest, names and bytecode go to the board; debug info and sources stay on the PC](doc/images/package.svg)
 
 A few safety nets are already there: the tool warns when a program uses `eval()`, which does
 not exist on the board, and the board refuses a program prepared for another version of the
@@ -127,6 +119,9 @@ engine instead of crashing.
 No board at hand? The tool can play one. `qjsx agent` becomes the **digital twin** of a
 board: your program runs on the PC exactly as it would on the board, with the same modules
 (`device/gpio`, `device/i2c`, `device/adc`...), and you deploy and debug it the same way.
+
+![One project runs on the board, on its digital twin, and on the PC](doc/images/where-it-runs.svg)
+
 A web page shows the board and lets you act on it:
 
 ![The page of the digital twin](doc/images/twin.jpg)

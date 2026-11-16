@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="312" viewBox="0 0 900 312" role="img" aria-label="The PC builds a package and sends it to the board, which runs it; VS Code debugs it through qjsx debug; the program output comes back to the PC.">
+  <!-- qjsx: overview, used by README.md. Hand-written; light and dark through
+       prefers-color-scheme; one font size, bold for titles. -->
+  <style>
+    svg { --bg: #f6f8fa; --box: #ffffff; --edge: #d0d7de; --text: #1f2328; --muted: #59636e;
+          --line: #59636e; --pc: #0969da; --pc-fill: #ddf4ff; --dev: #1a7f37; --dev-fill: #dafbe1; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg: #161b22; --box: #0d1117; --edge: #3d444d; --text: #e6edf3; --muted: #9198a1;
+            --line: #9198a1; --pc: #4493f8; --pc-fill: #0f2440; --dev: #3fb950; --dev-fill: #0f2a1a; }
+    }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+           font-size: 14px; fill: var(--text); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .title { font-weight: 600; }
+    .muted { fill: var(--muted); }
+    .c { text-anchor: middle; }
+    .bg { fill: var(--bg); }
+    .box { fill: var(--box); stroke: var(--edge); stroke-width: 1; }
+    .pc { fill: var(--pc-fill); stroke: var(--pc); stroke-width: 1.5; }
+    .dev { fill: var(--dev-fill); stroke: var(--dev); stroke-width: 1.5; }
+    .pc-text { fill: var(--pc); }
+    .dev-text { fill: var(--dev); }
+    .arrow { fill: none; stroke: var(--line); stroke-width: 1.5; }
+    .dashed { stroke-dasharray: 5 4; }
+    .head { fill: var(--line); }
+  </style>
+  <defs>
+    <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse">
+      <path class="head" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="900" height="312" rx="12"/>
+
+  <!-- the PC -->
+  <rect class="pc" x="16" y="16" width="460" height="280" rx="10"/>
+  <text class="title pc-text" x="34" y="42">Your PC</text>
+
+  <rect class="box" x="34" y="58" width="124" height="48" rx="6"/>
+  <text class="title c" x="96" y="79">Sources</text>
+  <text class="mono muted c" x="96" y="97">src/*.js</text>
+
+  <rect class="box" x="186" y="58" width="124" height="48" rx="6"/>
+  <text class="mono title c" x="248" y="79">qjsx build</text>
+  <text class="muted c" x="248" y="97">compiles</text>
+
+  <rect class="box" x="338" y="58" width="124" height="48" rx="6"/>
+  <text class="title c" x="400" y="79">Package</text>
+  <text class="mono muted c" x="400" y="97">app.qjspkg</text>
+
+  <rect class="box" x="34" y="134" width="124" height="48" rx="6"/>
+  <text class="title c" x="96" y="155">VS Code</text>
+  <text class="muted c" x="96" y="173">js-debug</text>
+
+  <rect class="box" x="186" y="134" width="124" height="48" rx="6"/>
+  <text class="mono title c" x="248" y="155">qjsx debug</text>
+  <text class="muted c" x="248" y="173">debug proxy</text>
+
+  <rect class="box" x="186" y="210" width="124" height="48" rx="6"/>
+  <text class="title c" x="248" y="231">Console</text>
+  <text class="mono muted c" x="248" y="249">qjsx monitor</text>
+
+  <path class="arrow" d="M158 82 H184" marker-end="url(#head)"/>
+  <path class="arrow" d="M310 82 H336" marker-end="url(#head)"/>
+  <path class="arrow" d="M160 158 H184" marker-start="url(#head)" marker-end="url(#head)"/>
+
+  <text class="muted c" x="246" y="284">compiles, and keeps the sources and the debug info</text>
+
+  <!-- the board -->
+  <rect class="dev" x="580" y="16" width="304" height="280" rx="10"/>
+  <text class="title dev-text" x="598" y="42">The board</text>
+
+  <rect class="box" x="600" y="58" width="110" height="200" rx="6"/>
+  <text class="title c" x="655" y="152">Agent</text>
+  <text class="muted c" x="655" y="170">+ debug stub</text>
+
+  <rect class="box" x="736" y="58" width="132" height="64" rx="6"/>
+  <text class="title c" x="802" y="85">QuickJS</text>
+  <text class="muted c" x="802" y="105">runs bytecode</text>
+
+  <rect class="box" x="736" y="158" width="132" height="64" rx="6"/>
+  <text class="title c" x="802" y="185">Flash</text>
+  <text class="muted c" x="802" y="205">package · /data</text>
+
+  <path class="arrow" d="M710 90 H734" marker-end="url(#head)"/>
+  <path class="arrow" d="M710 190 H734" marker-end="url(#head)"/>
+  <path class="arrow" d="M802 158 V124" marker-end="url(#head)"/>
+  <text class="muted" x="810" y="145">in place</text>
+
+  <text class="muted c" x="732" y="284">no compiler · firmware ≈ 700 KB</text>
+
+  <!-- the link, drawn last: over the two groups -->
+  <path class="arrow" d="M462 82 H598" marker-end="url(#head)"/>
+  <text class="mono c" x="531" y="74">qjsx deploy</text>
+
+  <path class="arrow" d="M312 158 H598" marker-start="url(#head)" marker-end="url(#head)"/>
+  <text class="c" x="393" y="150">debugging</text>
+
+  <path class="arrow dashed" d="M600 234 H312" marker-end="url(#head)"/>
+  <text class="c" x="393" y="226">program output</text>
+
+  <text class="muted c" x="528" y="186">serial, USB</text>
+  <text class="muted c" x="528" y="204">or TCP</text>
+</svg>

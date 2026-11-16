@@ -14,7 +14,11 @@
  * `Pwm` say what it really does. Outputs share timers, hence frequencies (on
  * the ESP32: 8 outputs, 4 timers, 14 bits at most; 14 bits at 1 kHz, 11 at
  * 20 kHz, 1 at 40 MHz; under about 5 Hz out of reach): a frequency no timer
- * can take is refused, the other outputs are never changed.
+ * can take is refused, the other outputs are never changed. On the Teensy
+ * 4.0 (i.MX RT1062) each PWM pin has its own counter, except pins sharing a
+ * FlexPWM submodule (2+3, 4+33, 6+9, 7+8+25, 28+29, 0+34+35, 1+36+37,
+ * 24+38+39), which share one frequency; 15 bits at 1 kHz, 12 at 20 kHz, 7 at
+ * 1 MHz; under about 18 Hz out of reach.
  *
  * Unlike `device/gpio`, `close()` AND the end of the program stop the output:
  * the pin stays driven at its idle level (0, or 1 when inverted).
@@ -23,11 +27,14 @@
  * catches typos), a missing field takes its default.
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | — | ✓ LEDC | — | ✓ ¹ |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | — | ✓ LEDC | — | ✓ ² | ✓ ¹ |
  *
  * ¹ Rounds and refuses as the ESP32.
+ *
+ * ² FlexPWM and QuadTimer; the pins with a PWM output: 0-15, 18, 19, 22-25,
+ * 28, 29, 33-39.
  *
  * @module device/pwm
  */

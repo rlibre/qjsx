@@ -1,0 +1,23 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
+# Espressif ESP32-S3-DevKitC-1, WROOM-1 N8R8 module: ESP32-S3 with 8 MB of
+# octal PSRAM inside the chip package, 8 MB of flash (as esptool reports
+# them; the user's board has a chip of revision v0.1). Host link on UART0
+# through the "UART" USB port (USB-serial bridge).
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# flash and partitions; the flash in QIO (4 data lines; DIO, the default, uses
+# 2): the code runs from flash through a 16 KB cache
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/8MB.csv"
+
+# PSRAM: octal, only through heap_caps_malloc(MALLOC_CAP_SPIRAM), for the JS heap
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_USE_CAPS_ALLOC=y

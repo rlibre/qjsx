@@ -18,9 +18,9 @@
  * restart();                                         // never returns
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | — ¹ | ✓ | — | ✓ ² |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | — ¹ | ✓ | — | ✓ | ✓ ² |
  *
  * ¹ Not in `qjsx run` nor in a program of the PC; the desktop agent (`qjsx agent`) has it.
  *

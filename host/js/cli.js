@@ -17,7 +17,6 @@ import { build } from "qjsx:build";
 import { warningText } from "qjsx:compile";
 import { qjsxVersion } from "sys/compiler";
 import { makeLibrary } from "qjsx:library";
-import { makeExecutable } from "qjsx:executable";
 import { writeTypings } from "qjsx:typings";
 import { loadProject, PROJECT_FILE } from "qjsx:project";
 import { Device } from "qjsx:device";
@@ -42,10 +41,8 @@ commands:
       --allow-serial[=port,...]           serial ports
       --qjsx-root-folder=<folder>         its process.cwd() (also QJSX_ROOT_FOLDER);
                                           a package adds the "desktop" section of qjsx.json
-  build [directory] [--executable]             compile the project (qjsx.json) into a .qjspkg;
-                                               --executable: also an executable of the PC
-                                               that runs it (<output>/<name>[.exe]); also
-                                               writes the typings of qjsx for VS Code
+  build [directory]                            compile the project (qjsx.json) into a .qjspkg;
+                                               also writes the typings of qjsx for VS Code
                                                (.qjsx/types, jsconfig.json when the
                                                project has none)
   mklib [directory] [--output <file>]          compile a library project into a .qjslib
@@ -535,12 +532,11 @@ function printWarnings(warnings) {
     }
 }
 
-// qjsx build: the package of the project; with --executable, also an
-// executable of the PC that runs it (<output>/<name>, .exe on Windows).
+// qjsx build: the package of the project.
 function buildCommand(args) {
-    const { options, positional } = parseArguments(args, { flags: ["executable"] });
+    const { positional } = parseArguments(args, {});
     if (positional.length > 1) {
-        throw new Error("usage: qjsx build [directory] [--executable]");
+        throw new Error("usage: qjsx build [directory]");
     }
 
     // the typings for VS Code first: written even when the build fails; not
@@ -568,15 +564,6 @@ function buildCommand(args) {
     }
     console.log(`built ${result.file}`);
     console.log(`  ${result.scriptCount} module(s), ${result.size} bytes, build ${result.buildId.slice(0, 12)}`);
-
-    if (options.executable) {
-        const name = process.platform === "win32" ? `${project.name}.exe` : project.name;
-        const executable = makeExecutable(result.file, join(project.directory, project.output, name));
-        console.log(`built ${executable.file} (${executable.size} bytes)`);
-        if (process.platform !== "win32") {
-            status(`mark it executable: chmod +x ${executable.file}`);
-        }
-    }
     return 0;
 }
 

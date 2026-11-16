@@ -20,9 +20,9 @@
  * tablet.onLineState(({ dtr }) => console.log(dtr ? "opened" : "closed"));
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | — | ✓ ¹ | — | ✓ |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | — | ✓ ¹ | — | — | ✓ |
  *
  * ¹ Where `device/usb` is: the chips with USB OTG (ESP32-S2, S3, P4); importing it fails elsewhere.
  *

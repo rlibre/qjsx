@@ -16,12 +16,12 @@
  * const { bytecode, imports, warnings } = compile(source, "src/main.js", { strip: "all" });
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | ✓ ¹ | — | — | — |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | ✓ ¹ | — | — | — | — |
  *
- * ¹ The qjsx tool (its commands and `qjsx run`), not the executables made by
- * `qjsx build --executable`. Devices have no compiler at all (no `eval` either).
+ * ¹ The qjsx tool (its commands and `qjsx run`). Devices have no compiler at
+ * all (no `eval` either).
  *
  * @module sys/compiler
  */

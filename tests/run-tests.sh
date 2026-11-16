@@ -68,13 +68,6 @@ check "package runs like the sources" diff build/demo-source.txt build/demo-pack
 check "package runs without compiler, with its library module" diff build/demo-source.txt build/demo-target.txt
 check "excluded file not packaged" bash -c "! grep -a -q 'ignored.test.js' '$PACKAGE'"
 
-# --- the program made into an executable of the PC (qjsx build --executable:
-# qjsx-runtime with the package appended)
-check "build --executable" "$BIN/qjsx" build "$DEMO" --executable
-DEMO_EXE="$DEMO/build/packages/demo$([ -f "$BIN/qjsx.exe" ] && echo .exe)"
-"$DEMO_EXE" > build/demo-executable.txt 2>&1
-check "the executable runs like the sources" diff build/demo-source.txt build/demo-executable.txt
-
 # The package is a regular zip: an external tool must read it.
 if command -v unzip > /dev/null; then
     check "package is a valid zip" unzip -tq "$PACKAGE"
@@ -152,7 +145,7 @@ check "-R / -W: the root folder is process.cwd() and may be used" bash -c "grep 
 check "-R / -W: nothing outside, no escape with .., no way through a link" bash -c "grep -q '^write outside: EACCES' build/perm-root.txt && grep -q '^read outside: EACCES' build/perm-root.txt && grep -q '^escape with ..: EACCES' build/perm-root.txt && grep -q '^read through a link: EACCES' build/perm-root.txt"
 check "-R / -W: the parent of the root cannot be removed" bash -c "grep -q '^remove the parent: EACCES' build/perm-root.txt && test -f '$PERM/outside/existing.txt' && ! test -e '$PERM/escaped.txt'"
 
-"$BIN/qjsx" build tests/fixtures/permissions --executable > /dev/null
+"$BIN/qjsx" build tests/fixtures/permissions > /dev/null
 PERM_PACKAGE=$(ls tests/fixtures/permissions/build/packages/*.qjspkg)
 mkdir -p tests/fixtures/permissions/build/packages/perm-root
 PERM_TEST=1 OTHER_VARIABLE=2 "$BIN/qjsx" run "$PERM_PACKAGE" "$PERM_OUTSIDE" > build/perm-package.txt 2>&1
@@ -165,8 +158,6 @@ check "package: the root folder given by --qjsx-root-folder or QJSX_ROOT_FOLDER"
 # failed, the program could not touch anything
 DISK_ROOT=$([ -n "$EXE_SUFFIX" ] && echo "C:/" || echo "/")
 check "a root folder at the root of a disk is refused" bash -c "! '$BIN/qjsx' run --qjsx-root-folder='$DISK_ROOT' '$PROBE' x > build/perm-disk.txt 2>&1 && grep -q 'cannot be the root of a file system' build/perm-disk.txt && ! grep -q '^cwd' build/perm-disk.txt"
-"tests/fixtures/permissions/build/packages/permissions$EXE_SUFFIX" one --qjsx-root-folder="$PERM/perm-root" "$PERM_OUTSIDE" > build/perm-exe.txt 2>&1
-check "executable: permissions of its package, --qjsx-root-folder not seen by the program" bash -c "grep -q '^cwd .*/perm-test/perm-root$' build/perm-exe.txt && grep -q '^write inside: ok' build/perm-exe.txt && grep -q '^read outside: EACCES' build/perm-exe.txt && grep -qF 'args [\"one\",' build/perm-exe.txt"
 
 # a root folder without "permissions": read, not write
 cp "$PROBE" "$PERM/readonly/src/main.js"
@@ -261,15 +252,6 @@ check "desktop agent: no file outside the data directory" bash -c "grep -qF 'esc
 "$BIN/qjsx" run "${DEVICE_PROCESS//\//\\}" > build/deviceprocess-pc.txt 2>&1
 check "PC: a package keeps the real argv and env" bash -c "grep -q '^argv .*qjspkg' build/deviceprocess-pc.txt && ! grep -qF 'env {\"GREETING\"' build/deviceprocess-pc.txt"
 check "PC: process.argv[0] and argv[1] have '/' separators" bash -c "grep '^argv ' build/deviceprocess-pc.txt | grep -q 'qjsx.*/deviceprocess-' && ! grep '^argv ' build/deviceprocess-pc.txt | grep -qF '\\'"
-# made into an executable: argv = [executable, executable, arguments], the
-# exit code of process.exit
-"$BIN/qjsx" build tests/fixtures/deviceprocess --executable > /dev/null
-EXE_SUFFIX=$([ -f "$BIN/qjsx.exe" ] && echo .exe)
-"tests/fixtures/deviceprocess/build/packages/deviceprocess$EXE_SUFFIX" one two 2>&1 | grep '^argv ' > build/executable-argv.txt
-check "executable: process.argv is [executable, executable, arguments]" \
-    bash -c "grep -q 'deviceprocess$EXE_SUFFIX\",\".*deviceprocess$EXE_SUFFIX\",\"one\",\"two\"\]' build/executable-argv.txt"
-"$BIN/qjsx" build tests/fixtures/exiting --executable > /dev/null
-check "executable: the exit code of process.exit" bash -c "'tests/fixtures/exiting/build/packages/exiting$EXE_SUFFIX' > /dev/null 2>&1; test \$? -eq 3"
 
 # --- a package loaded in RAM (deploy --ram): runs instead of the installed
 # one, lost at a restart; deploy --reset restarts the device after installing

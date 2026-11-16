@@ -278,9 +278,10 @@ keeps the old name: `C:\Sandbox\espjs`.
   `${executableFolder}` under `qjsx run app.qjspkg` = the package's folder. `qjsx run`
   options as Deno's: `--allow-read[=paths]` `-R`, `--allow-write[=paths]` `-W`,
   `--allow-net[=hosts]` `-N`, `--allow-env` `-E`, `-A`, plus `--allow-serial[=ports]` and
-  `"serial"` in `permissions` (opening a port acts on hardware). `--qjsx-root-folder` is the
-  ONLY runtime option of an executable (its permissions are baked in; the prefix avoids
-  stealing a program's own options). `qjsx run` options take no prefix: before the script
+  `"serial"` in `permissions` (opening a port acts on hardware). `qjsx build --executable`
+  (a runner `qjsx-runtime` with the package appended) was REMOVED (user, 2026-11-16: of
+  doubtful use): a program of the PC runs with `qjsx run app.qjspkg`; `${executableFolder}`
+  kept its name. `qjsx run` options take no prefix: before the script
   name they are qjsx's, after it the program's (as Deno). Paths compared as real
   paths (links resolved); a recursive rmSync never follows a link (removes the link, not
   its target): `removeTree` already used lstat. Tests: never a destructive probe outside
@@ -546,7 +547,9 @@ keeps the old name: `C:\Sandbox\espjs`.
 - Stack of the JS task, a setting of each ESP32 board (user, 2026-11-16: 32 KB for the
   client board; FLASHED and measured there: 66 nested JS calls, 270 levels for
   JSON.parse, JS region 232 -> 248 KB; flashing the client board (COM10, MAC checked
-  first) and the YD (COM11) needs no confirmation since 2026-11-16 (user), nor a
+  first), the YD (COM11) and the ESP32-S3-DevKitC-1 N8R8 (COM27, `serial:COM27@921600`,
+  board folder `esp32-s3-devkitc-n8r8`, chip revision v0.1; debugger / proxy / cdp all
+  passed there 2026-11-16) needs no confirmation since 2026-11-16 (user), nor a
   restoration of the program after a probe; other boards: ask): `JS_TASK_STACK` in each
   `boards/<board>/board_config.h` (YD 48 KB), `JS_STACK_LIMIT = JS_TASK_STACK -
   JS_NATIVE_STACK_MARGIN` (8 KB, board_esp32.h). Measured on the client board with 48 KB:
@@ -575,8 +578,7 @@ keeps the old name: `C:\Sandbox\espjs`.
     atoms are constant), `js_atom_is_rom()` = immortal reference count; `JSString` has
     GCC's layout on Windows too (12 bytes); BC_VERSION 0x45 -> 0x46 (an older firmware
     refuses the new packages: flash the firmware before deploying);
-  - the executable of `qjsx build --executable` moves its package to the start of the
-    block it read (aligned address); a package without `names.bin` is read the old way;
+  - a package without `names.bin` is read the old way;
     the debugger's LOAD_FUNCTION too;
   - tests/link.test.js (25 checks);
   - NOT done: step 3 (tables of variables in place), the fingerprint checked at the
@@ -1045,11 +1047,7 @@ in the include path (no two headers share a name; keep it so).
   (the same without compiler/, QJSX_NO_COMPILER: no eval, like the targets), `qjsx` (the
   tool), `qjsx-tests`, `qjsx-target` (qjsx without its compiler module, linked with
   qjsx-engine-target: runs packages like a
-  target; checked by run-tests.sh with tests/fixtures/nocompiler), `qjsx-runtime` (2026-11-12:
-  the runner of `qjsx build --executable`, engine without compiler + runtime + PC native
-  modules, its own main in host/runtime/, no tool JS, 1.25 MB in Release;
-  the package is appended to a copy of it with a trailer "QJSXPKG1" + 64-bit LE size;
-  argv = [exe, exe, args]). JS modules embedded as
+  target; checked by run-tests.sh with tests/fixtures/nocompiler). JS modules embedded as
   source (`qjsx:*`, `stdlib/*`) only work on the host; a target gets library modules as
   bytecode in the package (`.qjslib`).
   Executables in `bin/Release/` and `bin/Debug/`.
@@ -1128,6 +1126,120 @@ in the include path (no two headers share a name; keep it so).
   - order: minimal firmware (agent, deploy, run, debugger, same board tests as the ESP32),
     then PSRAM heap + microbench, then device/gpio (native SIO XOR toggle), then device/rmt
     on PIO.
+- Fourth target board: PJRC Teensy 4.0 (NXP i.MX RT1062, Cortex-M7 600 MHz single core,
+  32 KB I-cache + 32 KB D-cache, 1 MB RAM = 512 KB ITCM/DTCM + 512 KB OCRAM, NO PSRAM,
+  2 MB QSPI flash (64 KB kept by PJRC), USB high speed only, LED on pin 13, HalfKay
+  loader in a second chip: cannot be bricked). Choices of the user (2026-11-16):
+  - base: NXP MCUXpresso SDK (A; not the PJRC Arduino core), FreeRTOS from
+    `C:\tools\pico\FreeRTOS-Kernel` (Cortex-M7 port), compiler from
+    `C:\tools\pico\arm-gnu-toolchain-15.2.rel1`;
+  - link of the agent: native USB CDC (the only port), as the RP2350;
+  - folder `ports/imxrt1062/` with `boards/teensy40/`, on the model of ports/rp2350;
+  - order: minimal firmware (agent, deploy, package run in place from flash, debugger /
+    proxy / cdp suites), then speed measures, then device/gpio (LED 13), device/board,
+    random numbers (TRNG);
+  - DESIGN AGREED (user, 2026-11-16, points 1-7):
+    4. flash without the button by PJRC's convention (A, user): the PC sets the board's
+       USB serial port to 134 bauds, the firmware sees it in the USB interrupt and jumps
+       into the HalfKay loader (`bkpt #251`), then `teensy_loader_cli -w` writes; works
+       even when the program or the agent hangs; the very first flash by the button.
+       `tools/teensy.ps1 flash` does both steps;
+    1. memory: the factory FlexRAM split kept (as the SDK linker file): ITCM 128 KB at
+       0x00000000 (hot engine functions copied at boot as on the RP2350, interrupts, the
+       flash write code), DTCM 128 KB at 0x20000000 (.data / .bss, interrupt stack,
+       small stacks, USB buffers: not cached, no DMA coherency issue), OCRAM 768 KB at
+       0x20200000 (JS heap RegionHeap ~512 KB, FreeRTOS / C heap ~200 KB, JS stack 48 KB);
+       caches on (MPU: flash and OCRAM write-back); QJSX_SMALL_HEAP_DEFINES;
+    2. flash 2 MB at 0x60000000: 0x000000 1 MB = FCB (4 KB) + IVT / boot data (4 KB) +
+       vectors + firmware; 0x100000 two package slots of 256 KB (read in place);
+       0x180000 448 KB /data (LittleFS, later); 0x1F0000 64 KB kept by PJRC (EEPROM
+       emulation + the loader's restore program), never touched. Writes through the
+       RT1062 ROM API (`romapi`): interrupts off and scheduler suspended per 4 KB sector /
+       256 B page, the calling code in ITCM, then caches and FlexSPI read buffers
+       invalidated. FCB (W25Q16JV, quad read 0xEB), IVT, boot data, clock set-up
+       (ARM PLL 600 MHz, USB1 PLL 480 MHz) and linker file written by us (the SDK's board
+       files are in its examples repository, not downloaded); SDK startup .S and
+       system_MIMXRT1062.c used;
+    3. USB VID/PID of PJRC's Teensy serial, 16C0:0483;
+    5. USB stack in bare-metal mode (USB_STACK_BM, under interrupt), bytes handed to the
+       agent's link through a ring buffer + signal; our own minimal OSA
+       (fsl_os_abstraction.h) in ports/imxrt1062/main/;
+    6. `process.platform` = "imxrt1062";
+    7. /data later: LittleFS core (littlefs-project/littlefs, BSD-3) to download then,
+       unless the copy brought by the ESP-IDF component is cleaner to reuse.
+    Build: CMake + Ninja like ports/rp2350, `tools/teensy.ps1 configure|build|flash`,
+    the SDK files listed by hand (no NXP CMake / Kconfig); FreeRTOS port ARM_CM4F.
+  - MILESTONE 1 DONE 2026-11-16 (flashed, the user's Teensy on COM28, `serial:COM28`, no
+    baud rate needed): debugger 72/72, proxy 33/33, cdp 53/53. Firmware 690 KB in
+    flash, 34 KB of hot engine code in ITCM, 25 KB of DTCM, JS heap 512 KB, C heap
+    184 KB free at idle. `tools/teensy.ps1 flash` works without the button (134
+    bauds; the first flash needed it). Code: `ports/imxrt1062/` (CMakeLists.txt,
+    toolchain.cmake, boards/teensy40/{board_config.h, flash_config.c}, main/: imxrt1062.ld,
+    boot_header.c, clock_imxrt1062.c, usb_serial_imxrt1062.cpp (CDC: the class's
+    Send / Recv take the endpoint NUMBER, not the address: the bug of the first try),
+    loader_imxrt1062.cpp (PIT channel 2 -> bkpt #251), flash_imxrt1062.cpp (ROM API
+    from ITCM; fsl_romapi.c placed in ITCM by the linker script), board / platform /
+    syscalls (newlib: _sbrk in OCRAM, __malloc_lock = scheduler suspended),
+    tls_imxrt1062.* + tls_read_tp_imxrt1062.S (thread_local: one block per task made by
+    startThread, FreeRTOS TLS pointer 0, as the ESP32), atomics64_imxrt1062.c (64-bit
+    atomics, interrupts masked), fsl_os_abstraction.h, usb_device_config.h,
+    FreeRTOSConfig.h). Shared with the RP2350: `ports/freertos/compat/` (pthread.h,
+    dirent.h, posix_compat.cpp, moved from ports/rp2350/compat; clock from
+    platform::monotonicMs) and `ports/freertos/slot_storage.*` (the two package slots,
+    from board_rp2350.cpp; the RP2350 still has its own copy until its pass). Not yet:
+    device/gpio, device/board, /data.
+  - MILESTONE 2 (speed) MEASURED 2026-11-16 (temp/allocfull, temp/allocbench,
+    temp/latbench; logs temp/*-teensy.log), against the client's ESP32-S3 (240 MHz, QIO,
+    JS heap in an internal RAM region) measured the same day: 2.3 to 6.7 times faster
+    (compute 1263 -> 404 ms, json 3173 -> 1306, objects 2056 -> 307, properties 600 ->
+    141, closures 553 -> 123, strings 444 -> 135), i.e. 1 to 2.7 times faster per clock
+    (32 KB instruction cache, hot code in ITCM); `await null` 41 us (ESP32-S3 QIO: 195),
+    an awaited setTimeout(0) 102 us (ESP32-S3: ~1000, its 1 ms tick).
+  - MILESTONE 3 DONE 2026-11-16 (tried on the board, temp/teensyprobe, demo
+    temp/teensyled: Morse "QJSX" + heartbeat on the LED): `device/board` (id = the
+    OCOTP UID fuses, 8 bytes; mac base / ethernet = the OCOTP MAC fuses, PJRC's
+    04:e9:e5...; restart, memory, load) and `device/gpio`. Pins = the numbers printed
+    on the Teensy (0-39, LED 13; boards/teensy40/board_pins.h, from PJRC's
+    core_pins.h), on the fast GPIO ports GPIO6-9 (IOMUXC_GPR26-29), mux ALT5 + SION
+    (without SION the pad's level is not read back: outputs read 0, onChange sees
+    nothing), true open drain (pad ODE), pulls 22 k up / 100 k down, both edges by
+    EDGE_SEL on the shared GPIO6_7_8_9 interrupt -> ports/freertos/gpio_watch.
+    toggle() loop 267-313 kHz (ESP32-S3: 244 kHz), 105 kHz while the pin is watched.
+    Random numbers: the TRNG (milestone 1). Compatibility tables: a column
+    "i.MX RT1062" in every typing and in doc/jsmanual/api-readme.md. Not yet: /data.
+  - `device/pwm` DONE 2026-11-16 (design agreed: 1-4 ok), tried on the board
+    (temp/teensypwm; demo temp/teensyled = a PWM heartbeat on the LED, 6 % of the JS
+    thread): ports/imxrt1062/main/hal_pwm_imxrt1062.cpp, table boards/teensy40/board_pwm.h
+    (from PJRC's pwm.c: 31 pins, FlexPWM A/B/X or QuadTimer), registers written
+    directly. IPG 150 MHz / 2^0..7, 16-bit count (FlexPWM <= 65535, QuadTimer <= 65534
+    ticks): about 18 Hz to 75 MHz (the module caps 40 MHz); duty = whole ticks, bits =
+    floor(log2(ticks)) (15 at 1 kHz, 12 at 20 kHz, 7 at 1 MHz); a FlexPWM submodule =
+    one frequency for its outputs (another one: EBUSY; setFrequency refused while
+    shared); FlexPWM duty loaded at the end of the period (CLDOK / LDOK), fault inputs
+    ignored (FLVL, DISMAP 0); QuadTimer as PJRC (CMPLD1 = high, LOAD = 65537 - low,
+    OUTMODE 6, OPS = not inverted), duty 0 or 1 exactly = the pin as a GPIO at that
+    level (the timer cannot hold its output), only the loads change while it runs; X
+    output at most counts - 1 ticks; closed: the pin a GPIO output at its idle level.
+    Not measured with an oscilloscope.
+  INSTALLED 2026-11-16 (user approved the downloads):
+  - `C:\tools\nxp\mcuxsdk-26.06.00-LTS\mcuxsdk\` laid out as west would (no west):
+    sparse shallow clones at the commits of manifest tag v26.06.00-LTS: `mcuxsdk-core`
+    a910e764 (drivers, arch/arm; BSD-3), `devices/RT` = `mcux-devices-rt` 3248d6d5
+    (RT1060/MIMXRT1062 + RT1060/periph: headers, system, startup, gcc linker files;
+    BSD-3), `arch/arm/CMSIS` = `mcu-sdk-cmsis` e07cca54 (Core; Apache-2.0),
+    `middleware/usb` = `mcuxsdk-middleware-usb` 2289f6c8 (device, include, phy, config,
+    utility; BSD-3). LTS supported by NXP until 2028-06; the RNDIS bounds-check fix
+    (26.06.01-lts / 26.09.00) does not concern us (CDC only);
+  - NOT taken: `mcux-component` (outgoing license = NXP proprietary "LA_OPT Online Code
+    Hosting", to accept): the USB stack includes `fsl_os_abstraction.h` (usb.h), so we
+    provide our own small OSA over FreeRTOS;
+  - `C:\tools\teensy\teensy_loader_cli-2.3\teensy_loader_cli.exe` (PJRC, tag 2.3 =
+    03fca415, GPL-3.0, a tool only; source checked: no network, no process spawned),
+    built with mingw-w64 gcc and `-I C:\tools\teensy\compat` (two headers mapping the
+    old `ddk/hidsdi.h`, `ddk/hidclass.h` to mingw-w64's names; the source is untouched):
+    `gcc -O2 -Wall -s -DUSE_WIN32 -I../compat -o teensy_loader_cli.exe
+    teensy_loader_cli.c -lhid -lsetupapi -lwinmm`. Flash: `teensy_loader_cli
+    --mcu=TEENSY40 -w -v file.hex` (press the button, or a soft reboot).
 - After an engine change, also run the upstream engine tests and microbench
   (`tools/quickjs-split/test`, README there; build dir e.g. `C:\temp\qjs-engine-test`, upstream
   release extracted in `C:\temp\qjs-update\v2026-06-04\quickjs-2026-06-04`). Rerun premake

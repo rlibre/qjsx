@@ -294,18 +294,3 @@ hostApplication("qjsx-tests", "qjsx-engine", { "tests/native/*.cpp" }, {}, { "QJ
 hostApplication("qjsx-target", "qjsx-engine-target", {}, { "host/modules/compiler_module.cpp" }, { "QJSX_NO_COMPILER" })
     -- after qjsx: one build of the twin's page at a time
     dependson { "qjsx" }
--- The runner of a program made into an executable of the PC ("qjsx build
--- --executable" appends the package to a copy of it): the engine without
--- compiler, the runtime and the native modules of the PC; not the tool's
--- commands, its JS modules nor the standard library sources (a package
--- holds the library modules it uses). Its own main: host/runtime/.
--- device/serial (common/device/serial_module.cpp) stays: the PC's ports; the
--- other modules of common/device are those of a board (the twin).
-hostApplication("qjsx-runtime", "qjsx-engine-target", { "host/runtime/*.cpp" },
-    { "host/main.cpp", "host/agent_command.cpp", "host/modules/compiler_module.cpp",
-      "host/twin/sim/*.cpp", "common/device/gpio_module.cpp", "common/device/rmt_module.cpp",
-      "common/device/usb_module.cpp", "common/device/i2c_module.cpp", "common/device/adc_module.cpp",
-      "common/device/pwm_module.cpp", "common/device/board_module.cpp", "host/js/*.js", "host/twin/js/*.js",
-      "host/twin/api/twin.js", "host/twin/parts/*/model.js", "host/twin/ui/x4.config.json", "lib/stdlib/src/*.js",
-      "common/runtime/modules/globals.d.ts" },
-    { "QJSX_NO_COMPILER" })

@@ -8,10 +8,9 @@
 // The permissions of a program of the PC (doc/architecture.md 6.7), on
 // Deno's model: nothing is allowed unless granted.
 //   - "qjsx run script.js": only what its options grant (readRunOption);
-//   - a package ("qjsx run app.qjspkg", an executable made by "qjsx build
-//     --executable"): the "desktop" section of its manifest, copied from
-//     qjsx.json by qjsx build (applyDesktopSection), plus the options of
-//     qjsx run if any:
+//   - a package ("qjsx run app.qjspkg"): the "desktop" section of its
+//     manifest, copied from qjsx.json by qjsx build (applyDesktopSection),
+//     plus the options of qjsx run if any:
 //
 //       "desktop": {
 //           "rootFolder": "${userAppDataFolder}",
@@ -37,8 +36,8 @@
 
 namespace host {
 
-// The root folder on a command line ("qjsx run", an executable): the only
-// option an executable takes for itself (the program does not see it).
+// The root folder on the command line of "qjsx run" (before the script: the
+// program does not see it).
 const char *const ROOT_FOLDER_OPTION = "--qjsx-root-folder=";
 
 /**
@@ -60,8 +59,8 @@ bool readRunOption(const char *word, rt::Permissions *permissions, const char **
  * Completes the permissions of a package run on the PC from the "desktop"
  * section of its manifest: root folder (option, then QJSX_ROOT_FOLDER, then
  * the manifest), variables, granted kinds. 'programFolder' is
- * ${executableFolder} (the executable's folder, or the package file's for
- * "qjsx run app.qjspkg"). False after printing why: the run must not start.
+ * ${executableFolder}: the folder of the package file ("qjsx run
+ * app.qjspkg"). False after printing why: the run must not start.
  */
 bool applyDesktopSection(const uint8_t *package, size_t size, const char *programFolder, const char *rootOption,
                          rt::Permissions *permissions);

@@ -31,8 +31,37 @@
         `"reset": true`), bande de LEDs en grille de carrés plats, couleur d'une LED
         (racine cubique par canal, puis matrice des trois LEDs du WS2812 vers sRGB : le blanc
         reste blanc ; à affiner plus tard par une table, utilisateur) ;
-      - **en cours** : GC au repos (mesure d'un passage sur l'application cliente), lenteurs
-        du tas en région remesurées en QIO.
+      - **troisième carte ESP32 : ESP32-S3-DevKitC-1 N8R8** (de l'utilisateur, 2026-11-16 ;
+        puce de RÉVISION v0.1, MAC f4:12:fa:df:1b:34, COM27, console 921600 :
+        `serial:COM27@921600`) : dossier `ports/esp32/boards/esp32-s3-devkitc-n8r8/`
+        (8 Mo de flash en QIO, table 8MB.csv, PSRAM octale), compilé, flashé ; 8 Mo de
+        PSRAM vus, `/data` 1,9 Mo ; débogueur 72/72, proxy 33/33, cdp 53/53. Pas de JSON de
+        jumeau. Flasher à volonté (utilisateur) ;
+      - **Teensy 4.0, port i.MX RT1062, jalon 1 FAIT** (2026-11-16, CLAUDE.md « Fourth
+        target board ») : `ports/imxrt1062/`, SDK MCUXpresso 26.06.00-LTS de NXP,
+        FreeRTOS, USB CDC, flash par l'API de la ROM, `tools/teensy.ps1` (flash sans
+        bouton par les 134 bauds) ; sur COM28 : débogueur 72/72, proxy 33/33, cdp 53/53.
+        Jalon 2 MESURÉ (CLAUDE.md) : 2,3 à 6,7 fois plus rapide que l'ESP32-S3 de la
+        carte cliente, `await null` 41 µs (195 sur l'ESP32-S3).
+        Jalon 3 FAIT : `device/gpio` (broches numérotées comme sur la carte, LED 13,
+        toggle 267-313 kHz) et `device/board`, démo morse + battement de cœur
+        (temp/teensyled). `device/pwm` FAIT le même jour (FlexPWM + QuadTimer, 31
+        broches ; démo : battement de cœur en PWM sur la LED ; pas vérifié à
+        l'oscilloscope). Suite : `/data` plus tard ;
+      - **GC au repos : INUTILE pour l'application cliente** (mesuré le 2026-11-16, sonde
+        `__gc()` de l'option `QJSX_MEMORY_MAP`, application copiée dans `gcprobe/` du dossier
+        client) : tas JS stable à 200,8-201,6 Ko pendant 30 s, AUCUN passage automatique
+        (tout est libéré par le comptage de références, pas de cycles) ; un passage forcé
+        dure ≈ 3 ms et ne libère rien. À reconsidérer pour un programme qui fait des cycles ;
+      - **tas en région contre tas partagé, remesuré en QIO** (2026-11-16, temp/allocfull et
+        temp/allocbench, journaux temp/alloc*-qio.log ; région / partagé) : calcul 1263 =
+        1263, tableaux =, fermetures 553 / 546 (les +85 % de DIO ont disparu : c'était la
+        flash), JSON +8 %, propriétés +24 %, objets +24 % (en DIO la région était plus
+        rapide de 9 % : bruit de placement du code), chaînes +64 % (stable en DIO et QIO) :
+        les chaînes de 400 et 2400 octets ×2,2 et +64 %, celles de 100 octets égales. Piste :
+        les blocs de plus de 128 o vont à `RegionHeap` (en flash, derrière le cache de 16 Ko)
+        alors que le tas d'ESP-IDF (tas partagé) tourne en IRAM. Essai possible : `RegionHeap`
+        en IRAM (réglage bas niveau) : REPORTÉ (utilisateur, 2026-11-16 : « plus tard »).
 
 - [x] **Dernier état (2026-11-13 après-midi ; tout le matin est commité dans 3d95c7d ;
       l'utilisateur commite)** :
@@ -715,7 +744,8 @@
 
 ## Backlog
 
-- [x] **Exécutable pour le « device » desktop** (FAIT le 2026-11-12 : `qjsx build
+- [x] **Exécutable pour le « device » desktop** (RETIRÉ le 2026-11-16, voir « Retirer le
+      mode standalone » ; FAIT le 2026-11-12 : `qjsx build
       --executable`, `qjsx-runtime` + le paquet collé à la fin, 1,3 Mo pour la démo ;
       sans compilateur ; tests dans run-tests.sh) (utilisateur, 2026-11-12) : générer un
       exécutable autonome qui embarque un programme (son paquet), le PC jouant le rôle d'un
@@ -978,12 +1008,13 @@
 
 - [ ] **Livetrace des ports** (utilisateur, 2026-11-13) : à préciser.
 
-- [ ] **Retirer le mode standalone** (utilisateur, 2026-11-13 : « ça a un intérêt
-      discutable ») : compris comme `qjsx build --executable` (le runner `qjsx-runtime` +
-      le paquet collé à la fin, CLAUDE.md « qjsx-runtime ») ; à retirer avec ses tests
-      (run-tests.sh), sa doc (architecture.md, guide « Programs of the PC » du manuel,
-      aide de `qjsx`) et la section `desktop` de `qjsx.json` si elle ne sert plus qu'à
-      lui (elle sert aussi à `qjsx run` d'un paquet : à voir).
+- [x] **Retirer le mode standalone** (utilisateur, 2026-11-13 : « ça a un intérêt
+      discutable » ; FAIT le 2026-11-16, « vire le mode executable ») : `qjsx build
+      --executable`, le projet premake `qjsx-runtime` (host/runtime/), host/js/executable.js,
+      leurs tests (run-tests.sh), la doc (architecture.md, guide « Programs of the PC »,
+      aide de `qjsx`, .d.ts). GARDÉS, car `qjsx run app.qjspkg` s'en sert : la section
+      `desktop` de `qjsx.json`, `--qjsx-root-folder`, `QJSX_ROOT_FOLDER`,
+      `${executableFolder}` (= le dossier du paquet, nom inchangé).
 
 - [ ] **« Fusible » contre le debug d'une carte en production** (utilisateur, 2026-11-13) :
       un réglage, façon eFuse, qui empêche de déboguer (et sans doute de déployer, de lire
@@ -1081,7 +1112,15 @@
       construire le firmware ESP32 par carte (image ESP-IDF officielle) ; attacher à la
       release les exécutables, `stdlib.qjslib` et les `qjsx.bin` (avec l'adresse de
       flashage). Questions : déclencheur (tag `v*` ?), plateformes, signature, numéro de
-      version (`QJSX_VERSION`).
+      version (`QJSX_VERSION`). Rappel de l'utilisateur (2026-11-16) : les firmwares ET
+      `qjsx` en release dans GitHub.
+
+- [ ] **Secrets sur un device : NVS chiffrée ?** (idée de l'utilisateur, 2026-11-16) : à
+      discuter. Aujourd'hui nos fichiers sont sur LittleFS (`/data`), pas dans la NVS.
+      ESP-IDF chiffre la NVS de deux façons : clés dans une partition `nvs_keys` protégée
+      par le chiffrement de la flash, ou clé dérivée d'une clé HMAC en eFuse (S3 : sans
+      chiffrer toute la flash). Les deux brûlent des eFuses (irréversible) : à essayer sur
+      une carte de test, jamais sur la carte cliente sans accord.
 
 - [ ] **Accepter TypeScript** (demande de l'utilisateur, 2026-11-11) : des sources `.ts` dans
       un projet qjsx. À concevoir avant de coder : qui retire les types (un transpileur

@@ -15,6 +15,8 @@
 #   QJSX_ENGINE_SOURCES    the engine (C)
 #   QJSX_COMMON_SOURCES    runtime, modules, agent (C++)
 #   QJSX_FREERTOS_SOURCES  the FreeRTOS part of platform.h, shared by the ports
+#   QJSX_NEWLIB_COMPAT_DIR, QJSX_NEWLIB_COMPAT_SOURCES  the POSIX functions the
+#                          newlib of the Arm toolchain lacks (RP2350, i.MX RT1062)
 #   QJSX_FREERTOS_GPIO_SOURCES  the watch of changing pins, shared by the FreeRTOS
 #                          ports that implement common/hal/hal_gpio.h
 #   QJSX_DEVICE_BOARD_SOURCES the module device/board (board.h, restart.h): every port
@@ -55,6 +57,12 @@ file(GLOB QJSX_COMMON_SOURCES
     "${QJSX_ROOT}/common/agent/*.cpp")
 
 set(QJSX_FREERTOS_SOURCES "${QJSX_ROOT}/ports/freertos/platform_freertos.cpp")
+
+# the POSIX functions the newlib of the Arm toolchain lacks (RP2350, i.MX
+# RT1062): its folder goes before the system headers, its source in the
+# firmware
+set(QJSX_NEWLIB_COMPAT_DIR "${QJSX_ROOT}/ports/freertos/compat")
+set(QJSX_NEWLIB_COMPAT_SOURCES "${QJSX_NEWLIB_COMPAT_DIR}/posix_compat.cpp")
 
 # the watch of changing pins of a FreeRTOS port that implements hal_gpio.h
 set(QJSX_FREERTOS_GPIO_SOURCES "${QJSX_ROOT}/ports/freertos/gpio_watch.cpp")

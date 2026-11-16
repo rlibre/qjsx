@@ -35,9 +35,9 @@
  * path.resolve("config.json");                // process.cwd() + "/config.json"
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | ✓ | ✓ | ✓ | ✓ |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | ✓ | ✓ | ✓ | ✓ | ✓ |
  *
  * @module stdlib/path
  */

@@ -25,9 +25,9 @@
  * catches typos), a missing field takes its default.
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | — | ✓ | — | ✓ ¹ |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | — | ✓ | — | — | ✓ ¹ |
  *
  * ¹ The parts wired on the bus answer, any other address NACKs.
  *

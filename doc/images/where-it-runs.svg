@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="316" viewBox="0 0 880 316" role="img" aria-label="One project runs in three places: on the board, on its digital twin, and on the PC; the board and the twin share the modules, the deploy and the debugger.">
+  <!-- qjsx: one program, three places, used by README.md. Hand-written; light
+       and dark through prefers-color-scheme; one font size, bold for titles. -->
+  <style>
+    svg { --bg: #f6f8fa; --box: #ffffff; --edge: #d0d7de; --text: #1f2328; --muted: #59636e;
+          --line: #59636e; --pc: #0969da; --pc-fill: #ddf4ff; --dev: #1a7f37; --dev-fill: #dafbe1; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg: #161b22; --box: #0d1117; --edge: #3d444d; --text: #e6edf3; --muted: #9198a1;
+            --line: #9198a1; --pc: #4493f8; --pc-fill: #0f2440; --dev: #3fb950; --dev-fill: #0f2a1a; }
+    }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+           font-size: 14px; fill: var(--text); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .title { font-weight: 600; }
+    .muted { fill: var(--muted); }
+    .c { text-anchor: middle; }
+    .end { text-anchor: end; }
+    .bg { fill: var(--bg); }
+    .box { fill: var(--box); stroke: var(--edge); stroke-width: 1; }
+    .pc { fill: var(--pc-fill); stroke: var(--pc); stroke-width: 1.5; }
+    .dev { fill: var(--dev-fill); stroke: var(--dev); stroke-width: 1.5; }
+    .dashed { stroke-dasharray: 5 4; }
+    .arrow { fill: none; stroke: var(--line); stroke-width: 1.5; }
+    .head { fill: var(--line); }
+  </style>
+  <defs>
+    <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse">
+      <path class="head" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="880" height="316" rx="12"/>
+
+  <!-- the project -->
+  <rect class="box" x="330" y="16" width="220" height="56" rx="6"/>
+  <text class="title c" x="440" y="39">Your project</text>
+  <text class="mono muted c" x="440" y="59">qjsx.json + src/</text>
+
+  <!-- the three places -->
+  <rect class="dev" x="16" y="150" width="272" height="100" rx="8"/>
+  <text class="title c" x="152" y="176">The board</text>
+  <text class="muted c" x="152" y="200">ESP32-S3, RP2350</text>
+  <text class="muted c" x="152" y="222">runs the bytecode from flash</text>
+
+  <!-- dashed: a board played by the PC -->
+  <rect class="dev dashed" x="304" y="150" width="272" height="100" rx="8"/>
+  <text class="title c" x="440" y="176">The digital twin</text>
+  <text class="muted c" x="440" y="200">qjsx agent: the board on the PC</text>
+  <text class="muted c" x="440" y="222">pins, parts, buses in a web page</text>
+
+  <rect class="pc" x="592" y="150" width="272" height="100" rx="8"/>
+  <text class="title c" x="728" y="176">The PC</text>
+  <text class="muted c" x="728" y="200">qjsx run, without a board</text>
+  <text class="muted c" x="728" y="222">with Deno-like permissions</text>
+
+  <!-- what the board and the twin share -->
+  <rect class="box" x="16" y="266" width="560" height="34" rx="6"/>
+  <text class="c" x="296" y="288">same modules, same deploy, same debugger in VS Code</text>
+
+  <!-- arrows, drawn last -->
+  <path class="arrow" d="M400 72 L154 148" marker-end="url(#head)"/>
+  <text class="mono end" x="284" y="100">qjsx deploy</text>
+
+  <path class="arrow" d="M440 72 V148" marker-end="url(#head)"/>
+  <text class="mono" x="450" y="116">qjsx deploy</text>
+
+  <path class="arrow" d="M480 72 L726 148" marker-end="url(#head)"/>
+  <text class="mono" x="600" y="100">qjsx run</text>
+</svg>

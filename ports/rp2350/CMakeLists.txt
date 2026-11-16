@@ -43,7 +43,7 @@ set(QJSX_VERSION "${CMAKE_MATCH_1}")
 
 # the sources shared by every device port
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/qjsx.cmake")
-set(QJSX_COMPAT_DIR "${CMAKE_CURRENT_LIST_DIR}/compat")
+set(QJSX_COMPAT_DIR "${QJSX_NEWLIB_COMPAT_DIR}")
 
 # the engine in its own library: its "list.h" (QuickJS's lists) would hide
 # FreeRTOS's in the firmware's sources, and FreeRTOS's would hide it here.
@@ -104,7 +104,7 @@ add_executable(qjsx
     main/board_rp2350.cpp
     main/platform_rp2350.cpp
     main/psram_rp2350.cpp
-    compat/posix_compat.cpp)
+    ${QJSX_NEWLIB_COMPAT_SOURCES})
 
 # FreeRTOS's headers first (its list.h, not QuickJS's: our code never includes
 # the engine's internal headers), then ours

@@ -9,7 +9,9 @@
  * Digital pins: inputs, push-pull outputs, open-drain outputs, change
  * callbacks and waits for a level.
  *
- * Pins are GPIO numbers of the chip. Nothing is checked beyond their range: a
+ * Pins are GPIO numbers of the chip (ESP32, RP2350), or the pin numbers printed
+ * on the board where the chip has no single numbering (Teensy 4.0: 0 to 39, the
+ * LED is 13). Nothing is checked beyond their range: a
  * pin of the flash, of the PSRAM or of the console UART can be taken, the
  * program is responsible. A pin is NOT reset at the end of the program (an
  * output keeps its level); only `close()` puts it back as at boot.
@@ -18,9 +20,9 @@
  * catches typos), a missing field takes its default.
  *
  * @compatibility
- * | PC | ESP32 | RP2350 | Twin |
- * |---|---|---|---|
- * | — | ✓ | ✓ | ✓ |
+ * | PC | ESP32 | RP2350 | i.MX RT1062 | Twin |
+ * |---|---|---|---|---|
+ * | — | ✓ | ✓ | ✓ | ✓ |
  *
  * @module device/gpio
  */

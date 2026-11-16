@@ -708,9 +708,7 @@ What the server does:
     another engine is refused when it starts ("the names of the package are not the ones
     of this engine: rebuild it").
   - The package must stay where it is while its program runs: the flash slot of a running
-    program is never erased, a package in RAM is kept until its run ends, and the
-    executable of `qjsx build --executable` moves its package to the start of the block it
-    read (an aligned address).
+    program is never erased, and a package in RAM is kept until its run ends.
   - A package without `names.bin` is still read the former way. The `.qjslib` libraries
     are not linked: the build links their modules with the program's.
 - The zip (with its CRC32) is written by the host JS.
@@ -1610,14 +1608,9 @@ How to add a board, or a new chip, is described step by step in
 >   `common/runtime/package.*`, without copying, shared with the device). Module loader: native,
 >   bytecode of the package, embedded JS, files;
 > - `qjsx build [directory]`: compiles the project (`qjsx.json`) into a `.qjspkg` (see 4.1), with
->   the library modules it imports (4.5); `--executable` (2026-11-12) also makes an executable
->   of the PC that runs it, `<output>/<name>[.exe]`: a copy of `qjsx-runtime` (built next to
->   `qjsx`: engine without compiler, runtime, native modules of the PC, no tool command, 1.25 MB
->   in Release without symbols) with the package appended and a 16-byte trailer
->   (`QJSXPKG1` + 64-bit size, little endian; `host/runtime/runtime_main.cpp`,
->   `host/js/executable.js`); `process.argv` = [executable, executable, arguments], as a
->   standalone Node executable; on Linux / macOS the file must be `chmod +x`ed (no chmod in
->   `sys/fs` yet);
+>   the library modules it imports (4.5). Its former `--executable` option (a copy of a
+>   runner, `qjsx-runtime`, with the package appended) was removed on 2026-11-16 (user: of
+>   doubtful use); a program of the PC is run by `qjsx run app.qjspkg`;
 > - `qjsx mklib [directory] [--output <file>]`: compiles a library project into a `.qjslib`
 >   (4.5);
 > - `qjsx deploy [package] --target T [--token X] [--no-run] [--ram | --reset] [--monitor [--until-exit]]`,
@@ -1761,9 +1754,7 @@ A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with
 
 A twin makes the desktop agent a board: a program written for the board runs on the PC, at
 the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `qjsx debug`,
-`qjsx monitor`). No executable is involved: the tool itself plays the board (the standalone
-executable of `qjsx build --executable` is a different thing, a program delivered as a PC
-application).
+`qjsx monitor`). No executable is involved: the tool itself plays the board.
 
 - **Starting it**:
   - `qjsx agent --board <name | file.json> [--ui-port 8090] [--usb-port <port>]
@@ -2055,8 +2046,8 @@ application).
 Goal (user): a bug in the JS of a program running on the PC must not be able to wipe a
 disk. Model: Deno's — nothing is allowed unless granted.
 
-- **Where it applies**: a program of the PC, i.e. `qjsx run script.js`, `qjsx run
-  app.qjspkg`, and an executable made by `qjsx build --executable`. A **device has no
+- **Where it applies**: a program of the PC, i.e. `qjsx run script.js` and `qjsx run
+  app.qjspkg`. A **device has no
   permissions** (user): its working folder is the board's data folder (`process.cwd()`,
   base of relative `fs` paths) and everything is allowed; but the desktop agent and the
   twin, which run on the PC's own disk, **simulate the partition of a board**: their
@@ -2085,14 +2076,15 @@ disk. Model: Deno's — nothing is allowed unless granted.
 
   each kind is `true`, `false` or a list; a path starts with a variable (followed by `/` or
   nothing) or is absolute, else `qjsx build` refuses it. Variables: `${executableFolder}`
-  (the executable's folder; the package file's for `qjsx run app.qjspkg`),
+  (the folder of the package file; the name dates from the executables of the former
+  `qjsx build --executable`),
   `${userAppDataFolder}` (`%APPDATA%/<name>`, `~/Library/Application Support/<name>`,
   `$XDG_DATA_HOME/<name>` or `~/.local/share/<name>`; not created), `${currentFolder}` (the
   current folder at launch), `${rootFolder}` (needs `rootFolder`). Without `permissions`,
   a root folder may be read, not written; without anything, nothing is allowed.
 - **Root folder**: the program's `process.cwd()`, base of its relative `fs` paths. From
-  `--qjsx-root-folder=<folder>` (the only option an executable takes for itself; removed
-  from `process.argv`), else the environment variable `QJSX_ROOT_FOLDER`, else
+  `--qjsx-root-folder=<folder>` (an option of `qjsx run`, before the script), else the
+  environment variable `QJSX_ROOT_FOLDER`, else
   `rootFolder` of the manifest. The root of a file system (`/`, `C:/`, `//server/share`) is
   refused: nothing runs.
 - **`qjsx run` options**, before the script (after it, the arguments are the program's):

@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="356" viewBox="0 0 880 356" role="img" aria-label="qjsx build follows the imports of your modules and of the libraries, and writes a package: manifest, names and bytecode go to the board; debug info and sources stay on the PC.">
+  <!-- qjsx: what a package holds, used by README.md. Hand-written; light and
+       dark through prefers-color-scheme; one font size, bold for titles. -->
+  <style>
+    svg { --bg: #f6f8fa; --box: #ffffff; --edge: #d0d7de; --text: #1f2328; --muted: #59636e;
+          --line: #59636e; --pc: #0969da; --pc-fill: #ddf4ff; --dev: #1a7f37; --dev-fill: #dafbe1; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg: #161b22; --box: #0d1117; --edge: #3d444d; --text: #e6edf3; --muted: #9198a1;
+            --line: #9198a1; --pc: #4493f8; --pc-fill: #0f2440; --dev: #3fb950; --dev-fill: #0f2a1a; }
+    }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+           font-size: 14px; fill: var(--text); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .title { font-weight: 600; }
+    .muted { fill: var(--muted); }
+    .c { text-anchor: middle; }
+    .bg { fill: var(--bg); }
+    .box { fill: var(--box); stroke: var(--edge); stroke-width: 1; }
+    .pc { fill: var(--pc-fill); stroke: var(--pc); stroke-width: 1.5; }
+    .dev { fill: var(--dev-fill); stroke: var(--dev); stroke-width: 1.5; }
+    .pc-text { fill: var(--pc); }
+    .dev-text { fill: var(--dev); }
+    .pc-line { fill: none; stroke: var(--pc); stroke-width: 1.5; }
+    .dev-line { fill: none; stroke: var(--dev); stroke-width: 1.5; }
+    .arrow { fill: none; stroke: var(--line); stroke-width: 1.5; }
+    .dashed { stroke-dasharray: 5 4; }
+    .head { fill: var(--line); }
+  </style>
+  <defs>
+    <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse">
+      <path class="head" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="880" height="356" rx="12"/>
+
+  <!-- what goes in: your modules and the libraries -->
+  <rect class="box" x="16" y="40" width="200" height="100" rx="6"/>
+  <text class="title c" x="116" y="64">Your modules</text>
+  <text class="mono" x="36" y="92">src/main.js</text>
+  <text class="mono" x="36" y="116">src/sensors.js</text>
+
+  <rect class="box" x="16" y="164" width="200" height="176" rx="6"/>
+  <text class="mono title c" x="116" y="188">stdlib.qjslib</text>
+  <text class="mono title" x="36" y="216">stdlib/rgbled</text>
+  <text class="mono muted" x="36" y="240">stdlib/path</text>
+  <text class="mono muted" x="36" y="264">stdlib/tasks</text>
+  <text class="mono muted" x="36" y="288">stdlib/usb</text>
+  <text class="muted c" x="116" y="322">or your own .qjslib</text>
+
+  <!-- the build -->
+  <rect class="box" x="262" y="150" width="150" height="110" rx="6"/>
+  <text class="mono title c" x="337" y="176">qjsx build</text>
+  <text class="muted c" x="337" y="200">follows imports</text>
+  <text class="muted c" x="337" y="222">compiles</text>
+  <text class="muted c" x="337" y="244">links the names</text>
+
+  <text class="muted c" x="337" y="292">only what is</text>
+  <text class="muted c" x="337" y="310">imported goes in</text>
+
+  <!-- the package -->
+  <rect class="box" x="466" y="16" width="250" height="322" rx="8"/>
+  <text class="mono title" x="482" y="42">app.qjspkg</text>
+  <text class="muted" x="576" y="42">a zip</text>
+
+  <rect class="dev" x="480" y="56" width="222" height="44" rx="5"/>
+  <text class="mono title" x="494" y="75">manifest.json</text>
+  <text class="muted" x="494" y="93">build id, modules</text>
+
+  <rect class="dev" x="480" y="106" width="222" height="44" rx="5"/>
+  <text class="mono title" x="494" y="125">names.bin</text>
+  <text class="muted" x="494" y="143">names of the program</text>
+
+  <rect class="dev" x="480" y="156" width="222" height="44" rx="5"/>
+  <text class="mono title" x="494" y="175">bytecode/</text>
+  <text class="muted" x="494" y="193">main, sensors, rgbled</text>
+
+  <path class="arrow dashed" d="M480 213 H702"/>
+
+  <rect class="pc" x="480" y="226" width="222" height="44" rx="5"/>
+  <text class="mono title" x="494" y="245">debug/</text>
+  <text class="muted" x="494" y="263">lines, scopes, names</text>
+
+  <rect class="pc" x="480" y="276" width="222" height="44" rx="5"/>
+  <text class="mono title" x="494" y="295">src/</text>
+  <text class="muted" x="494" y="313">exact copy of the sources</text>
+
+  <!-- where each part goes -->
+  <path class="dev-line" d="M726 56 H734 V200 H726"/>
+  <text class="title dev-text" x="746" y="104">to the board</text>
+  <text class="muted" x="746" y="126">reduced package,</text>
+  <text class="muted" x="746" y="146">runs in place</text>
+  <text class="muted" x="746" y="166">from flash</text>
+
+  <path class="pc-line" d="M726 226 H734 V320 H726"/>
+  <text class="title pc-text" x="746" y="266">stays on the PC</text>
+  <text class="muted" x="746" y="288">for the debugger</text>
+
+  <!-- arrows, drawn last -->
+  <path class="arrow" d="M216 90 L260 178" marker-end="url(#head)"/>
+  <path class="arrow" d="M150 211 C200 211 220 228 260 228" marker-end="url(#head)"/>
+  <path class="arrow" d="M412 205 H464" marker-end="url(#head)"/>
+</svg>
