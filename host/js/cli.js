@@ -392,7 +392,9 @@ async function deviceInfo(device) {
     const heapPeak = answer.get(KEY.JS_HEAP_PEAK);
     if (heapPeak !== undefined) {
         const when = answer.get(KEY.RUNNING) === true ? "this run" : "last run";
-        console.log(`JS heap:  ${formatSize(heapUsed)} used, ${formatSize(heapPeak)} at most (${when})`);
+        const heapSize = answer.get(KEY.JS_HEAP_SIZE);
+        const ofRegion = heapSize === undefined ? "" : `, of ${formatSize(heapSize)}`;
+        console.log(`JS heap:  ${formatSize(heapUsed)} used, ${formatSize(heapPeak)} at most (${when})${ofRegion}`);
     }
 
     // the free memory of the board (not the desktop's)

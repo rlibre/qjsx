@@ -25,7 +25,11 @@
 //     positions: [pc, sourceOffset, kind, pc, sourceOffset, kind, ...]
 //                (kind 0 expression, 1 statement, 2 return; sorted by pc),
 //     arguments: [{ name, flags }], locals: [{ name, scope, flags }],
-//     closures: [{ name, flags }], scopes: [{ parent, start, end }] }
+//     closures: [{ name, flags }], scopes: [{ parent, start, end }],
+//     constants: [{ name, value }] }
+// 'constants': with the function of a module only, the constants of the
+// module that the compiler replaced by their value (a number or a string):
+// no variable holds them, the debugger shows them from here.
 // Source offsets are byte offsets in the UTF-8 source; flags are the
 // JS_DEBUG_VARIABLE_* bits.
 // 'dynamicImport': false makes 'import()' a syntax error, reported at its
@@ -47,6 +51,7 @@
 // Note: compiling a module registers it in the context of the tool; this is
 // harmless for a command-line tool that compiles each file once.
 #include "jsbind.h"
+#include "memory.h"
 #include "quickjs-debug.h"
 #include "version.h"
 
@@ -129,6 +134,22 @@ JSValue variablesToJs(JSContext *ctx, const JSDebugVariable *variables, int coun
 }
 
 /**
+ * The constants of a module replaced by their value, as an array of
+ * { name, value }.
+ */
+JSValue constantsToJs(JSContext *ctx, const JSDebugFunctionInfo *info) {
+    JSValue array = JS_NewArray(ctx);
+
+    for (int i = 0; i < info->constant_count; i++) {
+        JSValue entry = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, entry, "name", JS_AtomToString(ctx, info->constants[i].name));
+        JS_SetPropertyStr(ctx, entry, "value", JS_DupValue(ctx, info->constants[i].value));
+        JS_SetPropertyUint32(ctx, array, i, entry);
+    }
+    return array;
+}
+
+/**
  * The scopes of a function as an array of { parent, start, end }: parent
  * is the index of the enclosing scope (-1 for scope 0), start / end the
  * source range [start, end).
@@ -168,6 +189,11 @@ void collectFunction(JSContext *ctx, const JSDebugFunctionInfo *info, void *opaq
     JS_SetPropertyStr(ctx, record, "locals", variablesToJs(ctx, info->locals, info->local_count, true));
     JS_SetPropertyStr(ctx, record, "closures", variablesToJs(ctx, info->closures, info->closure_count, false));
     JS_SetPropertyStr(ctx, record, "scopes", scopesToJs(ctx, info));
+
+    // the constants of its module, with the module function only
+    if (info->constant_count > 0) {
+        JS_SetPropertyStr(ctx, record, "constants", constantsToJs(ctx, info));
+    }
 
     // records come in function number order (numbers are given in
     // creation order), so the index is the number
@@ -330,18 +356,142 @@ js::Value compile(js::Str source, js::Str name, js::Optional<CompileOptions> opt
     return compileResult(ctx, &copy, &extras);
 }
 
+// ### Link #####################################################################
+
+/**
+ * The bytes of a Uint8Array (not copied): nullptr when 'array' is not one.
+ */
+const uint8_t *bytesOf(JSContext *ctx, JSValueConst array, size_t *size) {
+    // its buffer, then the part of it the array shows
+    size_t offset = 0;
+    size_t length = 0;
+    JSValue buffer = JS_GetTypedArrayBuffer(ctx, array, &offset, &length, nullptr);
+    if (JS_IsException(buffer)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return nullptr;
+    }
+
+    size_t bufferSize = 0;
+    const uint8_t *data = JS_GetArrayBuffer(ctx, &bufferSize, buffer);
+    JS_FreeValue(ctx, buffer);
+    if (data == nullptr) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return nullptr;
+    }
+
+    *size = length;
+    return data + offset;
+}
+
+/**
+ * JS link(modules): { names, modules }. 'modules': the bytecode of every
+ * module of a package, as compile() gives it (each with the table of its own
+ * names). Returns the same modules written with fixed name numbers
+ * (JS_WRITE_OBJ_FIXED_ATOMS), in the same order, and 'names', the image of
+ * the names of the whole package (JS_SetPackageAtoms): a device then runs
+ * the bytecode where the package lies, and keeps no name in its RAM.
+ *
+ * How: a runtime of its own, whose only names are the engine's, reads every
+ * module; the names they use get the numbers that follow the engine's, in
+ * the order they come; these numbers are the ones written.
+ */
+js::Value link(js::Value modules) {
+    JSContext *ctx = js::context();
+
+    // how many modules
+    JSValue lengthValue = JS_GetPropertyStr(ctx, modules.get(), "length");
+    uint32_t count = 0;
+    JS_ToUint32(ctx, &count, lengthValue);
+    JS_FreeValue(ctx, lengthValue);
+
+    // the runtime of the link: a context without built-in objects is enough
+    // to read and write bytecode, and makes no name
+    JSRuntime *linkRuntime = JS_NewRuntime();
+    JSContext *linkContext = JS_NewContextRaw(linkRuntime);
+    JSValue *read = (JSValue *)memory::allocate(sizeof(JSValue) * (count + 1));
+    uint32_t readCount = 0;
+    const char *problem = nullptr;
+
+    // 1. read every module: its names take the next numbers
+    for (uint32_t i = 0; i < count && problem == nullptr; i++) {
+        JSValue element = JS_GetPropertyUint32(ctx, modules.get(), i);
+        size_t size = 0;
+        const uint8_t *data = bytesOf(ctx, element, &size);
+        if (data == nullptr) {
+            problem = "compiler.link: every module must be a Uint8Array";
+        } else {
+            JSValue module = JS_ReadObject(linkContext, data, size, JS_READ_OBJ_BYTECODE);
+            if (JS_IsException(module)) {
+                JS_FreeValue(linkContext, JS_GetException(linkContext));
+                problem = "compiler.link: a module is not bytecode of this compiler";
+            } else {
+                read[readCount++] = module;
+            }
+        }
+        JS_FreeValue(ctx, element);
+    }
+
+    // 2. the image of the names, 3. each module written with their numbers
+    JSValue result = JS_NewObject(ctx);
+    JSValue written = JS_NewArray(ctx);
+    if (problem == nullptr) {
+        size_t namesSize = 0;
+        uint8_t *names = JS_WritePackageAtoms(linkContext, &namesSize);
+        if (names == nullptr) {
+            JS_FreeValue(linkContext, JS_GetException(linkContext));
+            problem = "compiler.link: the names of the package cannot be written";
+        } else {
+            JS_SetPropertyStr(ctx, result, "names", js::Buffer::copy(names, namesSize).value().dup());
+            js_free(linkContext, names);
+        }
+    }
+
+    for (uint32_t i = 0; i < readCount && problem == nullptr; i++) {
+        size_t size = 0;
+        uint8_t *bytecode = JS_WriteObject(linkContext, &size, read[i], JS_WRITE_OBJ_BYTECODE | JS_WRITE_OBJ_FIXED_ATOMS);
+        if (bytecode == nullptr) {
+            JS_FreeValue(linkContext, JS_GetException(linkContext));
+            problem = "compiler.link: a module cannot be written";
+        } else {
+            JS_SetPropertyUint32(ctx, written, i, js::Buffer::copy(bytecode, size).value().dup());
+            js_free(linkContext, bytecode);
+        }
+    }
+    JS_SetPropertyStr(ctx, result, "modules", written);
+
+    // free the modules, then the runtime of the link
+    for (uint32_t i = 0; i < readCount; i++) {
+        JS_FreeValue(linkContext, read[i]);
+    }
+
+    memory::release(read);
+    JS_FreeContext(linkContext);
+    JS_FreeRuntime(linkRuntime);
+
+    if (problem != nullptr) {
+        JS_FreeValue(ctx, result);
+        return js::fail(problem);
+    }
+    return js::Value(ctx, result);
+}
+
 } // namespace
 
 /**
- * Module "sys/compiler": compile(), and the versions recorded in the package
- * manifest.
+ * Module "sys/compiler": compile(), link(), and the versions recorded in the
+ * package manifest.
  */
 JS_MODULE(compiler, module) {
     JS_FUNCTION(module, compile);
+    JS_FUNCTION(module, link);
 
     // recorded in the package manifest: bytecode is only valid for the engine
     // version that produced it
     module.constant("quickjsVersion", CONFIG_VERSION);
     module.constant("qjsxVersion", QJSX_VERSION);
     module.constant("bytecodeVersion", JS_GetBytecodeVersion());
+
+    // identifies the names of the engine: a package linked for them only runs
+    // on an engine that has the same
+    module.constant("engineNames", (double)JS_GetAtomsFingerprint());
 }

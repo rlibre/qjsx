@@ -126,6 +126,35 @@ static void *get_arena_block(JSMallocArena *ar, unsigned int idx, unsigned int b
     return ar->blocks + idx * block_size;
 }
 
+/* qjsx: the tuned arenas must hold a block of the largest small size, which
+   js_malloc_block_sizes must know */
+_Static_assert(JS_MALLOC_MAX_SMALL_SIZE <= 512, "JS_MALLOC_MAX_SMALL_SIZE is at most 512");
+_Static_assert(JS_MALLOC_ARENA_SIZE - sizeof(JSMallocArena) >= JS_MALLOC_MAX_SMALL_SIZE,
+               "JS_MALLOC_ARENA_SIZE is too small for a block of JS_MALLOC_MAX_SMALL_SIZE");
+
+#if JS_MALLOC_ARENA_CACHE > 0
+/* qjsx: JSMallocArena.n_init_blocks is a byte */
+_Static_assert((JS_MALLOC_ARENA_SIZE - sizeof(JSMallocArena)) / JS_MALLOC_MIN_SMALL_SIZE <= 255,
+               "JS_MALLOC_ARENA_SIZE is too large for JS_MALLOC_ARENA_CACHE");
+
+/* qjsx: a large block that grows is given a multiple of this size, up to
+   JS_MALLOC_GROW_MAX bytes: a string built piece by piece is not resized at
+   each piece (QuickJS's arenas gave that room up to 512 bytes) */
+#define JS_MALLOC_GROW_STEP 32
+#define JS_MALLOC_GROW_MAX 1024
+
+/* qjsx: gives the empty arenas kept aside back to the host's heap */
+static void js_malloc_free_arena_cache(JSMallocContext *s)
+{
+    while (s->arena_cache) {
+        JSMallocArena *ar = s->arena_cache;
+        s->arena_cache = (JSMallocArena *)ar->link.next;
+        s->mf.js_free(&s->malloc_state, ar);
+    }
+    s->arena_cache_count = 0;
+}
+#endif
+
 static no_inline JSMallocArena *js_malloc_new_arena(JSMallocContext *s, int block_size_idx)
 {
     JSMallocBlockHeader *b;
@@ -134,7 +163,19 @@ static no_inline JSMallocArena *js_malloc_new_arena(JSMallocContext *s, int bloc
 
     block_size = js_malloc_block_sizes[block_size_idx];
     n_blocks = (JS_MALLOC_ARENA_SIZE - sizeof(JSMallocArena)) / block_size;
+#if JS_MALLOC_ARENA_CACHE > 0
+    /* qjsx: an empty arena kept aside first, else a new one of the common
+       size */
+    ar = s->arena_cache;
+    if (ar) {
+        s->arena_cache = (JSMallocArena *)ar->link.next;
+        s->arena_cache_count--;
+    } else {
+        ar = s->mf.js_malloc(&s->malloc_state, JS_MALLOC_ARENA_SIZE);
+    }
+#else
     ar = s->mf.js_malloc(&s->malloc_state, sizeof(JSMallocArena) + n_blocks * block_size);
+#endif
     if (!ar)
         return NULL;
 
@@ -149,6 +190,12 @@ static no_inline JSMallocArena *js_malloc_new_arena(JSMallocContext *s, int bloc
             ar->bitmap[i] = 0;
     }
 #endif
+#if JS_MALLOC_ARENA_CACHE > 0
+    /* qjsx: no block was allocated yet: an empty free list, filled by the
+       blocks freed (__js_malloc takes the never allocated ones in order) */
+    ar->n_init_blocks = 0;
+    ar->first_free_block = FREE_NIL;
+#else
     for(i = 0; i < n_blocks - 1; i++) {
         b = get_arena_block(ar, i, block_size);
         b->u.free_next = i + 1;
@@ -157,6 +204,7 @@ static no_inline JSMallocArena *js_malloc_new_arena(JSMallocContext *s, int bloc
     b = get_arena_block(ar, n_blocks - 1, block_size);
     b->u.free_next = FREE_NIL;
     b->block_size_idx = block_size_idx;
+#endif
     
     /* add to the head */
     list_add(&ar->link, &s->arena_list[block_size_idx]);
@@ -168,6 +216,13 @@ static no_inline void *js_malloc_large(JSMallocContext *s, size_t size)
 {
     JSMallocLargeBlockHeader *b;
     b = s->mf.js_malloc(&s->malloc_state, sizeof(JSMallocLargeBlockHeader) + size);
+#if JS_MALLOC_ARENA_CACHE > 0
+    /* qjsx: no room: give the kept arenas back, then try once more */
+    if (!b && s->arena_cache) {
+        js_malloc_free_arena_cache(s);
+        b = s->mf.js_malloc(&s->malloc_state, sizeof(JSMallocLargeBlockHeader) + size);
+    }
+#endif
     if (!b)
         return NULL;
     b->header.u.block_idx = FREE_NIL;
@@ -210,8 +265,20 @@ static void *__js_malloc(JSMallocContext *s, size_t size)
                 ar = list_entry(el, JSMallocArena, free_link);
             }
             block_idx = ar->first_free_block;
+#if JS_MALLOC_ARENA_CACHE > 0
+            /* qjsx: no freed block: the next one never allocated */
+            if (block_idx == FREE_NIL) {
+                block_idx = ar->n_init_blocks++;
+                b = get_arena_block(ar, block_idx, block_size);
+                b->block_size_idx = block_size_idx;
+            } else {
+                b = get_arena_block(ar, block_idx, block_size);
+                ar->first_free_block = b->u.free_next;
+            }
+#else
             b = get_arena_block(ar, ar->first_free_block, block_size);
             ar->first_free_block = b->u.free_next;
+#endif
             b->u.block_idx = block_idx;
             ar->n_used_blocks++;
             if (unlikely(ar->n_used_blocks == ar->n_blocks)) {
@@ -266,6 +333,15 @@ static void __js_free(JSMallocContext *s, void *ptr)
         if (unlikely(ar->n_used_blocks == 0)) {
             list_del(&ar->link);
             list_del(&ar->free_link);
+#if JS_MALLOC_ARENA_CACHE > 0
+            /* qjsx: kept for the next request of any block size, up to
+               JS_MALLOC_ARENA_CACHE arenas */
+            if (s->arena_cache_count < JS_MALLOC_ARENA_CACHE) {
+                ar->link.next = (struct list_head *)s->arena_cache;
+                s->arena_cache = ar;
+                s->arena_cache_count++;
+            } else
+#endif
             s->mf.js_free(&s->malloc_state, ar);
         }
     }
@@ -292,6 +368,11 @@ static void *__js_realloc(JSMallocContext *s, void *ptr, size_t size)
 #endif
 #ifdef QJSX_ALLOC_HISTOGRAM
             qjsx_count_block(qjsx_large_block_size(s, lb), -1);
+#endif
+#if JS_MALLOC_ARENA_CACHE > 0
+            /* qjsx: room for the next growth of a block that is not large */
+            if (size <= JS_MALLOC_GROW_MAX)
+                size = (size + JS_MALLOC_GROW_STEP - 1) & ~(size_t)(JS_MALLOC_GROW_STEP - 1);
 #endif
             new_lb = s->mf.js_realloc(&s->malloc_state, lb, sizeof(JSMallocLargeBlockHeader) + size);
             if (!new_lb) {
@@ -370,6 +451,43 @@ static size_t __js_malloc_usable_size(JSMallocContext *s, const char *ptr)
         return block_size - sizeof(*b);
     }
 }
+
+#ifdef QJSX_MEMORY_MAP
+/* qjsx: measure (temporary), see quickjs.h */
+void JS_DumpMallocMap(JSRuntime *rt)
+{
+    JSMallocContext *s = &rt->malloc_ctx;
+    struct list_head *el;
+    int block_size_idx, arena_count = 0, cached = 0;
+    size_t arena_bytes = 0, used_bytes = 0;
+
+    printf("MAP arenas: block size, arenas, blocks in use, blocks\n");
+    for(block_size_idx = 0; block_size_idx < JS_MALLOC_BLOCK_SIZE_COUNT; block_size_idx++) {
+        int block_size = js_malloc_block_sizes[block_size_idx];
+        int count = 0, used = 0, blocks = 0;
+        list_for_each(el, &s->arena_list[block_size_idx]) {
+            JSMallocArena *ar = list_entry(el, JSMallocArena, link);
+            count++;
+            used += ar->n_used_blocks;
+            blocks += ar->n_blocks;
+        }
+        if (count == 0)
+            continue;
+        arena_count += count;
+        used_bytes += (size_t)used * block_size;
+        printf("MAP arena %d %d %d %d\n", block_size, count, used, blocks);
+    }
+#if JS_MALLOC_ARENA_CACHE > 0
+    cached = s->arena_cache_count;
+    arena_bytes = (size_t)(arena_count + cached) * JS_MALLOC_ARENA_SIZE;
+#endif
+    printf("MAP arenas total: %d arenas of %d bytes, %d kept aside, blocks in use %u bytes\n",
+           arena_count, (int)JS_MALLOC_ARENA_SIZE, cached, (unsigned)used_bytes);
+    printf("MAP host blocks: %u blocks, %u bytes counted, of which arenas %u bytes\n",
+           (unsigned)s->malloc_state.malloc_count, (unsigned)s->malloc_state.malloc_size,
+           (unsigned)arena_bytes);
+}
+#endif
 
 static __maybe_unused void js_malloc_dump_arenas(JSMallocContext *s)
 {
@@ -1117,6 +1235,10 @@ void JS_FreeRuntime(JSRuntime *rt)
     js_free_rt(rt, rt->atom_array);
     js_free_rt(rt, rt->atom_hash);
     js_free_rt(rt, rt->shape_hash);
+#if JS_MALLOC_ARENA_CACHE > 0
+    /* qjsx: the empty arenas kept aside */
+    js_malloc_free_arena_cache(&rt->malloc_ctx);
+#endif
 #ifdef DUMP_LEAKS
     if (!list_empty(&rt->string_list)) {
         if (rt->rt_info) {
@@ -1157,6 +1279,10 @@ void JS_FreeRuntime(JSRuntime *rt)
     }
 #endif
 
+#if JS_MALLOC_ARENA_CACHE > 0
+    /* qjsx: an arena emptied by the leak report above */
+    js_malloc_free_arena_cache(&rt->malloc_ctx);
+#endif
     {
         JSMallocState ms = rt->malloc_ctx.malloc_state;
         rt->malloc_ctx.mf.js_free(&ms, rt);

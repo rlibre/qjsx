@@ -137,6 +137,19 @@ check(evaluated.exception?.description?.startsWith("SyntaxError"), "a syntax err
 evaluated = await session.evaluate("area", { level: 1 });
 equal(evaluated.value?.kind, "function", "evaluate in the calling frame");
 
+// --- a constant of the module, replaced by its value by the compiler: shown
+// from the debug info, usable in an evaluation, not changeable
+equal(variables.get("UNIT")?.value, "cm", "a constant of the module is shown with its value");
+evaluated = await session.evaluate("UNIT + box.width");
+equal(evaluated.value?.value, "cm3", "evaluate with a constant of the module");
+let constantError = "";
+try {
+    await session.setVariable(0, "UNIT", "m");
+} catch (error) {
+    constantError = error.message;
+}
+check(constantError.includes("constant"), "a constant of the module cannot be changed");
+
 // --- change a variable
 await session.setVariable(0, "height", 10);
 evaluated = await session.evaluate("height");

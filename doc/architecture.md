@@ -668,7 +668,9 @@ What the server does:
 >   imported, which the firmware must provide);
 > - `bytecode`: the bytecode version number of the package (see "Package compiled for
 >   another engine" below);
-> - `bytecode/<path>.qbc`, `debug/<path>.json`, `src/<path>`;
+> - `names`: `{ entry: "names.bin", engine }`, the entry of the names of the package and
+>   the fingerprint of the engine's names they follow (see "Executed in place" below);
+> - `names.bin`, `bytecode/<path>.qbc`, `debug/<path>.json`, `src/<path>`;
 > - ids: build id of a script = first 32 hexadecimal digits of the SHA-256 of its
 >   bytecode; `sourceHash` = SHA-256 of the source; build id of the package = SHA-256 of the
 >   ids of the scripts and of the main module; file `<name>-<12 digits>.qjspkg`;
@@ -688,8 +690,29 @@ What the server does:
 - **Entries stored without compression**: no dependency on a compression library, and
   the device reads the package in place. On the ESP32 the slot of the package is mapped with
   `esp_partition_mmap` and the modules are read from there, without copying the package into
-  RAM. The engine still copies the bytecode it loads: `JS_READ_OBJ_ROM_DATA`, which would let
-  it run the bytecode straight from flash, is not used. **To try.**
+  RAM.
+- **Executed in place** (2026-11-16, change S of [engine-changes.md](engine-changes.md)):
+  the bytecode runs where the package lies, and the names of the program (properties,
+  variables of modules, module names) stay in the package too.
+  - `qjsx build` links the modules once they are all compiled (`linkModules`,
+    `host/js/build.js`, over `link()` of `sys/compiler`): every name gets one number for
+    the whole package, after the numbers of the engine's own names; the bytecode of each
+    module is written again with these numbers, without the table of its names; the
+    names go in one entry, `names.bin`, in the form the engine uses in memory, at a
+    multiple of 8 bytes in the archive (`align` of `writeZip`). The reduced package sent
+    to a device keeps it.
+  - `createRuntime()` (`common/runtime/program.cpp`) gives `names.bin` to the engine
+    (`JS_SetPackageAtoms`) before it creates the context, so before anything makes a
+    name; the modules are then read with `JS_READ_OBJ_ROM_DATA |
+    JS_READ_OBJ_FIXED_ATOMS` (`bytecodeReadFlags`). A package whose names are for
+    another engine is refused when it starts ("the names of the package are not the ones
+    of this engine: rebuild it").
+  - The package must stay where it is while its program runs: the flash slot of a running
+    program is never erased, a package in RAM is kept until its run ends, and the
+    executable of `qjsx build --executable` moves its package to the start of the block it
+    read (an aligned address).
+  - A package without `names.bin` is still read the former way. The `.qjslib` libraries
+    are not linked: the build links their modules with the program's.
 - The zip (with its CRC32) is written by the host JS.
 
 Content:
@@ -1210,6 +1233,27 @@ the ESP32's (PSRAM, or internal RAM without PSRAM), the desktop's (malloc, writt
 because QuickJS's is not reachable), the RegionHeap; QuickJS's default (RP2350 without
 PSRAM) is not measured. On the desktop agent and the twin the figure is the PC's, larger
 than on a device (16-byte values and 8-byte pointers against 8 and 4).
+
+**JS heap of a board without PSRAM** (2026-11-16, ESP32): the JS heap is one region of internal RAM, reserved once by the JS task at its
+first runtime (`reserveJsRegion()`, `board_esp32.cpp`: the largest free block less
+`JS_HEAP_RESERVE`, 16 KB; the other, smaller, free blocks stay to the firmware too) and
+managed by `memory::RegionHeap`, as the PSRAM of the RP2350. The firmware keeps its RAM
+whatever the program does: a program that fills its region gets "out of memory", and its
+blocks no longer split the firmware's heap. Before, both shared ESP-IDF's heap: the
+program of a board left 5 KB to the firmware. Inside the region QuickJS's allocator has
+two levels (engine-changes.md Q): blocks up to 128 bytes in 1 KB arenas (a free list per
+arena, 4 empty arenas kept), the rest straight in the RegionHeap, without a lock (one
+thread). `INFO` gives the size of the region (`JS_HEAP_SIZE`), shown by `qjsx device
+info` ("of ..."). Measures on that board with its program, 32-bit: 2,840 live blocks,
+193 KB; 97 % of the allocations are at most 128 bytes. TRIED on that board the same day:
+a region of 232 KB; its program uses 205.8 KB of it (255.8 KB before) and the firmware
+keeps 46.7 KB free (23.7 KB before, 5 KB at first); an empty program 62.0 KB. A
+benchmark that asked for more than the region ended with an uncaught exception and the
+agent went on answering. `idf.py -DQJSX_JS_HEAP_SHARED=ON` builds the former shared heap
+(to compare). Open: the speed (engine-changes.md Q); the reserve (a package in RAM,
+`qjsx deploy --ram` / `qjsx debug`, comes from the firmware's part: its largest free
+block is 31 KB); an out of memory is reported as "Uncaught (in promise) null"; the
+RP2350 without PSRAM still uses QuickJS's default allocator.
 
 **Files of a device** (2026-11-13): the data folder of a device (`/data` on an ESP32, LittleFS on the "data" partition, formatted the first time; `<storage>/data` on the desktop agent and the twin) is reached by its programs (`sys/fs`, confined to it) and by the PC through the agent: FILE_LIST, FILE_READ (2048-byte pieces), FILE_WRITE_BEGIN / CHUNK / END (a temporary `<name>.qjsx-part` renamed at the end), FILE_REMOVE, FILE_MKDIR, FILE_RENAME (`common/agent/data_files.cpp`; errors with a Node-like ERROR_CODE); `qjsx device ls | read | write | rm | mkdir | mv`, `qjsx deploy --data` (the `data` folder of `qjsx.json`; other files of the device kept), `qjsx device info` (used, and the partition size on a board).
 

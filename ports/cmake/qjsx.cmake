@@ -29,6 +29,7 @@
 #                             the port gives its driver, hal::serial::boardDriver)
 #   QJSX_INCLUDE_DIRS      every source folder (headers are included by name)
 #   QJSX_DEFINES           for every source
+#   QJSX_SMALL_HEAP_DEFINES  more of them, for a board whose JS heap is small
 #   QJSX_ENGINE_OPTIONS    compile options of the engine sources
 
 get_filename_component(QJSX_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
@@ -83,10 +84,25 @@ set(QJSX_DEFINES
     "CONFIG_VERSION=\"${QJSX_QUICKJS_VERSION}\""
     "QJSX_NO_COMPILER")
 
+# for a board whose JS heap is small (no PSRAM): QuickJS's arenas of small
+# blocks are 1 KB instead of 4 KB and hold the blocks up to 128 bytes instead
+# of 512 (an arena per block size in use: 4 KB ones left half of the heap
+# empty); 4 empty arenas are kept for the next request (engine-changes.md Q)
+set(QJSX_SMALL_HEAP_DEFINES
+    "JS_MALLOC_ARENA_SIZE=1024"
+    "JS_MALLOC_MAX_SMALL_SIZE=128"
+    "JS_MALLOC_ARENA_CACHE=4")
+
 # measure (temporary, 2026-11-13): sizes of the blocks of the JS heap, global
 # __allocHistogram(); idf.py -DQJSX_ALLOC_HISTOGRAM=ON (stays in the CMake cache)
 if(QJSX_ALLOC_HISTOGRAM)
     list(APPEND QJSX_DEFINES "QJSX_ALLOC_HISTOGRAM")
+endif()
+
+# measure (temporary, 2026-11-16): the memory map of the board, global
+# __memoryMap(title); idf.py -DQJSX_MEMORY_MAP=ON (stays in the CMake cache)
+if(QJSX_MEMORY_MAP)
+    list(APPEND QJSX_DEFINES "QJSX_MEMORY_MAP")
 endif()
 
 # as in premake5.lua (qjsx-engine-target); the engine is upstream code: its warnings

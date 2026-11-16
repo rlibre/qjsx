@@ -290,6 +290,12 @@ static int add_global_variables(JSContext *ctx, JSFunctionDef *fd)
         for(i = 0; i < fd->global_var_count; i++) {
             JSVarKindEnum var_kind;
             hf = &fd->global_vars[i];
+            /* qjsx: no variable for a constant replaced by its value */
+            if (fd->module_const_count > 0) {
+                JSModuleConst *mc = js_get_module_const(fd, hf->var_name);
+                if (mc && mc->is_removed)
+                    continue;
+            }
             if (hf->cpool_idx >= 0 && !hf->is_lexical) {
                 var_kind = JS_VAR_GLOBAL_FUNCTION_DECL;
             } else {
@@ -367,6 +373,10 @@ JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
 
     /* add the module global variables in the closure */
     if (fd->is_eval) {
+        /* qjsx: first the constants of a module that are replaced by their
+           value: the ones not exported get no variable (compiler/fold.c) */
+        if (js_find_module_constants(ctx, fd))
+            goto fail;
         if (add_global_variables(ctx, fd))
             goto fail;
     } 
@@ -399,6 +409,11 @@ JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
 #endif
 
     if (resolve_variables(ctx, fd))
+        goto fail;
+
+    /* qjsx: the expressions of literal numbers and strings are computed
+       now (compiler/fold.c) */
+    if (fold_constants(ctx, fd))
         goto fail;
 
     /* qjsx: the temporal dead zone checks proven useless become plain

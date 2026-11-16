@@ -61,7 +61,13 @@ export function writeZip(entries) {
         const data = entry.data;
         const crc = crc32(data);
 
-        const local = new Uint8Array(30 + name.length);
+        // 'align': the data starts at a multiple of that many bytes in the
+        // archive (zero bytes in the extra field of the local header, as
+        // Android's zipalign does), for data used where the archive lies
+        const dataStart = offset + 30 + name.length;
+        const padding = entry.align === undefined ? 0 : (entry.align - dataStart % entry.align) % entry.align;
+
+        const local = new Uint8Array(30 + name.length + padding);
         const localView = new DataView(local.buffer);
         localView.setUint32(0, SIGNATURE_LOCAL, true);
         localView.setUint16(4, VERSION, true);
@@ -73,7 +79,7 @@ export function writeZip(entries) {
         localView.setUint32(18, data.length, true);   // compressed size
         localView.setUint32(22, data.length, true);   // uncompressed size
         localView.setUint16(26, name.length, true);
-        localView.setUint16(28, 0, true);             // extra field length
+        localView.setUint16(28, padding, true);       // extra field length
         local.set(name, 30);
 
         const central = new Uint8Array(46 + name.length);

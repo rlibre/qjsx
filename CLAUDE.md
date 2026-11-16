@@ -516,6 +516,71 @@ keeps the old name: `C:\Sandbox\espjs`.
   -22.5 KB on the PC. Measures of the JS heap: QuickJS 2026 has its own allocator with
   4 KB arenas per block size, 52 % empty on an empty context (-64 KB on the PC without
   them): the next lever, not done. Old files: temp/rom-atoms-backup/.
+- JS heap of a board without PSRAM (agreed by the user 2026-11-16, IMPLEMENTED the same day,
+  ESP32; Debug suite 109 OK on the PC with the same settings and QJSX_JS_HEAP_MB=64;
+  TRIED on the client board: region 232 KB, its program 255.8 -> 205.8 KB of JS heap,
+  firmware 46.7 KB free, empty program 62.0 KB; SPEED not settled: against the shared
+  heap, closures in a loop +85 %, strings +62 %, objects -9 %, cause not found, not seen
+  on the PC; the firmware's instruction cache is 16 KB for a 25 KB JS_CallInternal;
+  `idf.py -DQJSX_JS_HEAP_SHARED=ON` = the former shared heap): one region of internal RAM reserved by the JS
+  task at its first runtime (`reserveJsRegion()`, board_esp32.cpp: largest free block less
+  `JS_HEAP_RESERVE` 16 KB), managed by `memory::RegionHeap`; inside, QuickJS's arenas
+  tuned by the port (engine change Q, `QJSX_SMALL_HEAP_DEFINES` of ports/cmake/qjsx.cmake):
+  `JS_MALLOC_ARENA_SIZE=1024`, `JS_MALLOC_MAX_SMALL_SIZE=128`, `JS_MALLOC_ARENA_CACHE=4`
+  (empty arenas kept, all of one size); unset = original QuickJS (PC, boards with PSRAM).
+  `INFO` key `JS_HEAP_SIZE`, `board::MemoryStatus.jsHeapSize`. Measure option
+  `QJSX_ALLOC_HISTOGRAM` (idf.py -DQJSX_ALLOC_HISTOGRAM=ON, global `__allocHistogram()`).
+  The client board's console is at 921600 bauds: `serial:COM10@921600`.
+- Package executed in place (design agreed by the user 2026-11-16, steps 1 and 2
+  IMPLEMENTED the same day, engine change S, `doc/architecture.md` 4.1; Debug suite 112 OK,
+  Bellard's tests OK; FLASHED and MEASURED on the client board: its program's JS heap
+  195.6 -> 156.3 KB, package sent 41.7 -> 55.9 KB; the debugger not tried again on a
+  board):
+  - atom indexes are fixed: the engine's names (rom-atoms), then the package's
+    (`names.bin`), then the ones made at run time;
+  - `qjsx build` links the modules (`linkModules`, build.js, over `link()` of
+    sys/compiler, which reads every module in a runtime of its own): one image of names
+    for the package (entry `names.bin`, 8-byte aligned in the zip: `align` of writeZip;
+    `names: { entry, engine }` in the manifest; kept in the reduced package), bytecode
+    written with `JS_WRITE_OBJ_FIXED_ATOMS` (first byte `BC_VERSION | 0x80`);
+  - `createRuntime()` (program.cpp) calls `JS_SetPackageAtoms` BEFORE `JS_NewContext`
+    (nothing may have made a name); modules read with `JS_READ_OBJ_ROM_DATA |
+    JS_READ_OBJ_FIXED_ATOMS` (`bytecodeReadFlags`); names of another engine: refused when
+    the package starts (fingerprint `QJSX_ROM_ATOM_FINGERPRINT`, written by
+    tools/rom-atoms/generate.sh);
+  - `core/package-atoms.c` (new); `__JS_AtomIsConst(rt, v)` (signed compare: integer
+    atoms are constant), `js_atom_is_rom()` = immortal reference count; `JSString` has
+    GCC's layout on Windows too (12 bytes); BC_VERSION 0x45 -> 0x46 (an older firmware
+    refuses the new packages: flash the firmware before deploying);
+  - the executable of `qjsx build --executable` moves its package to the start of the
+    block it read (aligned address); a package without `names.bin` is read the old way;
+    the debugger's LOAD_FUNCTION too;
+  - tests/link.test.js (25 checks);
+  - NOT done: step 3 (tables of variables in place), the fingerprint checked at the
+    upload, the RP2350.
+- Bytecode optimizer, first steps (agreed by the user 2026-11-16, IMPLEMENTED the same
+  day, engine change R, `compiler/fold.c`; Debug suite 111 OK, Bellard's tests OK,
+  microbench not slower; the client board's program, compiled again: JS heap 206.0 ->
+  195.6 KB on the board, package 44.2 -> 41.7 KB):
+  - constant folding (`fold_constants()`, between resolve_variables and resolve_labels):
+    operators on literal numbers and strings computed by the compiler (`5 * 1000`,
+    `"a" + "b"`, `"v" + 1`); not bigints, booleans, comparisons;
+  - constants of a module (`js_find_module_constants()`): a top-level `const` whose value
+    is such a literal expression is replaced by its value wherever the module reads it;
+    not exported: no variable at all; exported: keeps its variable. Given up when a
+    function assigns to that name (even a local one) or the module calls eval();
+  - ACCEPTED by the user: reading such a constant before its declaration gives its value
+    (no ReferenceError); a breakpoint on its line slides to the next statement;
+  - debugger: `JSDebugFunctionInfo.constants`, sidecar `constants: [{ name, value }]`
+    (module function), shown in the closure scope of every function of the module,
+    usable in evaluate, not changeable (debuginfo.js `constants()`, debugsession.js);
+  - same bytecode in debug and production (still one package); BC_VERSION not bumped;
+  - tests/fold.test.js, tests/modconst.test.js (+ fixtures/modconst), debuginfo and
+    proxy tests; the debuggee fixture ends with a constant (`UNIT`);
+  - later: exported constants across modules, fused opcodes (after a measure on the
+    board: 16 KB instruction cache), the other ideas of TODO.md.
+  Tool pitfall: the Bash tool turns a doubled backslash of a heredoc into one: write
+  files that hold backslashes with the Write tool.
 - Temporal dead zone checks (engine change N, agreed by the user 2026-11-12, IMPLEMENTED the
   same day): `compiler/tdz.c`, a data-flow pass between resolve_variables and resolve_labels,
   turns `get_loc_check` / `put_loc_check` on surely initialized locals into `get_loc` /

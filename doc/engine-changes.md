@@ -614,6 +614,153 @@ of a text already in the firmware: on a 32-bit board about 5 KB of text, 6 KB of
   are still made in the heap; a check that the generated files match the engine (they
   are made again by hand).
 
+## Q. Arenas of the allocator tuned for a small heap
+
+2026-11-16, agreed with the user. QuickJS 2026 has its own allocator over the host's
+(`core/runtime.c`): blocks up to 512 bytes (header included) come from 4 KB arenas, one
+arena per block size (31 sizes), given back to the host when their last block is freed;
+larger blocks go to the host directly. Fast (a free list per arena), but each block size
+in use holds at least 4 KB: an empty context had 28 arenas, 52 % empty; on the ESP32-S3
+without PSRAM the program of a board used 255.8 KB of JS heap with them and 210.7 KB
+without (`JS_MALLOC_LARGE_BLOCKS_ONLY`).
+
+- Three compile options (`quickjs-internal.h`), set by the port of a board whose JS
+  heap is small (`QJSX_SMALL_HEAP_DEFINES`, `ports/cmake/qjsx.cmake`; the ESP32 port gives
+  them without PSRAM); unset, the original QuickJS:
+  - `JS_MALLOC_ARENA_SIZE` (4096; small heap: 1024);
+  - `JS_MALLOC_MAX_SMALL_SIZE` (512; small heap: 128): on the board, 97 % of the
+    allocations of a program are at most 128 bytes, in steps of 8 that match the engine's
+    structures; above, 3 % of the allocations and 44 % of the bytes: the host's heap;
+  - `JS_MALLOC_ARENA_CACHE` (0; small heap: 4): empty arenas kept for the next request
+    instead of going back to the host. Not 0: every arena is allocated
+    `JS_MALLOC_ARENA_SIZE` bytes whatever its block size, so a kept arena serves any
+    size (`js_malloc_new_arena`, `__js_free`). They go back to the host when a large
+    allocation fails (`js_malloc_large`, then one more try) and in `JS_FreeRuntime`
+    (`js_malloc_free_arena_cache`). With it also: an arena is made in constant time
+    (`JSMallocArena.n_init_blocks`: the blocks never allocated are taken in order, the
+    free list only holds freed blocks; QuickJS chains every block when it makes an
+    arena), and a large block of at most 1 KB that grows is given a multiple of 32 bytes
+    (`__js_realloc`: QuickJS's arenas gave that room up to 512 bytes).
+- Two `_Static_assert`: the largest small size is at most 512 and fits in an arena.
+- The host under it, on a board without PSRAM: one region of internal RAM managed by
+  `memory::RegionHeap` (see architecture.md, "Memory of a device"); not an engine change.
+- **Measure option** `QJSX_ALLOC_HISTOGRAM` (2026-11-13, temporary: `idf.py
+  -DQJSX_ALLOC_HISTOGRAM=ON`): every block goes to the host and is counted by size
+  (`JSAllocHistogram`, `JS_GetAllocHistogram()`, the global `__allocHistogram()` of
+  globals.cpp). It gave the figures above.
+- **Measures on the board** (ESP32-S3 without PSRAM, 2026-11-16, with the region of
+  architecture.md): its program 255.8 KB -> 205.8 KB of JS heap; an empty program
+  62.0 KB (157.1 KB at the start of this work, with the names in the heap).
+- **Speed**: on the PC, microbench +3.9 % with the small arenas over the system malloc
+  (string building +50 %; the same loops over a RegionHeap are faster than over
+  malloc). On the board a throw-away benchmark (temp/allocbench) against the shared
+  heap with QuickJS's arenas: objects -9 %, arrays equal, JSON +8 %, properties +27 %,
+  string building +62 %, closures in a loop +85 %; the two additions above (arena in
+  constant time, room when growing) changed nothing. The cause is not found: the same
+  loops are not slower on the PC. The instruction cache of the firmware is 16 KB for a
+  25 KB `JS_CallInternal`: a closure made in a loop costs 26 to 52 us against 10 us for
+  a small object, so the place of the code may count more than the allocator.
+- **Bytecode**: unchanged.
+
+## R. Constant expressions and constants of a module
+
+2026-11-16, agreed with the user (first steps of a bytecode optimizer). QuickJS computes
+nothing at compile time but the minus sign of a number: `5 * 1000`, `1 << 4` and
+`"ab" + "cd"` are computed each time they run (a string concatenation allocates). A new
+file, `compiler/fold.c`, does two things; the bytecode is the same in debug and in
+production, as before.
+
+1. **Constant folding** (`fold_constants()`, between `resolve_variables()` and
+   `resolve_labels()`): an operator whose operands are literal numbers or strings is
+   replaced, with them, by its result. Operators: `+ - * / % **`, shifts and bit
+   operations, unary `- + ~`; `+` joins strings, and a string with a number (the engine
+   converts the number). The pass keeps aside the last constants pushed and writes them
+   unchanged before any other instruction, a label included, so a value that depends on
+   a test is never folded. Values are computed as the interpreter does (doubles, 32 bit
+   integers for shifts, `-0` kept). Left to run time: bigints, booleans, `null`,
+   `undefined`, comparisons, strings holding half of a surrogate pair. The positions of
+   the debugger met among the constants keep their place.
+2. **Constants of a module** (`js_find_module_constants()`, before the child functions
+   of the module function are made; `resolve_scope_var()` and `add_global_variables()`
+   use its result): a `const` declared at the top level of a module with such a value
+   (literals, or an expression of literals and of other such constants) is replaced by
+   its value wherever the module reads it. When the module does not export it, it has no
+   variable at all: no closure variable in the module function nor in the functions that
+   read it, no `JSVarRef`, no name, no initialization code. An exported one keeps its
+   variable for the modules that import it. A candidate is given up when any function of
+   the module assigns to, deletes or takes a reference of that name (even a local
+   variable of the same name: names are not resolved yet), and a module that calls
+   `eval()` directly keeps all its variables.
+- **Agreed changes of behavior**: reading such a constant before its declaration ran
+  gives its value (QuickJS throws a ReferenceError); a breakpoint on its line slides to
+  the next statement (the line has no code).
+- **Debugger**: `JSDebugFunctionInfo.constants` (`quickjs-debug.h`, name and value, with
+  the module function); the sidecar has `constants: [{ name, value }]`; the proxy shows
+  them in the closure scope of every function of the module, passes them to an
+  evaluation, refuses to change them (`host/js/debuginfo.js`, `debugsession.js`).
+- **Bytecode**: same opcodes, `BC_VERSION` not bumped.
+- **Measures** on the program of a board (17 modules, 216 functions): 86 of its 119
+  module variables are such constants; closure variable entries 636 -> 445, names 593 ->
+  509, checked reads of module variables 138 -> 15, bytecode 18,873 -> 18,319 bytes,
+  package 44,183 -> 41,683 bytes; on the board (ESP32-S3 without PSRAM) its JS heap
+  206.0 -> 195.6 KB.
+- Tests: `tests/fold.test.js` (82 checks: each expression against the same one computed
+  at run time), `tests/modconst.test.js` (21), `tests/debuginfo.test.js` and
+  `tests/proxy.test.js` (the constants in the debugger).
+- Not done: constants exported from a module replaced in the modules that import them
+  (the build would pass them); booleans; dead entries left in the constant pool by a
+  folded float.
+
+## S. Package executed in place: names of the package, fixed atom indexes
+
+2026-11-16, agreed with the user. A module of a package carried the table of its own
+names; reading it made each name in the heap, then wrote the index of each name in the
+bytecode, which therefore had to be copied in the heap. On the ESP32-S3 without PSRAM the
+program of a board kept about 19 KB of names and 18 KB of bytecode in RAM, both already
+in its package in flash.
+
+- **Fixed atom indexes**: `0 .. QJSX_ROM_ATOM_COUNT - 1` the names of the engine
+  (change P), then the names of the package, then the names made at run time.
+- **Names of a package** (`core/package-atoms.c`, new):
+  - `JS_WritePackageAtoms(ctx, &size)` (engine with compiler) writes the image of the
+    names a runtime made after the engine's: a header (mark "QJSN", fingerprint of the
+    engine's names, first index, count, hash size, size), the offset of each name, a hash
+    table (open addressing, an atom index per slot), then each name as QuickJS allocates
+    an atom string, with an immortal reference count and its index in `hash_next`. No
+    pointer in it: the same image serves a 32 bit device and the PC;
+  - `JS_SetPackageAtoms(rt, image, size)` gives them to a runtime that made no name yet
+    (just after `JS_NewRuntime2`, before any context): the atom table points at the
+    image, `rt->const_atom_end` moves past them, the lookups of `__JS_NewAtom` /
+    `__JS_FindAtom` search the engine's names, then the package's, then the heap's;
+    refused (-1) for another fingerprint or another layout. `JS_HasPackageAtoms(rt)`;
+  - `JS_GetAtomsFingerprint()`: `QJSX_ROM_ATOM_FINGERPRINT`, written in `rom-atoms.h` by
+    `tools/rom-atoms/generate.sh` (a hash of the names and of their order).
+- `__JS_AtomIsConst()` takes the runtime (`const_atom_end`); `js_atom_is_rom()` is now
+  "its reference count is immortal" (engine's and package's names alike).
+- **Bytecode with fixed indexes**: `JS_WRITE_OBJ_FIXED_ATOMS` writes every atom as its
+  index in the writing runtime, with an empty table of names and its own first byte
+  (`BC_VERSION_FIXED_ATOMS` = `BC_VERSION | 0x80`); `JS_READ_OBJ_FIXED_ATOMS` reads such
+  a bytecode only, takes the indexes as they are (checked against `const_atom_end`).
+  With `JS_READ_OBJ_ROM_DATA`, QuickJS's own path, the bytecode of the functions is used
+  where the buffer lies: nothing in it is changed.
+- `struct JSString` has the layout of GCC on Windows too (`JS_GCC_LAYOUT`: 12 bytes
+  instead of 20), so that the image is the same on the PC.
+- **`BC_VERSION` 0x45 -> 0x46**: a firmware of before refuses the new packages.
+- The link (`sys/compiler` `link()`, `host/modules/compiler_module.cpp`): a runtime of
+  its own reads the bytecode of every module of the package (their names get the indexes
+  that follow the engine's, in order), writes the image of the names, then each module
+  with `JS_WRITE_OBJ_FIXED_ATOMS`. `qjsx build` calls it (see architecture.md 4.1).
+- Not changed: the bytecode the debugger sends (LOAD_FUNCTION) and a package without
+  `names.bin` are read as before, with their own table of names.
+- **Measures on the board** (ESP32-S3 without PSRAM, its program of 17 modules,
+  2026-11-16): JS heap 195.6 -> 156.3 KB; the package sent to the board 41.7 -> 55.9 KB
+  (the names are stored ready to use, with their headers: flash, not RAM); an empty
+  program stays at 62.9 KB. The firmware of before refused nothing by mistake: the
+  program installed with bytecode 0x45 was not started by the new firmware.
+- Not done: the tables of variables of the functions (`vardefs`, `closure_var`) are
+  still copied in the heap; the agent does not compare the fingerprint at the upload
+  (the loader refuses the package when it starts).
+
 ## Limits and items not done
 
 - **"Uncaught" prediction**: done statically (section M), not with the planned
@@ -658,6 +805,7 @@ Measurements of 2026-11-10:
 | + activation number of the frames (L), 2026-11-11 | 4,637.7 | 4,485.8 | −3.3% |
 | + temporal dead zone checks removed (N), 2026-11-12 | 4,642.8 | 4,449.0 | −4.2% |
 | + names in read-only memory (P), 2026-11-13 | 4,641.7 | 4,571.0 | −1.5% |
+| + constant folding, constants of a module (R), 2026-11-16 | 4,638.5 | 4,532.7 | −2.3% |
 
 - The final version costs about 2% more than the version without markers. Part of this
   difference stays within the noise from one pass to the next: `regexp_replace`, purely in C,
@@ -700,3 +848,6 @@ Measurements of 2026-11-10:
 | `quickjs-debug.h`, `core/debug.c`, `core/core.h`, `core/interpreter.c` (also) | prediction of uncaught exceptions, `JSDebugEvent.uncaught` (M) |
 | `compiler/tdz.c` (new), `compiler/compiler.h`, `compiler/finalize.c`, `compiler/resolve-labels.c`, `compiler/debug-info.c` (also) | temporal dead zone checks removed where useless; `set_x` fusion not across a stop position (N) |
 | `quickjs.h`, `quickjs-internal.h`, `core/atoms.c`, `core/runtime.c`, `core/gc.c` (also), `core/rom-atoms.h` and `core/rom-atoms.c` (new, generated) | names in read-only memory, immortal reference count (P) |
+| `core/package-atoms.c` (new), `quickjs.h`, `quickjs-internal.h`, `core/atoms.c`, `bytecode/reader.c`, `bytecode/writer.c` (also) | names of a package, bytecode with fixed atom indexes read in place, `JSString` layout, `BC_VERSION` 0x46 (S) |
+| `compiler/fold.c` (new), `compiler/compiler.h`, `compiler/finalize.c`, `compiler/funcdef.c`, `compiler/resolve-vars.c`, `compiler/resolve-labels.c`, `compiler/debug-info.c`, `quickjs-debug.h` (also) | constant folding, constants of a module replaced by their value (R) |
+| `quickjs-internal.h`, `core/runtime.c` (also) | arenas of the allocator tuned for a small heap, arenas kept (Q); `quickjs.h`, `quickjs-internal.h`, `core/runtime.c`: measure of the block sizes (`QJSX_ALLOC_HISTOGRAM`) |

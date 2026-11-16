@@ -68,4 +68,14 @@ idf_component_register(
         ${QJSX_USB_REQUIRES})
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE ${QJSX_DEFINES} ${QJSX_USB_DEFINES})
+
+# a board without PSRAM: its JS heap is a region of internal RAM
+# (board_esp32.cpp), the engine's arenas are sized for it. To compare,
+# idf.py -DQJSX_JS_HEAP_SHARED=ON gives the heap shared with the firmware and
+# QuickJS's own arenas back (stays in the CMake cache until set OFF)
+if(QJSX_JS_HEAP_SHARED)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE QJSX_JS_HEAP_SHARED)
+elseif(NOT CONFIG_SPIRAM)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE ${QJSX_SMALL_HEAP_DEFINES})
+endif()
 set_source_files_properties(${QJSX_ENGINE_SOURCES} PROPERTIES COMPILE_OPTIONS "${QJSX_ENGINE_OPTIONS}")

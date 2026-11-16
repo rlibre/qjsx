@@ -70,6 +70,24 @@ static void collectNames(JSRuntime *rt) {
     }
 }
 
+/**
+ * What identifies the table: a hash (FNV-1a, 32 bits) of the number of
+ * names and, for each index in order, of its kind and of its text. A
+ * package made with another table is refused (JS_SetPackageAtoms).
+ */
+static uint32_t fingerprintOfNames(void) {
+    uint32_t hash = 2166136261u;
+    for (int i = 0; i < nameCount; i++) {
+        // the index (its low byte), the kind, the characters
+        hash = (hash ^ (uint8_t)i) * 16777619u;
+        hash = (hash ^ (uint8_t)names[i].isSymbol) * 16777619u;
+        for (uint32_t k = 0; k < names[i].length; k++) {
+            hash = (hash ^ names[i].text[k]) * 16777619u;
+        }
+    }
+    return hash;
+}
+
 // ### Output ###################################################################
 
 static const char *FILE_HEADER =
@@ -127,6 +145,9 @@ static void writeHeader(const char *folder, uint32_t hashSize) {
     fputs("\n#ifndef QJSX_ROM_ATOMS_H\n#define QJSX_ROM_ATOMS_H\n\n", out);
     fprintf(out, "/* atom indexes 0 .. QJSX_ROM_ATOM_COUNT - 1 are made at start */\n");
     fprintf(out, "#define QJSX_ROM_ATOM_COUNT %d\n", nameCount);
+    fprintf(out, "/* identifies these names and their indexes: a package is made for one\n"
+                 "   table of names (JS_GetAtomsFingerprint) */\n");
+    fprintf(out, "#define QJSX_ROM_ATOM_FINGERPRINT 0x%08xu\n", fingerprintOfNames());
     fprintf(out, "/* slots of qjsx_rom_atom_hash (a power of two) */\n");
     fprintf(out, "#define QJSX_ROM_ATOM_HASH_SIZE %u\n\n", hashSize);
 

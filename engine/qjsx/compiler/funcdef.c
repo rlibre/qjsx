@@ -116,6 +116,8 @@ void js_free_function_def(JSContext *ctx, JSFunctionDef *fd)
         JS_FreeAtom(ctx, fd->global_vars[i].var_name);
     }
     js_free(ctx, fd->global_vars);
+    /* qjsx: the constants of a module */
+    js_free_module_consts(ctx, fd);
 
     for(i = 0; i < fd->closure_var_count; i++) {
         JSClosureVar *cv = &fd->closure_var[i];

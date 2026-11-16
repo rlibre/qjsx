@@ -60,13 +60,31 @@ const package::Entry *findBytecode(const package::Reader *reader, const char *na
     return entry;
 }
 
+// Entry of a package that holds its names (the image JS_SetPackageAtoms()
+// takes, made by "qjsx build": host/js/build.js).
+const char *const NAMES_ENTRY = "names.bin";
+
+/**
+ * How the bytecode of the package is read (flags of JS_ReadObject). When the
+ * runtime was given the names of the package (createRuntime), the bytecode
+ * is written with their numbers and runs where it lies in the package: no
+ * copy in the JS heap. Else (a package without names: an older one) it is
+ * copied and its names are made in the heap.
+ */
+int bytecodeReadFlags(JSContext *ctx) {
+    if (JS_HasPackageAtoms(JS_GetRuntime(ctx))) {
+        return JS_READ_OBJ_BYTECODE | JS_READ_OBJ_ROM_DATA | JS_READ_OBJ_FIXED_ATOMS;
+    }
+    return JS_READ_OBJ_BYTECODE;
+}
+
 /**
  * Reads a module of the package from its bytecode, in place. nullptr with a
  * pending exception if the bytecode is invalid.
  */
 JSModuleDef *readPackageModule(JSContext *ctx, const Session *session, const package::Entry *entry, const char *name) {
     // read the bytecode: JS_ReadObject registers the module in the context
-    JSValue module = JS_ReadObject(ctx, entry->data, entry->size, JS_READ_OBJ_BYTECODE);
+    JSValue module = JS_ReadObject(ctx, entry->data, entry->size, bytecodeReadFlags(ctx));
     if (JS_IsException(module)) {
         return nullptr;
     }
@@ -319,6 +337,15 @@ bool startPackage(JSContext *ctx, void *startOpaque) {
         return false;
     }
 
+    // nor a package whose names this engine refused (createRuntime): its
+    // bytecode is written with their numbers
+    bool hasNames = start->reader->find(NAMES_ENTRY) != nullptr;
+    if (hasNames && !JS_HasPackageAtoms(JS_GetRuntime(ctx))) {
+        fprintf(stderr, "qjsx: the names of the package are not the ones of this engine: rebuild it\n");
+        JS_FreeValue(ctx, manifest);
+        return false;
+    }
+
     // read the name of the main module (freed on every path below)
     char *main = manifestMain(ctx, manifest);
 
@@ -346,7 +373,7 @@ bool startPackage(JSContext *ctx, void *startOpaque) {
 
     // read the main module; the debugger is told before its imports are
     // loaded: their own notifications come after
-    JSValue module = JS_ReadObject(ctx, entry->data, entry->size, JS_READ_OBJ_BYTECODE);
+    JSValue module = JS_ReadObject(ctx, entry->data, entry->size, bytecodeReadFlags(ctx));
     if (!JS_IsException(module)) {
         notifyModuleLoaded(start->hooks, main);
     }
@@ -464,6 +491,14 @@ Runtime createRuntime(Session *session) {
         created.runtime = JS_NewRuntime2(allocator, nullptr);
     } else {
         created.runtime = JS_NewRuntime();
+    }
+
+    // the names of the package, before anything makes a name: its bytecode
+    // is written with their numbers, which follow the engine's. Refused
+    // (another engine): startPackage() says so
+    const package::Entry *names = session->package != nullptr ? session->package->find(NAMES_ENTRY) : nullptr;
+    if (names != nullptr) {
+        JS_SetPackageAtoms(created.runtime, names->data, names->size);
     }
 
     created.ctx = JS_NewContext(created.runtime);

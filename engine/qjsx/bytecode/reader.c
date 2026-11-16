@@ -18,6 +18,7 @@ typedef struct BCReaderState {
     BOOL allow_sab : 8;
     BOOL allow_bytecode : 8;
     BOOL is_rom_data : 8;
+    BOOL fixed_atoms : 8;   /* qjsx: JS_READ_OBJ_FIXED_ATOMS */
     BOOL allow_reference : 8;
     /* object references */
     JSObject **objects;
@@ -184,6 +185,18 @@ static int bc_idx_to_atom(BCReaderState *s, JSAtom *patom, uint32_t idx)
 
     if (__JS_AtomIsTaggedInt(idx)) {
         atom = idx;
+#if QJSX_ROM_ATOMS
+    } else if (s->fixed_atoms) {
+        /* qjsx: an index of the runtime: a name of the engine or of the
+           package (never counted: no reference to take) */
+        if (idx >= s->ctx->rt->const_atom_end) {
+            JS_ThrowSyntaxError(s->ctx, "invalid name index (pos=%u)",
+                                (unsigned int)(s->ptr - s->buf_start));
+            *patom = JS_ATOM_NULL;
+            return s->error_state = -1;
+        }
+        atom = idx;
+#endif
     } else if (idx < s->first_atom) {
         atom = JS_DupAtom(s->ctx, idx);
     } else {
@@ -301,6 +314,17 @@ static int JS_ReadFunctionBytecode(BCReaderState *s, JSFunctionBytecode *b,
         case OP_FMT_atom_label_u16:
             idx = get_u32(bc_buf + pos + 1);
             if (s->is_rom_data) {
+#if QJSX_ROM_ATOMS
+                /* qjsx: with fixed indexes, a name of the engine or of the
+                   package (or an integer): anything else is not valid */
+                if (s->fixed_atoms && !__JS_AtomIsTaggedInt(idx) &&
+                    idx >= s->ctx->rt->const_atom_end) {
+                    JS_ThrowSyntaxError(s->ctx, "invalid name index in the bytecode (pos=%d)", pos);
+                    b->byte_code_len = pos;
+                    s->error_state = -1;
+                    return -1;
+                }
+#endif
                 /* just increment the reference count of the atom */
                 JS_DupAtom(s->ctx, (JSAtom)idx);
             } else {
@@ -1089,9 +1113,11 @@ static int JS_ReadObjectAtoms(BCReaderState *s)
 
     if (bc_get_u8(s, &v8))
         return -1;
-    if (v8 != BC_VERSION) {
+    /* qjsx: a bytecode with fixed atom indexes has its own first byte, and
+       is read as such only */
+    if (v8 != (s->fixed_atoms ? BC_VERSION_FIXED_ATOMS : BC_VERSION)) {
         JS_ThrowSyntaxError(s->ctx, "invalid version (%d expected=%d)",
-                            v8, BC_VERSION);
+                            v8, s->fixed_atoms ? BC_VERSION_FIXED_ATOMS : BC_VERSION);
         return -1;
     }
     if (bc_get_leb128(s, &s->idx_to_atom_count))
@@ -1148,6 +1174,7 @@ JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
     s->ptr = buf;
     s->allow_bytecode = ((flags & JS_READ_OBJ_BYTECODE) != 0);
     s->is_rom_data = ((flags & JS_READ_OBJ_ROM_DATA) != 0);
+    s->fixed_atoms = ((flags & JS_READ_OBJ_FIXED_ATOMS) != 0);
     s->allow_sab = ((flags & JS_READ_OBJ_SAB) != 0);
     s->allow_reference = ((flags & JS_READ_OBJ_REFERENCE) != 0);
     if (s->allow_bytecode)

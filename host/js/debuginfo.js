@@ -354,12 +354,28 @@ export class ScriptInfo {
 
         const functionScope = slotsOf(info.locals, SLOT_LOCAL).filter(variable => isFunctionScope(variable.scope));
         result.push({ kind: "local", variables: [...slotsOf(info.arguments, SLOT_ARGUMENT), ...functionScope] });
-        result.push({ kind: "closure", variables: slotsOf(info.closures, SLOT_CLOSURE) });
+        // the closure variables, then the constants of the module the
+        // compiler replaced by their value (an exported one also has its
+        // variable, in the module function: once is enough)
+        const closures = slotsOf(info.closures, SLOT_CLOSURE);
+        const closureNames = new Set(closures.map(variable => variable.name));
+        const constants = this.constants().filter(constant => !closureNames.has(constant.name));
+        result.push({ kind: "closure", variables: [...closures, ...constants] });
 
         // without the scope numbers, and without empty scopes
         return result
             .map(entry => ({ kind: entry.kind, variables: entry.variables.map(withoutScope) }))
             .filter(entry => entry.variables.length > 0);
+    }
+
+    // The constants of the module that have no variable at run time (the
+    // compiler wrote their value where they are read), as variables without
+    // slot: { name, constant, flags }.
+    constants() {
+        const flags = VARIABLE_FLAG.LEXICAL | VARIABLE_FLAG.CONST;
+        return this.functions
+            .flatMap(info => info.constants ?? [])
+            .map(({ name, value }) => ({ name, constant: value, flags }));
     }
 
     // The slot of 'this' in a function ({ slotKind, index }), or null: QuickJS
@@ -417,7 +433,10 @@ function slotsOf(variables, slotKind) {
     return visible;
 }
 
-function withoutScope({ name, slotKind, index, flags }) {
+function withoutScope({ name, slotKind, index, flags, constant }) {
+    if (constant !== undefined) {
+        return { name, constant, flags };
+    }
     return { name, slotKind, index, flags };
 }
 

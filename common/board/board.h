@@ -122,6 +122,7 @@ struct MemoryStatus {
     size_t ramLowest;      // lowest free internal RAM since the boot
     size_t psramFree;      // free PSRAM now (0 without PSRAM)
     size_t psramLargest;   // largest free block of PSRAM (0 without PSRAM)
+    size_t jsHeapSize;     // region reserved for the JS heap (0: it shares the RAM, or the PSRAM)
 };
 
 /**
@@ -129,6 +130,15 @@ struct MemoryStatus {
  * (the desktop: the PC's memory says nothing about a device).
  */
 bool memoryStatus(MemoryStatus *out);
+
+#ifdef QJSX_MEMORY_MAP
+/**
+ * Measure (temporary, QJSX_MEMORY_MAP): prints on the console the heaps of
+ * the board, every block of them, the tasks with their stacks and the
+ * region of the JS heap. Called by the JS task (the global __memoryMap()).
+ */
+void printMemoryMap();
+#endif
 
 /**
  * Bytes of stack the JS code may use on the JS thread (QuickJS turns going

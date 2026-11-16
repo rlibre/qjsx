@@ -44,12 +44,31 @@ import { matchFiles } from "qjsx:glob";
 import { loadProject, PROJECT_FILE } from "qjsx:project";
 import { hex, encodeText } from "qjsx:util";
 import { compileModule, compilerId, BYTECODE_VERSION } from "qjsx:compile";
+import { link, engineNames } from "sys/compiler";
 import {
     readLibrary, libraryModule, libraryOf, isNativeModule, bareNameError, madeByThisCompiler, standardLibraryFile,
     STANDARD_LIBRARY, NATIVE_PREFIXES,
 } from "qjsx:library";
 
 export const PACKAGE_FORMAT = 1;
+
+// Entry of the names of the package (see linkModules), and its alignment in
+// the archive: the engine uses it where the package lies.
+export const NAMES_ENTRY = "names.bin";
+const NAMES_ALIGNMENT = 8;
+
+// Links the modules of the package (sys/compiler link()): every name they
+// use gets one number for the whole package, their bytecode is written with
+// these numbers ('bytecode' of each module is replaced) and the names go in
+// one entry. A device then runs the bytecode where the package lies and
+// keeps none of these names in its RAM. Returns the entry of the names.
+function linkModules(modules) {
+    const linked = link(modules.map(module => module.bytecode));
+    modules.forEach((module, index) => {
+        module.bytecode = linked.modules[index];
+    });
+    return { name: NAMES_ENTRY, data: linked.names, align: NAMES_ALIGNMENT };
+}
 
 // A module of the program, compiled from its file: what goes into the
 // package ('script' is its record in the manifest).
@@ -224,9 +243,13 @@ export function build(directory) {
         }
     }
 
+    // link the modules: one table of names for the package, first entry
+    // after the manifest
+    const namesEntry = linkModules([...packaged.values()]);
+
     // the entries of the archive; two modules must not give the same entry
-    const entries = [];
-    const entryNames = new Set();
+    const entries = [namesEntry];
+    const entryNames = new Set([namesEntry.name]);
     const scripts = [];
     for (const module of packaged.values()) {
         scripts.push(module.script);
@@ -280,6 +303,7 @@ export function build(directory) {
         created: new Date().toISOString(),
         compiler: compilerId(),
         bytecode: BYTECODE_VERSION,
+        names: { entry: NAMES_ENTRY, engine: engineNames },   // the bytecode is linked to them
         main: project.main,
         env: project.env,   // process.env on a device; left out of the JSON when undefined
         desktop: project.desktop,   // root folder and permissions on the PC; left out when undefined

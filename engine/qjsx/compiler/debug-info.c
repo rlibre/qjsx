@@ -188,6 +188,7 @@ void js_debug_info_collect(JSContext *ctx, JSFunctionDef *fd, JSFunctionBytecode
     JSDebugVariable *locals = NULL;
     JSDebugVariable *closures = NULL;
     JSDebugScope *scopes = NULL;
+    JSDebugConstant *constants = NULL;
     int i;
 
     if (rt->debug.info_collector == NULL)
@@ -207,7 +208,8 @@ void js_debug_info_collect(JSContext *ctx, JSFunctionDef *fd, JSFunctionBytecode
     locals = js_mallocz(ctx, sizeof(locals[0]) * max_int(fd->var_count, 1));
     closures = js_mallocz(ctx, sizeof(closures[0]) * max_int(fd->closure_var_count, 1));
     scopes = js_mallocz(ctx, sizeof(scopes[0]) * max_int(fd->scope_count, 1));
-    if (!arguments || !locals || !closures || !scopes) {
+    constants = js_mallocz(ctx, sizeof(constants[0]) * max_int(fd->module_const_count, 1));
+    if (!arguments || !locals || !closures || !scopes || !constants) {
         JS_FreeValue(ctx, JS_GetException(ctx));   /* out of memory: no debug info */
         goto done;
     }
@@ -248,6 +250,12 @@ void js_debug_info_collect(JSContext *ctx, JSFunctionDef *fd, JSFunctionBytecode
     info.closure_count = fd->closure_var_count;
     info.scopes = scopes;
     info.scope_count = fd->scope_count;
+    for (i = 0; i < fd->module_const_count; i++) {
+        constants[i].name = fd->module_consts[i].var_name;
+        constants[i].value = fd->module_consts[i].value;
+    }
+    info.constants = constants;
+    info.constant_count = fd->module_const_count;
     rt->debug.info_collector(ctx, &info, rt->debug.info_opaque);
 
  done:
@@ -255,4 +263,5 @@ void js_debug_info_collect(JSContext *ctx, JSFunctionDef *fd, JSFunctionBytecode
     js_free(ctx, locals);
     js_free(ctx, closures);
     js_free(ctx, scopes);
+    js_free(ctx, constants);
 }

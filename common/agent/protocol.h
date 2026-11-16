@@ -134,6 +134,7 @@ enum Key {
     KEY_RAM_LOWEST = 54,
     KEY_PSRAM_FREE = 55,
     KEY_PSRAM_LARGEST = 56,
+    KEY_JS_HEAP_SIZE = 57,
 };
 
 enum Stream {

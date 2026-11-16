@@ -80,3 +80,7 @@ console.log(failSoftly());
 debugger;
 console.log("sum", add(first(), second()));
 waitAndCount().then(showTicks);
+
+// a constant the compiler replaces by its value: no variable holds it, the
+// debugger shows it from the debug info (kept last: the tests name lines)
+const UNIT = "c" + "m";

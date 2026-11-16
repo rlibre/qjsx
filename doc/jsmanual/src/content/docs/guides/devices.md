@@ -16,6 +16,27 @@ The program arrives as a package of bytecode, compiled on the PC by `qjsx build`
   known when the package is built, and the library modules it imports are copied into the
   package. Static `import` only.
 
+## Constants cost nothing
+
+`qjsx build` computes the expressions made of literal numbers and strings (`5 * 1000`,
+`1 << 4`, `"pin" + "-" + 4`), and replaces a `const` of a module that has such a value by
+that value wherever the module reads it:
+
+```js
+const DELAY = 5 * 1000;      // no variable is made for it
+const LABEL = "led-" + 2;
+
+export function wait() {
+    return sleep(DELAY);     // compiled as sleep(5000)
+}
+```
+
+Such a constant takes no memory on the device, so naming values costs nothing. Two
+things follow: reading it before its declaration ran gives its value (JavaScript throws
+a ReferenceError there), and a breakpoint set on its line stops at the next statement.
+The debugger still shows it, with its value. An exported constant, a `const` holding an
+object, an array or the result of a call, and a `let` stay ordinary variables.
+
 ## One thread, one loop
 
 A program runs on one JS thread. Hardware events (a pin changes, bytes arrive, a send

@@ -123,6 +123,14 @@ typedef struct BlockEnv {
     uint8_t is_regular_stmt : 1; /* i.e. not a loop statement */
 } BlockEnv;
 
+/* qjsx: a 'const' of a module replaced by its value where the module reads
+   it (compiler/fold.c, js_find_module_constants) */
+typedef struct JSModuleConst {
+    JSAtom var_name;   /* owned */
+    JSValue value;     /* a number or a string, owned */
+    BOOL is_removed;   /* the variable itself is not made (not exported) */
+} JSModuleConst;
+
 typedef struct JSGlobalVar {
     int cpool_idx; /* if >= 0, index in the constant pool for hoisted
                       function defintion*/
@@ -309,6 +317,10 @@ typedef struct JSFunctionDef {
     int global_var_count;
     int global_var_size;
     JSGlobalVar *global_vars;
+    /* qjsx: the constants of the module replaced by their value (module
+       function only) */
+    JSModuleConst *module_consts;
+    int module_const_count;
 
     DynBuf byte_code;
     int last_opcode_pos; /* -1 if no last opcode */
@@ -507,6 +519,12 @@ void js_compile_warning(JSParseState *s, JSCompileWarningKind kind, const uint8_
 BOOL js_last_op_is_scope_var(JSFunctionDef *fd, JSAtom name);
 /* qjsx: compiler/tdz.c */
 int remove_useless_tdz_checks(JSContext *ctx, JSFunctionDef *fd);
+/* qjsx: compiler/fold.c */
+int fold_constants(JSContext *ctx, JSFunctionDef *fd);
+int js_find_module_constants(JSContext *ctx, JSFunctionDef *fd);
+JSModuleConst *js_get_module_const(JSFunctionDef *fd, JSAtom name);
+int js_emit_module_const(JSContext *ctx, JSFunctionDef *fd, DynBuf *bc, JSModuleConst *mc);
+void js_free_module_consts(JSContext *ctx, JSFunctionDef *fd);
 void emit_op(JSParseState *s, uint8_t val);
 void emit_atom(JSParseState *s, JSAtom name);
 int update_label(JSFunctionDef *s, int label, int delta);

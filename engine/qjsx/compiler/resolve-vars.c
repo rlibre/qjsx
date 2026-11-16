@@ -498,6 +498,21 @@ int resolve_scope_var(JSContext *ctx, JSFunctionDef *s,
         fd = s;
     if (var_idx < 0 && fd->is_eval) {
         int idx1;
+        /* qjsx: a constant of the module (compiler/fold.c): a read is its
+           value, the initialization of one that has no variable drops the
+           value */
+        if (fd->module_const_count > 0) {
+            JSModuleConst *mc = js_get_module_const(fd, var_name);
+            if (mc && (op == OP_scope_get_var || op == OP_scope_get_var_undef)) {
+                if (js_emit_module_const(ctx, s, bc, mc))
+                    return -1;
+                goto done;
+            }
+            if (mc && mc->is_removed && op == OP_scope_put_var_init) {
+                dbuf_putc(bc, OP_drop);
+                goto done;
+            }
+        }
         for (idx1 = 0; idx1 < fd->closure_var_count; idx1++) {
             JSClosureVar *cv = &fd->closure_var[idx1];
             if (var_name == cv->var_name) {

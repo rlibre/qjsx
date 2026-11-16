@@ -7,14 +7,18 @@
 
 // Sends a package to a device and starts it.
 //
-// The device gets a reduced package: manifest.json (with "reduced": true)
-// and bytecode/ only, what its loader reads. The debug sidecars (debug/) and
+// The device gets a reduced package: manifest.json (with "reduced": true),
+// names.bin and bytecode/ only, what its loader reads. The debug sidecars (debug/) and
 // the sources (src/) stay in the full package on the PC, where the debugger
 // finds it by its build id, which does not change.
 import * as fs from "sys/fs";
 import { sha256 } from "sys/crypto";
 import { readZip, writeZip } from "qjsx:zip";
 import { KIND, KEY, UPLOAD_CHUNK } from "qjsx:protocol";
+
+// The entry of the names of a package and its alignment (as qjsx:build).
+const NAMES_ENTRY = "names.bin";
+const NAMES_ALIGNMENT = 8;
 
 // The manifest of a package (its manifest.json, parsed).
 export function packageManifest(packageBytes) {
@@ -52,6 +56,12 @@ export function reducePackage(packageBytes) {
     for (const [name, data] of entries) {
         if (name.startsWith("bytecode/")) {
             kept.push({ name, data });
+        }
+
+        // the names the bytecode is linked to, aligned as in the full
+        // package (the engine uses them where the package lies)
+        if (name === NAMES_ENTRY) {
+            kept.push({ name, data, align: NAMES_ALIGNMENT });
         }
     }
     return writeZip(kept);

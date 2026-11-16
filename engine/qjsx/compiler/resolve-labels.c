@@ -184,6 +184,14 @@ static void instantiate_hoisted_definitions(JSContext *ctx, JSFunctionDef *s, Dy
         JSGlobalVar *hf = &s->global_vars[i];
         BOOL has_var_obj = FALSE;
         BOOL force_init = hf->force_init;
+        /* qjsx: a constant replaced by its value has no variable */
+        if (s->module_const_count > 0) {
+            JSModuleConst *mc = js_get_module_const(s, hf->var_name);
+            if (mc && mc->is_removed) {
+                JS_FreeAtom(ctx, hf->var_name);
+                continue;
+            }
+        }
         /* we are in an eval, so the closure contains all the
            enclosing variables */
         /* If the outer function has a variable environment,

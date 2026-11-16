@@ -13,6 +13,9 @@
 
 /* atom indexes 0 .. QJSX_ROM_ATOM_COUNT - 1 are made at start */
 #define QJSX_ROM_ATOM_COUNT 515
+/* identifies these names and their indexes: a package is made for one
+   table of names (JS_GetAtomsFingerprint) */
+#define QJSX_ROM_ATOM_FINGERPRINT 0x6d8d10d0u
 /* slots of qjsx_rom_atom_hash (a power of two) */
 #define QJSX_ROM_ATOM_HASH_SIZE 2048
 

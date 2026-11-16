@@ -557,6 +557,29 @@ public:
     }
 };
 
+#ifdef QJSX_MEMORY_MAP
+/**
+ * Measure (temporary, QJSX_MEMORY_MAP): prints the memory map of the board
+ * (its heaps, tasks and JS region), then of the JS heap (the allocator's
+ * arenas, what QuickJS counts by kind of object), between two marker lines.
+ */
+void memoryMap(js::Str title) {
+    JSRuntime *runtime = JS_GetRuntime(js::context());
+
+    // the board, then the allocator of the engine
+    printf("MAP begin %.*s\n", (int)title.size(), title.data());
+    board::printMemoryMap();
+    JS_DumpMallocMap(runtime);
+
+    // what QuickJS counts
+    JSMemoryUsage usage;
+    JS_ComputeMemoryUsage(runtime, &usage);
+    JS_DumpMemoryUsage(stdout, &usage, runtime);
+    printf("MAP end\n");
+    fflush(stdout);
+}
+#endif
+
 #ifdef QJSX_ALLOC_HISTOGRAM
 /**
  * Measure (temporary, QJSX_ALLOC_HISTOGRAM): the blocks of the JS heap by
@@ -609,6 +632,11 @@ JS_GLOBALS(runtime, globals) {
     JS_FUNCTION(globals, setInterval);
     JS_FUNCTION(globals, clearTimeout);
     JS_FUNCTION(globals, clearInterval);
+
+#ifdef QJSX_MEMORY_MAP
+    // measure (temporary): the memory map of the board and of the JS heap
+    JS_FUNCTION_AS(globals, memoryMap, "__memoryMap");
+#endif
 
 #ifdef QJSX_ALLOC_HISTOGRAM
     // measure (temporary): sizes of the blocks of the JS heap

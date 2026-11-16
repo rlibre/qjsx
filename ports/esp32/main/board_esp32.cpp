@@ -18,6 +18,7 @@
 #include "modules.h"
 #include "platform.h"
 #include "protocol.h"
+#include "region_heap.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -31,6 +32,13 @@
 #include "esp_partition.h"
 #include "esp_system.h"
 #include "sdkconfig.h"
+
+// the measure of the memory map walks the tasks
+#ifdef QJSX_MEMORY_MAP
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/freertos_debug.h"
+#endif
 
 // the board has PSRAM (its sdkconfig.board sets CONFIG_SPIRAM)
 #if CONFIG_SPIRAM
@@ -132,6 +140,67 @@ void *jsHeapRealloc(JSMallocState *state, void *block, size_t size) {
 }
 
 const JSMallocFunctions jsHeapAllocator = { &jsHeapMalloc, &jsHeapFree, &jsHeapRealloc, &jsHeapUsableSize };
+
+// Without PSRAM the JS heap is one region of internal RAM, taken once and
+// managed by memory::RegionHeap: the firmware keeps the rest, whatever the
+// program does. A program that fills its region gets "out of memory"; the
+// agent, the drivers and the file system still have their RAM, and the JS
+// blocks no longer split the firmware's heap. QJSX_JS_HEAP_SHARED (a build
+// option, to compare: idf.py -DQJSX_JS_HEAP_SHARED=ON) keeps the heap shared
+// with the firmware, as before.
+#if !CONFIG_SPIRAM && !defined(QJSX_JS_HEAP_SHARED)
+#define JS_HEAP_REGION 1
+#else
+#define JS_HEAP_REGION 0
+#endif
+
+#if JS_HEAP_REGION
+const size_t JS_HEAP_RESERVE = 16 * 1024;    // left to the firmware in the largest free block
+const size_t JS_HEAP_SMALLEST = 64 * 1024;   // a smaller region is not worth it: shared heap
+
+memory::RegionHeap jsRegion;                 // the region, used by the JS task only
+void *jsRegionStart = nullptr;               // its first byte (for the measure of the memory map)
+size_t jsRegionSize = 0;                     // its size, 0 while not reserved (JS task writes once)
+bool jsRegionTried = false;                  // reserveJsRegion() ran (JS task only)
+
+/**
+ * Reserves the JS region: the largest free block of internal RAM less
+ * JS_HEAP_RESERVE (the other, smaller, free blocks also stay to the
+ * firmware). Called once, by the JS task at its first runtime: its stack,
+ * the agent, the links and the file system are allocated before. False when
+ * the block is too small: the JS heap then shares the firmware's.
+ */
+bool reserveJsRegion() {
+    // once
+    if (jsRegionTried) {
+        return jsRegionSize > 0;
+    }
+
+    jsRegionTried = true;
+
+    // the largest block, less the firmware's part
+    size_t largest = heap_caps_get_largest_free_block(JS_HEAP_CAPS);
+    if (largest < JS_HEAP_RESERVE + JS_HEAP_SMALLEST) {
+        printf("qjsx: no region for the JS heap (largest free block %u KB): it shares the RAM\n",
+            (unsigned)(largest / 1024));
+        return false;
+    }
+
+    // the region, then the heap in it
+    size_t size = largest - JS_HEAP_RESERVE;
+    void *region = heap_caps_malloc(size, JS_HEAP_CAPS);
+    if (region == nullptr || !jsRegion.init(region, size)) {
+        heap_caps_free(region);
+        printf("qjsx: cannot reserve the JS heap (%u KB): it shares the RAM\n", (unsigned)(size / 1024));
+        return false;
+    }
+
+    jsRegionStart = region;
+    jsRegionSize = size;
+    printf("qjsx: JS heap of %u KB\n", (unsigned)(size / 1024));
+    return true;
+}
+#endif
 
 // ### Package storage #########################################################
 
@@ -546,10 +615,17 @@ bool macAddress(MacKind kind, uint8_t *out) {
 }
 
 /**
- * The JS heap in PSRAM, or in internal RAM without PSRAM (counted, see
- * jsHeapMalloc).
+ * The JS heap: in PSRAM (ESP-IDF's heap, counted, see jsHeapMalloc); without
+ * PSRAM in the region of internal RAM reserved now, or in the firmware's
+ * heap when it could not be reserved. Called once, by the JS task.
  */
 const JSMallocFunctions *jsAllocator() {
+#if JS_HEAP_REGION
+    if (reserveJsRegion()) {
+        return memory::jsAllocator(&jsRegion, false);
+    }
+#endif
+
     return &jsHeapAllocator;
 }
 
@@ -584,8 +660,46 @@ bool memoryStatus(MemoryStatus *out) {
     out->psramFree = 0;
     out->psramLargest = 0;
 #endif
+
+    // the region of the JS heap (without PSRAM)
+#if JS_HEAP_REGION
+    out->jsHeapSize = jsRegionSize;
+#else
+    out->jsHeapSize = 0;
+#endif
     return true;
 }
+
+#ifdef QJSX_MEMORY_MAP
+/**
+ * Measure (temporary): the heaps of internal RAM (summary, then every
+ * block), the tasks (stack block, its size, bytes never used) and the JS
+ * region (address, size, RegionHeap's counts).
+ */
+void printMemoryMap() {
+    // the heaps: summary and blocks
+    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    heap_caps_dump(MALLOC_CAP_INTERNAL);
+
+    // every task
+    TaskIterator_t iterator = {};
+    while (xTaskGetNext(&iterator) != -1) {
+        TaskHandle_t task = iterator.pxTaskHandle;
+        uint8_t *stack = pxTaskGetStackStart(task);
+        printf("MAP task %s stack %p size %u unused %u\n", pcTaskGetName(task), stack,
+            (unsigned)heap_caps_get_allocated_size(stack), (unsigned)uxTaskGetStackHighWaterMark(task));
+    }
+
+    // the JS region
+#if JS_HEAP_REGION
+    memory::HeapStats stats = {};
+    jsRegion.stats(&stats);
+    printf("MAP region at %p size %u total %u used %u peak %u largest free %u used blocks %u free blocks %u\n",
+        jsRegionStart, (unsigned)jsRegionSize, (unsigned)stats.total, (unsigned)stats.used, (unsigned)stats.peak,
+        (unsigned)stats.largestFree, (unsigned)stats.usedBlocks, (unsigned)stats.freeBlocks);
+#endif
+}
+#endif
 
 /**
  * Below the stack of the JS task (main.cpp).

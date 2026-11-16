@@ -1,5 +1,5 @@
 diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/date.c engine/qjsx/builtins/date.c
---- build/qjsx-baseline/builtins/date.c	2026-11-13 19:37:09.472068600 +0100
+--- build/qjsx-baseline/builtins/date.c	2026-11-16 11:07:47.853821700 +0100
 +++ engine/qjsx/builtins/date.c	2026-11-11 16:04:41.500342200 +0100
 @@ -39,7 +39,9 @@
          }
@@ -13,7 +13,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/date.c engine/qjsx/bu
          struct tm *tm;
          time_t gm_ti, loc_ti;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/math.c engine/qjsx/builtins/math.c
---- build/qjsx-baseline/builtins/math.c	2026-11-13 19:37:09.471068300 +0100
+--- build/qjsx-baseline/builtins/math.c	2026-11-16 11:07:47.852806700 +0100
 +++ engine/qjsx/builtins/math.c	2026-11-13 15:45:47.178657000 +0100
 @@ -469,6 +469,17 @@
          ctx->random_state = 1;
@@ -34,9 +34,54 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/math.c engine/qjsx/bu
                                int argc, JSValueConst *argv)
  {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/bytecode/reader.c
---- build/qjsx-baseline/bytecode/reader.c	2026-11-13 19:37:09.468069200 +0100
-+++ engine/qjsx/bytecode/reader.c	2026-11-11 16:04:41.505342000 +0100
-@@ -427,6 +427,11 @@
+--- build/qjsx-baseline/bytecode/reader.c	2026-11-16 11:07:47.848823000 +0100
++++ engine/qjsx/bytecode/reader.c	2026-11-16 10:58:23.043692600 +0100
+@@ -18,6 +18,7 @@
+     BOOL allow_sab : 8;
+     BOOL allow_bytecode : 8;
+     BOOL is_rom_data : 8;
++    BOOL fixed_atoms : 8;   /* qjsx: JS_READ_OBJ_FIXED_ATOMS */
+     BOOL allow_reference : 8;
+     /* object references */
+     JSObject **objects;
+@@ -184,6 +185,18 @@
+ 
+     if (__JS_AtomIsTaggedInt(idx)) {
+         atom = idx;
++#if QJSX_ROM_ATOMS
++    } else if (s->fixed_atoms) {
++        /* qjsx: an index of the runtime: a name of the engine or of the
++           package (never counted: no reference to take) */
++        if (idx >= s->ctx->rt->const_atom_end) {
++            JS_ThrowSyntaxError(s->ctx, "invalid name index (pos=%u)",
++                                (unsigned int)(s->ptr - s->buf_start));
++            *patom = JS_ATOM_NULL;
++            return s->error_state = -1;
++        }
++        atom = idx;
++#endif
+     } else if (idx < s->first_atom) {
+         atom = JS_DupAtom(s->ctx, idx);
+     } else {
+@@ -301,6 +314,17 @@
+         case OP_FMT_atom_label_u16:
+             idx = get_u32(bc_buf + pos + 1);
+             if (s->is_rom_data) {
++#if QJSX_ROM_ATOMS
++                /* qjsx: with fixed indexes, a name of the engine or of the
++                   package (or an integer): anything else is not valid */
++                if (s->fixed_atoms && !__JS_AtomIsTaggedInt(idx) &&
++                    idx >= s->ctx->rt->const_atom_end) {
++                    JS_ThrowSyntaxError(s->ctx, "invalid name index in the bytecode (pos=%d)", pos);
++                    b->byte_code_len = pos;
++                    s->error_state = -1;
++                    return -1;
++                }
++#endif
+                 /* just increment the reference count of the atom */
+                 JS_DupAtom(s->ctx, (JSAtom)idx);
+             } else {
+@@ -427,6 +451,11 @@
      bc.js_mode = v8;
      if (bc_get_atom(s, &bc.func_name))  //@ atom leak if failure
          goto fail;
@@ -48,7 +93,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/
      if (bc_get_leb128_u16(s, &bc.arg_count))
          goto fail;
      if (bc_get_leb128_u16(s, &bc.var_count))
-@@ -551,11 +556,6 @@
+@@ -551,11 +580,6 @@
      if (b->has_debug) {
          /* read optional debug information */
          bc_read_trace(s, "debug {\n");
@@ -60,7 +105,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/
          if (bc_get_leb128_int(s, &b->debug.pc2line_len))
              goto fail;
          if (b->debug.pc2line_len) {
-@@ -1074,6 +1074,12 @@
+@@ -1074,6 +1098,12 @@
      return obj;
  }
  
@@ -73,10 +118,40 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/
  static int JS_ReadObjectAtoms(BCReaderState *s)
  {
      uint8_t v8;
+@@ -1083,9 +1113,11 @@
+ 
+     if (bc_get_u8(s, &v8))
+         return -1;
+-    if (v8 != BC_VERSION) {
++    /* qjsx: a bytecode with fixed atom indexes has its own first byte, and
++       is read as such only */
++    if (v8 != (s->fixed_atoms ? BC_VERSION_FIXED_ATOMS : BC_VERSION)) {
+         JS_ThrowSyntaxError(s->ctx, "invalid version (%d expected=%d)",
+-                            v8, BC_VERSION);
++                            v8, s->fixed_atoms ? BC_VERSION_FIXED_ATOMS : BC_VERSION);
+         return -1;
+     }
+     if (bc_get_leb128(s, &s->idx_to_atom_count))
+@@ -1142,6 +1174,7 @@
+     s->ptr = buf;
+     s->allow_bytecode = ((flags & JS_READ_OBJ_BYTECODE) != 0);
+     s->is_rom_data = ((flags & JS_READ_OBJ_ROM_DATA) != 0);
++    s->fixed_atoms = ((flags & JS_READ_OBJ_FIXED_ATOMS) != 0);
+     s->allow_sab = ((flags & JS_READ_OBJ_SAB) != 0);
+     s->allow_reference = ((flags & JS_READ_OBJ_REFERENCE) != 0);
+     if (s->allow_bytecode)
 diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/bytecode/writer.c
---- build/qjsx-baseline/bytecode/writer.c	2026-11-13 19:37:09.467068200 +0100
-+++ engine/qjsx/bytecode/writer.c	2026-11-11 16:04:41.506342600 +0100
-@@ -444,6 +444,9 @@
+--- build/qjsx-baseline/bytecode/writer.c	2026-11-16 11:07:47.847820800 +0100
++++ engine/qjsx/bytecode/writer.c	2026-11-16 10:52:46.668789800 +0100
+@@ -118,6 +118,7 @@
+     BOOL allow_bytecode : 8;
+     BOOL allow_sab : 8;
+     BOOL allow_reference : 8;
++    BOOL fixed_atoms : 8;   /* qjsx: JS_WRITE_OBJ_FIXED_ATOMS */
+     uint32_t first_atom;
+     uint32_t *atom_to_idx;
+     int atom_to_idx_size;
+@@ -444,6 +445,9 @@
      bc_put_u16(s, flags);
      bc_put_u8(s, b->js_mode);
      bc_put_atom(s, b->func_name);
@@ -86,7 +161,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/
  
      bc_put_leb128(s, b->arg_count);
      bc_put_leb128(s, b->var_count);
-@@ -490,7 +493,6 @@
+@@ -490,7 +494,6 @@
          goto fail;
  
      if (b->has_debug) {
@@ -94,10 +169,47 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/
          bc_put_leb128(s, b->debug.pc2line_len);
          dbuf_put(&s->dbuf, b->debug.pc2line_buf, b->debug.pc2line_len);
          if (b->debug.source) {
+@@ -879,7 +882,9 @@
+ 
+     dbuf1 = s->dbuf;
+     js_dbuf_init(s->ctx, &s->dbuf);
+-    bc_put_u8(s, BC_VERSION);
++    /* qjsx: its own first byte for a bytecode with fixed atom indexes (it
++       has no atom: the table below is empty) */
++    bc_put_u8(s, s->fixed_atoms ? BC_VERSION_FIXED_ATOMS : BC_VERSION);
+ 
+     bc_put_leb128(s, s->idx_to_atom_count);
+     for(i = 0; i < s->idx_to_atom_count; i++) {
+@@ -920,6 +925,10 @@
+         s->first_atom = JS_ATOM_END;
+     else
+         s->first_atom = 1;
++    /* qjsx: every atom is written as its index in this runtime */
++    s->fixed_atoms = ((flags & JS_WRITE_OBJ_FIXED_ATOMS) != 0);
++    if (s->fixed_atoms)
++        s->first_atom = UINT32_MAX;
+     js_dbuf_init(ctx, &s->dbuf);
+     js_object_list_init(&s->object_list);
+ 
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjsx/compiler/compiler.h
---- build/qjsx-baseline/compiler/compiler.h	2026-11-13 19:37:09.482084100 +0100
-+++ engine/qjsx/compiler/compiler.h	2026-11-12 08:52:26.317088600 +0100
-@@ -189,8 +189,31 @@
+--- build/qjsx-baseline/compiler/compiler.h	2026-11-16 11:07:47.866130900 +0100
++++ engine/qjsx/compiler/compiler.h	2026-11-16 10:30:25.278518400 +0100
+@@ -123,6 +123,14 @@
+     uint8_t is_regular_stmt : 1; /* i.e. not a loop statement */
+ } BlockEnv;
+ 
++/* qjsx: a 'const' of a module replaced by its value where the module reads
++   it (compiler/fold.c, js_find_module_constants) */
++typedef struct JSModuleConst {
++    JSAtom var_name;   /* owned */
++    JSValue value;     /* a number or a string, owned */
++    BOOL is_removed;   /* the variable itself is not made (not exported) */
++} JSModuleConst;
++
+ typedef struct JSGlobalVar {
+     int cpool_idx; /* if >= 0, index in the constant pool for hoisted
+                       function defintion*/
+@@ -189,8 +197,31 @@
  typedef struct JSVarScope {
      int parent;  /* index into fd->scopes of the enclosing scope */
      int first;   /* index into fd->vars of the last variable in this scope */
@@ -129,7 +241,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
  typedef struct JSVarDef {
      JSAtom var_name;
      /* index into fd->scopes of this variable lexical scope */
-@@ -218,6 +241,8 @@
+@@ -218,6 +249,8 @@
  typedef struct JSFunctionDef {
      JSContext *ctx;
      struct JSFunctionDef *parent;
@@ -138,7 +250,18 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
      int parent_cpool_idx; /* index in the constant pool of the parent
                               or -1 if none */
      int parent_scope_level; /* scope level in parent at point of definition */
-@@ -326,6 +351,13 @@
+@@ -284,6 +317,10 @@
+     int global_var_count;
+     int global_var_size;
+     JSGlobalVar *global_vars;
++    /* qjsx: the constants of the module replaced by their value (module
++       function only) */
++    JSModuleConst *module_consts;
++    int module_const_count;
+ 
+     DynBuf byte_code;
+     int last_opcode_pos; /* -1 if no last opcode */
+@@ -326,6 +363,13 @@
      char *source;  /* raw source, utf-8 encoded */
      int source_len;
  
@@ -152,7 +275,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
      JSModuleDef *module; /* != NULL when parsing a module */
      BOOL has_await; /* TRUE if await is used (used in module eval) */
  } JSFunctionDef;
-@@ -368,6 +400,8 @@
+@@ -368,6 +412,8 @@
      BOOL is_module; /* parsing a module */
      BOOL allow_html_comments;
      BOOL ext_json; /* JSON parsing: true if accepting JSON superset */
@@ -161,7 +284,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
      GetLineColCache get_line_col_cache;
  } JSParseState;
  
-@@ -463,6 +497,16 @@
+@@ -463,6 +509,22 @@
  void emit_u16(JSParseState *s, uint16_t val);
  void emit_u32(JSParseState *s, uint32_t val);
  void emit_source_pos(JSParseState *s, const uint8_t *source_ptr);
@@ -175,10 +298,16 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
 +BOOL js_last_op_is_scope_var(JSFunctionDef *fd, JSAtom name);
 +/* qjsx: compiler/tdz.c */
 +int remove_useless_tdz_checks(JSContext *ctx, JSFunctionDef *fd);
++/* qjsx: compiler/fold.c */
++int fold_constants(JSContext *ctx, JSFunctionDef *fd);
++int js_find_module_constants(JSContext *ctx, JSFunctionDef *fd);
++JSModuleConst *js_get_module_const(JSFunctionDef *fd, JSAtom name);
++int js_emit_module_const(JSContext *ctx, JSFunctionDef *fd, DynBuf *bc, JSModuleConst *mc);
++void js_free_module_consts(JSContext *ctx, JSFunctionDef *fd);
  void emit_op(JSParseState *s, uint8_t val);
  void emit_atom(JSParseState *s, JSAtom name);
  int update_label(JSFunctionDef *s, int label, int delta);
-@@ -531,7 +575,10 @@
+@@ -531,7 +593,10 @@
                               int label_break, int label_cont,
                               int drop_count);
  void pop_break_entry(JSFunctionDef *fd);
@@ -192,8 +321,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
  int is_let(JSParseState *s, int decl_mask);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/qjsx/compiler/debug-info.c
 --- build/qjsx-baseline/compiler/debug-info.c	1970-01-01 01:00:00.000000000 +0100
-+++ engine/qjsx/compiler/debug-info.c	2026-11-12 08:52:26.255725400 +0100
-@@ -0,0 +1,258 @@
++++ engine/qjsx/compiler/debug-info.c	2026-11-16 10:33:29.640704200 +0100
+@@ -0,0 +1,267 @@
 +/*          _
 + *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
 + * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
@@ -384,6 +513,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/q
 +    JSDebugVariable *locals = NULL;
 +    JSDebugVariable *closures = NULL;
 +    JSDebugScope *scopes = NULL;
++    JSDebugConstant *constants = NULL;
 +    int i;
 +
 +    if (rt->debug.info_collector == NULL)
@@ -403,7 +533,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/q
 +    locals = js_mallocz(ctx, sizeof(locals[0]) * max_int(fd->var_count, 1));
 +    closures = js_mallocz(ctx, sizeof(closures[0]) * max_int(fd->closure_var_count, 1));
 +    scopes = js_mallocz(ctx, sizeof(scopes[0]) * max_int(fd->scope_count, 1));
-+    if (!arguments || !locals || !closures || !scopes) {
++    constants = js_mallocz(ctx, sizeof(constants[0]) * max_int(fd->module_const_count, 1));
++    if (!arguments || !locals || !closures || !scopes || !constants) {
 +        JS_FreeValue(ctx, JS_GetException(ctx));   /* out of memory: no debug info */
 +        goto done;
 +    }
@@ -444,6 +575,12 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/q
 +    info.closure_count = fd->closure_var_count;
 +    info.scopes = scopes;
 +    info.scope_count = fd->scope_count;
++    for (i = 0; i < fd->module_const_count; i++) {
++        constants[i].name = fd->module_consts[i].var_name;
++        constants[i].value = fd->module_consts[i].value;
++    }
++    info.constants = constants;
++    info.constant_count = fd->module_const_count;
 +    rt->debug.info_collector(ctx, &info, rt->debug.info_opaque);
 +
 + done:
@@ -451,9 +588,10 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/q
 +    js_free(ctx, locals);
 +    js_free(ctx, closures);
 +    js_free(ctx, scopes);
++    js_free(ctx, constants);
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx/compiler/emitter.c
---- build/qjsx-baseline/compiler/emitter.c	2026-11-13 19:37:09.462069700 +0100
+--- build/qjsx-baseline/compiler/emitter.c	2026-11-16 11:07:47.842793400 +0100
 +++ engine/qjsx/compiler/emitter.c	2026-11-11 16:04:41.508343500 +0100
 @@ -57,6 +57,21 @@
      }
@@ -497,7 +635,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx
          fd->scope_first = get_first_lexical_var(fd, fd->scope_level);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/compiler/eval.c
---- build/qjsx-baseline/compiler/eval.c	2026-11-13 19:37:09.467068200 +0100
+--- build/qjsx-baseline/compiler/eval.c	2026-11-16 11:07:47.847820800 +0100
 +++ engine/qjsx/compiler/eval.c	2026-11-11 16:04:41.508343500 +0100
 @@ -86,6 +86,8 @@
      }
@@ -521,12 +659,41 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/co
          fun_obj = JS_NewModuleValue(ctx, m);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjsx/compiler/finalize.c
---- build/qjsx-baseline/compiler/finalize.c	2026-11-13 19:37:09.466067900 +0100
-+++ engine/qjsx/compiler/finalize.c	2026-11-12 08:49:49.875951600 +0100
-@@ -401,6 +401,11 @@
+--- build/qjsx-baseline/compiler/finalize.c	2026-11-16 11:07:47.846824400 +0100
++++ engine/qjsx/compiler/finalize.c	2026-11-16 10:30:40.431558300 +0100
+@@ -290,6 +290,12 @@
+         for(i = 0; i < fd->global_var_count; i++) {
+             JSVarKindEnum var_kind;
+             hf = &fd->global_vars[i];
++            /* qjsx: no variable for a constant replaced by its value */
++            if (fd->module_const_count > 0) {
++                JSModuleConst *mc = js_get_module_const(fd, hf->var_name);
++                if (mc && mc->is_removed)
++                    continue;
++            }
+             if (hf->cpool_idx >= 0 && !hf->is_lexical) {
+                 var_kind = JS_VAR_GLOBAL_FUNCTION_DECL;
+             } else {
+@@ -367,6 +373,10 @@
+ 
+     /* add the module global variables in the closure */
+     if (fd->is_eval) {
++        /* qjsx: first the constants of a module that are replaced by their
++           value: the ones not exported get no variable (compiler/fold.c) */
++        if (js_find_module_constants(ctx, fd))
++            goto fail;
+         if (add_global_variables(ctx, fd))
+             goto fail;
+     } 
+@@ -401,6 +411,16 @@
      if (resolve_variables(ctx, fd))
          goto fail;
  
++    /* qjsx: the expressions of literal numbers and strings are computed
++       now (compiler/fold.c) */
++    if (fold_constants(ctx, fd))
++        goto fail;
++
 +    /* qjsx: the temporal dead zone checks proven useless become plain
 +       accesses (compiler/tdz.c) */
 +    if (remove_useless_tdz_checks(ctx, fd))
@@ -535,7 +702,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjs
  #if defined(DUMP_BYTECODE) && (DUMP_BYTECODE & 2)
      if (!fd->strip_debug) {
          printf("pass 2\n");
-@@ -444,6 +449,19 @@
+@@ -444,6 +464,19 @@
      js_free(ctx, fd->byte_code.buf);
      fd->byte_code.buf = NULL;
  
@@ -555,7 +722,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjs
      strip_var_debug = fd->strip_debug && !fd->has_eval_call; /* XXX: check */
      b->func_name = fd->func_name;
      if (fd->arg_count + fd->var_count > 0) {
-@@ -501,15 +519,16 @@
+@@ -501,15 +534,16 @@
  
      b->stack_size = stack_size;
  
@@ -574,9 +741,808 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjs
  
          //DynBuf pc2line;
          //compute_pc2line_info(fd, &pc2line);
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/fold.c engine/qjsx/compiler/fold.c
+--- build/qjsx-baseline/compiler/fold.c	1970-01-01 01:00:00.000000000 +0100
++++ engine/qjsx/compiler/fold.c	2026-11-16 10:31:47.528578400 +0100
+@@ -0,0 +1,795 @@
++/*          _
++ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
++ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
++ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
++ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
++ */
++
++/*
++ * QuickJS - compiler/fold.c
++ *
++ * qjsx: computes at compile time the expressions made of literal numbers and
++ * strings only ("constant folding"). Not part of upstream QuickJS, which
++ * only folds the minus sign of a number: see doc/engine-changes.md (R).
++ *
++ *     5 * 1000           push_i32 5; push_i32 1000; mul    ->  push_i32 5000
++ *     "ab" + "cd"        push_atom_value x 2; add           ->  push_atom_value "abcd"
++ *     "v" + 1 + 2        ...                                ->  push_atom_value "v12"
++ *
++ * The pass runs between resolve_variables() and resolve_labels(), on the
++ * bytecode with symbolic labels. It reads the instructions in order and
++ * keeps aside the last constants pushed, not written yet: they are the top
++ * of the stack at run time.
++ *   - a constant push (OP_push_i32, OP_push_const of a number or a string,
++ *     OP_push_atom_value) is kept aside;
++ *   - an operator whose operands are all kept aside and that fold_binary()
++ *     or fold_unary() can compute is replaced, with its operands, by its
++ *     result, kept aside in turn (so "1 + 2 + 3" folds twice);
++ *   - any other instruction, a label included (the stack is then not the one
++ *     of the pushes before it), first writes what was kept aside, unchanged
++ *     and in the same order.
++ * The positions of the debugger and of the errors (OP_line_num) met while
++ * constants are kept aside keep their place among them.
++ *
++ * The values are computed as the interpreter does: numbers as doubles (the
++ * result is an integer instruction when it is a 32 bit integer, -0
++ * excepted), shifts and bit operations on 32 bit integers, strings joined
++ * after the conversion of a number by the engine itself. Left to run time:
++ * bigints, booleans, null, undefined, comparisons, and strings holding half
++ * of a surrogate pair.
++ */
++
++#include "quickjs-internal.h"
++#include "compiler/compiler.h"
++
++/* constants and positions kept aside at most: more are written at once */
++#define FOLD_MAX_ITEMS 32
++/* a joined string longer than this is left to run time */
++#define FOLD_MAX_STRING 65536
++
++/* What is kept aside, in the order of the input. */
++typedef struct FoldItem {
++    BOOL is_marker;   /* an OP_line_num, else a constant */
++    BOOL is_new;      /* a computed constant: no instruction of the input */
++    int pos;          /* its instruction in the input (not for a computed constant) */
++    JSValue value;    /* the constant, owned: a number or a string */
++} FoldItem;
++
++typedef struct FoldState {
++    JSContext *ctx;
++    JSFunctionDef *fd;
++    const uint8_t *buf;               /* the input */
++    DynBuf out;                       /* the output */
++    FoldItem items[FOLD_MAX_ITEMS];
++    int item_count;
++    int folded;                       /* operators computed */
++} FoldState;
++
++/* ### Constants ############################################################# */
++
++static BOOL fold_is_number(JSValueConst v)
++{
++    int tag = JS_VALUE_GET_TAG(v);
++    return tag == JS_TAG_INT || tag == JS_TAG_FLOAT64;
++}
++
++static double fold_number(JSValueConst v)
++{
++    if (JS_VALUE_GET_TAG(v) == JS_TAG_INT)
++        return JS_VALUE_GET_INT(v);
++    return JS_VALUE_GET_FLOAT64(v);
++}
++
++/* a flat string without half of a surrogate pair: its UTF-8 form gives the
++   same string back */
++static BOOL fold_is_string(JSValueConst v)
++{
++    JSString *p;
++    uint32_t i;
++
++    if (JS_VALUE_GET_TAG(v) != JS_TAG_STRING)
++        return FALSE;
++    p = JS_VALUE_GET_STRING(v);
++    if (p->is_wide_char) {
++        for(i = 0; i < p->len; i++) {
++            if (p->u.str16[i] >= 0xd800 && p->u.str16[i] <= 0xdfff)
++                return FALSE;
++        }
++    }
++    return TRUE;
++}
++
++/* The constant pushed by the instruction at 'pos' (owned by the caller), or
++   JS_UNINITIALIZED when it is not a number or a string constant. */
++static JSValue fold_constant_at(JSContext *ctx, JSFunctionDef *fd, const uint8_t *buf, int pos)
++{
++    JSValueConst v;
++
++    switch(buf[pos]) {
++    case OP_push_i32:
++        return JS_NewInt32(ctx, (int32_t)get_u32(buf + pos + 1));
++    case OP_push_const:
++        v = fd->cpool[get_u32(buf + pos + 1)];
++        if (fold_is_number(v) || JS_VALUE_GET_TAG(v) == JS_TAG_STRING)
++            return JS_DupValue(ctx, v);
++        return JS_UNINITIALIZED;
++    case OP_push_atom_value:
++        return JS_AtomToString(ctx, get_u32(buf + pos + 1));
++    default:
++        return JS_UNINITIALIZED;
++    }
++}
++
++/* ### Operators ############################################################# */
++
++/* 'a' + 'b' where one at least is a string: JS_UNINITIALIZED when left to
++   run time, JS_EXCEPTION out of memory. */
++static JSValue fold_concat(JSContext *ctx, JSValueConst a, JSValueConst b)
++{
++    const char *text_a, *text_b;
++    size_t len_a, len_b;
++    char *joined;
++    JSValue result = JS_UNINITIALIZED;
++
++    /* each operand: a string we can join, or a number */
++    if (!(fold_is_string(a) || fold_is_number(a)) || !(fold_is_string(b) || fold_is_number(b)))
++        return JS_UNINITIALIZED;
++
++    /* their text (the engine converts the numbers) */
++    text_a = JS_ToCStringLen(ctx, &len_a, a);
++    text_b = JS_ToCStringLen(ctx, &len_b, b);
++    if (!text_a || !text_b) {
++        result = JS_EXCEPTION;
++        goto done;
++    }
++    if (len_a + len_b > FOLD_MAX_STRING)
++        goto done;
++
++    /* joined */
++    joined = js_malloc(ctx, len_a + len_b + 1);
++    if (!joined) {
++        result = JS_EXCEPTION;
++        goto done;
++    }
++    memcpy(joined, text_a, len_a);
++    memcpy(joined + len_a, text_b, len_b);
++    result = JS_NewStringLen(ctx, joined, len_a + len_b);
++    js_free(ctx, joined);
++
++ done:
++    JS_FreeCString(ctx, text_a);
++    JS_FreeCString(ctx, text_b);
++    return result;
++}
++
++/* 'a' op 'b': JS_UNINITIALIZED when left to run time, JS_EXCEPTION out of
++   memory. */
++static JSValue fold_binary(JSContext *ctx, int op, JSValueConst a, JSValueConst b)
++{
++    double da, db, d;
++    int32_t ia, ib;
++
++    /* a string on one side: only '+' */
++    if (!fold_is_number(a) || !fold_is_number(b)) {
++        if (op != OP_add)
++            return JS_UNINITIALIZED;
++        return fold_concat(ctx, a, b);
++    }
++
++    da = fold_number(a);
++    db = fold_number(b);
++    switch(op) {
++    case OP_add:
++        d = da + db;
++        break;
++    case OP_sub:
++        d = da - db;
++        break;
++    case OP_mul:
++        d = da * db;
++        break;
++    case OP_div:
++        d = da / db;
++        break;
++    case OP_mod:
++        d = fmod(da, db);
++        break;
++    case OP_pow:
++        d = js_pow(da, db);
++        break;
++    default:
++        /* shifts and bit operations: on 32 bit integers (neither
++           conversion can fail: numbers) */
++        JS_ToInt32(ctx, &ia, a);
++        JS_ToInt32(ctx, &ib, b);
++        switch(op) {
++        case OP_shl:
++            d = (int32_t)((uint32_t)ia << (ib & 31));
++            break;
++        case OP_sar:
++            d = ia >> (ib & 31);
++            break;
++        case OP_shr:
++            d = (uint32_t)ia >> (ib & 31);
++            break;
++        case OP_and:
++            d = ia & ib;
++            break;
++        case OP_or:
++            d = ia | ib;
++            break;
++        case OP_xor:
++            d = ia ^ ib;
++            break;
++        default:
++            return JS_UNINITIALIZED;
++        }
++        break;
++    }
++    return JS_NewFloat64(ctx, d);
++}
++
++/* op 'a': JS_UNINITIALIZED when left to run time. */
++static JSValue fold_unary(JSContext *ctx, int op, JSValueConst a)
++{
++    int32_t ia;
++
++    if (!fold_is_number(a))
++        return JS_UNINITIALIZED;
++    switch(op) {
++    case OP_neg:
++        return JS_NewFloat64(ctx, -fold_number(a));
++    case OP_plus:
++        return JS_DupValue(ctx, a);
++    case OP_not:
++        JS_ToInt32(ctx, &ia, a);
++        return JS_NewInt32(ctx, ~ia);
++    default:
++        return JS_UNINITIALIZED;
++    }
++}
++
++static BOOL fold_is_binary(int op)
++{
++    switch(op) {
++    case OP_add:
++    case OP_sub:
++    case OP_mul:
++    case OP_div:
++    case OP_mod:
++    case OP_pow:
++    case OP_shl:
++    case OP_sar:
++    case OP_shr:
++    case OP_and:
++    case OP_or:
++    case OP_xor:
++        return TRUE;
++    default:
++        return FALSE;
++    }
++}
++
++static BOOL fold_is_unary(int op)
++{
++    return op == OP_neg || op == OP_plus || op == OP_not;
++}
++
++/* ### Output ################################################################ */
++
++/* Adds 'val' (taken) to the constants of the function: its index, -1 out of
++   memory. */
++static int fold_cpool_add(JSContext *ctx, JSFunctionDef *fd, JSValue val)
++{
++    if (js_resize_array(ctx, (void *)&fd->cpool, sizeof(fd->cpool[0]),
++                        &fd->cpool_size, fd->cpool_count + 1)) {
++        JS_FreeValue(ctx, val);
++        return -1;
++    }
++    fd->cpool[fd->cpool_count++] = val;
++    return fd->cpool_count - 1;
++}
++
++/* Writes in 'out', for function 'fd', the push of a constant, as the parser
++   writes a literal: an integer, a string by its atom, else a constant of the
++   pool. */
++static int fold_emit_value(JSContext *ctx, JSFunctionDef *fd, DynBuf *out, JSValueConst value)
++{
++    int idx;
++
++    if (JS_VALUE_GET_TAG(value) == JS_TAG_INT) {
++        dbuf_putc(out, OP_push_i32);
++        dbuf_put_u32(out, (uint32_t)JS_VALUE_GET_INT(value));
++        return 0;
++    }
++
++    if (JS_VALUE_GET_TAG(value) == JS_TAG_STRING) {
++        /* warning: JS_NewAtomStr frees the string value */
++        JSAtom atom = JS_NewAtomStr(ctx, JS_VALUE_GET_STRING(JS_DupValue(ctx, value)));
++        if (atom == JS_ATOM_NULL)
++            return -1;
++        if (!__JS_AtomIsTaggedInt(atom)) {
++            dbuf_putc(out, OP_push_atom_value);
++            dbuf_put_u32(out, atom);
++            return 0;
++        }
++    }
++
++    idx = fold_cpool_add(ctx, fd, JS_DupValue(ctx, value));
++    if (idx < 0)
++        return -1;
++    dbuf_putc(out, OP_push_const);
++    dbuf_put_u32(out, idx);
++    return 0;
++}
++
++/* Writes everything kept aside, in order, and forgets it. */
++static int fold_flush(FoldState *s)
++{
++    int i, ret = 0;
++
++    for(i = 0; i < s->item_count; i++) {
++        FoldItem *item = &s->items[i];
++        if (item->is_marker || !item->is_new) {
++            /* an instruction of the input, unchanged */
++            dbuf_put(&s->out, s->buf + item->pos, opcode_info[s->buf[item->pos]].size);
++        } else if (fold_emit_value(s->ctx, s->fd, &s->out, item->value)) {
++            ret = -1;
++        }
++        if (!item->is_marker)
++            JS_FreeValue(s->ctx, item->value);
++    }
++    s->item_count = 0;
++    return ret;
++}
++
++/* Index of the last constant kept aside before item 'before', -1 if none. */
++static int fold_last_constant(FoldState *s, int before)
++{
++    int i;
++
++    for(i = before - 1; i >= 0; i--) {
++        if (!s->items[i].is_marker)
++            return i;
++    }
++    return -1;
++}
++
++/* Forgets the constant kept aside at 'index' (an operand that was computed):
++   its value, and the atom its instruction held. */
++static void fold_drop_constant(FoldState *s, int index)
++{
++    FoldItem *item = &s->items[index];
++
++    if (!item->is_new && s->buf[item->pos] == OP_push_atom_value)
++        JS_FreeAtom(s->ctx, get_u32(s->buf + item->pos + 1));
++    JS_FreeValue(s->ctx, item->value);
++    memmove(item, item + 1, (s->item_count - index - 1) * sizeof(*item));
++    s->item_count--;
++}
++
++/* Keeps aside the instruction at 'pos': a position, or a constant with its
++   value (taken). Room is made first by writing what is kept. */
++static int fold_keep(FoldState *s, BOOL is_marker, BOOL is_new, int pos, JSValue value)
++{
++    FoldItem *item;
++
++    if (s->item_count == FOLD_MAX_ITEMS && fold_flush(s)) {
++        if (!is_marker)
++            JS_FreeValue(s->ctx, value);
++        return -1;
++    }
++    item = &s->items[s->item_count++];
++    item->is_marker = is_marker;
++    item->is_new = is_new;
++    item->pos = pos;
++    item->value = value;
++    return 0;
++}
++
++/* ### Pass ################################################################## */
++
++/* The operator at 'pos' with the constants kept aside: TRUE when it was
++   computed (its operands are replaced by the result, kept aside), FALSE when
++   it must be written as it is, -1 out of memory. */
++static int fold_operator(FoldState *s, int pos)
++{
++    int op = s->buf[pos];
++    int top, below;
++    JSValue result;
++
++    /* its operands among what is kept aside */
++    top = fold_last_constant(s, s->item_count);
++    if (top < 0)
++        return FALSE;
++    if (fold_is_unary(op)) {
++        result = fold_unary(s->ctx, op, s->items[top].value);
++        below = -1;
++    } else {
++        below = fold_last_constant(s, top);
++        if (below < 0)
++            return FALSE;
++        result = fold_binary(s->ctx, op, s->items[below].value, s->items[top].value);
++    }
++    if (JS_IsException(result))
++        return -1;
++    if (JS_IsUninitialized(result))
++        return FALSE;
++
++    /* the result takes their place (the upper one first: the indexes below
++       it do not move) */
++    fold_drop_constant(s, top);
++    if (below >= 0)
++        fold_drop_constant(s, below);
++    s->folded++;
++    return fold_keep(s, FALSE, TRUE, -1, result) ? -1 : TRUE;
++}
++
++int fold_constants(JSContext *ctx, JSFunctionDef *fd)
++{
++    FoldState state, *s = &state;
++    int pos, op, size, len, folded;
++    JSValue value;
++
++    s->ctx = ctx;
++    s->fd = fd;
++    s->buf = fd->byte_code.buf;
++    s->item_count = 0;
++    s->folded = 0;
++    len = fd->byte_code.size;
++    js_dbuf_bytecode_init(ctx, &s->out);
++
++    for(pos = 0; pos < len; pos += size) {
++        op = s->buf[pos];
++        size = opcode_info[op].size;
++
++        /* a position among constants kept aside stays among them */
++        if (op == OP_line_num && s->item_count > 0) {
++            if (fold_keep(s, TRUE, FALSE, pos, JS_UNDEFINED))
++                goto fail;
++            continue;
++        }
++
++        /* a constant: kept aside */
++        value = fold_constant_at(ctx, fd, s->buf, pos);
++        if (JS_IsException(value))
++            goto fail;
++        if (!JS_IsUninitialized(value)) {
++            if (fold_keep(s, FALSE, FALSE, pos, value))
++                goto fail;
++            continue;
++        }
++
++        /* an operator on constants: computed */
++        if (fold_is_binary(op) || fold_is_unary(op)) {
++            folded = fold_operator(s, pos);
++            if (folded < 0)
++                goto fail;
++            if (folded)
++                continue;
++        }
++
++        /* anything else: what is kept aside, then the instruction; a label
++           moves with it */
++        if (fold_flush(s))
++            goto fail;
++        dbuf_put(&s->out, s->buf + pos, size);
++        if (op == OP_label)
++            fd->label_slots[get_u32(s->buf + pos + 1)].pos2 = s->out.size;
++    }
++    if (fold_flush(s))
++        goto fail;
++    if (dbuf_error(&s->out))
++        goto fail;
++
++    /* nothing computed: the input stays (the output is the same) */
++    if (s->folded == 0) {
++        dbuf_free(&s->out);
++        return 0;
++    }
++    dbuf_free(&fd->byte_code);
++    fd->byte_code = s->out;
++    return 0;
++
++ fail:
++    for(pos = 0; pos < s->item_count; pos++) {
++        if (!s->items[pos].is_marker)
++            JS_FreeValue(ctx, s->items[pos].value);
++    }
++    dbuf_free(&s->out);
++    return -1;
++}
++
++/* ### Constants of a module ################################################# */
++
++/*
++ * A "const" declared at the top level of a module with a literal value (or
++ * an expression of literals and of such constants) is replaced by its value
++ * wherever the module reads it: "const DELAY = 5 * 1000;" costs no variable,
++ * no entry in the closures of the functions that read it, no checked read.
++ *
++ * js_find_module_constants() runs on the module function before its child
++ * functions are made, on the bytecode of the parser (names not resolved):
++ *   1. the candidates: the "const" of the module that are not functions;
++ *   2. their values: the top level code is read in order, keeping the last
++ *      constants pushed as fold_constants() does; a read of a candidate
++ *      whose value is known pushes that value; the initialization of a
++ *      candidate (OP_scope_put_var_init) with a constant on top gives it its
++ *      value. Any other instruction, a label included, forgets the stack: a
++ *      value that depends on a test is not a constant;
++ *   3. every function of the module is searched: a candidate that is the
++ *      operand of an assignment, a delete or a reference is given up, even
++ *      when the name is in fact a local variable of that function (the names
++ *      are not resolved yet: to be safe). A declaration of the same name in
++ *      a function does not count: it never initializes the module's;
++ *   4. a candidate that the module exports keeps its variable, for the
++ *      modules that import it; the others lose it (is_removed).
++ * A module that calls eval() directly keeps all its variables.
++ *
++ * resolve_scope_var() then writes the value for each read, and a drop for
++ * the initialization of a removed constant.
++ *
++ * Reading such a constant before its declaration ran gives its value, where
++ * QuickJS throws a ReferenceError: agreed (doc/engine-changes.md, R).
++ */
++
++/* A candidate of js_find_module_constants(). */
++typedef struct ConstCandidate {
++    JSAtom name;       /* not owned (the global variable of the module) */
++    JSValue value;     /* its value, JS_UNINITIALIZED while unknown; owned */
++    int init_count;    /* initializations seen in the top level code */
++    BOOL is_rejected;  /* used otherwise than read: not a constant for us */
++} ConstCandidate;
++
++typedef struct ConstSearch {
++    JSContext *ctx;
++    ConstCandidate *candidates;
++    int count;
++} ConstSearch;
++
++static ConstCandidate *const_find(ConstSearch *search, JSAtom name)
++{
++    int i;
++
++    for(i = 0; i < search->count; i++) {
++        if (search->candidates[i].name == name)
++            return &search->candidates[i];
++    }
++    return NULL;
++}
++
++static BOOL const_has_eval(JSFunctionDef *fd)
++{
++    struct list_head *el;
++
++    if (fd->has_eval_call)
++        return TRUE;
++    list_for_each(el, &fd->child_list) {
++        if (const_has_eval(list_entry(el, JSFunctionDef, link)))
++            return TRUE;
++    }
++    return FALSE;
++}
++
++static void const_clear_stack(JSContext *ctx, JSValue *stack, int *pcount)
++{
++    while (*pcount > 0)
++        JS_FreeValue(ctx, stack[--*pcount]);
++}
++
++/* Step 2: the values, from the top level code of the module. -1 out of
++   memory. */
++static int const_find_values(ConstSearch *search, JSFunctionDef *fd)
++{
++    JSContext *ctx = search->ctx;
++    const uint8_t *buf = fd->byte_code.buf;
++    int len = fd->byte_code.size;
++    JSValue stack[FOLD_MAX_ITEMS], value;
++    int count = 0, pos, op, size, ret = -1;
++    ConstCandidate *candidate;
++
++    for(pos = 0; pos < len; pos += size) {
++        op = buf[pos];
++        size = opcode_info[op].size;
++        if (op == OP_line_num)
++            continue;
++
++        /* a constant, or the read of a candidate whose value is known */
++        value = fold_constant_at(ctx, fd, buf, pos);
++        if (JS_IsException(value))
++            goto done;
++        if (JS_IsUninitialized(value) && op == OP_scope_get_var) {
++            candidate = const_find(search, get_u32(buf + pos + 1));
++            if (candidate && !JS_IsUninitialized(candidate->value))
++                value = JS_DupValue(ctx, candidate->value);
++        }
++        if (!JS_IsUninitialized(value)) {
++            if (count == FOLD_MAX_ITEMS)
++                const_clear_stack(ctx, stack, &count);
++            stack[count++] = value;
++            continue;
++        }
++
++        /* an operator on the constants on top */
++        value = JS_UNINITIALIZED;
++        if (fold_is_unary(op) && count >= 1) {
++            value = fold_unary(ctx, op, stack[count - 1]);
++            if (!JS_IsUninitialized(value) && !JS_IsException(value)) {
++                JS_FreeValue(ctx, stack[count - 1]);
++                stack[count - 1] = value;
++                continue;
++            }
++        } else if (fold_is_binary(op) && count >= 2) {
++            value = fold_binary(ctx, op, stack[count - 2], stack[count - 1]);
++            if (!JS_IsUninitialized(value) && !JS_IsException(value)) {
++                JS_FreeValue(ctx, stack[--count]);
++                JS_FreeValue(ctx, stack[count - 1]);
++                stack[count - 1] = value;
++                continue;
++            }
++        }
++        if (JS_IsException(value))
++            goto done;
++
++        /* the initialization of a candidate: its value if a constant is on
++           top; a second one, or one that is not a constant, gives it up */
++        if (op == OP_scope_put_var_init) {
++            candidate = const_find(search, get_u32(buf + pos + 1));
++            if (candidate) {
++                candidate->init_count++;
++                if (candidate->init_count == 1 && count >= 1)
++                    candidate->value = JS_DupValue(ctx, stack[count - 1]);
++                else
++                    candidate->is_rejected = TRUE;
++            }
++        }
++
++        /* anything else: the stack is no longer known */
++        const_clear_stack(ctx, stack, &count);
++    }
++    ret = 0;
++
++ done:
++    const_clear_stack(ctx, stack, &count);
++    return ret;
++}
++
++/* Step 3: gives up the candidates that "fd" or a function inside it uses
++   otherwise than by reading them. */
++static void const_check_uses(ConstSearch *search, JSFunctionDef *fd)
++{
++    const uint8_t *buf = fd->byte_code.buf;
++    int len = fd->byte_code.size;
++    int pos, op, size;
++    struct list_head *el;
++    ConstCandidate *candidate;
++
++    for(pos = 0; pos < len; pos += size) {
++        op = buf[pos];
++        size = opcode_info[op].size;
++        switch(op) {
++        case OP_scope_get_var:
++        case OP_scope_get_var_undef:
++            /* a read */
++            break;
++        case OP_scope_put_var_init:
++            /* the initialization of a declaration: in the top level code,
++               counted by const_find_values(); in another function, of one
++               of its own variables, never of a variable of the module */
++            break;
++        case OP_scope_put_var:
++        case OP_scope_delete_var:
++        case OP_scope_make_ref:
++        case OP_scope_get_ref:
++        case OP_scope_get_var_checkthis:
++            candidate = const_find(search, get_u32(buf + pos + 1));
++            if (candidate)
++                candidate->is_rejected = TRUE;
++            break;
++        default:
++            break;
++        }
++    }
++
++    list_for_each(el, &fd->child_list) {
++        const_check_uses(search, list_entry(el, JSFunctionDef, link));
++    }
++}
++
++int js_find_module_constants(JSContext *ctx, JSFunctionDef *fd)
++{
++    ConstSearch search;
++    JSModuleDef *m = fd->module;
++    int i, k, kept, ret = -1;
++
++    /* a module only, without direct eval (its variables are found by name
++       at run time) */
++    if (!m || fd->global_var_count == 0 || const_has_eval(fd))
++        return 0;
++
++    /* 1. the candidates */
++    search.ctx = ctx;
++    search.count = 0;
++    search.candidates = js_mallocz(ctx, fd->global_var_count * sizeof(search.candidates[0]));
++    if (!search.candidates)
++        return -1;
++    for(i = 0; i < fd->global_var_count; i++) {
++        JSGlobalVar *hf = &fd->global_vars[i];
++        if (hf->is_const && hf->is_lexical && hf->cpool_idx < 0) {
++            search.candidates[search.count].name = hf->var_name;
++            search.candidates[search.count].value = JS_UNINITIALIZED;
++            search.count++;
++        }
++    }
++
++    /* 2. their values, 3. their uses */
++    if (search.count > 0) {
++        if (const_find_values(&search, fd))
++            goto done;
++        const_check_uses(&search, fd);
++    }
++
++    /* 4. the constants of the module; an exported one keeps its variable */
++    kept = 0;
++    for(i = 0; i < search.count; i++) {
++        ConstCandidate *candidate = &search.candidates[i];
++        if (!JS_IsUninitialized(candidate->value) && !candidate->is_rejected && candidate->init_count == 1)
++            kept++;
++    }
++    if (kept > 0) {
++        fd->module_consts = js_mallocz(ctx, kept * sizeof(fd->module_consts[0]));
++        if (!fd->module_consts)
++            goto done;
++        for(i = 0; i < search.count; i++) {
++            ConstCandidate *candidate = &search.candidates[i];
++            JSModuleConst *mc;
++            if (JS_IsUninitialized(candidate->value) || candidate->is_rejected || candidate->init_count != 1)
++                continue;
++            mc = &fd->module_consts[fd->module_const_count++];
++            mc->var_name = JS_DupAtom(ctx, candidate->name);
++            mc->value = JS_DupValue(ctx, candidate->value);
++            mc->is_removed = TRUE;
++            for(k = 0; k < m->export_entries_count; k++) {
++                JSExportEntry *me = &m->export_entries[k];
++                if (me->export_type == JS_EXPORT_TYPE_LOCAL && me->local_name == candidate->name)
++                    mc->is_removed = FALSE;
++            }
++        }
++    }
++    ret = 0;
++
++ done:
++    for(i = 0; i < search.count; i++)
++        JS_FreeValue(ctx, search.candidates[i].value);
++    js_free(ctx, search.candidates);
++    return ret;
++}
++
++JSModuleConst *js_get_module_const(JSFunctionDef *fd, JSAtom name)
++{
++    int i;
++
++    for(i = 0; i < fd->module_const_count; i++) {
++        if (fd->module_consts[i].var_name == name)
++            return &fd->module_consts[i];
++    }
++    return NULL;
++}
++
++int js_emit_module_const(JSContext *ctx, JSFunctionDef *fd, DynBuf *bc, JSModuleConst *mc)
++{
++    return fold_emit_value(ctx, fd, bc, mc->value);
++}
++
++void js_free_module_consts(JSContext *ctx, JSFunctionDef *fd)
++{
++    int i;
++
++    for(i = 0; i < fd->module_const_count; i++) {
++        JS_FreeAtom(ctx, fd->module_consts[i].var_name);
++        JS_FreeValue(ctx, fd->module_consts[i].value);
++    }
++    js_free(ctx, fd->module_consts);
++    fd->module_consts = NULL;
++    fd->module_const_count = 0;
++}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx/compiler/funcdef.c
---- build/qjsx-baseline/compiler/funcdef.c	2026-11-13 19:37:09.465067900 +0100
-+++ engine/qjsx/compiler/funcdef.c	2026-11-11 16:04:41.510348300 +0100
+--- build/qjsx-baseline/compiler/funcdef.c	2026-11-16 11:07:47.845822700 +0100
++++ engine/qjsx/compiler/funcdef.c	2026-11-16 10:30:25.279520400 +0100
 @@ -59,6 +59,8 @@
      fd->scope_count = 1;
      fd->scopes[0].first = -1;
@@ -594,7 +1560,16 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx
  
      for(i = 0; i < fd->cpool_count; i++) {
          JS_FreeValue(ctx, fd->cpool[i]);
-@@ -509,9 +512,9 @@
+@@ -113,6 +116,8 @@
+         JS_FreeAtom(ctx, fd->global_vars[i].var_name);
+     }
+     js_free(ctx, fd->global_vars);
++    /* qjsx: the constants of a module */
++    js_free_module_consts(ctx, fd);
+ 
+     for(i = 0; i < fd->closure_var_count; i++) {
+         JSClosureVar *cv = &fd->closure_var[i];
+@@ -509,9 +514,9 @@
      char atom_buf[ATOM_GET_STR_BUF_SIZE];
      const char *str;
  
@@ -607,7 +1582,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx
          printf("%s:%d:%d: ", str, line_num, col_num);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-class.c engine/qjsx/compiler/parser-class.c
---- build/qjsx-baseline/compiler/parser-class.c	2026-11-13 19:37:09.463072900 +0100
+--- build/qjsx-baseline/compiler/parser-class.c	2026-11-16 11:07:47.843824600 +0100
 +++ engine/qjsx/compiler/parser-class.c	2026-11-11 16:04:41.510348300 +0100
 @@ -52,7 +52,7 @@
  
@@ -628,7 +1603,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-class.c engine
      if (!fd->strip_source) {
          js_free(ctx, ctor_fd->source);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/qjsx/compiler/parser-expr.c
---- build/qjsx-baseline/compiler/parser-expr.c	2026-11-13 19:37:09.463072900 +0100
+--- build/qjsx-baseline/compiler/parser-expr.c	2026-11-16 11:07:47.843824600 +0100
 +++ engine/qjsx/compiler/parser-expr.c	2026-11-11 16:04:41.512350100 +0100
 @@ -1839,6 +1839,11 @@
          } else {
@@ -685,7 +1660,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
          }
          return 0;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/qjsx/compiler/parser-func.c
---- build/qjsx-baseline/compiler/parser-func.c	2026-11-13 19:37:09.466067900 +0100
+--- build/qjsx-baseline/compiler/parser-func.c	2026-11-16 11:07:47.847820800 +0100
 +++ engine/qjsx/compiler/parser-func.c	2026-11-11 16:04:41.513349800 +0100
 @@ -196,6 +196,7 @@
      int func_idx, lexical_func_idx = -1;
@@ -762,7 +1737,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/
  
      return 0;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/qjsx/compiler/parser-stmt.c
---- build/qjsx-baseline/compiler/parser-stmt.c	2026-11-13 19:37:09.464067800 +0100
+--- build/qjsx-baseline/compiler/parser-stmt.c	2026-11-16 11:07:47.844821200 +0100
 +++ engine/qjsx/compiler/parser-stmt.c	2026-11-11 16:04:41.515348900 +0100
 @@ -83,7 +83,15 @@
  }
@@ -882,8 +1857,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/
              goto fail;
          if (js_parse_expect_semi(s))
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engine/qjsx/compiler/resolve-labels.c
---- build/qjsx-baseline/compiler/resolve-labels.c	2026-11-13 19:37:09.466067900 +0100
-+++ engine/qjsx/compiler/resolve-labels.c	2026-11-12 08:52:26.394888700 +0100
+--- build/qjsx-baseline/compiler/resolve-labels.c	2026-11-16 11:07:47.846824400 +0100
++++ engine/qjsx/compiler/resolve-labels.c	2026-11-16 10:30:40.432557300 +0100
 @@ -36,7 +36,10 @@
              if (pos_next > s->bc_len)
                  goto done;
@@ -896,7 +1871,22 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
                  pos = pos_next;
              } else {
                  break;
-@@ -249,7 +252,10 @@
+@@ -181,6 +184,14 @@
+         JSGlobalVar *hf = &s->global_vars[i];
+         BOOL has_var_obj = FALSE;
+         BOOL force_init = hf->force_init;
++        /* qjsx: a constant replaced by its value has no variable */
++        if (s->module_const_count > 0) {
++            JSModuleConst *mc = js_get_module_const(s, hf->var_name);
++            if (mc && mc->is_removed) {
++                JS_FreeAtom(ctx, hf->var_name);
++                continue;
++            }
++        }
+         /* we are in an eval, so the closure contains all the
+            enclosing variables */
+         /* If the outer function has a variable environment,
+@@ -249,7 +260,10 @@
          op = bc_buf[pos];
          len = opcode_info[op].size;
          if (op == OP_line_num) {
@@ -908,7 +1898,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
          } else
          if (op == OP_label) {
              label = get_u32(bc_buf + pos + 1);
-@@ -365,10 +371,23 @@
+@@ -365,10 +379,23 @@
      }
  
      line_num = 0; /* avoid warning */
@@ -932,7 +1922,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
          switch(op) {
          case OP_line_num:
              line_num = get_u32(bc_buf + pos + 1);
-@@ -677,6 +696,8 @@
+@@ -677,6 +704,8 @@
  /* the pc2line table gives a source position for each PC value */
  static void add_pc2line_info(JSFunctionDef *s, uint32_t pc, uint32_t source_pos)
  {
@@ -941,7 +1931,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
      if (s->line_number_slots != NULL
      &&  s->line_number_count < s->line_number_size
      &&  pc >= s->line_number_last_pc
-@@ -801,6 +822,12 @@
+@@ -801,6 +830,12 @@
          for (;;) {
              switch(op = s->byte_code.buf[pos]) {
              case OP_line_num:
@@ -954,7 +1944,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
                  if (pline)
                      *pline = get_u32(s->byte_code.buf + pos + 1);
                  /* fall thru */
-@@ -1026,17 +1053,35 @@
+@@ -1026,17 +1061,35 @@
          put_short_code(&bc_out, OP_put_loc, s->arg_var_object_idx);
      }
  
@@ -991,7 +1981,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
              break;
  
          case OP_label:
-@@ -1072,16 +1117,13 @@
+@@ -1072,16 +1125,13 @@
          case OP_call:
          case OP_call_method:
              {
@@ -1013,7 +2003,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
                  add_pc2line_info(s, bc_out.size, line_num);
                  put_short_code(&bc_out, op, argc);
                  break;
-@@ -1614,9 +1656,14 @@
+@@ -1614,9 +1664,14 @@
          case OP_put_var_ref:
              if (OPTIMIZE) {
                  /* transformation: put_x(n) get_x(n) -> set_x(n) */
@@ -1029,6 +2019,31 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
                      if (cc.line_num >= 0) line_num = cc.line_num;
                      add_pc2line_info(s, bc_out.size, line_num);
                      put_short_code(&bc_out, op + 1, idx);
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-vars.c engine/qjsx/compiler/resolve-vars.c
+--- build/qjsx-baseline/compiler/resolve-vars.c	2026-11-16 11:07:47.845822700 +0100
++++ engine/qjsx/compiler/resolve-vars.c	2026-11-16 10:30:40.433558200 +0100
+@@ -498,6 +498,21 @@
+         fd = s;
+     if (var_idx < 0 && fd->is_eval) {
+         int idx1;
++        /* qjsx: a constant of the module (compiler/fold.c): a read is its
++           value, the initialization of one that has no variable drops the
++           value */
++        if (fd->module_const_count > 0) {
++            JSModuleConst *mc = js_get_module_const(fd, var_name);
++            if (mc && (op == OP_scope_get_var || op == OP_scope_get_var_undef)) {
++                if (js_emit_module_const(ctx, s, bc, mc))
++                    return -1;
++                goto done;
++            }
++            if (mc && mc->is_removed && op == OP_scope_put_var_init) {
++                dbuf_putc(bc, OP_drop);
++                goto done;
++            }
++        }
+         for (idx1 = 0; idx1 < fd->closure_var_count; idx1++) {
+             JSClosureVar *cv = &fd->closure_var[idx1];
+             if (var_name == cv->var_name) {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/tdz.c engine/qjsx/compiler/tdz.c
 --- build/qjsx-baseline/compiler/tdz.c	1970-01-01 01:00:00.000000000 +0100
 +++ engine/qjsx/compiler/tdz.c	2026-11-12 08:49:33.477031800 +0100
@@ -1288,15 +2303,22 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/tdz.c engine/qjsx/com
 +    return ret;
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/atoms.c
---- build/qjsx-baseline/core/atoms.c	2026-11-13 19:37:09.442958400 +0100
-+++ engine/qjsx/core/atoms.c	2026-11-13 19:23:24.606245800 +0100
-@@ -22,11 +22,56 @@
+--- build/qjsx-baseline/core/atoms.c	2026-11-16 11:07:47.832791600 +0100
++++ engine/qjsx/core/atoms.c	2026-11-16 10:54:20.892857900 +0100
+@@ -18,15 +18,75 @@
+ /* return the max count from the hash size */
+ #define JS_ATOM_COUNT_RESIZE(n) ((n) * 2)
+ 
+-static inline BOOL __JS_AtomIsConst(JSAtom v)
++/* qjsx: takes the runtime: the names in read-only memory (the engine's and
++   the ones of the package) are not counted either */
++static inline BOOL __JS_AtomIsConst(JSRuntime *rt, JSAtom v)
  {
  #if defined(DUMP_LEAKS) && DUMP_LEAKS > 1
          return (int32_t)v <= 0;
 +#elif QJSX_ROM_ATOMS
-+        /* qjsx: the names in read-only memory are not counted either */
-+        return (int32_t)v < QJSX_ROM_ATOM_COUNT;
++        /* (signed: an integer atom, with its high bit set, is constant) */
++        return (int32_t)v < (int32_t)rt->const_atom_end;
  #else
          return (int32_t)v < JS_ATOM_END;
  #endif
@@ -1309,30 +2331,25 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/
 +/* qjsx: first size of the hash table of the atoms in the heap */
 +#define QJSX_RAM_ATOM_HASH_SIZE 128
 +
-+/* qjsx: index of the name in read-only memory equal to 'str' (or to the
-+   'len' ASCII characters of 'chars' when 'str' is NULL), 0 if none.
-+   Open addressing in qjsx_rom_atom_hash, by the hash of the string. */
-+static JSAtom js_rom_find_atom(uint32_t h, int atom_type, JSString *str,
-+                               const char *chars, uint32_t len)
++/* qjsx: index of the name equal to 'str' (or to the 'len' ASCII characters
++   of 'chars' when 'str' is NULL) in a table of names in read-only memory,
++   0 if none. 'table': open addressing by the hash of the string ('mask' =
++   its size - 1), an atom index per slot, 0 = empty. */
++static JSAtom js_find_in_const_table(JSRuntime *rt, const uint16_t *table, uint32_t mask,
++                                     uint32_t h, JSString *str, const char *chars, uint32_t len)
 +{
-+    uint32_t mask = QJSX_ROM_ATOM_HASH_SIZE - 1;
 +    uint32_t slot = h & mask;
 +    uint32_t i;
 +
-+    /* every name in read-only memory is an 8 bit string atom */
-+    if (atom_type != JS_ATOM_TYPE_STRING) {
-+        return JS_ATOM_NULL;
-+    }
-+
 +    /* walk the slots from the one of the hash until an empty one */
-+    while ((i = qjsx_rom_atom_hash[slot]) != 0) {
-+        JSAtomStruct *p = (JSAtomStruct *)qjsx_rom_atom_ptr[i];
++    while ((i = table[slot]) != 0) {
++        JSAtomStruct *p = rt->atom_array[i];
 +        if (p->hash == h && p->len == len) {
 +            BOOL same;
 +            if (str != NULL) {
 +                same = js_string_memcmp(p, 0, str, 0, len) == 0;
 +            } else {
-+                same = memcmp(p->u.str8, chars, len) == 0;
++                same = p->is_wide_char == 0 && memcmp(p->u.str8, chars, len) == 0;
 +            }
 +            if (same) {
 +                return i;
@@ -1342,18 +2359,36 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/
 +    }
 +    return JS_ATOM_NULL;
 +}
++
++/* qjsx: the same among the names of the engine, then of the package */
++static JSAtom js_rom_find_atom(JSRuntime *rt, uint32_t h, int atom_type, JSString *str,
++                               const char *chars, uint32_t len)
++{
++    JSAtom atom;
++
++    /* every name in read-only memory is a string atom */
++    if (atom_type != JS_ATOM_TYPE_STRING) {
++        return JS_ATOM_NULL;
++    }
++
++    atom = js_find_in_const_table(rt, qjsx_rom_atom_hash, QJSX_ROM_ATOM_HASH_SIZE - 1, h, str, chars, len);
++    if (atom == JS_ATOM_NULL && rt->pkg_atom_hash != NULL) {
++        atom = js_find_in_const_table(rt, rt->pkg_atom_hash, rt->pkg_atom_hash_size - 1, h, str, chars, len);
++    }
++    return atom;
++}
 +#endif
 +
  static inline int is_num(int c)
  {
      return c >= '0' && c <= '9';
-@@ -200,10 +245,92 @@
+@@ -200,10 +260,95 @@
      rt->atom_hash = new_hash;
      rt->atom_hash_size = new_hash_size;
      rt->atom_count_resize = JS_ATOM_COUNT_RESIZE(new_hash_size);
 +#if QJSX_ROM_ATOMS
 +    /* qjsx: the names in read-only memory are not in this table */
-+    rt->atom_count_resize += QJSX_ROM_ATOM_COUNT;
++    rt->atom_count_resize += rt->const_atom_end;
 +#endif
      //    JS_DumpAtoms(rt);
      return 0;
@@ -1393,6 +2428,9 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/
 +    rt->atom_count = 0;
 +    rt->atom_size = 0;
 +    rt->atom_free_index = 0;
++    rt->const_atom_end = QJSX_ROM_ATOM_COUNT;
++    rt->pkg_atom_hash = NULL;
++    rt->pkg_atom_hash_size = 0;
 +    if (JS_ResizeAtomHash(rt, QJSX_RAM_ATOM_HASH_SIZE))
 +        return -1;
 +
@@ -1440,7 +2478,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/
  int JS_InitAtoms(JSRuntime *rt)
  {
      int i, len, atom_type;
-@@ -232,6 +359,7 @@
+@@ -232,12 +377,13 @@
      }
      return 0;
  }
@@ -1448,7 +2486,23 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/
  
  JSAtom JS_DupAtomRT(JSRuntime *rt, JSAtom v)
  {
-@@ -289,6 +417,11 @@
+     JSAtomStruct *p;
+ 
+-    if (!__JS_AtomIsConst(v)) {
++    if (!__JS_AtomIsConst(rt, v)) {
+         p = rt->atom_array[v];
+         js_rc(p)->ref_count++;
+     }
+@@ -249,7 +395,7 @@
+     JSRuntime *rt;
+     JSAtomStruct *p;
+ 
+-    if (!__JS_AtomIsConst(v)) {
++    if (!__JS_AtomIsConst(ctx->rt, v)) {
+         rt = ctx->rt;
+         p = rt->atom_array[v];
+         js_rc(p)->ref_count++;
+@@ -289,6 +435,11 @@
  JSAtom js_get_atom_index(JSRuntime *rt, JSAtomStruct *p)
  {
      uint32_t i = p->hash_next;  /* atom_index */
@@ -1460,43 +2514,61 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/
      if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
          JSAtomStruct *p1;
  
-@@ -320,7 +453,8 @@
+@@ -320,7 +471,8 @@
              /* str is the atom, return its index */
              i = js_get_atom_index(rt, str);
              /* reduce string refcount and increase atom's unless constant */
 -            if (__JS_AtomIsConst(i))
 +            /* qjsx: unless immortal (a name in read-only memory) */
-+            if (__JS_AtomIsConst(i) && JS_REF_COUNT_IS_MORTAL(js_rc(str)))
++            if (__JS_AtomIsConst(rt, i) && JS_REF_COUNT_IS_MORTAL(js_rc(str)))
                  js_rc(str)->ref_count--;
              return i;
          }
-@@ -328,6 +462,12 @@
+@@ -328,6 +480,12 @@
          len = str->len;
          h = hash_string(str, atom_type);
          h &= JS_ATOM_HASH_MASK;
 +#if QJSX_ROM_ATOMS
 +        /* qjsx: the names in read-only memory first (not counted) */
-+        i = js_rom_find_atom(h, atom_type, str, NULL, len);
++        i = js_rom_find_atom(rt, h, atom_type, str, NULL, len);
 +        if (i != JS_ATOM_NULL)
 +            goto done;
 +#endif
          h1 = h & (rt->atom_hash_size - 1);
          i = rt->atom_hash[h1];
          while (i != 0) {
-@@ -482,6 +622,12 @@
+@@ -336,7 +494,7 @@
+                 p->atom_type == atom_type &&
+                 p->len == len &&
+                 js_string_memcmp(p, 0, str, 0, len) == 0) {
+-                if (!__JS_AtomIsConst(i))
++                if (!__JS_AtomIsConst(rt, i))
+                     js_rc(p)->ref_count++;
+                 goto done;
+             }
+@@ -482,6 +640,12 @@
  
      h = hash_string8((const uint8_t *)str, len, JS_ATOM_TYPE_STRING);
      h &= JS_ATOM_HASH_MASK;
 +#if QJSX_ROM_ATOMS
 +    /* qjsx: the names in read-only memory first (not counted) */
-+    i = js_rom_find_atom(h, JS_ATOM_TYPE_STRING, NULL, str, len);
++    i = js_rom_find_atom(rt, h, JS_ATOM_TYPE_STRING, NULL, str, len);
 +    if (i != JS_ATOM_NULL)
 +        return i;
 +#endif
      h1 = h & (rt->atom_hash_size - 1);
      i = rt->atom_hash[h1];
      while (i != 0) {
-@@ -509,6 +655,10 @@
+@@ -491,7 +655,7 @@
+             p->len == len &&
+             p->is_wide_char == 0 &&
+             memcmp(p->u.str8, str, len) == 0) {
+-            if (!__JS_AtomIsConst(i))
++            if (!__JS_AtomIsConst(rt, i))
+                 js_rc(p)->ref_count++;
+             return i;
+         }
+@@ -509,6 +673,10 @@
      }
  #endif
      uint32_t i = p->hash_next;  /* atom_index */
@@ -1507,8 +2579,24 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/
      if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
          JSAtomStruct *p0, *p1;
          uint32_t h0;
+@@ -850,13 +1018,13 @@
+ 
+ void JS_FreeAtom(JSContext *ctx, JSAtom v)
+ {
+-    if (!__JS_AtomIsConst(v))
++    if (!__JS_AtomIsConst(ctx->rt, v))
+         __JS_FreeAtom(ctx->rt, v);
+ }
+ 
+ void JS_FreeAtomRT(JSRuntime *rt, JSAtom v)
+ {
+-    if (!__JS_AtomIsConst(v))
++    if (!__JS_AtomIsConst(rt, v))
+         __JS_FreeAtom(rt, v);
+ }
+ 
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/closures.c engine/qjsx/core/closures.c
---- build/qjsx-baseline/core/closures.c	2026-11-13 19:37:09.459068200 +0100
+--- build/qjsx-baseline/core/closures.c	2026-11-16 11:07:47.839791500 +0100
 +++ engine/qjsx/core/closures.c	2026-11-11 16:38:22.149302500 +0100
 @@ -619,6 +619,7 @@
      rt->current_stack_frame = sf;
@@ -1519,7 +2607,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/closures.c engine/qjsx/co
      sf->arg_count = argc;
      arg_buf = argv;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/core.h engine/qjsx/core/core.h
---- build/qjsx-baseline/core/core.h	2026-11-13 19:37:09.478068100 +0100
+--- build/qjsx-baseline/core/core.h	2026-11-16 11:07:47.862130600 +0100
 +++ engine/qjsx/core/core.h	2026-11-11 17:48:34.850300900 +0100
 @@ -543,4 +543,16 @@
  #endif
@@ -2230,7 +3318,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/debug.c engine/qjsx/core/
 +    return 0;
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core/errors.c
---- build/qjsx-baseline/core/errors.c	2026-11-13 19:37:09.445434600 +0100
+--- build/qjsx-baseline/core/errors.c	2026-11-16 11:07:47.835776800 +0100
 +++ engine/qjsx/core/errors.c	2026-11-11 16:04:41.521349400 +0100
 @@ -30,6 +30,9 @@
      JSRuntime *rt = ctx->rt;
@@ -2258,7 +3346,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core
                              atom_str ? atom_str : "<null>");
                  JS_FreeCString(ctx, atom_str);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/gc.c engine/qjsx/core/gc.c
---- build/qjsx-baseline/core/gc.c	2026-11-13 19:37:09.445434600 +0100
+--- build/qjsx-baseline/core/gc.c	2026-11-16 11:07:47.835776800 +0100
 +++ engine/qjsx/core/gc.c	2026-11-13 19:23:32.493715900 +0100
 @@ -1070,6 +1070,11 @@
          sizeof(rt->atom_hash[0]) * rt->atom_hash_size;
@@ -2285,7 +3373,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/gc.c engine/qjsx/core/gc.
          js_free_rt(rt, b->debug.source);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx/core/interpreter.c
---- build/qjsx-baseline/core/interpreter.c	2026-11-13 19:37:09.460068000 +0100
+--- build/qjsx-baseline/core/interpreter.c	2026-11-16 11:07:47.840791900 +0100
 +++ engine/qjsx/core/interpreter.c	2026-11-12 09:53:07.314645700 +0100
 @@ -29,8 +29,22 @@
      JSVarRef **var_refs;
@@ -2520,7 +3608,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
                      rt->current_exception = JS_UNINITIALIZED;
                      pc = b->byte_code_buf + pos;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/iteration.c engine/qjsx/core/iteration.c
---- build/qjsx-baseline/core/iteration.c	2026-11-13 19:37:09.459068200 +0100
+--- build/qjsx-baseline/core/iteration.c	2026-11-16 11:07:47.839791500 +0100
 +++ engine/qjsx/core/iteration.c	2026-11-11 16:04:41.524857300 +0100
 @@ -25,8 +25,8 @@
                                            JSValueConst this_val)
@@ -2534,7 +3622,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/iteration.c engine/qjsx/c
      return JS_UNDEFINED;
  }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/modules.c engine/qjsx/core/modules.c
---- build/qjsx-baseline/core/modules.c	2026-11-13 19:37:09.464067800 +0100
+--- build/qjsx-baseline/core/modules.c	2026-11-16 11:07:47.844821200 +0100
 +++ engine/qjsx/core/modules.c	2026-11-11 16:04:41.524857300 +0100
 @@ -1206,9 +1206,11 @@
              return JS_ATOM_NULL;
@@ -2571,9 +3659,246 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/modules.c engine/qjsx/cor
  JSValue JS_GetImportMeta(JSContext *ctx, JSModuleDef *m)
  {
      JSValue obj;
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/package-atoms.c engine/qjsx/core/package-atoms.c
+--- build/qjsx-baseline/core/package-atoms.c	1970-01-01 01:00:00.000000000 +0100
++++ engine/qjsx/core/package-atoms.c	2026-11-16 10:56:51.860082200 +0100
+@@ -0,0 +1,233 @@
++/*          _
++ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
++ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
++ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
++ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
++ */
++
++/*
++ * QuickJS - core/package-atoms.c
++ *
++ * qjsx: the names (atoms) of a package, made once by "qjsx build" and used
++ * where the package lies (flash on a device). Not part of upstream QuickJS:
++ * see doc/engine-changes.md (S).
++ *
++ * The atom indexes of a runtime that runs a package are fixed:
++ *     0 .. QJSX_ROM_ATOM_COUNT - 1      the names of the engine (rom-atoms.c)
++ *     then the names of the package     JS_SetPackageAtoms()
++ *     then the names made at run time   in the heap, as in QuickJS
++ * The bytecode of the package is written with these indexes
++ * (JS_WRITE_OBJ_FIXED_ATOMS): nothing in it is changed when it is read, so
++ * it runs where it lies (JS_READ_OBJ_ROM_DATA | JS_READ_OBJ_FIXED_ATOMS).
++ *
++ * The image of the names (little endian, at an address multiple of 4):
++ *     JSPackageAtomsHeader
++ *     uint32_t offsets[count]     of the JSString of each index from the
++ *                                 start of the image; 0: no name there
++ *     uint16_t hash[hash_size]    open addressing by JSString.hash: an atom
++ *                                 index, 0 = empty slot
++ *     padding to 8 bytes
++ *     the names, each as QuickJS allocates an atom string: a block header
++ *     with an immortal reference count, the JSString (its atom index in
++ *     hash_next), the characters, padded to 8 bytes
++ * It holds no pointer: the same image serves a 32 bit device and the PC.
++ */
++
++#include "quickjs-internal.h"
++
++#if QJSX_ROM_ATOMS
++
++#define JS_PACKAGE_ATOMS_MAGIC 0x4e534a51   /* "QJSN" */
++/* free entries of the atom table after the names of the package (it then
++   grows by half, as in __JS_NewAtom) */
++#define JS_PACKAGE_RAM_ATOM_SLOTS 128
++/* an atom index of the image fits in 16 bits */
++#define JS_PACKAGE_ATOMS_MAX 60000
++
++typedef struct JSPackageAtomsHeader {
++    uint32_t magic;        /* JS_PACKAGE_ATOMS_MAGIC */
++    uint32_t fingerprint;  /* of the names of the engine the indexes follow */
++    uint32_t first_atom;   /* index of the first name: QJSX_ROM_ATOM_COUNT */
++    uint32_t count;        /* indexes, the ones without name included */
++    uint32_t hash_size;    /* slots of the hash table, a power of two */
++    uint32_t size;         /* bytes of the image */
++} JSPackageAtomsHeader;
++
++uint32_t JS_GetAtomsFingerprint(void)
++{
++    return QJSX_ROM_ATOM_FINGERPRINT;
++}
++
++/* Gives the names of a package to a runtime that has made none of its own
++   yet (just after JS_NewRuntime2, before any context). The image must stay
++   valid and unchanged as long as the runtime. -1: not an image of names for
++   this engine, or too late; nothing is changed. */
++int JS_SetPackageAtoms(JSRuntime *rt, const uint8_t *image, size_t size)
++{
++    const JSPackageAtomsHeader *h = (const JSPackageAtomsHeader *)image;
++    const uint32_t *offsets;
++    JSAtomStruct **new_array;
++    uint32_t i, first, new_size;
++    size_t tables_end;
++
++    /* an image for this engine */
++    if (size < sizeof(*h) || ((uintptr_t)image & 3) != 0)
++        return -1;
++    if (h->magic != JS_PACKAGE_ATOMS_MAGIC || h->fingerprint != QJSX_ROM_ATOM_FINGERPRINT ||
++        h->first_atom != QJSX_ROM_ATOM_COUNT || h->size > size || h->count > JS_PACKAGE_ATOMS_MAX ||
++        h->hash_size == 0 || (h->hash_size & (h->hash_size - 1)) != 0)
++        return -1;
++    tables_end = sizeof(*h) + (size_t)h->count * 4 + (size_t)h->hash_size * 2;
++    if (tables_end > h->size)
++        return -1;
++
++    /* a runtime that only has the names of the engine */
++    first = QJSX_ROM_ATOM_COUNT;
++    if (rt->const_atom_end != first || rt->atom_count != (int)first || rt->atom_free_index != (int)first)
++        return -1;
++
++    /* the atom table: the engine's names, the package's, free entries */
++    offsets = (const uint32_t *)(h + 1);
++    for(i = 0; i < h->count; i++) {
++        if (offsets[i] != 0 && (offsets[i] < tables_end || offsets[i] + sizeof(JSString) > h->size))
++            return -1;
++    }
++    new_size = first + h->count + JS_PACKAGE_RAM_ATOM_SLOTS;
++    new_array = js_realloc_rt(rt, rt->atom_array, sizeof(rt->atom_array[0]) * new_size);
++    if (!new_array)
++        return -1;
++    rt->atom_array = new_array;
++    for(i = 0; i < h->count; i++) {
++        if (offsets[i] != 0) {
++            /* read-only: never written (immortal reference count) */
++            new_array[first + i] = (JSAtomStruct *)(image + offsets[i]);
++        } else {
++            /* an index without name: never given to a new atom */
++            new_array[first + i] = new_array[JS_ATOM_empty_string];
++        }
++    }
++    for(i = first + h->count; i < new_size; i++) {
++        uint32_t next = (i == new_size - 1) ? 0 : i + 1;
++        new_array[i] = atom_set_free(next);
++    }
++
++    rt->atom_size = new_size;
++    rt->atom_count += h->count;
++    rt->atom_count_resize += h->count;
++    rt->atom_free_index = first + h->count;
++    rt->const_atom_end = first + h->count;
++    rt->pkg_atom_hash = (const uint16_t *)(offsets + h->count);
++    rt->pkg_atom_hash_size = h->hash_size;
++    return 0;
++}
++
++JS_BOOL JS_HasPackageAtoms(JSRuntime *rt)
++{
++    return rt->pkg_atom_hash != NULL;
++}
++
++#ifndef QJSX_NO_COMPILER
++/* The image of the names that 'ctx' made after the ones of the engine, for
++   JS_SetPackageAtoms(): their indexes are kept. The runtime must have been
++   used for nothing but reading the bytecode of the package (qjsx build).
++   Allocated with js_malloc; NULL with an exception on error. */
++uint8_t *JS_WritePackageAtoms(JSContext *ctx, size_t *psize)
++{
++    JSRuntime *rt = ctx->rt;
++    JSPackageAtomsHeader *h;
++    uint32_t *offsets;
++    uint16_t *hash;
++    uint8_t *image;
++    uint32_t first = QJSX_ROM_ATOM_COUNT;
++    uint32_t i, count, hash_size, slot;
++    size_t pos, total, text_size;
++
++    /* the indexes in use after the engine's: strings only */
++    count = 0;
++    total = 0;
++    for(i = first; i < (uint32_t)rt->atom_size; i++) {
++        JSAtomStruct *p = rt->atom_array[i];
++        if (atom_is_free(p))
++            continue;
++        if (p->atom_type != JS_ATOM_TYPE_STRING) {
++            JS_ThrowInternalError(ctx, "a name of the package is not a string");
++            return NULL;
++        }
++        count = i - first + 1;
++        text_size = ((size_t)p->len << p->is_wide_char) + 1 - p->is_wide_char;
++        total += (sizeof(JSMallocBlockHeader) + sizeof(JSString) + text_size + 7) & ~(size_t)7;
++    }
++    if (count > JS_PACKAGE_ATOMS_MAX) {
++        JS_ThrowInternalError(ctx, "too many names in the package");
++        return NULL;
++    }
++
++    /* the tables, then the names */
++    hash_size = 16;
++    while (hash_size < 2 * count)
++        hash_size *= 2;
++    pos = (sizeof(*h) + (size_t)count * 4 + (size_t)hash_size * 2 + 7) & ~(size_t)7;
++    total += pos;
++    image = js_mallocz(ctx, total);
++    if (!image)
++        return NULL;
++    h = (JSPackageAtomsHeader *)image;
++    h->magic = JS_PACKAGE_ATOMS_MAGIC;
++    h->fingerprint = QJSX_ROM_ATOM_FINGERPRINT;
++    h->first_atom = first;
++    h->count = count;
++    h->hash_size = hash_size;
++    h->size = total;
++    offsets = (uint32_t *)(h + 1);
++    hash = (uint16_t *)(offsets + count);
++
++    for(i = first; i < first + count; i++) {
++        JSAtomStruct *p = rt->atom_array[i];
++        JSMallocBlockHeader *block;
++        JSString *copy;
++        if (atom_is_free(p))
++            continue;
++
++        /* the name, as an atom string with an immortal count */
++        block = (JSMallocBlockHeader *)(image + pos);
++        block->ref_count = JS_REF_COUNT_IMMORTAL;
++        copy = (JSString *)(image + pos + sizeof(*block));
++        text_size = ((size_t)p->len << p->is_wide_char) + 1 - p->is_wide_char;
++        copy->len = p->len;
++        copy->is_wide_char = p->is_wide_char;
++        copy->hash = p->hash;
++        copy->atom_type = JS_ATOM_TYPE_STRING;
++        copy->hash_next = i;   /* its atom index */
++        memcpy(copy->u.str8, p->u.str8, text_size);
++        offsets[i - first] = pos + sizeof(*block);
++        pos += (sizeof(*block) + sizeof(*copy) + text_size + 7) & ~(size_t)7;
++
++        /* in the hash table */
++        slot = p->hash & (hash_size - 1);
++        while (hash[slot] != 0)
++            slot = (slot + 1) & (hash_size - 1);
++        hash[slot] = i;
++    }
++    *psize = total;
++    return image;
++}
++#endif
++
++#else /* !QJSX_ROM_ATOMS */
++
++uint32_t JS_GetAtomsFingerprint(void)
++{
++    return 0;
++}
++
++int JS_SetPackageAtoms(JSRuntime *rt, const uint8_t *image, size_t size)
++{
++    return -1;
++}
++
++JS_BOOL JS_HasPackageAtoms(JSRuntime *rt)
++{
++    return FALSE;
++}
++
++#endif
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/rom-atoms.c engine/qjsx/core/rom-atoms.c
 --- build/qjsx-baseline/core/rom-atoms.c	1970-01-01 01:00:00.000000000 +0100
-+++ engine/qjsx/core/rom-atoms.c	2026-11-13 19:24:26.771580900 +0100
++++ engine/qjsx/core/rom-atoms.c	2026-11-16 10:53:05.792254200 +0100
 @@ -0,0 +1,1156 @@
 +/*          _
 + *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
@@ -3733,8 +5058,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/rom-atoms.c engine/qjsx/c
 +#endif
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/rom-atoms.h engine/qjsx/core/rom-atoms.h
 --- build/qjsx-baseline/core/rom-atoms.h	1970-01-01 01:00:00.000000000 +0100
-+++ engine/qjsx/core/rom-atoms.h	2026-11-13 19:24:26.767581400 +0100
-@@ -0,0 +1,532 @@
++++ engine/qjsx/core/rom-atoms.h	2026-11-16 10:53:05.788728700 +0100
+@@ -0,0 +1,535 @@
 +/*          _
 + *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
 + * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
@@ -3750,6 +5075,9 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/rom-atoms.h engine/qjsx/c
 +
 +/* atom indexes 0 .. QJSX_ROM_ATOM_COUNT - 1 are made at start */
 +#define QJSX_ROM_ATOM_COUNT 515
++/* identifies these names and their indexes: a package is made for one
++   table of names (JS_GetAtomsFingerprint) */
++#define QJSX_ROM_ATOM_FINGERPRINT 0x6d8d10d0u
 +/* slots of qjsx_rom_atom_hash (a power of two) */
 +#define QJSX_ROM_ATOM_HASH_SIZE 2048
 +
@@ -4268,9 +5596,285 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/rom-atoms.h engine/qjsx/c
 +
 +#endif
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/core/runtime.c
---- build/qjsx-baseline/core/runtime.c	2026-11-13 19:37:09.442958400 +0100
-+++ engine/qjsx/core/runtime.c	2026-11-13 19:23:32.423311500 +0100
-@@ -617,6 +617,7 @@
+--- build/qjsx-baseline/core/runtime.c	2026-11-16 11:07:47.833795400 +0100
++++ engine/qjsx/core/runtime.c	2026-11-16 10:10:11.251455100 +0100
+@@ -47,6 +47,43 @@
+     512,
+ };
+ 
++#ifdef QJSX_ALLOC_HISTOGRAM
++/* qjsx: measure (temporary), see JS_GetAllocHistogram */
++static JSAllocHistogram qjsx_alloc_histogram;
++
++const JSAllocHistogram *JS_GetAllocHistogram(void)
++{
++    return &qjsx_alloc_histogram;
++}
++
++/* qjsx: size of a request as a small block: header + size rounded to 8 */
++static uint32_t qjsx_block_size(size_t size)
++{
++    return ((size + JS_MALLOC_ALIGN - 1) & ~(JS_MALLOC_ALIGN - 1)) +
++        sizeof(JSMallocBlockHeader);
++}
++
++/* qjsx: size as a small block of a large block, from its size in the host's
++   heap (rounded up by the host, below the rounding to 8 of qjsx_block_size) */
++static uint32_t qjsx_large_block_size(JSMallocContext *s, JSMallocLargeBlockHeader *lb)
++{
++    return qjsx_block_size(s->mf.js_malloc_usable_size(lb) - sizeof(JSMallocLargeBlockHeader));
++}
++
++/* qjsx: counts one block of 'block_size' bytes in (delta 1) or out (-1) */
++static void qjsx_count_block(uint32_t block_size, int delta)
++{
++    uint32_t step = block_size / 8;
++    if (step >= JS_ALLOC_HISTOGRAM_STEPS - 1) {
++        step = JS_ALLOC_HISTOGRAM_STEPS - 1;
++        qjsx_alloc_histogram.large_live_bytes += delta * (int32_t)block_size;
++    }
++    qjsx_alloc_histogram.live[step] += delta;
++    if (delta > 0)
++        qjsx_alloc_histogram.made[step]++;
++}
++#endif
++
+ static int get_block_size_index(size_t size)
+ {
+     if (size <= 16) {
+@@ -71,6 +108,9 @@
+ {
+     int i;
+     memset(s, 0, sizeof(*s));
++#ifdef QJSX_ALLOC_HISTOGRAM
++    memset(&qjsx_alloc_histogram, 0, sizeof(qjsx_alloc_histogram));
++#endif
+     get_zero_size_block(s)->u.block_idx = FREE_NIL;
+     for(i = 0; i < JS_MALLOC_BLOCK_SIZE_COUNT; i++) {
+         init_list_head(&s->arena_list[i]);
+@@ -86,6 +126,35 @@
+     return ar->blocks + idx * block_size;
+ }
+ 
++/* qjsx: the tuned arenas must hold a block of the largest small size, which
++   js_malloc_block_sizes must know */
++_Static_assert(JS_MALLOC_MAX_SMALL_SIZE <= 512, "JS_MALLOC_MAX_SMALL_SIZE is at most 512");
++_Static_assert(JS_MALLOC_ARENA_SIZE - sizeof(JSMallocArena) >= JS_MALLOC_MAX_SMALL_SIZE,
++               "JS_MALLOC_ARENA_SIZE is too small for a block of JS_MALLOC_MAX_SMALL_SIZE");
++
++#if JS_MALLOC_ARENA_CACHE > 0
++/* qjsx: JSMallocArena.n_init_blocks is a byte */
++_Static_assert((JS_MALLOC_ARENA_SIZE - sizeof(JSMallocArena)) / JS_MALLOC_MIN_SMALL_SIZE <= 255,
++               "JS_MALLOC_ARENA_SIZE is too large for JS_MALLOC_ARENA_CACHE");
++
++/* qjsx: a large block that grows is given a multiple of this size, up to
++   JS_MALLOC_GROW_MAX bytes: a string built piece by piece is not resized at
++   each piece (QuickJS's arenas gave that room up to 512 bytes) */
++#define JS_MALLOC_GROW_STEP 32
++#define JS_MALLOC_GROW_MAX 1024
++
++/* qjsx: gives the empty arenas kept aside back to the host's heap */
++static void js_malloc_free_arena_cache(JSMallocContext *s)
++{
++    while (s->arena_cache) {
++        JSMallocArena *ar = s->arena_cache;
++        s->arena_cache = (JSMallocArena *)ar->link.next;
++        s->mf.js_free(&s->malloc_state, ar);
++    }
++    s->arena_cache_count = 0;
++}
++#endif
++
+ static no_inline JSMallocArena *js_malloc_new_arena(JSMallocContext *s, int block_size_idx)
+ {
+     JSMallocBlockHeader *b;
+@@ -94,7 +163,19 @@
+ 
+     block_size = js_malloc_block_sizes[block_size_idx];
+     n_blocks = (JS_MALLOC_ARENA_SIZE - sizeof(JSMallocArena)) / block_size;
++#if JS_MALLOC_ARENA_CACHE > 0
++    /* qjsx: an empty arena kept aside first, else a new one of the common
++       size */
++    ar = s->arena_cache;
++    if (ar) {
++        s->arena_cache = (JSMallocArena *)ar->link.next;
++        s->arena_cache_count--;
++    } else {
++        ar = s->mf.js_malloc(&s->malloc_state, JS_MALLOC_ARENA_SIZE);
++    }
++#else
+     ar = s->mf.js_malloc(&s->malloc_state, sizeof(JSMallocArena) + n_blocks * block_size);
++#endif
+     if (!ar)
+         return NULL;
+ 
+@@ -109,6 +190,12 @@
+             ar->bitmap[i] = 0;
+     }
+ #endif
++#if JS_MALLOC_ARENA_CACHE > 0
++    /* qjsx: no block was allocated yet: an empty free list, filled by the
++       blocks freed (__js_malloc takes the never allocated ones in order) */
++    ar->n_init_blocks = 0;
++    ar->first_free_block = FREE_NIL;
++#else
+     for(i = 0; i < n_blocks - 1; i++) {
+         b = get_arena_block(ar, i, block_size);
+         b->u.free_next = i + 1;
+@@ -117,6 +204,7 @@
+     b = get_arena_block(ar, n_blocks - 1, block_size);
+     b->u.free_next = FREE_NIL;
+     b->block_size_idx = block_size_idx;
++#endif
+     
+     /* add to the head */
+     list_add(&ar->link, &s->arena_list[block_size_idx]);
+@@ -128,6 +216,13 @@
+ {
+     JSMallocLargeBlockHeader *b;
+     b = s->mf.js_malloc(&s->malloc_state, sizeof(JSMallocLargeBlockHeader) + size);
++#if JS_MALLOC_ARENA_CACHE > 0
++    /* qjsx: no room: give the kept arenas back, then try once more */
++    if (!b && s->arena_cache) {
++        js_malloc_free_arena_cache(s);
++        b = s->mf.js_malloc(&s->malloc_state, sizeof(JSMallocLargeBlockHeader) + size);
++    }
++#endif
+     if (!b)
+         return NULL;
+     b->header.u.block_idx = FREE_NIL;
+@@ -135,6 +230,9 @@
+ #ifdef JS_MALLOC_USE_ITER
+     list_add_tail(&b->link, &s->large_block_list);
+ #endif
++#ifdef QJSX_ALLOC_HISTOGRAM
++    qjsx_count_block(qjsx_large_block_size(s, b), 1);
++#endif
+     return b->header.user_data;
+ }
+ 
+@@ -167,8 +265,20 @@
+                 ar = list_entry(el, JSMallocArena, free_link);
+             }
+             block_idx = ar->first_free_block;
++#if JS_MALLOC_ARENA_CACHE > 0
++            /* qjsx: no freed block: the next one never allocated */
++            if (block_idx == FREE_NIL) {
++                block_idx = ar->n_init_blocks++;
++                b = get_arena_block(ar, block_idx, block_size);
++                b->block_size_idx = block_size_idx;
++            } else {
++                b = get_arena_block(ar, block_idx, block_size);
++                ar->first_free_block = b->u.free_next;
++            }
++#else
+             b = get_arena_block(ar, ar->first_free_block, block_size);
+             ar->first_free_block = b->u.free_next;
++#endif
+             b->u.block_idx = block_idx;
+             ar->n_used_blocks++;
+             if (unlikely(ar->n_used_blocks == ar->n_blocks)) {
+@@ -200,6 +310,9 @@
+ #ifdef JS_MALLOC_USE_ITER
+             list_del(&lb->link);
+ #endif
++#ifdef QJSX_ALLOC_HISTOGRAM
++            qjsx_count_block(qjsx_large_block_size(s, lb), -1);
++#endif
+             s->mf.js_free(&s->malloc_state, lb);
+         }
+     } else {
+@@ -220,6 +333,15 @@
+         if (unlikely(ar->n_used_blocks == 0)) {
+             list_del(&ar->link);
+             list_del(&ar->free_link);
++#if JS_MALLOC_ARENA_CACHE > 0
++            /* qjsx: kept for the next request of any block size, up to
++               JS_MALLOC_ARENA_CACHE arenas */
++            if (s->arena_cache_count < JS_MALLOC_ARENA_CACHE) {
++                ar->link.next = (struct list_head *)s->arena_cache;
++                s->arena_cache = ar;
++                s->arena_cache_count++;
++            } else
++#endif
+             s->mf.js_free(&s->malloc_state, ar);
+         }
+     }
+@@ -244,8 +366,19 @@
+ #ifdef JS_MALLOC_USE_ITER
+             list_del(&lb->link);
+ #endif
++#ifdef QJSX_ALLOC_HISTOGRAM
++            qjsx_count_block(qjsx_large_block_size(s, lb), -1);
++#endif
++#if JS_MALLOC_ARENA_CACHE > 0
++            /* qjsx: room for the next growth of a block that is not large */
++            if (size <= JS_MALLOC_GROW_MAX)
++                size = (size + JS_MALLOC_GROW_STEP - 1) & ~(size_t)(JS_MALLOC_GROW_STEP - 1);
++#endif
+             new_lb = s->mf.js_realloc(&s->malloc_state, lb, sizeof(JSMallocLargeBlockHeader) + size);
+             if (!new_lb) {
++#ifdef QJSX_ALLOC_HISTOGRAM
++                qjsx_count_block(qjsx_large_block_size(s, lb), 1);
++#endif
+ #ifdef JS_MALLOC_USE_ITER
+                 /* add again in the list */
+                 list_add_tail(&lb->link, &s->large_block_list);
+@@ -254,6 +387,9 @@
+             }
+             new_lb->header.u.block_idx = FREE_NIL;
+             new_lb->header.block_size_idx = 0xff; /* fail safe */
++#ifdef QJSX_ALLOC_HISTOGRAM
++            qjsx_count_block(qjsx_large_block_size(s, new_lb), 1);
++#endif
+ #ifdef JS_MALLOC_USE_ITER
+             list_add_tail(&new_lb->link, &s->large_block_list);
+ #endif
+@@ -316,6 +452,43 @@
+     }
+ }
+ 
++#ifdef QJSX_MEMORY_MAP
++/* qjsx: measure (temporary), see quickjs.h */
++void JS_DumpMallocMap(JSRuntime *rt)
++{
++    JSMallocContext *s = &rt->malloc_ctx;
++    struct list_head *el;
++    int block_size_idx, arena_count = 0, cached = 0;
++    size_t arena_bytes = 0, used_bytes = 0;
++
++    printf("MAP arenas: block size, arenas, blocks in use, blocks\n");
++    for(block_size_idx = 0; block_size_idx < JS_MALLOC_BLOCK_SIZE_COUNT; block_size_idx++) {
++        int block_size = js_malloc_block_sizes[block_size_idx];
++        int count = 0, used = 0, blocks = 0;
++        list_for_each(el, &s->arena_list[block_size_idx]) {
++            JSMallocArena *ar = list_entry(el, JSMallocArena, link);
++            count++;
++            used += ar->n_used_blocks;
++            blocks += ar->n_blocks;
++        }
++        if (count == 0)
++            continue;
++        arena_count += count;
++        used_bytes += (size_t)used * block_size;
++        printf("MAP arena %d %d %d %d\n", block_size, count, used, blocks);
++    }
++#if JS_MALLOC_ARENA_CACHE > 0
++    cached = s->arena_cache_count;
++    arena_bytes = (size_t)(arena_count + cached) * JS_MALLOC_ARENA_SIZE;
++#endif
++    printf("MAP arenas total: %d arenas of %d bytes, %d kept aside, blocks in use %u bytes\n",
++           arena_count, (int)JS_MALLOC_ARENA_SIZE, cached, (unsigned)used_bytes);
++    printf("MAP host blocks: %u blocks, %u bytes counted, of which arenas %u bytes\n",
++           (unsigned)s->malloc_state.malloc_count, (unsigned)s->malloc_state.malloc_size,
++           (unsigned)arena_bytes);
++}
++#endif
++
+ static __maybe_unused void js_malloc_dump_arenas(JSMallocContext *s)
+ {
+     struct list_head *el;
+@@ -617,6 +790,7 @@
      rt->malloc_ctx.mf = *mf;
      rt->malloc_ctx.malloc_state = ms;
      rt->malloc_gc_threshold = 256 * 1024;
@@ -4278,7 +5882,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  
      init_list_head(&rt->context_list);
      init_list_head(&rt->gc_obj_list);
-@@ -680,6 +681,11 @@
+@@ -680,6 +854,11 @@
      return 0;
  #elif defined(__linux__) || defined(__GLIBC__)
      return malloc_usable_size((void *)ptr);
@@ -4290,7 +5894,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  #else
      /* change this to `return 0;` if compilation fails */
      return malloc_usable_size((void *)ptr);
-@@ -914,6 +920,7 @@
+@@ -914,6 +1093,7 @@
      int i;
  
      JS_FreeValueRT(rt, rt->current_exception);
@@ -4298,7 +5902,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  
      list_for_each_safe(el, el1, &rt->job_list) {
          JSJobEntry *e = list_entry(el, JSJobEntry, link);
-@@ -1040,6 +1047,11 @@
+@@ -1040,6 +1220,11 @@
      /* free the atoms */
      for(i = 0; i < rt->atom_size; i++) {
          JSAtomStruct *p = rt->atom_array[i];
@@ -4310,7 +5914,29 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
          if (!atom_is_free(p)) {
  #ifdef DUMP_LEAKS
              list_del(&p->link);
-@@ -1140,7 +1152,12 @@
+@@ -1050,6 +1235,10 @@
+     js_free_rt(rt, rt->atom_array);
+     js_free_rt(rt, rt->atom_hash);
+     js_free_rt(rt, rt->shape_hash);
++#if JS_MALLOC_ARENA_CACHE > 0
++    /* qjsx: the empty arenas kept aside */
++    js_malloc_free_arena_cache(&rt->malloc_ctx);
++#endif
+ #ifdef DUMP_LEAKS
+     if (!list_empty(&rt->string_list)) {
+         if (rt->rt_info) {
+@@ -1090,6 +1279,10 @@
+     }
+ #endif
+ 
++#if JS_MALLOC_ARENA_CACHE > 0
++    /* qjsx: an arena emptied by the leak report above */
++    js_malloc_free_arena_cache(&rt->malloc_ctx);
++#endif
+     {
+         JSMallocState ms = rt->malloc_ctx.malloc_state;
+         rt->malloc_ctx.mf.js_free(&ms, rt);
+@@ -1140,7 +1333,12 @@
  
      if (JS_AddIntrinsicBaseObjects(ctx) ||
          JS_AddIntrinsicDate(ctx) ||
@@ -4324,8 +5950,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
          JS_AddIntrinsicRegExp(ctx) ||
          JS_AddIntrinsicJSON(ctx) ||
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.h
---- build/qjsx-baseline/quickjs.h	2026-11-13 19:37:09.791638000 +0100
-+++ engine/qjsx/quickjs.h	2026-11-13 19:36:10.845054600 +0100
+--- build/qjsx-baseline/quickjs.h	2026-11-16 11:07:48.193898500 +0100
++++ engine/qjsx/quickjs.h	2026-11-16 10:56:51.859092300 +0100
 @@ -47,6 +47,19 @@
  
  #define JS_BOOL int
@@ -4402,7 +6028,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.
      }
      return (JSValue)v;
  }
-@@ -717,7 +748,9 @@
+@@ -717,11 +748,48 @@
  {
      if (JS_VALUE_HAS_REF_COUNT(v)) {
          JSRefCountHeader *p = __js_rc(JS_VALUE_GET_PTR(v));
@@ -4413,7 +6039,46 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.
      }
      return (JSValue)v;
  }
-@@ -966,6 +999,14 @@
+ 
++/* qjsx: the names of a package (core/package-atoms.c). JS_SetPackageAtoms
++   gives them to a runtime that made no name of its own yet (just after
++   JS_NewRuntime2); the image stays where it is, unchanged, as long as the
++   runtime; -1 if it is not an image for this engine, or too late.
++   JS_WritePackageAtoms (engine with compiler) makes the image of the names
++   'ctx' created after the engine's (js_malloc; NULL and an exception on
++   error). JS_GetAtomsFingerprint: what identifies the names of the engine a
++   package was made for (0: an engine without names in read-only memory). */
++int JS_SetPackageAtoms(JSRuntime *rt, const uint8_t *image, size_t size);
++/* true once JS_SetPackageAtoms() succeeded on this runtime */
++JS_BOOL JS_HasPackageAtoms(JSRuntime *rt);
++uint8_t *JS_WritePackageAtoms(JSContext *ctx, size_t *psize);
++uint32_t JS_GetAtomsFingerprint(void);
++
++#ifdef QJSX_MEMORY_MAP
++/* qjsx: measure (temporary): prints the arenas of the allocator by block
++   size (arenas, blocks in use, blocks), the arenas kept aside and the bytes
++   of the large blocks */
++void JS_DumpMallocMap(JSRuntime *rt);
++#endif
++
++#ifdef QJSX_ALLOC_HISTOGRAM
++/* qjsx: measure (temporary): the blocks of the JS heap by their size as a
++   small block of QuickJS's allocator (8 + the size rounded to 8), in steps
++   of 8 bytes; the last step holds every larger block */
++#define JS_ALLOC_HISTOGRAM_STEPS 129
++typedef struct JSAllocHistogram {
++    uint32_t live[JS_ALLOC_HISTOGRAM_STEPS];  /* blocks allocated now */
++    uint32_t made[JS_ALLOC_HISTOGRAM_STEPS];  /* blocks allocated since the runtime was made */
++    uint32_t large_live_bytes;                /* bytes of the live blocks of the last step */
++} JSAllocHistogram;
++/* the counts of the last runtime made (one runtime at a time) */
++const JSAllocHistogram *JS_GetAllocHistogram(void);
++#endif
++
+ JS_BOOL JS_StrictEq(JSContext *ctx, JSValueConst op1, JSValueConst op2);
+ JS_BOOL JS_SameValue(JSContext *ctx, JSValueConst op1, JSValueConst op2);
+ JS_BOOL JS_SameValueZero(JSContext *ctx, JSValueConst op1, JSValueConst op2);
+@@ -966,6 +1034,14 @@
  /* return the import.meta object of a module */
  JSValue JS_GetImportMeta(JSContext *ctx, JSModuleDef *m);
  JSAtom JS_GetModuleName(JSContext *ctx, JSModuleDef *m);
@@ -4428,8 +6093,25 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.
  JSValue JS_GetModuleNamespace(JSContext *ctx, JSModuleDef *m);
  
  /* JS Job support */
-@@ -994,6 +1035,13 @@
+@@ -980,6 +1056,10 @@
+ #define JS_WRITE_OBJ_BYTECODE  (1 << 0) /* allow function/module */
+ #define JS_WRITE_OBJ_BSWAP     (1 << 1) /* byte swapped output */
+ #define JS_WRITE_OBJ_SAB       (1 << 2) /* allow SharedArrayBuffer */
++/* qjsx: writes the atoms as their indexes in this runtime, without the
++   table of their texts: for JS_READ_OBJ_FIXED_ATOMS, in a runtime given the
++   same names (JS_WritePackageAtoms / JS_SetPackageAtoms) */
++#define JS_WRITE_OBJ_FIXED_ATOMS (1 << 4)
+ #define JS_WRITE_OBJ_REFERENCE (1 << 3) /* allow object references to
+                                            encode arbitrary object
+                                            graph */
+@@ -992,8 +1072,19 @@
+ #define JS_READ_OBJ_ROM_DATA  (1 << 1) /* avoid duplicating 'buf' data */
+ #define JS_READ_OBJ_SAB       (1 << 2) /* allow SharedArrayBuffer */
  #define JS_READ_OBJ_REFERENCE (1 << 3) /* allow object references */
++/* qjsx: the atoms of the bytecode are indexes of the runtime (the names of
++   the engine and of the package, JS_SetPackageAtoms): nothing is relocated.
++   With JS_READ_OBJ_ROM_DATA the bytecode runs where it lies. */
++#define JS_READ_OBJ_FIXED_ATOMS (1 << 4)
  JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
                        int flags);
 +/* qjsx: version of the bytecode this engine writes and reads (BC_VERSION):
@@ -4444,8 +6126,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.
  JSValue JS_EvalFunction(JSContext *ctx, JSValue fun_obj);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/quickjs-debug.h
 --- build/qjsx-baseline/quickjs-debug.h	1970-01-01 01:00:00.000000000 +0100
-+++ engine/qjsx/quickjs-debug.h	2026-11-11 17:48:12.444529400 +0100
-@@ -0,0 +1,308 @@
++++ engine/qjsx/quickjs-debug.h	2026-11-16 10:33:29.640704200 +0100
+@@ -0,0 +1,319 @@
 +/*          _
 + *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
 + * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
@@ -4700,6 +6382,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/qu
 +    int flags;     /* JS_DEBUG_VARIABLE_* */
 +} JSDebugVariable;
 +
++/* A constant of a module that the compiler replaced by its value (no
++   variable holds it at run time). */
++typedef struct JSDebugConstant {
++    JSAtom name;
++    JSValueConst value;   /* a number or a string */
++} JSDebugConstant;
++
 +typedef struct JSDebugFunctionInfo {
 +    int function_number;
 +    JSAtom name;                /* JS_ATOM_NULL if anonymous */
@@ -4718,6 +6407,10 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/qu
 +    int closure_count;
 +    const JSDebugScope *scopes;
 +    int scope_count;
++    /* the constants of the module replaced by their value: with the module
++       function only (visible from every function of the module) */
++    const JSDebugConstant *constants;
++    int constant_count;
 +} JSDebugFunctionInfo;
 +
 +typedef void JSDebugInfoCollector(JSContext *ctx, const JSDebugFunctionInfo *info,
@@ -4755,8 +6448,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/qu
 +
 +#endif /* QUICKJS_DEBUG_H */
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx/quickjs-internal.h
---- build/qjsx-baseline/quickjs-internal.h	2026-11-13 19:37:09.482084100 +0100
-+++ engine/qjsx/quickjs-internal.h	2026-11-13 19:22:34.664427400 +0100
+--- build/qjsx-baseline/quickjs-internal.h	2026-11-16 11:07:47.865133500 +0100
++++ engine/qjsx/quickjs-internal.h	2026-11-16 10:52:46.667804400 +0100
 @@ -30,6 +30,7 @@
  #include "cutils.h"
  #include "list.h"
@@ -4765,7 +6458,65 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  #include "libregexp.h"
  #include "libunicode.h"
  #include "dtoa.h"
-@@ -301,6 +302,30 @@
+@@ -226,12 +227,31 @@
+ /* JS malloc */
+ 
+ #define JS_MALLOC_ALIGN 8
++/* qjsx: the port of a device with little RAM sets the three values below
++   (compile options): QuickJS's 4 KB arenas of small blocks up to 512 bytes
++   leave half of a small heap empty (one arena per block size in use).
++   JS_MALLOC_MAX_SMALL_SIZE is at most 512 (js_malloc_block_sizes). */
++#ifndef JS_MALLOC_ARENA_SIZE
+ #define JS_MALLOC_ARENA_SIZE 4096
++#endif
+ #define JS_MALLOC_BLOCK_SIZE_COUNT 31
+ #define JS_MALLOC_MIN_SMALL_SIZE 16
++#ifndef JS_MALLOC_MAX_SMALL_SIZE
+ #define JS_MALLOC_MAX_SMALL_SIZE 512
+-#if defined(__SANITIZE_ADDRESS__)
++#endif
++/* qjsx: number of empty arenas kept for the next request instead of going
++   back to the host's heap. Not 0: every arena is JS_MALLOC_ARENA_SIZE bytes
++   whatever its block size, so that a kept one serves any block size; an
++   arena is made in constant time (its free list is filled as its blocks are
++   freed); a large block that grows gets some room for the next time.
++   0: QuickJS's original arenas. */
++#ifndef JS_MALLOC_ARENA_CACHE
++#define JS_MALLOC_ARENA_CACHE 0
++#endif
++#if defined(__SANITIZE_ADDRESS__) || defined(QJSX_ALLOC_HISTOGRAM)
+ /* use the host malloc() for all allocations */
++/* qjsx: also while measuring the sizes of the allocations (QJSX_ALLOC_HISTOGRAM,
++   temporary): the size of each block is read back from the host */
+ #define JS_MALLOC_LARGE_BLOCKS_ONLY 1
+ #else
+ #define JS_MALLOC_LARGE_BLOCKS_ONLY 0
+@@ -275,6 +295,11 @@
+     struct list_head free_link;
+     struct list_head link;
+     uint8_t block_size_idx;
++#if JS_MALLOC_ARENA_CACHE > 0
++    /* qjsx: the blocks from this index on were never allocated: they are
++       not in the free list yet (an arena is made in constant time) */
++    uint8_t n_init_blocks;
++#endif
+     uint16_t n_used_blocks; /* number of allocated blocks */
+     uint16_t n_blocks; /* total number of blocks */
+     uint16_t first_free_block; /* FREE_NIL if none */
+@@ -294,6 +319,12 @@
+ #endif
+     __attribute__((aligned(JS_MALLOC_ALIGN))) uint8_t zero_size_block[sizeof(JSMallocBlockHeader)];
+ 
++#if JS_MALLOC_ARENA_CACHE > 0
++    /* qjsx: the empty arenas kept, chained by 'link.next' */
++    JSMallocArena *arena_cache;
++    int arena_cache_count;
++#endif
++
+     /* callbacks to the host malloc */
+     JSMallocFunctions mf;
+     JSMallocState malloc_state;
+@@ -301,6 +332,30 @@
  
  /* end JS Malloc */
  
@@ -4796,7 +6547,24 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  struct JSRuntime {
      JSMallocContext malloc_ctx;
      const char *rt_info;
-@@ -373,6 +398,7 @@
+@@ -312,6 +367,16 @@
+     uint32_t *atom_hash;
+     JSAtomStruct **atom_array;
+     int atom_free_index; /* 0 = none */
++#if QJSX_ROM_ATOMS
++    /* qjsx: the atoms below this index are never counted nor freed: the
++       names of the engine in read-only memory, then the names of the
++       package (JS_SetPackageAtoms) */
++    uint32_t const_atom_end;
++    /* qjsx: hash table of the names of the package (NULL: none), in its
++       image: an atom index per slot, 0 = empty */
++    const uint16_t *pkg_atom_hash;
++    uint32_t pkg_atom_hash_size;
++#endif
+ 
+     int class_count;    /* size of class_array */
+     JSClass *class_array;
+@@ -373,6 +438,7 @@
      int shape_hash_count; /* number of hashed shapes */
      JSShape **shape_hash;
      void *user_opaque;
@@ -4804,7 +6572,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  };
  
  struct JSClass {
-@@ -402,6 +428,12 @@
+@@ -402,6 +468,12 @@
      /* only used in generators. Current stack pointer value. NULL if
         the function is running. */
      JSValue *cur_sp;
@@ -4817,7 +6585,25 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  } JSStackFrame;
  
  typedef enum {
-@@ -698,10 +730,21 @@
+@@ -565,7 +637,16 @@
+ #define JS_ATOM_HASH_MASK  ((1 << 30) - 1)
+ #define JS_ATOM_HASH_PRIVATE JS_ATOM_HASH_MASK
+ 
+-struct JSString {
++/* qjsx: the layout of GCC on every platform (Windows packs bit fields of
++   different types apart: 20 bytes instead of 12): a JSString written in a
++   package (core/package-atoms.c) is the same on the PC and on a device */
++#if defined(_WIN32) && defined(__GNUC__)
++#define JS_GCC_LAYOUT __attribute__((gcc_struct))
++#else
++#define JS_GCC_LAYOUT
++#endif
++
++struct JS_GCC_LAYOUT JSString {
+     uint32_t len : 31;
+     uint8_t is_wide_char : 1; /* 0 = 8 bits, 1 = 16 bits characters */
+     /* for JS_ATOM_TYPE_SYMBOL: hash = weakref_count, atom_type = 3,
+@@ -698,10 +779,21 @@
      JSValue *cpool; /* constant pool (self pointer) */
      int cpool_count;
      int closure_var_count;
@@ -4841,7 +6627,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
          int pc2line_len;
          uint8_t *pc2line_buf;
          char *source;
-@@ -1349,7 +1392,10 @@
+@@ -1349,7 +1441,12 @@
      BC_TAG_OBJECT_REFERENCE,
  } BCTagEnum;
  
@@ -4849,11 +6635,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
 +/* qjsx: own value (QuickJS 2026-06-04 uses 5): the format differs
 +   (filename always written, function_number), so a bytecode of one is
 +   refused by the other instead of being misread. */
-+#define BC_VERSION 0x45
++#define BC_VERSION 0x46
++/* qjsx: first byte of a bytecode written with JS_WRITE_OBJ_FIXED_ATOMS */
++#define BC_VERSION_FIXED_ATOMS (BC_VERSION | 0x80)
  
  #define JS_NEW_CTOR_NO_GLOBAL   (1 << 0) /* don't create a global binding */
  #define JS_NEW_CTOR_PROTO_CLASS (1 << 1) /* the prototype class is 'class_id' instead of JS_CLASS_OBJECT */
-@@ -1607,9 +1653,27 @@
+@@ -1607,9 +1704,27 @@
      return (JSAtomStruct *)(((uintptr_t)v << 1) | 1);
  }
  
@@ -4862,12 +6650,12 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
 +#include "core/rom-atoms.h"
 +
 +/* qjsx: true if the atom string 'p' is one of the names in read-only memory
-+   (never written, never freed; its atom index is in 'hash_next') */
++   (the engine's, or the ones of the package): never written, never freed,
++   its atom index is in 'hash_next'. They are the atoms with an immortal
++   reference count. */
 +static inline BOOL js_atom_is_rom(const JSAtomStruct *p)
 +{
-+    const uint8_t *address = (const uint8_t *)p;
-+    const uint8_t *begin = (const uint8_t *)&qjsx_rom_atoms;
-+    return address >= begin && address < begin + sizeof(qjsx_rom_atoms);
++    return js_rc((void *)p)->ref_count >= JS_REF_COUNT_IMMORTAL;
 +}
 +#endif
 +
@@ -4881,7 +6669,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
      if (--js_rc(str)->ref_count <= 0) {
          if (str->atom_type) {
              JS_FreeAtomStruct(rt, str);
-@@ -1750,6 +1814,18 @@
+@@ -1750,6 +1865,18 @@
      }
  }
  
@@ -4901,7 +6689,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  static force_inline BOOL can_extend_fast_array(JSObject *p)
  {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-opcode.h engine/qjsx/quickjs-opcode.h
---- build/qjsx-baseline/quickjs-opcode.h	2026-11-13 19:37:09.841567600 +0100
+--- build/qjsx-baseline/quickjs-opcode.h	2026-11-16 11:07:48.246946800 +0100
 +++ engine/qjsx/quickjs-opcode.h	2026-11-11 16:04:41.534423300 +0100
 @@ -256,6 +256,8 @@
  DEF(is_undefined_or_null, 1, 1, 1, none)

@@ -118,6 +118,7 @@ typedef struct BCWriterState {
     BOOL allow_bytecode : 8;
     BOOL allow_sab : 8;
     BOOL allow_reference : 8;
+    BOOL fixed_atoms : 8;   /* qjsx: JS_WRITE_OBJ_FIXED_ATOMS */
     uint32_t first_atom;
     uint32_t *atom_to_idx;
     int atom_to_idx_size;
@@ -881,7 +882,9 @@ static int JS_WriteObjectAtoms(BCWriterState *s)
 
     dbuf1 = s->dbuf;
     js_dbuf_init(s->ctx, &s->dbuf);
-    bc_put_u8(s, BC_VERSION);
+    /* qjsx: its own first byte for a bytecode with fixed atom indexes (it
+       has no atom: the table below is empty) */
+    bc_put_u8(s, s->fixed_atoms ? BC_VERSION_FIXED_ATOMS : BC_VERSION);
 
     bc_put_leb128(s, s->idx_to_atom_count);
     for(i = 0; i < s->idx_to_atom_count; i++) {
@@ -922,6 +925,10 @@ uint8_t *JS_WriteObject2(JSContext *ctx, size_t *psize, JSValueConst obj,
         s->first_atom = JS_ATOM_END;
     else
         s->first_atom = 1;
+    /* qjsx: every atom is written as its index in this runtime */
+    s->fixed_atoms = ((flags & JS_WRITE_OBJ_FIXED_ATOMS) != 0);
+    if (s->fixed_atoms)
+        s->first_atom = UINT32_MAX;
     js_dbuf_init(ctx, &s->dbuf);
     js_object_list_init(&s->object_list);
 

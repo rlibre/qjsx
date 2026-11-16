@@ -504,6 +504,13 @@ void Agent::handleInfo(int64_t id) {
             payload.integer((int64_t)memory.psramLargest);
             fieldCount += 2;
         }
+
+        // the region reserved for the JS heap, when the board has one
+        if (memory.jsHeapSize > 0) {
+            payload.integer(KEY_JS_HEAP_SIZE);
+            payload.integer((int64_t)memory.jsHeapSize);
+            fieldCount++;
+        }
     }
 
     respond(id, &payload, fieldCount);

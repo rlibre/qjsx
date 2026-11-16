@@ -4,6 +4,85 @@
 
 - [x] **Dernier état (2026-11-13 après-midi ; tout le matin est commité dans 3d95c7d ;
       l'utilisateur commite)** :
+      - **tas JS d'une board sans PSRAM** (2026-11-16, architecture.md « JS heap of a board
+        without PSRAM », engine-changes.md Q) : région de RAM interne réservée au premier
+        runtime (plus grand bloc libre moins 16 Ko), gérée par `RegionHeap` ; pages de
+        QuickJS de 1 Ko pour les blocs jusqu'à 128 o, réserve de 4 pages vides
+        (`QJSX_SMALL_HEAP_DEFINES`, donnés par le port ESP32 sans PSRAM) ; `device info`
+        affiche la taille de la région. Sur PC : suite Debug 109 OK avec ces réglages et
+        `QJSX_JS_HEAP_MB=64`, contexte vide 133 → 72 Ko, microbench +3,9 % (grandes
+        chaînes, malloc de Windows dessous). ESSAYÉ sur la carte cliente le 2026-11-16 :
+        région de 232 Ko, application 255,8 → 205,8 Ko de tas JS, firmware 46,7 Ko libres
+        (23,7 avant), programme vide 62,0 Ko ; un programme qui dépasse la région reçoit
+        une exception et l'agent répond toujours. `-DQJSX_JS_HEAP_SHARED=ON` = ancien tas
+        partagé (pour comparer). VITESSE sur la carte (temp/allocbench, contre l'ancien
+        tas) : objets −9 %, tableaux =, JSON +8 %, propriétés +27 %, chaînes +62 %,
+        fonctions créées en boucle +85 % ; cause NON trouvée (pas de ralentissement des
+        mêmes boucles sur PC ; page créée en temps constant et marge au
+        redimensionnement : sans effet). Piste : le cache d'instructions du firmware
+        fait 16 Ko pour un `JS_CallInternal` de 25 Ko (comme sur la RP2350), la place du
+        code compte peut-être plus que l'allocateur : essayer 32 Ko (coûte de la RAM) et
+        la flash en QIO. Reste aussi : régler la réserve (paquet en RAM de 44 Ko
+        impossible : plus grand bloc libre du firmware 31 Ko), message d'un manque de
+        mémoire (« Uncaught (in promise) null »), RP2350 sans PSRAM, manuel JS.
+      - **carte mémoire de la carte cliente** (2026-11-16, option de mesure
+        `-DQJSX_MEMORY_MAP=ON`, globale `__memoryMap(titre)` ; relevé brut dans
+        temp/histo/map-clean.txt) : trois poches de RAM trouvées, rien de corrigé :
+        1. pile de la tâche JS 48 Ko dont 41,3 Ko jamais utilisés ; 2. un tas de 32 Ko
+        (0x3fcf0000) et le tas RTC de 7,8 Ko entièrement libres, que la région JS (un seul
+        bloc du tas principal) ne peut pas prendre ; 3. pic du tas JS au chargement :
+        211 Ko, pour 166 Ko une fois les modules chargés (45 Ko transitoires, cause à
+        trouver). Statique : 72,6 Ko de RAM (code en RAM 43,5 Ko, .data 16,5, .bss 12,6).
+      - **optimiseur de bytecode : constantes, FAIT le 2026-11-16** (engine-changes.md R,
+        `compiler/fold.c`) : marche 1 (calcul des expressions de littéraux) et marche 2
+        (`const` de module remplacées par leur valeur, sans variable si non exportées),
+        valeurs dans le fichier de débogage (`constants`), montrées par le débogueur.
+        Sur l'application cliente : 86 variables de module en moins, tas JS sur la carte
+        206,0 → 195,6 Ko, paquet 44,2 → 41,7 Ko. Tests : fold 82, modconst 21. Reste :
+        constantes exportées entre modules (3 dans l'application), booléens, opcodes
+        fusionnés (après mesure sur la carte). Proposition d'origine : marche 1, calcul des expressions constantes à la compilation
+        (nombres, concaténation de chaînes littérales : rien n'est calculé aujourd'hui,
+        sauf le moins unaire) ; marche 2, `const` de module à valeur littérale remplacées
+        par leur valeur (89 sur 141 variables de module dans l'application cliente, 123
+        lectures, ≈ 8 Ko de RAM), la valeur allant dans le fichier de débogage ; acceptés :
+        lire une constante avant sa déclaration ne lève plus d'erreur, un point d'arrêt
+        sur la ligne glisse à l'instruction suivante. Opcodes fusionnés : plus tard,
+        après mesure sur la carte. Sondes : temp/heapmap/optprobe.c, ophisto.c.
+      - **tâches préemptées (« faux threads »)** (idée de l'utilisateur, 2026-11-16, à
+        étudier, rien de fait) : une tâche = un générateur ; au point de contrôle que
+        l'interpréteur a déjà (saut en arrière, appel : interpreter.c:81, celui du
+        débogueur et de yieldIfDue), si la tranche de temps est écoulée et que le cadre en
+        cours est celui d'un générateur, sortir avec un nouveau code de retour
+        « préempté » (à côté de FUNC_RET_YIELD, interpreter.c:2760) ; reprise sans valeur
+        poussée ni attendue (generators.c:719) ; ordonnanceur en JS dans stdlib, tranche
+        en millisecondes. Pas d'opcode, pas de changement de version du bytecode. Limite :
+        pas de coupure pendant une fonction ordinaire ou native appelée par la tâche. À
+        lire avant de proposer : la reprise des générateurs, comment savoir que le cadre
+        en cours est suspendable. Écartés : threads à la Python (une pile C par thread,
+        fin de la garantie « un callback n'est pas interrompu »), interpréteur sans pile
+        (réécriture du cœur), workers (≈ 62 Ko par moteur).
+      - **optimiseur de bytecode** (utilisateur, 2026-11-16 : « pour la suite, réfléchir
+        à un optimiseur de bytecode ») : à étudier, rien de fait.
+      - **paquet exécuté en place, marches 1 et 2 FAITES le 2026-11-16** (engine-changes.md
+        S) : `qjsx build` lie les modules (`link()` de sys/compiler) : une table de noms
+        pour tout le paquet (entrée `names.bin`, alignée sur 8, `names` dans le manifeste),
+        bytecode écrit avec les numéros définitifs ; le runtime donne les noms au moteur
+        avant de créer le contexte (`JS_SetPackageAtoms`, program.cpp) et lit le bytecode
+        en place. BC_VERSION 0x46. MESURÉ sur la carte cliente : tas JS 195,6 → 156,3 Ko
+        (paquet envoyé 41,7 → 55,9 Ko, en flash) ; l'application redémarre et tourne.
+        Débogueur pas réessayé sur la carte. Reste : la marche 3 (tables de variables en place),
+        l'empreinte des noms vérifiée dès l'upload, la RP2350. Proposition d'origine
+        (retenue par l'utilisateur le 2026-11-16, après l'allocateur) : sur les 142 Ko que le programme de la carte ajoute, ~76 Ko sont
+        chargés avant toute exécution (216 fonctions : structures 18 Ko, bytecode 19 Ko,
+        tables de variables 12 Ko ; 593 noms ≈ 20 Ko). Trois marches : 1. noms du paquet
+        en flash, numéros fixes (moteur, paquet, reste) ; 2. bytecode en place
+        (`JS_READ_OBJ_ROM_DATA`, les numéros de noms n'étant plus corrigés) ; 3. tables
+        de variables en place. ≈ −51 Ko. Coûts : format du paquet (alignement 8),
+        empreinte de la table des noms du moteur dans le manifeste, BC_VERSION, même
+        disposition de JSString sur PC (20 o sous Windows contre 12). Pistes plus
+        petites : fonctions natives de jsbind paresseuses (−7 Ko), `length` / `name` des
+        fonctions calculés (−5 à −7 Ko, risqué), lien de liste du ramasse-miettes (−12 Ko,
+        lourd). Sondes : temp/heapmap/appstatic.c.
       - **noms des objets intégrés en mémoire morte** (FAIT le 2026-11-13 soir, ESSAI sur PC
         seulement, doc/engine-changes.md P) : `QJSX_ROM_ATOMS` (quickjs.h, 1 ; 0 = QuickJS
         d'origine ; copie des fichiers d'avant dans temp/rom-atoms-backup/), compteur

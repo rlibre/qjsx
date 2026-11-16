@@ -94,4 +94,44 @@ const stops = script.statementStops();
 equal(stops.length, script.functions.length, "statement stops for every function");
 check(stops[greetNumber].offsets.includes(atReturn.pc), "the breakpoint offset is a statement stop");
 
+// --- the constants of a module the compiler replaced by their value: no
+// slot, their value in the debug info, visible from every function
+const constantLines = [
+    "const STEP = 4;",                       // 0
+    "const DOUBLE = STEP * 2;",              // 1
+    "export const NAME = \"v\" + DOUBLE;",     // 2
+    "let total = 0;",                        // 3
+    "export function add() {",               // 4
+    "    total += STEP;",                    // 5
+    "    return total;",                     // 6
+    "}",                                     // 7
+];
+const constantSource = constantLines.join("\n");
+const constantCompiled = compileModule("src/constants.js", constantSource);
+const constantRecord = {
+    path: "src/constants.js",
+    buildId: constantCompiled.buildId,
+    sourceHash: constantCompiled.sourceHash,
+    debug: "debug/src/constants.js.json",
+    source: "src/src/constants.js",
+};
+const constantScript = new ScriptInfo(constantRecord, new Map([
+    [constantRecord.source, encoder.encode(constantSource)],
+    [constantRecord.debug, encoder.encode(JSON.stringify(constantCompiled.sidecar))],
+]), undefined);
+
+const describeVariable = variable => (variable.constant !== undefined ? `${variable.name}=${variable.constant}` : variable.name);
+const inAdd = constantScript.breakpointAt(6, 0);
+const addClosure = constantScript.scopesAt(inAdd.number, inAdd.pc).find(scope => scope.kind === "closure");
+equal(addClosure.variables.map(describeVariable).join(), "total,STEP=4,DOUBLE=8,NAME=v8",
+    "in a function: its closure variables, then the constants of the module with their values");
+check(addClosure.variables.every(variable => variable.constant === undefined || variable.slotKind === undefined),
+    "a constant has no slot");
+
+const atTop = constantScript.breakpointAt(3, 0);
+const topClosure = constantScript.scopesAt(atTop.number, atTop.pc).find(scope => scope.kind === "closure");
+const topNames = topClosure.variables.map(describeVariable);
+check(topNames.includes("NAME") && !topNames.includes("NAME=v8"), `an exported constant is shown once, by its variable: ${topNames.join()}`);
+check(topNames.includes("STEP=4") && topNames.includes("DOUBLE=8"), "the other constants are shown by their value in the module code");
+
 report("debuginfo");

@@ -48,6 +48,16 @@ local BUILD = absolute(_OPTIONS["builddir"] or "build")
 local REPL_C = BUILD .. "/generated/repl.c"
 local VERSION = io.readfile(ORIGINAL .. "/VERSION"):gsub("%s+", "")
 
+-- The programs of the release (qjs.c, quickjs-libc.c, run-test262.c...) are
+-- compiled from a copy: next to their own quickjs.h they would include it
+-- instead of the header of the engine they are linked with, and its inline
+-- functions (JS_FreeValue...) are not the same in engine/qjsx.
+local SOURCES = BUILD .. "/upstream-src"
+os.mkdir(SOURCES)
+for _, name in ipairs({ "qjs.c", "qjsc.c", "quickjs-libc.c", "quickjs-libc.h", "run-test262.c" }) do
+    os.copyfile(UPSTREAM .. "/" .. name, SOURCES .. "/" .. name)
+end
+
 workspace "quickjs-split-test"
     configurations { "Release" }
     location(BUILD)
@@ -91,8 +101,8 @@ engine("engine-split", SPLIT, {
 project "qjsc"
     kind "ConsoleApp"
     objdir(BUILD .. "/obj/qjsc")
-    includedirs { ORIGINAL, UPSTREAM }
-    files { UPSTREAM .. "/qjsc.c", UPSTREAM .. "/quickjs-libc.c" }
+    includedirs { ORIGINAL }
+    files { SOURCES .. "/qjsc.c", SOURCES .. "/quickjs-libc.c" }
     links { "engine-original", "m", "pthread" }
     postbuildcommands {
         "mkdir -p " .. BUILD .. "/generated",
@@ -104,10 +114,25 @@ local function qjs(name, engineName, root)
         kind "ConsoleApp"
         objdir(BUILD .. "/obj/" .. name)
         dependson { "qjsc" }
-        includedirs { root, UPSTREAM }
-        files { UPSTREAM .. "/qjs.c", UPSTREAM .. "/quickjs-libc.c", REPL_C }
+        includedirs { root }
+        files { SOURCES .. "/qjs.c", SOURCES .. "/quickjs-libc.c", REPL_C }
         links { engineName, "m", "pthread" }
 end
 
 qjs("qjs-original", "engine-original", ORIGINAL)
 qjs("qjs-split", "engine-split", SPLIT)
+
+-- run-test262, Bellard's runner of the ECMAScript conformance suite (test262,
+-- cloned in <release dir>/test262 at the commit of its Makefile), with each
+-- engine: from <release dir>, "run-test262-split -m -c test262.conf"
+local function runTest262(name, engineName, root)
+    project(name)
+        kind "ConsoleApp"
+        objdir(BUILD .. "/obj/" .. name)
+        includedirs { root }
+        files { SOURCES .. "/run-test262.c", SOURCES .. "/quickjs-libc.c" }
+        links { engineName, "m", "pthread" }
+end
+
+runTest262("run-test262-original", "engine-original", ORIGINAL)
+runTest262("run-test262-split", "engine-split", SPLIT)

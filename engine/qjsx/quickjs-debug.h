@@ -252,6 +252,13 @@ typedef struct JSDebugVariable {
     int flags;     /* JS_DEBUG_VARIABLE_* */
 } JSDebugVariable;
 
+/* A constant of a module that the compiler replaced by its value (no
+   variable holds it at run time). */
+typedef struct JSDebugConstant {
+    JSAtom name;
+    JSValueConst value;   /* a number or a string */
+} JSDebugConstant;
+
 typedef struct JSDebugFunctionInfo {
     int function_number;
     JSAtom name;                /* JS_ATOM_NULL if anonymous */
@@ -270,6 +277,10 @@ typedef struct JSDebugFunctionInfo {
     int closure_count;
     const JSDebugScope *scopes;
     int scope_count;
+    /* the constants of the module replaced by their value: with the module
+       function only (visible from every function of the module) */
+    const JSDebugConstant *constants;
+    int constant_count;
 } JSDebugFunctionInfo;
 
 typedef void JSDebugInfoCollector(JSContext *ctx, const JSDebugFunctionInfo *info,

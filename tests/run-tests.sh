@@ -37,6 +37,9 @@ check "debugger support of the engine" "$BIN/qjsx-tests" run -A tests/debug.test
 check "region heap (JS heap of a raw region)" "$BIN/qjsx-tests" run -A tests/region_heap.test.js
 check "runtime library" "$BIN/qjsx" run -A tests/runtime.test.js
 check "temporal dead zone (let / const checks kept where needed)" "$BIN/qjsx" run -A tests/tdz.test.js
+check "constant folding (literal expressions computed by the compiler)" "$BIN/qjsx" run -A tests/fold.test.js
+check "constants of a module replaced by their value" "$BIN/qjsx" run -A tests/modconst.test.js
+check "link of a package (names of the package, linked bytecode)" "$BIN/qjsx" run -A tests/link.test.js
 check "tool modules" "$BIN/qjsx" run -A tests/tools.test.js
 check "protocol (CBOR, COBS, frames)" "$BIN/qjsx" run -A tests/protocol.test.js
 check "debug info (lines, breakpoints, scopes)" "$BIN/qjsx" run -A tests/debuginfo.test.js

@@ -227,10 +227,27 @@ typedef enum OPCodeEnum OPCodeEnum;
 /* JS malloc */
 
 #define JS_MALLOC_ALIGN 8
+/* qjsx: the port of a device with little RAM sets the three values below
+   (compile options): QuickJS's 4 KB arenas of small blocks up to 512 bytes
+   leave half of a small heap empty (one arena per block size in use).
+   JS_MALLOC_MAX_SMALL_SIZE is at most 512 (js_malloc_block_sizes). */
+#ifndef JS_MALLOC_ARENA_SIZE
 #define JS_MALLOC_ARENA_SIZE 4096
+#endif
 #define JS_MALLOC_BLOCK_SIZE_COUNT 31
 #define JS_MALLOC_MIN_SMALL_SIZE 16
+#ifndef JS_MALLOC_MAX_SMALL_SIZE
 #define JS_MALLOC_MAX_SMALL_SIZE 512
+#endif
+/* qjsx: number of empty arenas kept for the next request instead of going
+   back to the host's heap. Not 0: every arena is JS_MALLOC_ARENA_SIZE bytes
+   whatever its block size, so that a kept one serves any block size; an
+   arena is made in constant time (its free list is filled as its blocks are
+   freed); a large block that grows gets some room for the next time.
+   0: QuickJS's original arenas. */
+#ifndef JS_MALLOC_ARENA_CACHE
+#define JS_MALLOC_ARENA_CACHE 0
+#endif
 #if defined(__SANITIZE_ADDRESS__) || defined(QJSX_ALLOC_HISTOGRAM)
 /* use the host malloc() for all allocations */
 /* qjsx: also while measuring the sizes of the allocations (QJSX_ALLOC_HISTOGRAM,
@@ -278,6 +295,11 @@ typedef struct {
     struct list_head free_link;
     struct list_head link;
     uint8_t block_size_idx;
+#if JS_MALLOC_ARENA_CACHE > 0
+    /* qjsx: the blocks from this index on were never allocated: they are
+       not in the free list yet (an arena is made in constant time) */
+    uint8_t n_init_blocks;
+#endif
     uint16_t n_used_blocks; /* number of allocated blocks */
     uint16_t n_blocks; /* total number of blocks */
     uint16_t first_free_block; /* FREE_NIL if none */
@@ -296,6 +318,12 @@ typedef struct {
     struct list_head large_block_list; /* list of JSMallocLargeBlockHeader.link */
 #endif
     __attribute__((aligned(JS_MALLOC_ALIGN))) uint8_t zero_size_block[sizeof(JSMallocBlockHeader)];
+
+#if JS_MALLOC_ARENA_CACHE > 0
+    /* qjsx: the empty arenas kept, chained by 'link.next' */
+    JSMallocArena *arena_cache;
+    int arena_cache_count;
+#endif
 
     /* callbacks to the host malloc */
     JSMallocFunctions mf;
@@ -339,6 +367,16 @@ struct JSRuntime {
     uint32_t *atom_hash;
     JSAtomStruct **atom_array;
     int atom_free_index; /* 0 = none */
+#if QJSX_ROM_ATOMS
+    /* qjsx: the atoms below this index are never counted nor freed: the
+       names of the engine in read-only memory, then the names of the
+       package (JS_SetPackageAtoms) */
+    uint32_t const_atom_end;
+    /* qjsx: hash table of the names of the package (NULL: none), in its
+       image: an atom index per slot, 0 = empty */
+    const uint16_t *pkg_atom_hash;
+    uint32_t pkg_atom_hash_size;
+#endif
 
     int class_count;    /* size of class_array */
     JSClass *class_array;
@@ -599,7 +637,16 @@ typedef enum {
 #define JS_ATOM_HASH_MASK  ((1 << 30) - 1)
 #define JS_ATOM_HASH_PRIVATE JS_ATOM_HASH_MASK
 
-struct JSString {
+/* qjsx: the layout of GCC on every platform (Windows packs bit fields of
+   different types apart: 20 bytes instead of 12): a JSString written in a
+   package (core/package-atoms.c) is the same on the PC and on a device */
+#if defined(_WIN32) && defined(__GNUC__)
+#define JS_GCC_LAYOUT __attribute__((gcc_struct))
+#else
+#define JS_GCC_LAYOUT
+#endif
+
+struct JS_GCC_LAYOUT JSString {
     uint32_t len : 31;
     uint8_t is_wide_char : 1; /* 0 = 8 bits, 1 = 16 bits characters */
     /* for JS_ATOM_TYPE_SYMBOL: hash = weakref_count, atom_type = 3,
@@ -1397,7 +1444,9 @@ typedef enum BCTagEnum {
 /* qjsx: own value (QuickJS 2026-06-04 uses 5): the format differs
    (filename always written, function_number), so a bytecode of one is
    refused by the other instead of being misread. */
-#define BC_VERSION 0x45
+#define BC_VERSION 0x46
+/* qjsx: first byte of a bytecode written with JS_WRITE_OBJ_FIXED_ATOMS */
+#define BC_VERSION_FIXED_ATOMS (BC_VERSION | 0x80)
 
 #define JS_NEW_CTOR_NO_GLOBAL   (1 << 0) /* don't create a global binding */
 #define JS_NEW_CTOR_PROTO_CLASS (1 << 1) /* the prototype class is 'class_id' instead of JS_CLASS_OBJECT */
@@ -1660,12 +1709,12 @@ static inline JSAtomStruct *atom_set_free(uint32_t v)
 #include "core/rom-atoms.h"
 
 /* qjsx: true if the atom string 'p' is one of the names in read-only memory
-   (never written, never freed; its atom index is in 'hash_next') */
+   (the engine's, or the ones of the package): never written, never freed,
+   its atom index is in 'hash_next'. They are the atoms with an immortal
+   reference count. */
 static inline BOOL js_atom_is_rom(const JSAtomStruct *p)
 {
-    const uint8_t *address = (const uint8_t *)p;
-    const uint8_t *begin = (const uint8_t *)&qjsx_rom_atoms;
-    return address >= begin && address < begin + sizeof(qjsx_rom_atoms);
+    return js_rc((void *)p)->ref_count >= JS_REF_COUNT_IMMORTAL;
 }
 #endif
 

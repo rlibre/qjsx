@@ -31,7 +31,7 @@ export const KIND = {
     HELLO: 10,          // { PROTOCOL, TOKEN? } -> { PROTOCOL, AGENT, ENGINE, VERSION?, MAX_MESSAGE, NATIVES? }
     INFO: 11,           // {} -> { RUNNING, BUILD_ID, PACKAGE_SIZE, VOLATILE, DATA_USED?, DATA_TOTAL?,
                         //        JS_HEAP_USED?, JS_HEAP_PEAK?, RAM_FREE?, RAM_LARGEST?, RAM_LOWEST?,
-                        //        PSRAM_FREE?, PSRAM_LARGEST? }
+                        //        PSRAM_FREE?, PSRAM_LARGEST?, JS_HEAP_SIZE? }
     // deployment
     UPLOAD_BEGIN: 20,   // { SIZE, SHA256, BUILD_ID, BYTECODE } -> {}; refused if the device reads another bytecode
     UPLOAD_CHUNK: 21,   // { OFFSET, DATA } -> {}
@@ -153,6 +153,7 @@ export const KEY = {
     RAM_LOWEST: 54,     // INFO answer: lowest free internal RAM since the boot
     PSRAM_FREE: 55,     // INFO answer: free PSRAM (absent without PSRAM)
     PSRAM_LARGEST: 56,  // INFO answer: largest free block of PSRAM
+    JS_HEAP_SIZE: 57,   // INFO answer: region reserved for the JS heap (absent when it shares the RAM)
 };
 
 export const STREAM = { STDOUT: 1, STDERR: 2 };

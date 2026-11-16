@@ -168,6 +168,30 @@ declare module "sys/compiler" {
          * Its scopes, as source ranges.
          */
         scopes: DebugScope[];
+
+        /**
+         * With the function of a module only, and only when it has some: the
+         * `const` of the module that the compiler replaced by their value.
+         * No variable holds them when the program runs.
+         */
+        constants?: DebugConstant[];
+    }
+
+    /**
+     * A `const` of a module whose value is a literal number or string (or
+     * an expression of them): the compiler writes the value wherever the
+     * module reads the constant.
+     */
+    export interface DebugConstant {
+        /**
+         * Its name.
+         */
+        name: string;
+
+        /**
+         * Its value.
+         */
+        value: number | string;
     }
 
     /**
@@ -245,6 +269,43 @@ declare module "sys/compiler" {
     /**
      * The QuickJS version of the compiler, e.g. `"2026-06-04"`.
      */
+    /**
+     * What {@link link} returns.
+     */
+    export interface LinkResult {
+        /**
+         * The names of the whole package, as the engine uses them in memory:
+         * the entry `names.bin` of a package.
+         */
+        names: Uint8Array;
+
+        /**
+         * The bytecode of the modules, in the order given, written with the
+         * numbers of these names: it only runs with them.
+         */
+        modules: Uint8Array[];
+    }
+
+    /**
+     * Links the modules of a package: gives every name they use (properties,
+     * variables of modules...) one number for the whole package, and writes
+     * the bytecode with these numbers. A device then runs the bytecode where
+     * the package lies and keeps none of these names in its RAM.
+     *
+     * `qjsx build` does it for a program; a linked module is not valid in
+     * another package.
+     *
+     * @param modules the bytecode of every module, as {@link compile} gives it
+     * @throws Error when a module is not bytecode of this compiler
+     */
+    export function link(modules: Uint8Array[]): LinkResult;
+
+    /**
+     * Identifies the names built in the engine, which a linked package
+     * relies on: recorded in the manifest of a package, checked when it runs.
+     */
+    export const engineNames: number;
+
     export const quickjsVersion: string;
 
     /**

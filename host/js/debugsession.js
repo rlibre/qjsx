@@ -419,16 +419,21 @@ export class DebugSession {
         const frame = this.pausedFrame(level);
         const scopes = this.scopesOf(frame);
 
-        // read the slots of the kinds these variables use
-        const slotKinds = new Set(scopes.flatMap(scope => scope.variables.map(variable => variable.slotKind)));
+        // read the slots of the kinds these variables use (a constant of
+        // the module has no slot: its value comes from the debug info)
+        const inSlots = scopes.flatMap(scope => scope.variables).filter(variable => !isConstant(variable));
+        const slotKinds = new Set(inSlots.map(variable => variable.slotKind));
         const values = await this.readSlots(level, slotKinds);
 
+        const valueOf = variable => {
+            if (isConstant(variable)) {
+                return { type: typeof variable.constant, value: variable.constant };
+            }
+            return decodeValue(values[variable.slotKind][variable.index]);
+        };
         return scopes.map(scope => ({
             kind: scope.kind,
-            variables: scope.variables.map(variable => ({
-                name: variable.name,
-                value: decodeValue(values[variable.slotKind][variable.index]),
-            })),
+            variables: scope.variables.map(variable => ({ name: variable.name, value: valueOf(variable) })),
         }));
     }
 
@@ -529,16 +534,22 @@ export class DebugSession {
             const parameters = this.parametersOf(frame);
             const thisSlot = frame.script.thisSlot(frame.number);
 
-            const slotKinds = new Set(parameters.map(variable => variable.slotKind));
+            const inSlots = parameters.filter(variable => !isConstant(variable));
+            const slotKinds = new Set(inSlots.map(variable => variable.slotKind));
             if (thisSlot !== null) {
                 slotKinds.add(thisSlot.slotKind);
             }
             const values = await this.readSlots(level, slotKinds);
 
             // a variable in its temporal dead zone cannot be passed
-            const usable = parameters.filter(variable => !isUninitialized(values[variable.slotKind][variable.index]));
+            const usable = inSlots.filter(variable => !isUninitialized(values[variable.slotKind][variable.index]));
             names = usable.map(variable => variable.name);
             argumentValues = usable.map(variable => toDevice(values[variable.slotKind][variable.index]));
+
+            // the constants of the module, with their values from the debug info
+            const constants = parameters.filter(isConstant);
+            names.push(...constants.map(variable => variable.name));
+            argumentValues.push(...constants.map(variable => encodeValue(variable.constant)));
             if (thisSlot !== null) {
                 thisValue = toDevice(values[thisSlot.slotKind][thisSlot.index]);
             }
@@ -621,6 +632,12 @@ export class DebugSession {
         }
         return [...byName.values()];
     }
+}
+
+// True for a constant of the module that has no slot on the device (the
+// compiler replaced it by its value, see ScriptInfo.constants).
+function isConstant(variable) {
+    return variable.constant !== undefined;
 }
 
 // ### Values ##################################################################

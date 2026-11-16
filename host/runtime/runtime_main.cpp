@@ -55,8 +55,9 @@ uint64_t readLittleEndian64(const uint8_t *bytes) {
 
 /**
  * The executable file 'path' read whole into *file (*fileSize bytes, owned
- * by the caller); the package appended at its end in *package (inside
- * *file), *packageSize bytes. False (and *file nullptr) if there is none.
+ * by the caller); the package appended at its end in *package (moved to the
+ * start of *file), *packageSize bytes. False (and *file nullptr) if there
+ * is none.
  */
 bool readAppendedPackage(const char *path, uint8_t **file, size_t *fileSize, const uint8_t **package, size_t *packageSize) {
     // the whole executable (a few MB)
@@ -78,8 +79,12 @@ bool readAppendedPackage(const char *path, uint8_t **file, size_t *fileSize, con
         return false;
     }
 
-    // the package just before the trailer
-    *package = trailer - size;
+    // the package, just before the trailer, moved to the start of the
+    // block: the engine uses the names of the package where they are, and
+    // needs them at an aligned address (the executable itself is no longer
+    // needed)
+    memmove(*file, trailer - size, (size_t)size);
+    *package = *file;
     *packageSize = (size_t)size;
     return true;
 }

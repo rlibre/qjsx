@@ -755,6 +755,27 @@ static inline JSValue JS_DupValueRT(JSRuntime *rt, JSValueConst v)
     return (JSValue)v;
 }
 
+/* qjsx: the names of a package (core/package-atoms.c). JS_SetPackageAtoms
+   gives them to a runtime that made no name of its own yet (just after
+   JS_NewRuntime2); the image stays where it is, unchanged, as long as the
+   runtime; -1 if it is not an image for this engine, or too late.
+   JS_WritePackageAtoms (engine with compiler) makes the image of the names
+   'ctx' created after the engine's (js_malloc; NULL and an exception on
+   error). JS_GetAtomsFingerprint: what identifies the names of the engine a
+   package was made for (0: an engine without names in read-only memory). */
+int JS_SetPackageAtoms(JSRuntime *rt, const uint8_t *image, size_t size);
+/* true once JS_SetPackageAtoms() succeeded on this runtime */
+JS_BOOL JS_HasPackageAtoms(JSRuntime *rt);
+uint8_t *JS_WritePackageAtoms(JSContext *ctx, size_t *psize);
+uint32_t JS_GetAtomsFingerprint(void);
+
+#ifdef QJSX_MEMORY_MAP
+/* qjsx: measure (temporary): prints the arenas of the allocator by block
+   size (arenas, blocks in use, blocks), the arenas kept aside and the bytes
+   of the large blocks */
+void JS_DumpMallocMap(JSRuntime *rt);
+#endif
+
 #ifdef QJSX_ALLOC_HISTOGRAM
 /* qjsx: measure (temporary): the blocks of the JS heap by their size as a
    small block of QuickJS's allocator (8 + the size rounded to 8), in steps
@@ -1035,6 +1056,10 @@ int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx);
 #define JS_WRITE_OBJ_BYTECODE  (1 << 0) /* allow function/module */
 #define JS_WRITE_OBJ_BSWAP     (1 << 1) /* byte swapped output */
 #define JS_WRITE_OBJ_SAB       (1 << 2) /* allow SharedArrayBuffer */
+/* qjsx: writes the atoms as their indexes in this runtime, without the
+   table of their texts: for JS_READ_OBJ_FIXED_ATOMS, in a runtime given the
+   same names (JS_WritePackageAtoms / JS_SetPackageAtoms) */
+#define JS_WRITE_OBJ_FIXED_ATOMS (1 << 4)
 #define JS_WRITE_OBJ_REFERENCE (1 << 3) /* allow object references to
                                            encode arbitrary object
                                            graph */
@@ -1047,6 +1072,10 @@ uint8_t *JS_WriteObject2(JSContext *ctx, size_t *psize, JSValueConst obj,
 #define JS_READ_OBJ_ROM_DATA  (1 << 1) /* avoid duplicating 'buf' data */
 #define JS_READ_OBJ_SAB       (1 << 2) /* allow SharedArrayBuffer */
 #define JS_READ_OBJ_REFERENCE (1 << 3) /* allow object references */
+/* qjsx: the atoms of the bytecode are indexes of the runtime (the names of
+   the engine and of the package, JS_SetPackageAtoms): nothing is relocated.
+   With JS_READ_OBJ_ROM_DATA the bytecode runs where it lies. */
+#define JS_READ_OBJ_FIXED_ATOMS (1 << 4)
 JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
                       int flags);
 /* qjsx: version of the bytecode this engine writes and reads (BC_VERSION):
