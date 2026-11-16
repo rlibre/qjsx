@@ -11,6 +11,9 @@ A site made with [Astro](https://astro.build) and [Starlight](https://starlight.
 
 ```bash
 npm install        # once
-npm run dev        # http://localhost:4321, reloads on each change
+npm run dev        # http://localhost:4321, reloads on each change of a guide
 npm run build      # the static site in dist/
 ```
+
+The API reference is generated when `npm run dev` or `npm run build` starts: after a
+change of a `.d.ts`, start `npm run dev` again (a running server keeps the old pages).

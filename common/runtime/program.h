@@ -26,6 +26,13 @@ class Loop;
 class Permissions;
 
 // Optional control over a run (all fields may be null / false).
+// The JS heap of a run (RunHooks::heapUsage), in bytes as QuickJS counts
+// them. Written by the JS thread, read by any thread with atomic loads.
+struct JsHeapUsage {
+    size_t used;   // the JS heap now (0 once the runtime is freed)
+    size_t peak;   // the most it used since the run started
+};
+
 struct RunHooks {
     void               *opaque;                  // passed to every hook
     void (*started)(void *opaque, Loop *loop);   // the loop exists, the program starts
@@ -46,6 +53,11 @@ struct RunHooks {
     // ports), those of the thread during the run; borrowed. nullptr: the
     // tool's own commands, everything allowed.
     const Permissions *permissions;
+    // Where the JS heap of the run is measured (set to 0 when the runtime
+    // is created); borrowed, must outlive the run. nullptr: not measured.
+    // Not measured either on a board whose allocator is QuickJS's default
+    // (board::jsAllocator() nullptr).
+    JsHeapUsage        *heapUsage;
 };
 
 // Evaluates the main module of a program. Returns false after reporting the error.

@@ -232,6 +232,12 @@ inline const char *errnoName(int error) {
         case ENOTEMPTY: {
             return "ENOTEMPTY";
         }
+        case ENOSYS: {
+            return "ENOSYS";
+        }
+        case ENAMETOOLONG: {
+            return "ENAMETOOLONG";
+        }
 
     #ifdef ETIMEDOUT
         case ETIMEDOUT: {

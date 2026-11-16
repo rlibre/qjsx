@@ -6,8 +6,8 @@
  */
 
 /**
- * Globals of every qjsx program: `console`, the
- * timers, `TextEncoder` / `TextDecoder` (UTF-8 only) and `process`.
+ * Globals of every qjsx program: `console`, the timers, `TextEncoder` /
+ * `TextDecoder` (UTF-8 only), `crypto` (random values) and `process`.
  *
  * Besides the standard ECMAScript objects (no browser or Node API), this is
  * all a program finds in `globalThis`. Everything else comes from modules:
@@ -169,6 +169,35 @@ declare class TextDecoder {
      */
     decode(bytes?: ArrayBuffer | Int8Array | Uint8Array | Uint8ClampedArray | Int16Array | Uint16Array | Int32Array
         | Uint32Array | Float16Array | Float32Array | Float64Array | BigInt64Array | BigUint64Array): string;
+}
+
+/**
+ * Random values, as the Web Crypto API of browsers and Node (only these two
+ * functions of it). The source is the system's on the PC, the hardware's on a
+ * board; in a digital twin with `"randomSeed"` in `qjsx.json`, a reproducible
+ * sequence (the same numbers at each run of the program), not for secrets.
+ *
+ * Note: `import * as crypto from "sys/crypto"` hides this global in that
+ * module (the hash functions and `randomBytes()` are there).
+ */
+declare namespace crypto {
+    /**
+     * Fills `array` with random bytes, in place, and returns it.
+     *
+     * @param array an integer typed array (or a view on part of one): its
+     *   bytes are filled, whatever its element type.
+     * @throws TypeError for anything else: a float array, a DataView, an
+     *   ArrayBuffer, a plain array.
+     * @throws an Error named `"QuotaExceededError"` above 65536 bytes (as the
+     *   web standard).
+     */
+    function getRandomValues<T extends Int8Array | Uint8Array | Uint8ClampedArray | Int16Array | Uint16Array | Int32Array | Uint32Array | BigInt64Array | BigUint64Array>(array: T): T;
+
+    /**
+     * A random UUID of version 4, 36 lowercase characters
+     * (`"1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed"`).
+     */
+    function randomUUID(): `${string}-${string}-${string}-${string}-${string}`;
 }
 
 /**

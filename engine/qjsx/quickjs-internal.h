@@ -231,8 +231,10 @@ typedef enum OPCodeEnum OPCodeEnum;
 #define JS_MALLOC_BLOCK_SIZE_COUNT 31
 #define JS_MALLOC_MIN_SMALL_SIZE 16
 #define JS_MALLOC_MAX_SMALL_SIZE 512
-#if defined(__SANITIZE_ADDRESS__)
+#if defined(__SANITIZE_ADDRESS__) || defined(QJSX_ALLOC_HISTOGRAM)
 /* use the host malloc() for all allocations */
+/* qjsx: also while measuring the sizes of the allocations (QJSX_ALLOC_HISTOGRAM,
+   temporary): the size of each block is read back from the host */
 #define JS_MALLOC_LARGE_BLOCKS_ONLY 1
 #else
 #define JS_MALLOC_LARGE_BLOCKS_ONLY 0
@@ -1653,9 +1655,27 @@ static inline JSAtomStruct *atom_set_free(uint32_t v)
     return (JSAtomStruct *)(((uintptr_t)v << 1) | 1);
 }
 
+#if QJSX_ROM_ATOMS
+/* qjsx: the names made in read-only memory (core/rom-atoms.c) */
+#include "core/rom-atoms.h"
+
+/* qjsx: true if the atom string 'p' is one of the names in read-only memory
+   (never written, never freed; its atom index is in 'hash_next') */
+static inline BOOL js_atom_is_rom(const JSAtomStruct *p)
+{
+    const uint8_t *address = (const uint8_t *)p;
+    const uint8_t *begin = (const uint8_t *)&qjsx_rom_atoms;
+    return address >= begin && address < begin + sizeof(qjsx_rom_atoms);
+}
+#endif
+
 /* same as JS_FreeValueRT() but faster */
 static inline void js_free_string(JSRuntime *rt, JSString *str)
 {
+    /* qjsx: a name in read-only memory is never freed */
+    if (!JS_REF_COUNT_IS_MORTAL(js_rc(str))) {
+        return;
+    }
     if (--js_rc(str)->ref_count <= 0) {
         if (str->atom_type) {
             JS_FreeAtomStruct(rt, str);

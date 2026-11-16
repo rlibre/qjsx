@@ -13,10 +13,11 @@ your project for VS Code.
 | Module | PC | ESP32 | RP2350 | Twin |
 |---|---|---|---|---|
 | globals | ✓ | ✓ | ✓ | ✓ |
-| `sys/fs` | ✓ | ✓ ¹ | ✓ ¹ | ✓ its data folder |
+| `sys/fs` | ✓ | ✓ /data | ✓ ¹ | ✓ its data folder |
 | `sys/crypto` | ✓ | ✓ | ✓ | ✓ |
 | `sys/net` | ✓ | — | — | — |
 | `sys/compiler` | ✓ the qjsx tool | — | — | — |
+| `device/board` | — | ✓ | — | ✓ |
 | `device/gpio` | — | ✓ | ✓ | ✓ |
 | `device/pwm` | — | ✓ | — | ✓ |
 | `device/adc` | — | ✓ ADC1 | — | ✓ |
@@ -28,7 +29,7 @@ your project for VS Code.
 | `stdlib/rgbled` | — | ✓ | — | ✓ |
 | `stdlib/usb` | — | ✓ S2, S3, P4 | — | ✓ |
 
-¹ The module is there, but the boards have no file system yet: every call fails.
+¹ The module is there, but the RP2350 has no file system yet: every call fails.
 
 PC: `qjsx run` and the programs of the PC. Twin: the digital twin of a board offers the
 native modules of that board (here the YD-ESP32-S3, which has every module of the

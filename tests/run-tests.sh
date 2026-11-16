@@ -291,6 +291,25 @@ check "deploy --reset restarts the device, the package starts at boot" bash -c "
 check "debugger stub (breakpoints, steps, pause, values)" "$BIN/qjsx" run -A tests/debugger.test.js "$AGENT_TARGET"
 check "debugger proxy core (lines, names, evaluation)" "$BIN/qjsx" run -A tests/proxy.test.js "$AGENT_TARGET"
 check "debugger CDP server (as js-debug)" "$BIN/qjsx" run -A tests/cdp.test.js "$AGENT_TARGET"
+check "device info gives the JS heap of the program" bash -c "'$BIN/qjsx' device info --target '$AGENT_TARGET' 2>/dev/null | grep -q '^JS heap:  .* at most (last run)'"
+
+# --- small messages, as a board without PSRAM: stops split, long console
+# lines cut, properties bounded, requests too large refused
+SMALL_PORT=45690
+SMALL_TARGET="tcp:127.0.0.1:$SMALL_PORT"
+rm -rf build/test-small
+"$BIN/qjsx" agent --port "$SMALL_PORT" --storage build/test-small --max-message 4096 > build/small-out.txt 2>&1 &
+SMALL_PID=$!
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    grep -q listening build/small-out.txt 2>/dev/null && break
+    sleep 0.2
+done
+check "small messages (4 KB): stops, console, properties" "$BIN/qjsx" run -A tests/maxmessage.test.js "$SMALL_TARGET"
+check "small messages (4 KB): the CDP server as js-debug" "$BIN/qjsx" run -A tests/cdp.test.js "$SMALL_TARGET"
+check "an agent refuses messages smaller than 4 KB" bash -c "! '$BIN/qjsx' agent --port 0 --max-message 1000 > /dev/null 2> build/small-bad.txt && grep -q 'expected 4096 bytes or more' build/small-bad.txt"
+kill "$SMALL_PID" 2> /dev/null
+wait "$SMALL_PID" 2> /dev/null
+rm -rf build/test-small
 
 kill "$AGENT_PID" 2> /dev/null
 wait "$AGENT_PID" 2> /dev/null
@@ -325,10 +344,38 @@ check "PWM outputs of the twin (device/pwm, the limits of the ESP32-S3)" \
     "$BIN/qjsx" run -A tests/pwm.test.js "tcp:127.0.0.1:$TWIN_PORT" "$TWIN_UI_PORT"
 check "UARTs of the twin (device/serial, TCP and the page)" \
     "$BIN/qjsx" run -A tests/serial.test.js "tcp:127.0.0.1:$TWIN_PORT" "$TWIN_UART_PORT" "$TWIN_UI_PORT"
+check "the board of the twin (device/board: id, MAC addresses, restart)" \
+    "$BIN/qjsx" run -A tests/board.test.js "tcp:127.0.0.1:$TWIN_PORT" build/test-twin
+check "the files of the data folder from the PC (qjsx device ls / read / write..., deploy --data)" \
+    "$BIN/qjsx" run -A tests/datafiles.test.js "tcp:127.0.0.1:$TWIN_PORT" build/test-twin
 kill "$TWIN_PID" 2> /dev/null
 wait "$TWIN_PID" 2> /dev/null
 rm -rf tests/fixtures/twin/build tests/fixtures/twinusb/build tests/fixtures/twini2c/build \
     tests/fixtures/twinserial/build tests/fixtures/twinpwm/build
+
+# --- random numbers: crypto.getRandomValues / randomUUID, randomBytes; the
+# twin of tests/fixtures/twinrandom ("randomSeed") gives the same numbers at
+# each run, a twin without seed other ones (tests/random.test.js)
+RANDOM_PORT=45724
+RANDOM_UI_PORT=45725
+FREE_PORT=45726
+FREE_UI_PORT=45727
+rm -rf build/test-twin-random build/test-twin-free
+"$BIN/qjsx" agent -p tests/fixtures/twinrandom --port "$RANDOM_PORT" --ui-port "$RANDOM_UI_PORT" \
+    --storage build/test-twin-random > build/twin-random-out.txt 2>&1 &
+RANDOM_PID=$!
+"$BIN/qjsx" agent --board yd-esp32-s3 --port "$FREE_PORT" --ui-port "$FREE_UI_PORT" \
+    --storage build/test-twin-free > build/twin-free-out.txt 2>&1 &
+FREE_PID=$!
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    grep -q listening build/twin-random-out.txt 2>/dev/null && grep -q listening build/twin-free-out.txt 2>/dev/null && break
+    sleep 0.2
+done
+check "random numbers (crypto, randomBytes; reproducible in a twin with randomSeed)" \
+    "$BIN/qjsx" run -A tests/random.test.js "tcp:127.0.0.1:$RANDOM_PORT" "tcp:127.0.0.1:$FREE_PORT"
+kill "$RANDOM_PID" "$FREE_PID" 2> /dev/null
+wait "$RANDOM_PID" "$FREE_PID" 2> /dev/null
+rm -rf tests/fixtures/twinrandom/build
 
 # --- the TCP links of the twin chosen from the page (no --uart-port nor
 # --usb-port): set, kept in twin.json, taken again after a restart

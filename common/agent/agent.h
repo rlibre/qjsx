@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include "cbor.h"
+#include "data_files.h"
 #include "frames.h"
 #include "platform.h"
 #include "sha256.h"
@@ -113,6 +114,13 @@ public:
      * True while a program runs.
      */
     virtual bool running() = 0;
+
+    /**
+     * Bytes of JS heap of the running program in *used (0 when none runs)
+     * and the most it used during the current, or last, run in *peak. Any
+     * thread.
+     */
+    virtual void jsHeap(size_t *used, size_t *peak) = 0;
 };
 
 struct Identity {
@@ -131,10 +139,11 @@ public:
     /**
      * The agent borrows 'storage' (the board's, in flash), 'ram' (the
      * package loaded in RAM: UPLOAD_BEGIN with VOLATILE) and 'controller'
-     * (not owned); the strings of 'identity' must outlive it. No host is
-     * attached yet.
+     * (not owned); the strings of 'identity' must outlive it. 'maxMessage'
+     * is the largest message of the link, both ways (board::agentMaxMessage).
+     * No host is attached yet.
      */
-    Agent(Storage *storage, RamStorage *ram, Controller *controller, Identity identity);
+    Agent(Storage *storage, RamStorage *ram, Controller *controller, Identity identity, size_t maxMessage);
 
     /**
      * Frees the upload hash and the remembered last answers.
@@ -163,8 +172,16 @@ public:
     bool            sessionOpen();
 
     /**
-     * Sends console output as a LOG event (any thread). Returns false if
-     * there is no session (the caller prints locally).
+     * Largest message of the link, both ways (said to the host in HELLO).
+     */
+    size_t          maxMessage() const {
+        return _maxMessage;
+    }
+
+    /**
+     * Sends console output as LOG events, cut into pieces that fit in a
+     * message (any thread). Returns false if there is no session (the
+     * caller prints locally).
      */
     bool            sendLog(int stream, const char *text, size_t length);
 
@@ -186,6 +203,16 @@ public:
      */
     void            setDebugger(Debugger *debugger) {
         _debugger = debugger;
+    }
+
+    /**
+     * The data folder the host reaches with the FILE_* requests (nullptr:
+     * no file system, they answer ENOSYS) and the bytes of its partition (0:
+     * unknown), both reported by INFO. Set before the host can connect.
+     */
+    void            setDataFolder(const char *folder, uint64_t totalBytes) {
+        _files.setFolder(folder);
+        _dataTotal = totalBytes;
     }
 
     /**
@@ -266,6 +293,33 @@ private:
     void            handleUploadEnd(int64_t id);
 
     /**
+     * FILE_LIST: the entries of a folder of the data folder.
+     */
+    void            handleFileList(int64_t id, const Fields *fields);
+
+    /**
+     * FILE_READ: a piece of a file (FILE_CHUNK bytes at most) and its size.
+     */
+    void            handleFileRead(int64_t id, const Fields *fields);
+
+    /**
+     * FILE_WRITE_BEGIN / CHUNK / END: a file written in pieces, then put in
+     * place.
+     */
+    void            handleFileWrite(int64_t kind, int64_t id, const Fields *fields);
+
+    /**
+     * FILE_REMOVE, FILE_MKDIR, FILE_RENAME: one operation on a path.
+     */
+    void            handleFileChange(int64_t kind, int64_t id, const Fields *fields);
+
+    /**
+     * ERROR answer for a failed file operation: MESSAGE "<CODE>: <system
+     * text>, '<path>'" and ERROR_CODE "<CODE>" (Node-like: "ENOENT"...).
+     */
+    void            respondFileError(int64_t id, int error, const char *path, size_t length);
+
+    /**
      * RESPONSE of the agent to request 'id'. 'payload' holds 'fieldCount' encoded pairs.
      */
     void            respond(int64_t id, const cbor::Writer *payload, int fieldCount);
@@ -310,7 +364,8 @@ private:
     Controller     *_controller;     // borrowed
     Debugger       *_debugger;       // borrowed; nullptr: debugger requests refused
     Identity        _identity;       // its strings are borrowed
-    frames::Parser  _parser;         // frames from the host (transport thread)
+    size_t          _maxMessage;     // largest message of the link, both ways (bytes)
+    frames::Parser  _parser;         // frames from the host (transport thread), sized by _maxMessage
     platform::Mutex _mutex;          // _link, _session, last answers, writes
     Link           *_link;           // borrowed; nullptr: no host (_mutex held)
     bool            _session;        // HELLO done (_mutex held)
@@ -322,6 +377,10 @@ private:
     uint8_t         _uploadHash[32];     // expected SHA-256 of the package
     char            _uploadBuildId[64];  // null terminated
     crypto::Sha256 *_hash;               // owned; hash of the bytes received; nullptr: no upload yet
+
+    // the data folder (transport thread only)
+    DataFiles       _files;              // the FILE_* requests
+    uint64_t        _dataTotal;          // bytes of the data partition; 0: unknown
 
     // last answers: a repeated request gets the same answer (_mutex held)
     LastAnswer      _agentAnswer;     // of the requests answered by the agent itself

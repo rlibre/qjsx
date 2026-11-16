@@ -469,6 +469,17 @@ void js_random_init(JSContext *ctx)
         ctx->random_state = 1;
 }
 
+/* qjsx: seeds Math.random() of 'ctx' (the time of js_random_init() is nearly
+   the same at each boot of a board, whose clock starts at 0). The runtime
+   calls it with bytes of the platform's source of randomness. */
+void JS_SetRandomSeed(JSContext *ctx, uint64_t seed)
+{
+    ctx->random_state = seed;
+    /* the state must be non zero */
+    if (ctx->random_state == 0)
+        ctx->random_state = 1;
+}
+
 static JSValue js_math_random(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {

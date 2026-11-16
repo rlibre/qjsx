@@ -18,6 +18,7 @@
 #include "platform.h"
 #include "program.h"
 #include "ram_storage.h"
+#include "restart.h"
 
 namespace agent {
 
@@ -133,6 +134,15 @@ public:
     }
 
     /**
+     * The JS heap of the running program and the most of this run, or of
+     * the last one (any thread: the JS thread stores them atomically).
+     */
+    void jsHeap(size_t *used, size_t *peak) override {
+        *used = __atomic_load_n(&_heap.used, __ATOMIC_RELAXED);
+        *peak = __atomic_load_n(&_heap.peak, __ATOMIC_RELAXED);
+    }
+
+    /**
      * JS thread: waits for run requests and runs the package, forever.
      */
     void mainLoop() {
@@ -230,6 +240,7 @@ private:
         hooks.moduleLoaded = &moduleLoaded;
         hooks.device = true;            // argv and env come from the package manifest
         hooks.permissions = &_permissions;
+        hooks.heapUsage = &_heap;       // INFO reports it
 
         // run it until it ends or is stopped, then give the package back
         *exitCode = rt::runPackage(package, size, &hooks, 0, nullptr);
@@ -342,6 +353,7 @@ private:
     int              _stopRequested = 0;          // atomic
     rt::Loop        *_loop = nullptr;             // JS thread only
     rt::Permissions  _permissions;                // data folder of the programs, no limit (setDataFolder())
+    rt::JsHeapUsage  _heap = { 0, 0 };            // JS heap of the current or last run (JS thread writes, atomic)
 };
 
 /**
@@ -353,6 +365,15 @@ void outputToHost(void *opaque, int stream, const char *text, size_t length) {
     if (!agent->sendLog(stream, text, length)) {
         board::writeConsole(stream, text, length);
     }
+}
+
+/**
+ * board.restart() of the program (JS thread): what the agent's RESET does
+ * (Runner::reset): does not return on a target; on the desktop, the
+ * installed program runs again once this run ends.
+ */
+void restartFromProgram(void *opaque) {
+    ((Runner *)opaque)->reset();
 }
 
 } // namespace
@@ -368,15 +389,22 @@ void runDevice(Identity identity) {
     // to the stub, the console output goes to the host
     Runner runner;
     RamStorage ram;
-    Agent device(board::packageStorage(), &ram, &runner, identity);
+    Agent device(board::packageStorage(), &ram, &runner, identity, board::agentMaxMessage());
     Debugger debugger(&device);
     device.setDebugger(&debugger);
     runner.attach(&device, &debugger, &ram);
     rt::setOutputSink(&outputToHost, &device);
 
+    // a program may restart the device (board.restart()): as the agent's
+    // RESET does
+    rt::setRestartHandler(&restartFromProgram, &runner);
+
     // the programs keep their files in the board's data folder (their
     // process.cwd())
     runner.setDataFolder(board::dataDirectory(), board::confineFiles());
+
+    // the host reaches the same folder (qjsx device ls | read | write...)
+    device.setDataFolder(board::dataDirectory(), board::dataCapacity());
 
     // start the links; the device cannot work without them. On failure the
     // output goes back to the console first: the sink points to the agent,

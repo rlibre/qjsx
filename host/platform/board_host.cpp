@@ -14,8 +14,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#if defined(__APPLE__)
+#include <malloc/malloc.h>
+#else
+#include <malloc.h>
+#endif
 
 #include "agent.h"
+#include "protocol.h"
 #include "files.h"
 #include "modules.h"
 #include "platform.h"
@@ -365,6 +371,99 @@ memory::RegionHeap *makeTestJsHeap() {
     return &heap;
 }
 
+// ### JS heap of the desktop ##################################################
+
+// QuickJS's own allocator, written again here so that the runtime can
+// measure the JS heap (program.cpp wraps the board's allocator; QuickJS's is
+// not reachable). Same counts and limit as QuickJS's js_def_malloc.
+
+// What malloc keeps per block besides its usable size (as QuickJS counts).
+const size_t MALLOC_OVERHEAD = 8;
+
+/**
+ * The usable size of a malloc'd block (0 for nullptr).
+ */
+size_t systemUsableSize(const void *block) {
+    if (block == nullptr) {
+        return 0;
+    }
+
+#if defined(_WIN32)
+    return _msize((void *)block);
+#elif defined(__APPLE__)
+    return malloc_size(block);
+#else
+    return malloc_usable_size((void *)block);
+#endif
+}
+
+/**
+ * QuickJS allocation: refused past QuickJS's memory limit, counted.
+ */
+void *systemMalloc(JSMallocState *state, size_t size) {
+    // within the limit
+    if (state->malloc_size + size > state->malloc_limit) {
+        return nullptr;
+    }
+
+    // the block, counted
+    void *block = malloc(size);
+    if (block == nullptr) {
+        return nullptr;
+    }
+
+    state->malloc_count++;
+    state->malloc_size += systemUsableSize(block) + MALLOC_OVERHEAD;
+    return block;
+}
+
+/**
+ * QuickJS free (nullptr: nothing), counted.
+ */
+void systemFree(JSMallocState *state, void *block) {
+    if (block == nullptr) {
+        return;
+    }
+
+    state->malloc_count--;
+    state->malloc_size -= systemUsableSize(block) + MALLOC_OVERHEAD;
+    free(block);
+}
+
+/**
+ * QuickJS resize (nullptr: allocates, size 0: frees), within the limit,
+ * counted.
+ */
+void *systemRealloc(JSMallocState *state, void *block, size_t size) {
+    // no block yet: an allocation
+    if (block == nullptr) {
+        return size == 0 ? nullptr : systemMalloc(state, size);
+    }
+
+    // size 0: a free
+    if (size == 0) {
+        systemFree(state, block);
+        return nullptr;
+    }
+
+    // within the limit (malloc_size includes the old size)
+    size_t oldSize = systemUsableSize(block);
+    if (state->malloc_size + size - oldSize > state->malloc_limit) {
+        return nullptr;
+    }
+
+    // the new block, counted
+    void *resized = realloc(block, size);
+    if (resized == nullptr) {
+        return nullptr;
+    }
+
+    state->malloc_size = state->malloc_size - oldSize + systemUsableSize(resized);
+    return resized;
+}
+
+const JSMallocFunctions systemAllocator = { &systemMalloc, &systemFree, &systemRealloc, &systemUsableSize };
+
 } // namespace
 
 /**
@@ -441,6 +540,13 @@ bool confineFiles() {
 }
 
 /**
+ * The data folder is on the PC's disk: no size of its own.
+ */
+uint64_t dataCapacity() {
+    return 0;
+}
+
+/**
  * The desktop cannot restart: returns false, the runner starts the program
  * again instead.
  */
@@ -448,18 +554,114 @@ bool restart() {
     return false;   // the runner starts the program again instead
 }
 
+namespace {
+
+const size_t BASE_MAC_SIZE = 6;   // bytes of a MAC address
+
 /**
- * QuickJS's default allocator, or a RegionHeap when QJSX_JS_HEAP_MB is set
- * (tests). Runtimes may live on several threads: the region heap is locked.
+ * The base MAC of the desktop "chip", in 'out': kept in <storage>/board-id
+ * (12 hexadecimal digits); drawn at random the first time, a unicast,
+ * locally administered address (bit 0 of the first byte clear, bit 1 set),
+ * and saved. Same installation, same id.
+ */
+void baseMac(uint8_t *out) {
+    // the file, if it holds an id
+    char path[1100];
+    snprintf(path, sizeof(path), "%s/board-id", state.options.storage);
+    size_t size = 0;
+    uint8_t *text = files::readAll(path, &size);
+    bool valid = text != nullptr && size >= BASE_MAC_SIZE * 2;
+    for (size_t index = 0; valid && index < BASE_MAC_SIZE; index++) {
+        unsigned int value = 0;
+        char digits[3] = { (char)text[index * 2], (char)text[index * 2 + 1], 0 };
+        valid = sscanf(digits, "%2x", &value) == 1;
+        out[index] = (uint8_t)value;
+    }
+    memory::release(text);
+    if (valid) {
+        return;
+    }
+
+    // a new one, saved for the next times
+    platform::randomBytes(out, BASE_MAC_SIZE);
+    out[0] = (uint8_t)((out[0] & 0xFE) | 0x02);
+    char saved[BASE_MAC_SIZE * 2 + 2];
+    for (size_t index = 0; index < BASE_MAC_SIZE; index++) {
+        snprintf(saved + index * 2, 3, "%02X", out[index]);
+    }
+    saved[BASE_MAC_SIZE * 2] = '\n';
+    if (!files::writeAll(path, saved, BASE_MAC_SIZE * 2 + 1)) {
+        fprintf(stderr, "qjsx agent: cannot write %s: %s (the board id changes at each start)\n", path, strerror(errno));
+    }
+}
+
+} // namespace
+
+/**
+ * The base MAC of the desktop "chip" (see baseMac).
+ */
+size_t chipId(uint8_t *out) {
+    baseMac(out);
+    return BASE_MAC_SIZE;
+}
+
+/**
+ * The MAC addresses derived from the base one, as the ESP32 does: WiFi
+ * station = base, access point = base + 1, Bluetooth = base + 2, Ethernet =
+ * base + 3 (added to the address as a 48-bit number).
+ */
+bool macAddress(MacKind kind, uint8_t *out) {
+    // the base address, and what is added to it
+    baseMac(out);
+    int offset = 0;
+    if (kind == MacKind::ap) {
+        offset = 1;
+    } else if (kind == MacKind::bluetooth) {
+        offset = 2;
+    } else if (kind == MacKind::ethernet) {
+        offset = 3;
+    }
+
+    // added from the last byte, with the carry
+    for (int index = (int)BASE_MAC_SIZE - 1; index >= 0 && offset > 0; index--) {
+        int sum = out[index] + offset;
+        out[index] = (uint8_t)sum;
+        offset = sum >> 8;
+    }
+    return true;
+}
+
+/**
+ * malloc, counted as QuickJS counts, or a RegionHeap when QJSX_JS_HEAP_MB is
+ * set (tests). Runtimes may live on several threads: the region heap is
+ * locked.
  */
 const JSMallocFunctions *jsAllocator() {
     // made once, the first time (thread-safe static initialization)
     static memory::RegionHeap *testHeap = makeTestJsHeap();
     if (testHeap == nullptr) {
-        return nullptr;
+        return &systemAllocator;
     }
 
     return memory::jsAllocator(testHeap, true);
+}
+
+/**
+ * 64 KB, or what "qjsx agent --max-message" asks (as a board without PSRAM).
+ */
+size_t agentMaxMessage() {
+    if (state.options.maxMessage > 0) {
+        return state.options.maxMessage;
+    }
+
+    return agent::DEFAULT_MAX_MESSAGE;
+}
+
+/**
+ * The PC's memory says nothing about a device.
+ */
+bool memoryStatus(MemoryStatus *) {
+    return false;
 }
 
 /**

@@ -135,6 +135,15 @@ uint8_t *encode(const uint8_t *message, size_t size, size_t *frameSize) {
 }
 
 /**
+ * The 4-byte header (magic, version, CRC) and the message, COBS-encoded:
+ * one code byte per 254 bytes, plus one.
+ */
+size_t maxSegmentSize(size_t messageSize) {
+    size_t bodySize = messageSize + 4;
+    return bodySize + bodySize / 254 + 1;
+}
+
+/**
  * Allocates the segment buffer of 'maxFrame' bytes.
  */
 Parser::Parser(size_t maxFrame, MessageCallback *onMessage, TextCallback *onText, void *opaque)

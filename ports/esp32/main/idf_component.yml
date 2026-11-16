@@ -13,3 +13,11 @@ dependencies:
     version: "^2.1.1"
     rules:
       - if: "target in [esp32s2, esp32s3, esp32p4]"
+
+  # LittleFS for the "data" partition mounted on /data (board_esp32.cpp): the
+  # files of the programs (sys/fs) and of the host (qjsx device ls / read /
+  # write...). Version fixed (user, 2026-11-13: checked, no known advisory;
+  # 1.23.1 fixes an overflow of esp_littlefs_info, which dataCapacity uses);
+  # MIT, LittleFS itself BSD-3-Clause.
+  joltwallet/littlefs:
+    version: "==1.23.1"

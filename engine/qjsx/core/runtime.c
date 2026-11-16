@@ -47,6 +47,43 @@ static const uint16_t js_malloc_block_sizes[JS_MALLOC_BLOCK_SIZE_COUNT] = {
     512,
 };
 
+#ifdef QJSX_ALLOC_HISTOGRAM
+/* qjsx: measure (temporary), see JS_GetAllocHistogram */
+static JSAllocHistogram qjsx_alloc_histogram;
+
+const JSAllocHistogram *JS_GetAllocHistogram(void)
+{
+    return &qjsx_alloc_histogram;
+}
+
+/* qjsx: size of a request as a small block: header + size rounded to 8 */
+static uint32_t qjsx_block_size(size_t size)
+{
+    return ((size + JS_MALLOC_ALIGN - 1) & ~(JS_MALLOC_ALIGN - 1)) +
+        sizeof(JSMallocBlockHeader);
+}
+
+/* qjsx: size as a small block of a large block, from its size in the host's
+   heap (rounded up by the host, below the rounding to 8 of qjsx_block_size) */
+static uint32_t qjsx_large_block_size(JSMallocContext *s, JSMallocLargeBlockHeader *lb)
+{
+    return qjsx_block_size(s->mf.js_malloc_usable_size(lb) - sizeof(JSMallocLargeBlockHeader));
+}
+
+/* qjsx: counts one block of 'block_size' bytes in (delta 1) or out (-1) */
+static void qjsx_count_block(uint32_t block_size, int delta)
+{
+    uint32_t step = block_size / 8;
+    if (step >= JS_ALLOC_HISTOGRAM_STEPS - 1) {
+        step = JS_ALLOC_HISTOGRAM_STEPS - 1;
+        qjsx_alloc_histogram.large_live_bytes += delta * (int32_t)block_size;
+    }
+    qjsx_alloc_histogram.live[step] += delta;
+    if (delta > 0)
+        qjsx_alloc_histogram.made[step]++;
+}
+#endif
+
 static int get_block_size_index(size_t size)
 {
     if (size <= 16) {
@@ -71,6 +108,9 @@ static void js_malloc_init(JSMallocContext *s)
 {
     int i;
     memset(s, 0, sizeof(*s));
+#ifdef QJSX_ALLOC_HISTOGRAM
+    memset(&qjsx_alloc_histogram, 0, sizeof(qjsx_alloc_histogram));
+#endif
     get_zero_size_block(s)->u.block_idx = FREE_NIL;
     for(i = 0; i < JS_MALLOC_BLOCK_SIZE_COUNT; i++) {
         init_list_head(&s->arena_list[i]);
@@ -134,6 +174,9 @@ static no_inline void *js_malloc_large(JSMallocContext *s, size_t size)
     b->header.block_size_idx = 0xff; /* fail safe */
 #ifdef JS_MALLOC_USE_ITER
     list_add_tail(&b->link, &s->large_block_list);
+#endif
+#ifdef QJSX_ALLOC_HISTOGRAM
+    qjsx_count_block(qjsx_large_block_size(s, b), 1);
 #endif
     return b->header.user_data;
 }
@@ -200,6 +243,9 @@ static void __js_free(JSMallocContext *s, void *ptr)
 #ifdef JS_MALLOC_USE_ITER
             list_del(&lb->link);
 #endif
+#ifdef QJSX_ALLOC_HISTOGRAM
+            qjsx_count_block(qjsx_large_block_size(s, lb), -1);
+#endif
             s->mf.js_free(&s->malloc_state, lb);
         }
     } else {
@@ -244,8 +290,14 @@ static void *__js_realloc(JSMallocContext *s, void *ptr, size_t size)
 #ifdef JS_MALLOC_USE_ITER
             list_del(&lb->link);
 #endif
+#ifdef QJSX_ALLOC_HISTOGRAM
+            qjsx_count_block(qjsx_large_block_size(s, lb), -1);
+#endif
             new_lb = s->mf.js_realloc(&s->malloc_state, lb, sizeof(JSMallocLargeBlockHeader) + size);
             if (!new_lb) {
+#ifdef QJSX_ALLOC_HISTOGRAM
+                qjsx_count_block(qjsx_large_block_size(s, lb), 1);
+#endif
 #ifdef JS_MALLOC_USE_ITER
                 /* add again in the list */
                 list_add_tail(&lb->link, &s->large_block_list);
@@ -254,6 +306,9 @@ static void *__js_realloc(JSMallocContext *s, void *ptr, size_t size)
             }
             new_lb->header.u.block_idx = FREE_NIL;
             new_lb->header.block_size_idx = 0xff; /* fail safe */
+#ifdef QJSX_ALLOC_HISTOGRAM
+            qjsx_count_block(qjsx_large_block_size(s, new_lb), 1);
+#endif
 #ifdef JS_MALLOC_USE_ITER
             list_add_tail(&new_lb->link, &s->large_block_list);
 #endif
@@ -1047,6 +1102,11 @@ void JS_FreeRuntime(JSRuntime *rt)
     /* free the atoms */
     for(i = 0; i < rt->atom_size; i++) {
         JSAtomStruct *p = rt->atom_array[i];
+#if QJSX_ROM_ATOMS
+        /* qjsx: the names in read-only memory were not allocated */
+        if (!atom_is_free(p) && js_atom_is_rom(p))
+            continue;
+#endif
         if (!atom_is_free(p)) {
 #ifdef DUMP_LEAKS
             list_del(&p->link);

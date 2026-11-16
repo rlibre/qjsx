@@ -11,6 +11,8 @@
 // (host/twin/sim/twin.h).
 #pragma once
 
+#include <stddef.h>
+
 namespace board {
 
 /**
@@ -25,6 +27,7 @@ struct HostOptions {
     const char *chip;      // chip of the board ("ESP32-S3")
     const char *board;     // name of the board ("YD-ESP32-S3")
     const char *platform;  // process.platform of the board ("esp32")
+    size_t      maxMessage; // largest message of the agent's link (board::agentMaxMessage); 0: 64 KB
 };
 
 /**

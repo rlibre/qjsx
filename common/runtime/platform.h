@@ -39,6 +39,15 @@ int64_t monotonicMs();
 void sleepMs(int64_t milliseconds);
 
 /**
+ * Fills 'buffer' with 'size' random bytes of cryptographic quality: the
+ * system's source on the desktop, the hardware's on a target (see each
+ * port). Any thread. Does not fail: a source that cannot answer is fatal.
+ * The runtime goes through rt::randomBytes (random.h), which may replace it
+ * by a reproducible sequence.
+ */
+void randomBytes(void *buffer, size_t size);
+
+/**
  * Called often by the JS thread while JS code runs (interrupt handler of the
  * runtime): from time to time, blocks it for one tick, so that the
  * lower-priority tasks of its core run. Without it, JS code that computes for

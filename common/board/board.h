@@ -52,24 +52,83 @@ const char *dataDirectory();
 
 /**
  * True if the programs must reach no file outside dataDirectory(): the
- * desktop agent and the twin, which run on the PC's own disk, simulate the
- * partition of a board this way. False on a real board: its programs see
- * only its own file system anyway (a device has no permissions, user
- * 2026-11-12).
+ * desktop agent and the twin, which run on the PC's own disk, and the
+ * boards, whose VFS also holds devices (the UART of the agent's link: user,
+ * 2026-11-13). A device has no other permissions.
  */
 bool confineFiles();
 
 /**
- * Restarts the chip: does not return on a target. Returns false when the
- * board cannot restart (desktop): the caller restarts the program instead.
+ * Bytes of the storage of dataDirectory() (the "data" partition of a board),
+ * reported by INFO; 0 when unknown (the desktop: the PC's disk) or without
+ * file system.
+ */
+uint64_t dataCapacity();
+
+/**
+ * Restarts the chip: does not return on a target, whose pending output (the
+ * agent's link, its open UARTs, its USB serial functions) is sent first, for
+ * at most RESTART_FLUSH_MS in all. Returns false when the board cannot
+ * restart (desktop): the caller restarts the program instead.
  */
 bool restart();
 
+const int RESTART_FLUSH_MS = 500;   // what restart() waits at most for the pending output
+
+const size_t MAX_CHIP_ID = 16;      // bytes of the longest chip id (chipId)
+
+/**
+ * The unique id of the chip, its bytes in 'out' (MAX_CHIP_ID at most); returns
+ * how many. ESP32: its base MAC (6 bytes, eFuses); the desktop agent and the
+ * twin: 6 bytes kept in their storage, drawn at random the first time.
+ */
+size_t chipId(uint8_t *out);
+
+// The MAC addresses of a chip, all derived from its base MAC (as ESP-IDF).
+enum class MacKind {
+    base,        // the base MAC (eFuses)
+    wifi,        // WiFi station
+    ap,          // WiFi access point
+    bluetooth,   // Bluetooth
+    ethernet,    // Ethernet
+};
+
+/**
+ * The MAC address of 'kind' in 'out' (6 bytes). False when the chip has none
+ * of that kind.
+ */
+bool macAddress(MacKind kind, uint8_t *out);
+
 /**
  * Allocator of the JS runtime (in PSRAM on the targets), or nullptr for the
- * default one of QuickJS.
+ * default one of QuickJS. It counts its blocks in the JSMallocState
+ * (malloc_count, malloc_size) and keeps QuickJS's memory limit, as QuickJS's
+ * own allocator does: the runtime measures the JS heap from malloc_size.
  */
 const JSMallocFunctions *jsAllocator();
+
+/**
+ * Largest message of the agent's link, both ways, in bytes (at least
+ * agent::MIN_MAX_MESSAGE): the agent's receive buffer is sized by it, its
+ * answers and events stay below it, the host learns it from HELLO and
+ * splits what it sends. A board without PSRAM keeps it small.
+ */
+size_t agentMaxMessage();
+
+// What memoryStatus() reports, in bytes.
+struct MemoryStatus {
+    size_t ramFree;        // free internal RAM now
+    size_t ramLargest;     // largest free block of internal RAM
+    size_t ramLowest;      // lowest free internal RAM since the boot
+    size_t psramFree;      // free PSRAM now (0 without PSRAM)
+    size_t psramLargest;   // largest free block of PSRAM (0 without PSRAM)
+};
+
+/**
+ * The free memory of the board in 'out'. False when the board cannot tell
+ * (the desktop: the PC's memory says nothing about a device).
+ */
+bool memoryStatus(MemoryStatus *out);
 
 /**
  * Bytes of stack the JS code may use on the JS thread (QuickJS turns going

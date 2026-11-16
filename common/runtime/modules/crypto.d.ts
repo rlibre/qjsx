@@ -6,7 +6,8 @@
  */
 
 /**
- * Hash functions: SHA-256, and SHA-1 for the protocols that impose it.
+ * Hash functions: SHA-256, and SHA-1 for the protocols that impose it; random
+ * bytes.
  *
  * Not Node's `crypto`: plain functions that return the digest as bytes.
  * Base64 is not here: the engine has the standard
@@ -46,4 +47,16 @@ declare module "sys/crypto" {
      * @throws TypeError if `data` is neither a string nor bytes.
      */
     export function sha1(data: HashData): Uint8Array;
+
+    /**
+     * A new Uint8Array of `size` random bytes, as Node's `crypto.randomBytes`
+     * but synchronous only (no callback). Same source as the global
+     * `crypto.getRandomValues()`: cryptographic quality, except in a digital
+     * twin with `"randomSeed"`, where the sequence is reproducible.
+     *
+     * @param size the number of bytes, 0 to 2147483647.
+     * @throws RangeError for a size out of that range; a size too large for
+     *   the memory throws as any allocation does.
+     */
+    export function randomBytes(size: number): Uint8Array;
 }

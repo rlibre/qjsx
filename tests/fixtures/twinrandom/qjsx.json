@@ -1,0 +1,7 @@
+{
+    "name": "twinrandom",
+    "twin": {
+        "board": "yd-esp32-s3",
+        "randomSeed": 42
+    }
+}

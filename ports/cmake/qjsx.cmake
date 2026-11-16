@@ -17,6 +17,7 @@
 #   QJSX_FREERTOS_SOURCES  the FreeRTOS part of platform.h, shared by the ports
 #   QJSX_FREERTOS_GPIO_SOURCES  the watch of changing pins, shared by the FreeRTOS
 #                          ports that implement common/hal/hal_gpio.h
+#   QJSX_DEVICE_BOARD_SOURCES the module device/board (board.h, restart.h): every port
 #   QJSX_DEVICE_GPIO_SOURCES  the module device/gpio: add it when the port
 #                          implements common/hal/hal_gpio.h (and register it)
 #   QJSX_DEVICE_RMT_SOURCES   the module device/rmt (common/hal/hal_rmt.h)
@@ -58,6 +59,7 @@ set(QJSX_FREERTOS_SOURCES "${QJSX_ROOT}/ports/freertos/platform_freertos.cpp")
 set(QJSX_FREERTOS_GPIO_SOURCES "${QJSX_ROOT}/ports/freertos/gpio_watch.cpp")
 
 # the hardware modules (common/device/), one list per hal interface
+set(QJSX_DEVICE_BOARD_SOURCES "${QJSX_ROOT}/common/device/board_module.cpp")
 set(QJSX_DEVICE_GPIO_SOURCES "${QJSX_ROOT}/common/device/gpio_module.cpp")
 set(QJSX_DEVICE_RMT_SOURCES "${QJSX_ROOT}/common/device/rmt_module.cpp")
 set(QJSX_DEVICE_USB_SOURCES "${QJSX_ROOT}/common/device/usb_module.cpp")
@@ -80,6 +82,12 @@ set(QJSX_INCLUDE_DIRS
 set(QJSX_DEFINES
     "CONFIG_VERSION=\"${QJSX_QUICKJS_VERSION}\""
     "QJSX_NO_COMPILER")
+
+# measure (temporary, 2026-11-13): sizes of the blocks of the JS heap, global
+# __allocHistogram(); idf.py -DQJSX_ALLOC_HISTOGRAM=ON (stays in the CMake cache)
+if(QJSX_ALLOC_HISTOGRAM)
+    list(APPEND QJSX_DEFINES "QJSX_ALLOC_HISTOGRAM")
+endif()
 
 # as in premake5.lua (qjsx-engine-target); the engine is upstream code: its warnings
 # are not ours to fix. On Xtensa and ARM int32_t is a long (32 bits, like

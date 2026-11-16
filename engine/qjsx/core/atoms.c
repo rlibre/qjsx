@@ -22,10 +22,55 @@ static inline BOOL __JS_AtomIsConst(JSAtom v)
 {
 #if defined(DUMP_LEAKS) && DUMP_LEAKS > 1
         return (int32_t)v <= 0;
+#elif QJSX_ROM_ATOMS
+        /* qjsx: the names in read-only memory are not counted either */
+        return (int32_t)v < QJSX_ROM_ATOM_COUNT;
 #else
         return (int32_t)v < JS_ATOM_END;
 #endif
 }
+
+#if QJSX_ROM_ATOMS
+/* qjsx: atom size of the first table, after the names in read-only memory
+   (it then grows by half, as in __JS_NewAtom) */
+#define QJSX_RAM_ATOM_SLOTS 128
+/* qjsx: first size of the hash table of the atoms in the heap */
+#define QJSX_RAM_ATOM_HASH_SIZE 128
+
+/* qjsx: index of the name in read-only memory equal to 'str' (or to the
+   'len' ASCII characters of 'chars' when 'str' is NULL), 0 if none.
+   Open addressing in qjsx_rom_atom_hash, by the hash of the string. */
+static JSAtom js_rom_find_atom(uint32_t h, int atom_type, JSString *str,
+                               const char *chars, uint32_t len)
+{
+    uint32_t mask = QJSX_ROM_ATOM_HASH_SIZE - 1;
+    uint32_t slot = h & mask;
+    uint32_t i;
+
+    /* every name in read-only memory is an 8 bit string atom */
+    if (atom_type != JS_ATOM_TYPE_STRING) {
+        return JS_ATOM_NULL;
+    }
+
+    /* walk the slots from the one of the hash until an empty one */
+    while ((i = qjsx_rom_atom_hash[slot]) != 0) {
+        JSAtomStruct *p = (JSAtomStruct *)qjsx_rom_atom_ptr[i];
+        if (p->hash == h && p->len == len) {
+            BOOL same;
+            if (str != NULL) {
+                same = js_string_memcmp(p, 0, str, 0, len) == 0;
+            } else {
+                same = memcmp(p->u.str8, chars, len) == 0;
+            }
+            if (same) {
+                return i;
+            }
+        }
+        slot = (slot + 1) & mask;
+    }
+    return JS_ATOM_NULL;
+}
+#endif
 
 static inline int is_num(int c)
 {
@@ -200,10 +245,92 @@ static int JS_ResizeAtomHash(JSRuntime *rt, int new_hash_size)
     rt->atom_hash = new_hash;
     rt->atom_hash_size = new_hash_size;
     rt->atom_count_resize = JS_ATOM_COUNT_RESIZE(new_hash_size);
+#if QJSX_ROM_ATOMS
+    /* qjsx: the names in read-only memory are not in this table */
+    rt->atom_count_resize += QJSX_ROM_ATOM_COUNT;
+#endif
     //    JS_DumpAtoms(rt);
     return 0;
 }
 
+#if QJSX_ROM_ATOMS
+/* qjsx: makes in the heap the predefined atom 'index', a symbol (the names
+   in read-only memory are strings only). As __JS_NewAtom does for a symbol. */
+static JSAtomStruct *js_new_rom_symbol(JSRuntime *rt, const char *str, int len,
+                                       uint32_t index)
+{
+    JSString *p = js_alloc_string_rt(rt, len, 0);
+    if (!p)
+        return NULL;
+    memcpy(p->u.str8, str, len);
+    p->u.str8[len] = '\0';
+    p->hash = index == JS_ATOM_Private_brand ? JS_ATOM_HASH_PRIVATE : 0;
+    p->hash_next = index;   /* atom_index */
+    p->atom_type = JS_ATOM_TYPE_SYMBOL;
+    return p;
+}
+
+/* qjsx: the table of the atoms starts with the names in read-only memory:
+   1. the hash table of the atoms of the heap, small;
+   2. the atom table: entry 0 = JS_ATOM_NULL (in the heap, as in
+      __JS_NewAtom), then the names in read-only memory, where the
+      predefined symbols are made in the heap, then free entries. */
+int JS_InitAtoms(JSRuntime *rt)
+{
+    uint32_t i, size;
+    int len;
+    const char *str;
+    JSAtomStruct *p;
+
+    rt->atom_hash_size = 0;
+    rt->atom_hash = NULL;
+    rt->atom_count = 0;
+    rt->atom_size = 0;
+    rt->atom_free_index = 0;
+    if (JS_ResizeAtomHash(rt, QJSX_RAM_ATOM_HASH_SIZE))
+        return -1;
+
+    /* the atom table, the null atom first */
+    size = QJSX_ROM_ATOM_COUNT + QJSX_RAM_ATOM_SLOTS;
+    rt->atom_array = js_malloc_rt(rt, sizeof(rt->atom_array[0]) * size);
+    if (!rt->atom_array)
+        return -1;
+    p = js_mallocz_rt(rt, sizeof(JSAtomStruct));
+    if (!p)
+        return -1;
+    js_rc(p)->ref_count = 1;  /* not refcounted */
+    p->atom_type = JS_ATOM_TYPE_SYMBOL;
+    rt->atom_array[0] = p;
+
+    /* the names in read-only memory, the predefined symbols in the heap
+       (js_atom_init gives their text) */
+    str = js_atom_init;
+    for(i = 1; i < QJSX_ROM_ATOM_COUNT; i++) {
+        const JSAtomStruct *rom = qjsx_rom_atom_ptr[i];
+        if (i < JS_ATOM_END) {
+            len = strlen(str);
+            if (rom == NULL) {
+                rom = js_new_rom_symbol(rt, str, len, i);
+                if (rom == NULL)
+                    return -1;
+            }
+            str += len + 1;
+        }
+        /* read-only: never written (immortal reference count) */
+        rt->atom_array[i] = (JSAtomStruct *)rom;
+    }
+
+    /* the free entries after them */
+    rt->atom_size = size;
+    rt->atom_count = QJSX_ROM_ATOM_COUNT;
+    rt->atom_free_index = QJSX_ROM_ATOM_COUNT;
+    for(i = QJSX_ROM_ATOM_COUNT; i < size; i++) {
+        uint32_t next = (i == size - 1) ? 0 : i + 1;
+        rt->atom_array[i] = atom_set_free(next);
+    }
+    return 0;
+}
+#else
 int JS_InitAtoms(JSRuntime *rt)
 {
     int i, len, atom_type;
@@ -232,6 +359,7 @@ int JS_InitAtoms(JSRuntime *rt)
     }
     return 0;
 }
+#endif
 
 JSAtom JS_DupAtomRT(JSRuntime *rt, JSAtom v)
 {
@@ -289,6 +417,11 @@ BOOL JS_AtomIsString(JSContext *ctx, JSAtom v)
 JSAtom js_get_atom_index(JSRuntime *rt, JSAtomStruct *p)
 {
     uint32_t i = p->hash_next;  /* atom_index */
+#if QJSX_ROM_ATOMS
+    /* qjsx: a name in read-only memory keeps its index in hash_next */
+    if (js_atom_is_rom(p))
+        return i;
+#endif
     if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
         JSAtomStruct *p1;
 
@@ -320,7 +453,8 @@ static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
             /* str is the atom, return its index */
             i = js_get_atom_index(rt, str);
             /* reduce string refcount and increase atom's unless constant */
-            if (__JS_AtomIsConst(i))
+            /* qjsx: unless immortal (a name in read-only memory) */
+            if (__JS_AtomIsConst(i) && JS_REF_COUNT_IS_MORTAL(js_rc(str)))
                 js_rc(str)->ref_count--;
             return i;
         }
@@ -328,6 +462,12 @@ static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
         len = str->len;
         h = hash_string(str, atom_type);
         h &= JS_ATOM_HASH_MASK;
+#if QJSX_ROM_ATOMS
+        /* qjsx: the names in read-only memory first (not counted) */
+        i = js_rom_find_atom(h, atom_type, str, NULL, len);
+        if (i != JS_ATOM_NULL)
+            goto done;
+#endif
         h1 = h & (rt->atom_hash_size - 1);
         i = rt->atom_hash[h1];
         while (i != 0) {
@@ -482,6 +622,12 @@ JSAtom __JS_FindAtom(JSRuntime *rt, const char *str, size_t len,
 
     h = hash_string8((const uint8_t *)str, len, JS_ATOM_TYPE_STRING);
     h &= JS_ATOM_HASH_MASK;
+#if QJSX_ROM_ATOMS
+    /* qjsx: the names in read-only memory first (not counted) */
+    i = js_rom_find_atom(h, JS_ATOM_TYPE_STRING, NULL, str, len);
+    if (i != JS_ATOM_NULL)
+        return i;
+#endif
     h1 = h & (rt->atom_hash_size - 1);
     i = rt->atom_hash[h1];
     while (i != 0) {
@@ -509,6 +655,10 @@ void JS_FreeAtomStruct(JSRuntime *rt, JSAtomStruct *p)
     }
 #endif
     uint32_t i = p->hash_next;  /* atom_index */
+#if QJSX_ROM_ATOMS
+    /* qjsx: a name in read-only memory is never freed (immortal count) */
+    assert(!js_atom_is_rom(p));
+#endif
     if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
         JSAtomStruct *p0, *p1;
         uint32_t h0;

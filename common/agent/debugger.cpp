@@ -142,6 +142,9 @@ namespace {
 const int LOOP_MESSAGE_REQUESTS = 1;
 // The pause loop checks this often whether the run was stopped.
 const int PAUSE_WAIT_MS = 50;
+// Bytes of a GET_PROPERTIES answer around its two arrays: message header,
+// keys, array heads.
+const size_t PROPERTIES_OVERHEAD = 64;
 
 // most arguments of a CALL (js-debug helpers take a few; the count comes from
 // the wire and sizes an allocation)
@@ -1118,16 +1121,19 @@ void Debugger::handleGetProperties(int64_t id, const Fields *fields) {
         return;
     }
 
-    // its own properties into a separate writer (the count is known only at
-    // the end)
-    cbor::Writer properties;
-    int propertyCount = 0;
-    writeProperties(&properties, object, (int)group, &propertyCount);
-
-    // its internals into another one; the object is no longer needed
+    // its internals into a separate writer (the count is known only at the
+    // end)
     cbor::Writer internals;
     int internalCount = 0;
     writeInternals(&internals, object, (int)group, &internalCount);
+
+    // its own properties into another one, in what the message has left;
+    // the object is no longer needed
+    cbor::Writer properties;
+    int propertyCount = 0;
+    size_t used = internals.size() + PROPERTIES_OVERHEAD;
+    size_t budget = _agent->maxMessage() > used ? _agent->maxMessage() - used : 0;
+    writeProperties(&properties, object, (int)group, budget, &propertyCount);
     JS_FreeValue(_ctx, object);
 
     // answer { PROPERTIES, INTERNALS }: each array header followed by its

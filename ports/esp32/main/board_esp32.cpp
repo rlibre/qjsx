@@ -17,6 +17,7 @@
 #include "memory.h"
 #include "modules.h"
 #include "platform.h"
+#include "protocol.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -25,6 +26,8 @@
 #include "driver/uart_vfs.h"
 #include "esp_flash.h"
 #include "esp_heap_caps.h"
+#include "esp_mac.h"
+#include "esp_littlefs.h"
 #include "esp_partition.h"
 #include "esp_system.h"
 #include "sdkconfig.h"
@@ -38,36 +41,24 @@ namespace board {
 
 namespace {
 
-// ### JS heap in PSRAM ########################################################
+// ### JS heap #################################################################
 
+// The JS heap: in PSRAM when the board has some, else in internal RAM. The
+// allocator counts its blocks and keeps QuickJS's memory limit as QuickJS's
+// own allocator does (board.h: the runtime measures the JS heap from it).
 #if CONFIG_SPIRAM
-const uint32_t PSRAM_CAPS = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;   // byte-addressable PSRAM
+const uint32_t JS_HEAP_CAPS = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;     // byte-addressable PSRAM
+#else
+const uint32_t JS_HEAP_CAPS = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;   // byte-addressable internal RAM
+#endif
+
+// What the heap keeps per block besides its usable size (as QuickJS counts).
+const size_t MALLOC_OVERHEAD = 8;
 
 /**
- * QuickJS allocation in PSRAM.
+ * Real size of a block (0 for nullptr).
  */
-void *psramMalloc(JSMallocState *, size_t size) {
-    return heap_caps_malloc(size, PSRAM_CAPS);
-}
-
-/**
- * QuickJS free (nullptr: nothing).
- */
-void psramFree(JSMallocState *, void *block) {
-    heap_caps_free(block);
-}
-
-/**
- * QuickJS resize, in PSRAM (size 0 frees, like realloc).
- */
-void *psramRealloc(JSMallocState *, void *block, size_t size) {
-    return heap_caps_realloc(block, size, PSRAM_CAPS);
-}
-
-/**
- * Real size of a block (QuickJS counts its memory with it).
- */
-size_t psramUsableSize(const void *block) {
+size_t jsHeapUsableSize(const void *block) {
     if (block == nullptr) {
         return 0;
     }
@@ -75,8 +66,72 @@ size_t psramUsableSize(const void *block) {
     return heap_caps_get_allocated_size((void *)block);
 }
 
-const JSMallocFunctions psramAllocator = { &psramMalloc, &psramFree, &psramRealloc, &psramUsableSize };
-#endif
+/**
+ * QuickJS allocation: refused past QuickJS's memory limit, counted.
+ */
+void *jsHeapMalloc(JSMallocState *state, size_t size) {
+    // within the limit
+    if (state->malloc_size + size > state->malloc_limit) {
+        return nullptr;
+    }
+
+    // the block, counted
+    void *block = heap_caps_malloc(size, JS_HEAP_CAPS);
+    if (block == nullptr) {
+        return nullptr;
+    }
+
+    state->malloc_count++;
+    state->malloc_size += jsHeapUsableSize(block) + MALLOC_OVERHEAD;
+    return block;
+}
+
+/**
+ * QuickJS free (nullptr: nothing), counted.
+ */
+void jsHeapFree(JSMallocState *state, void *block) {
+    if (block == nullptr) {
+        return;
+    }
+
+    state->malloc_count--;
+    state->malloc_size -= jsHeapUsableSize(block) + MALLOC_OVERHEAD;
+    heap_caps_free(block);
+}
+
+/**
+ * QuickJS resize (nullptr: allocates, size 0: frees), within the limit,
+ * counted.
+ */
+void *jsHeapRealloc(JSMallocState *state, void *block, size_t size) {
+    // no block yet: an allocation
+    if (block == nullptr) {
+        return size == 0 ? nullptr : jsHeapMalloc(state, size);
+    }
+
+    // size 0: a free
+    if (size == 0) {
+        jsHeapFree(state, block);
+        return nullptr;
+    }
+
+    // within the limit (malloc_size includes the old size)
+    size_t oldSize = jsHeapUsableSize(block);
+    if (state->malloc_size + size - oldSize > state->malloc_limit) {
+        return nullptr;
+    }
+
+    // the new block, counted
+    void *resized = heap_caps_realloc(block, size, JS_HEAP_CAPS);
+    if (resized == nullptr) {
+        return nullptr;
+    }
+
+    state->malloc_size = state->malloc_size - oldSize + jsHeapUsableSize(resized);
+    return resized;
+}
+
+const JSMallocFunctions jsHeapAllocator = { &jsHeapMalloc, &jsHeapFree, &jsHeapRealloc, &jsHeapUsableSize };
 
 // ### Package storage #########################################################
 
@@ -321,6 +376,12 @@ private:
 
 FlashStorage storage;
 
+// ### Files of the programs: LittleFS on the "data" partition ##################
+
+const char DATA_FOLDER[] = "/data";        // where the partition is mounted: process.cwd()
+const char DATA_PARTITION[] = "data";      // its label in partitions/*.csv
+bool dataMounted = false;                  // set once by mountData() (app_main, before the JS task)
+
 // ### Link to the host over UART0 #############################################
 
 const uart_port_t HOST_UART = UART_NUM_0;   // the COM port (CH343) and the IDF console
@@ -328,7 +389,6 @@ const int UART_RX_BUFFER = 4096;            // driver buffers, bytes
 const int UART_TX_BUFFER = 4096;
 const size_t READ_BLOCK = 256;              // bytes read at once by the reader task
 const int READ_TIMEOUT_MS = 20;             // the reader gives what came after that much silence
-const int RESTART_FLUSH_MS = 100;           // restart() waits that long at most for the UART to send
 
 // agent::Link over UART0. The console (printf, IDF logs) shares the wire:
 // every write goes through the driver, one call at a time, so a frame is
@@ -392,40 +452,139 @@ const char *platformName() {
 }
 
 /**
- * A real board: its programs see only its own file system.
+ * The programs reach only /data: the VFS of ESP-IDF also holds the UART of
+ * the agent's link (/dev/uart/0) and the console (user, 2026-11-13).
  */
 bool confineFiles() {
-    return false;
+    return true;
 }
 
 /**
- * No file system yet (the "data" partition will hold one): cwd() is "/" and
- * fs fails with ENOSYS.
+ * "/data" once mountData() mounted the "data" partition; nullptr if it could
+ * not (cwd() is then "/" and fs fails with ENOSYS).
  */
 const char *dataDirectory() {
-    return nullptr;
+    return dataMounted ? DATA_FOLDER : nullptr;
 }
 
 /**
- * Restarts the chip: does not return. The answer to RESET was only copied
- * into the transmit buffer of the UART driver: wait until it has left (at
- * most RESTART_FLUSH_MS), else the host would never get it.
+ * The size of the LittleFS of the "data" partition; 0 when not mounted.
+ */
+uint64_t dataCapacity() {
+    size_t total = 0;
+    size_t used = 0;
+    if (!dataMounted || esp_littlefs_info(DATA_PARTITION, &total, &used) != ESP_OK) {
+        return 0;
+    }
+    return total;
+}
+
+/**
+ * Mounts the LittleFS of the "data" partition on /data, formatting it the
+ * first time (or when it does not hold a valid LittleFS). False after
+ * printing why: no partition, or the flash refused.
+ */
+bool mountData() {
+    esp_vfs_littlefs_conf_t settings = {};
+    settings.base_path = DATA_FOLDER;
+    settings.partition_label = DATA_PARTITION;
+    settings.format_if_mount_failed = true;
+    esp_err_t result = esp_vfs_littlefs_register(&settings);
+    if (result != ESP_OK) {
+        printf("qjsx: the \"%s\" partition cannot be mounted on %s (%s): no files for the programs\n", DATA_PARTITION,
+               DATA_FOLDER, esp_err_to_name(result));
+        return false;
+    }
+
+    dataMounted = true;
+    return true;
+}
+
+/**
+ * Restarts the chip: does not return. What was written was only copied into
+ * the transmit buffers of the drivers (the answer to RESET, the last words of
+ * a program to a UART or to the USB host): wait until it has left, for at
+ * most RESTART_FLUSH_MS in all, else it would be lost.
  */
 bool restart() {
+    // one deadline for every output: the agent's link, the open UARTs, the
+    // USB serial functions
+    int64_t deadline = platform::monotonicMs() + RESTART_FLUSH_MS;
     uart_wait_tx_done(HOST_UART, pdMS_TO_TICKS(RESTART_FLUSH_MS));
+    hal::serial::drainUntil(deadline);
+#if QJSX_HAS_USB
+    hal::usb::drainUntil(deadline);
+#endif
+
     esp_restart();
 }
 
 /**
- * The JS heap in PSRAM; without PSRAM, QuickJS's default allocator (internal
- * RAM).
+ * The base MAC of the chip (eFuses): 6 bytes.
+ */
+size_t chipId(uint8_t *out) {
+    esp_read_mac(out, ESP_MAC_BASE);
+    return 6;
+}
+
+/**
+ * The MAC addresses ESP-IDF derives from the base one; false for a kind the
+ * chip does not have (esp_read_mac refuses it).
+ */
+bool macAddress(MacKind kind, uint8_t *out) {
+    esp_mac_type_t type = ESP_MAC_BASE;
+    if (kind == MacKind::wifi) {
+        type = ESP_MAC_WIFI_STA;
+    } else if (kind == MacKind::ap) {
+        type = ESP_MAC_WIFI_SOFTAP;
+    } else if (kind == MacKind::bluetooth) {
+        type = ESP_MAC_BT;
+    } else if (kind == MacKind::ethernet) {
+        type = ESP_MAC_ETH;
+    }
+    return esp_read_mac(out, type) == ESP_OK;
+}
+
+/**
+ * The JS heap in PSRAM, or in internal RAM without PSRAM (counted, see
+ * jsHeapMalloc).
  */
 const JSMallocFunctions *jsAllocator() {
+    return &jsHeapAllocator;
+}
+
+/**
+ * 64 KB with PSRAM; without it, a small one: the receive buffer of the
+ * agent and the copies of a message being sent take internal RAM.
+ */
+size_t agentMaxMessage() {
 #if CONFIG_SPIRAM
-    return &psramAllocator;
+    return agent::DEFAULT_MAX_MESSAGE;
 #else
-    return nullptr;
+    return agent::SMALL_MAX_MESSAGE;
 #endif
+}
+
+/**
+ * Free internal RAM (and PSRAM when the board has some), from the ESP-IDF
+ * heaps.
+ */
+bool memoryStatus(MemoryStatus *out) {
+    // internal RAM: now, the largest block, the lowest since the boot
+    const uint32_t internal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    out->ramFree = heap_caps_get_free_size(internal);
+    out->ramLargest = heap_caps_get_largest_free_block(internal);
+    out->ramLowest = heap_caps_get_minimum_free_size(internal);
+
+    // PSRAM
+#if CONFIG_SPIRAM
+    out->psramFree = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    out->psramLargest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+#else
+    out->psramFree = 0;
+    out->psramLargest = 0;
+#endif
+    return true;
 }
 
 /**

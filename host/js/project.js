@@ -29,6 +29,9 @@
 //     "libraries": ["libs/sensors.qjslib"]
 //                                     libraries the program may import, besides
 //                                     the standard one (paths from the project)
+//     "data": "data"                  folder of the project whose files "qjsx
+//                                     deploy --data" writes to the data folder
+//                                     of the device (same relative paths)
 //   }
 //
 // A library project (qjsx mklib) has 'modules' instead of 'main' and
@@ -58,6 +61,7 @@ const DEFAULTS = {
     env: undefined,
     desktop: undefined,
     libraries: [],
+    data: undefined,
     version: undefined,
     modules: undefined,
 };
@@ -74,6 +78,7 @@ const TYPES = {
     env: "object",
     desktop: "object",
     libraries: "array",
+    data: "string",
     version: "string",
     modules: "object",
     twin: "object",
@@ -131,6 +136,10 @@ function checkTwin(file, twin) {
         if (!known || !Number.isInteger(port) || port < 1 || port > 65535) {
             throw new Error(`${file}: 'twin.ports' holds agent, ui, usb, uart: ports from 1 to 65535`);
         }
+    }
+    const seed = twin.randomSeed;
+    if (seed !== undefined && (!Number.isSafeInteger(seed) || seed < 0)) {
+        throw new Error(`${file}: 'twin.randomSeed' (reproducible random numbers in the twin) must be an integer >= 0`);
     }
 }
 

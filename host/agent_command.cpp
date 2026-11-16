@@ -37,13 +37,20 @@
 // elsewhere) is the twin of the board it names, with the parts it wires
 // ("parts": their models run in the twin's runtime, qjsx:twin/parts) and its
 // ports ("ports": { agent, ui, usb, uart }, each one unless given on the
-// command line). The program starts once every part is built; a part that
+// command line). "randomSeed" (an integer) makes the random numbers of the
+// program reproducible (rt::setRandomSeed: crypto.getRandomValues,
+// randomUUID, randomBytes and Math.random give the same sequence at each
+// run); without it they are truly random. The program starts once every part is built; a part that
 // cannot be built stops the agent. --board on the command line wins over
 // the project's board; the project's parts come with -p only then.
 //
 // Hidden option, to work on the page (host/twin/ui): --ui-dir <folder> serves
 // the page from that folder (its dist/, built by "npm run build") instead of
 // the one embedded in the executable.
+//
+// Hidden option, for the tests: --max-message <bytes> makes the agent's
+// largest message that size (at least 4096) instead of 64 KB, as on a board
+// without PSRAM (board::agentMaxMessage).
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,7 +62,9 @@
 #include "memory.h"
 #include "modules.h"
 #include "platform.h"
+#include "protocol.h"
 #include "quickjs.h"
+#include "random.h"
 #include "runner.h"
 #include "twin.h"
 #include "version.h"
@@ -88,6 +97,7 @@ struct Options {
     int         usbPort = 0;              // TCP port of serial function 0 of the twin's USB device; 0: the page's choice
     int         uartPort = 0;             // TCP port of UART 0 of the twin; 0: the page's choice
     const char *uiDir = nullptr;          // hidden: folder the page is served from; nullptr: the embedded one
+    int         maxMessage = 0;           // hidden: largest message of the agent's link; 0: the default
     SerialWiring wirings[twin::MAX_UARTS];   // UARTs wired to PC serial ports from the start
     int         wiringCount = 0;          // entries of wirings
     bool        portGiven = false;        // the command line gave --port (wins over the project's)
@@ -126,6 +136,8 @@ struct ProjectTwin {
     int   uartPort;         // "ports.uart"; 0: not given
     SerialWiring wirings[twin::MAX_UARTS];   // "uarts": UARTs wired to PC serial ports (ports owned)
     int   wiringCount;      // entries of wirings
+    bool  seeded;           // "randomSeed" given: reproducible random numbers
+    uint64_t randomSeed;    // "randomSeed", an integer >= 0
 };
 
 /**
@@ -204,6 +216,12 @@ bool parseOptions(int argc, char **argv, Options *options) {
             options->uartPortGiven = true;
         } else if (strcmp(argv[i], "--ui-dir") == 0 && hasValue) {
             options->uiDir = argv[++i];
+        } else if (strcmp(argv[i], "--max-message") == 0 && hasValue) {
+            options->maxMessage = atoi(argv[++i]);
+            if (options->maxMessage < agent::MIN_MAX_MESSAGE) {
+                fprintf(stderr, "qjsx agent: --max-message %s: expected %d bytes or more\n", argv[i], agent::MIN_MAX_MESSAGE);
+                return false;
+            }
         } else if (strcmp(argv[i], "--uart-serial") == 0 && hasValue) {
             SerialWiring wiring;
             bool valid = parseWiring(argv[++i], &wiring) && addWiring(options->wirings, &options->wiringCount, wiring);
@@ -366,6 +384,24 @@ bool readProjectTwin(const char *folder, ProjectTwin *twin) {
         }
 
         JS_FreeValue(ctx, uarts);
+
+        // the seed of reproducible random numbers: an integer >= 0 (JSON
+        // numbers are exact up to 2^53)
+        JSValue seed = JS_GetPropertyStr(ctx, section, "randomSeed");
+        if (ok && !JS_IsUndefined(seed)) {
+            double number = 0;
+            bool valid = JS_IsNumber(seed) && JS_ToFloat64(ctx, &number, seed) == 0 && number >= 0 &&
+                         number <= 9007199254740991.0 && number == (double)(uint64_t)number;
+            if (valid) {
+                twin->seeded = true;
+                twin->randomSeed = (uint64_t)number;
+            } else {
+                fprintf(stderr, "qjsx agent: %s: \"twin.randomSeed\" must be an integer >= 0\n", file);
+                ok = false;
+            }
+        }
+
+        JS_FreeValue(ctx, seed);
     }
 
     JS_FreeValue(ctx, section);
@@ -437,6 +473,12 @@ bool applyProject(Options *options) {
         if (!given) {
             addWiring(options->wirings, &options->wiringCount, twin.wirings[i]);
         }
+    }
+
+    // reproducible random numbers: every run of the program draws the same
+    // sequence (crypto, Math.random); without a seed, true random numbers
+    if (twin.seeded) {
+        rt::setRandomSeed(twin.randomSeed);
     }
 
     // the storage in the project when it is elsewhere
@@ -615,6 +657,10 @@ int runAgentCommand(int argc, char **argv) {
         return 1;
     }
 
+    // the board the program runs on: its id, its MAC addresses, its restart
+    // (the desktop agent and the twin are devices too)
+    rt::registerNativeModule("device/board", &jsNewModule_board);
+
     // the twin of a board, if asked
     if (options.board != nullptr && !startTwin(argv[0], &options)) {
         return 1;
@@ -628,7 +674,8 @@ int runAgentCommand(int argc, char **argv) {
                                         options.storage,
                                         isTwin ? twin::chip() : nullptr,
                                         isTwin ? twin::name() : nullptr,
-                                        isTwin ? twin::platform() : nullptr };
+                                        isTwin ? twin::platform() : nullptr,
+                                        (size_t)options.maxMessage };
     if (!board::configureHost(boardOptions)) {
         return 1;
     }

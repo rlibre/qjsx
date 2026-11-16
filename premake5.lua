@@ -259,7 +259,7 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
             compilebuildoutputs "On"
         filter {}
         filter "system:windows"
-            links { "ws2_32" }
+            links { "ws2_32", "bcrypt" }   -- bcrypt: BCryptGenRandom (platform::randomBytes)
         filter "system:not windows"
             links { "pthread", "m" }
         filter {}
@@ -301,7 +301,7 @@ hostApplication("qjsx-runtime", "qjsx-engine-target", { "host/runtime/*.cpp" },
     { "host/main.cpp", "host/agent_command.cpp", "host/modules/compiler_module.cpp",
       "host/twin/sim/*.cpp", "common/device/gpio_module.cpp", "common/device/rmt_module.cpp",
       "common/device/usb_module.cpp", "common/device/i2c_module.cpp", "common/device/adc_module.cpp",
-      "common/device/pwm_module.cpp", "host/js/*.js", "host/twin/js/*.js",
+      "common/device/pwm_module.cpp", "common/device/board_module.cpp", "host/js/*.js", "host/twin/js/*.js",
       "host/twin/api/twin.js", "host/twin/parts/*/model.js", "host/twin/ui/x4.config.json", "lib/stdlib/src/*.js",
       "common/runtime/modules/globals.d.ts" },
     { "QJSX_NO_COMPILER" })

@@ -35,10 +35,14 @@
  * @compatibility
  * | PC | ESP32 | RP2350 | Twin |
  * |---|---|---|---|
- * | ✓ what the program was granted | ✓ ¹ | ✓ ¹ | ✓ its data folder |
+ * | ✓ what the program was granted | ✓ /data ¹ | ✓ ² | ✓ its data folder |
  *
- * ¹ No file system on the board yet: every function throws (errno ENOSYS,
- * `code` `"EUNKNOWN"`) except `existsSync`, which returns false.
+ * ¹ LittleFS on the "data" partition, mounted on `/data` (`process.cwd()`); a program
+ * reaches nothing outside it. A file is committed when it is closed: a power cut during
+ * `writeFileSync` keeps the old content whole.
+ *
+ * ² No file system on the RP2350 yet: every function throws (`code` `"ENOSYS"`) except
+ * `existsSync`, which returns false.
  *
  * @module sys/fs
  */

@@ -259,5 +259,22 @@ const Driver *boardDriver() {
     return &BOARD_DRIVER;
 }
 
+/**
+ * Before a restart (board_esp32.cpp): waits until each UART open by
+ * device/serial has sent what its driver holds, until 'deadlineMs'
+ * (platform::monotonicMs) at most.
+ */
+void drainUntil(int64_t deadlineMs) {
+    for (int number = 0; number < UARTS; number++) {
+        int64_t remaining = deadlineMs - platform::monotonicMs();
+        if (remaining <= 0) {
+            return;
+        }
+        if (isTaken(number)) {
+            uart_wait_tx_done((uart_port_t)number, pdMS_TO_TICKS(remaining));
+        }
+    }
+}
+
 } // namespace serial
 } // namespace hal

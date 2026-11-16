@@ -90,6 +90,14 @@ public:
     }
 
     /**
+     * Drops what was written after the first 'size' bytes (size <= size()):
+     * takes back an item that turned out too large.
+     */
+    void           truncate(size_t size) {
+        _size = size;
+    }
+
+    /**
      * The encoded bytes (nullptr while empty), owned by the writer.
      */
     const uint8_t *data() const {

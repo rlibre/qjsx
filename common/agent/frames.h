@@ -28,6 +28,12 @@ uint16_t crc16(const uint8_t *data, size_t size);
  */
 uint8_t *encode(const uint8_t *message, size_t size, size_t *frameSize);
 
+/**
+ * Bytes between the two 0x00 of the frame of a message of 'messageSize'
+ * bytes, at worst: what a Parser must keep to receive it.
+ */
+size_t   maxSegmentSize(size_t messageSize);
+
 // Splits a byte stream into messages and text (bytes that are not frames,
 // e.g. console output on a serial link). Not thread safe: one thread feeds it.
 class Parser {

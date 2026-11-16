@@ -169,8 +169,6 @@ behaviour as it is. Nothing fixed.
   `const`: JS may write them, and a written `pwm.frequency` changes what
   `setPulseWidth()` computes.
 - **`rmt.send`**: a fractional tick count or level (1.5) is truncated, not refused.
-- **No ENOSYS in jsbind's errno names**: on a board without file system, `sys/fs` errors
-  carry `code: "EUNKNOWN"`, not "ENOSYS" as CLAUDE.md says.
 - **Node differences**: `existsSync` throws EACCES without read permission (Node never
   throws); `process` and `console` properties are not enumerable; `TextDecoder` ignores
   `fatal` / `ignoreBOM`; `net.connect` throws EACCES at once (not a rejection), an unknown

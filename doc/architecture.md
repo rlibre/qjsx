@@ -853,8 +853,23 @@ integer-keyed maps.
 
 - Requests are numbered: a duplicate gets the same response again, without being
   executed again.
-- The agent gives the maximum size of a message in its answer to `HELLO` (`MAX_MESSAGE`,
-  64 KB).
+- The agent gives the largest message of the link, both ways, in its answer to `HELLO`
+  (`MAX_MESSAGE`). Each board chooses it (`board::agentMaxMessage`, 2026-11-13): 64 KB
+  with PSRAM, 8 KB without (an ESP32 without PSRAM; the RP2350 whose PSRAM did not
+  answer), 4 KB at least; `qjsx agent --max-message <bytes>` (hidden, for the tests) makes
+  the desktop agent small too. The agent's receive buffer is the frame of that message
+  (`frames::maxSegmentSize`: header and COBS overhead, about 8.2 KB for 8 KB; it was
+  twice 64 KB = 128 KB on every board).
+- The tool never sends more: `Device.request` refuses a larger request (`EMSGSIZE`: a
+  device would drop it without a word); upload and file chunks are 2048 bytes;
+  `SET_STOPS` is cut into several messages of whole functions (`splitStops`: the agent
+  replaces the stops function by function, so several messages do what one would; a
+  function alone too large is an error).
+- Neither does the agent: an answer too large becomes an `ERROR` ("answer too large for
+  the link"), an event too large is dropped; a console line is cut into several `LOG`
+  messages (never inside a UTF-8 character); the debugger cuts strings to a quarter of a
+  message (10,000 bytes at most) and stops adding properties to a `GET_PROPERTIES`
+  answer when the next one would not fit.
 - Big payloads are chunked (`UPLOAD_BEGIN` / `UPLOAD_CHUNK` / `UPLOAD_END`).
 
 #### Messages
@@ -1164,12 +1179,13 @@ the device where it makes sense.
 
 | Module | Platform | Description |
 |---|---|---|
-| `sys/fs` | host; present on a device, where it fails with `ENOSYS` until a board has a file system | files, synchronous |
+| `sys/fs` | host; ESP32 (LittleFS on the "data" partition, `/data`); the twin and the desktop agent (`<storage>/data`); RP2350: present, fails with `ENOSYS` | files, synchronous; on a device confined to its data folder |
 | `stdlib/path` | all (standard library, in JS) | paths |
-| `sys/crypto` | all | `sha256`, `sha1` |
+| `sys/crypto` | all | `sha256`, `sha1`, `randomBytes` |
 | `sys/net` | host | TCP, asynchronous |
 | `device/serial` | host, ESP32, the twin (class `Serial`) | serial ports: the PC's by name, the UARTs of a board by number with their pins |
 | `sys/compiler` | host | compile API |
+| `device/board` | ESP32, the twin, the desktop agent | `id()` (unique id of the chip: the base MAC on an ESP32), `mac(kind)`, `restart()` (sends the pending output, 500 ms at most, then restarts the chip; desktop agent and twin: what RESET does) |
 | `device/gpio` | ESP32, RP2350 | class `Gpio`: `read`, `write`, `toggle`, `onChange`, `waitFor`, `close` |
 | `device/rmt` | ESP32 | class `Rmt`: pulse trains (`send`, `sendBytes`), promises |
 | `stdlib/rgbled` | boards with `device/rmt` (standard library, in JS) | class `RgbLed` (WS2812…): `set`, `fill`, `setHsv`, `fillHsv`, `show`, `close` |
@@ -1182,6 +1198,34 @@ the device where it makes sense.
 `process` is a global, on every platform. `process.versions` (2026-11-12) holds `qjsx` (the
 version of the tool or of the firmware), `quickjs` (the engine) and, for a package run,
 `build` (its build id: a hash of the bytecode of its modules).
+
+**Memory of a device** (2026-11-13): `INFO` gives the JS heap of the program
+(`JS_HEAP_USED`, `JS_HEAP_PEAK`: of this run, or of the last one) and, on a board that can
+tell, its free memory (`RAM_FREE`, `RAM_LARGEST`, `RAM_LOWEST` since the boot, `PSRAM_FREE`,
+`PSRAM_LARGEST`); `qjsx device info` shows them. The JS heap is measured by
+`createRuntime` (program.cpp), which wraps the board's allocator when the run asks for it
+(`RunHooks::heapUsage`, the runner's): after each call it records QuickJS's own count
+(`malloc_size`) and its peak. Every board's allocator therefore counts as QuickJS's does:
+the ESP32's (PSRAM, or internal RAM without PSRAM), the desktop's (malloc, written again
+because QuickJS's is not reachable), the RegionHeap; QuickJS's default (RP2350 without
+PSRAM) is not measured. On the desktop agent and the twin the figure is the PC's, larger
+than on a device (16-byte values and 8-byte pointers against 8 and 4).
+
+**Files of a device** (2026-11-13): the data folder of a device (`/data` on an ESP32, LittleFS on the "data" partition, formatted the first time; `<storage>/data` on the desktop agent and the twin) is reached by its programs (`sys/fs`, confined to it) and by the PC through the agent: FILE_LIST, FILE_READ (2048-byte pieces), FILE_WRITE_BEGIN / CHUNK / END (a temporary `<name>.qjsx-part` renamed at the end), FILE_REMOVE, FILE_MKDIR, FILE_RENAME (`common/agent/data_files.cpp`; errors with a Node-like ERROR_CODE); `qjsx device ls | read | write | rm | mkdir | mv`, `qjsx deploy --data` (the `data` folder of `qjsx.json`; other files of the device kept), `qjsx device info` (used, and the partition size on a board).
+
+**Random numbers** (2026-11-13): the global `crypto` of the web (`getRandomValues()` for
+integer typed arrays, 65536 bytes at most, else an Error named `QuotaExceededError`;
+`randomUUID()`) and `randomBytes(size)` of `sys/crypto`, as Node's but synchronous. One
+source, `rt::randomBytes()` (`common/runtime/random.cpp`) over `platform::randomBytes()`:
+the system on the PC (BCryptGenRandom, getrandom, arc4random_buf); on the ESP32 the DRBG
+of mbedTLS (PSA), seeded at boot by `psa_crypto_init()` while the entropy source of the
+SAR ADC is on (`bootloader_random_enable()`: the hardware generator is truly random only
+with it or the radio; it borrows the ADC, hence before any program), each byte mixed with
+`esp_fill_random()`; RP2350: not done yet. `Math.random()` is seeded from it at each
+program run (engine change O: QuickJS took the time, nearly the same at each boot of a
+board). A twin with `"randomSeed"` in the `twin` section of `qjsx.json` replaces the
+source by a reproducible sequence (xoshiro256** from the seed), started again at each
+program run: the program draws the same numbers every time.
 
 **Hardware modules** (2026-11-11): three layers. An interface of the hardware in
 `common/hal/` (`hal_gpio.h`, `hal_rmt.h`, `hal_usb.h`, `hal_i2c.h`, `hal_adc.h`, `hal_pwm.h`: free functions, called on the JS thread; events

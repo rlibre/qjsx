@@ -45,6 +45,7 @@ change it). With `"target": "twin"` in `qjsx.json`, `qjsx deploy`, `qjsx debug` 
 | `ports` | the TCP ports of the agent (5555), the page (8090) and the links of the twin |
 | `uarts` | UARTs of the board wired to serial ports of the PC from the start |
 | `parts` | what is wired on the board: each part has an `id`, a `model`, a `label` and its own fields |
+| `randomSeed` | an integer: the random numbers of the program (`crypto.getRandomValues()`, `randomUUID()`, `randomBytes()` of `sys/crypto`, `Math.random()`) are the same at each run, to replay a test exactly. Without it they are truly random |
 
 ## Parts
 

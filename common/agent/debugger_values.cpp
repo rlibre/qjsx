@@ -12,6 +12,7 @@
 // accessors of RegExp.prototype.
 #include "debugger.h"
 #include "memory.h"
+#include "agent.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -25,7 +26,8 @@ namespace agent {
 
 namespace {
 
-// Longest string sent in a value; the host shows longer ones cut.
+// Longest string sent in a value; the host shows longer ones cut. Less on a
+// link with small messages (Debugger::maxString).
 const size_t MAX_STRING = 10000;
 // Most properties sent for one object (large arrays: the host asks for
 // ranges with its own helper functions).
@@ -212,16 +214,25 @@ char *formatDate(double timeValue) {
 }
 
 /**
- * Writes a text, cut to MAX_STRING bytes (the cut may fall inside a UTF-8
+ * Writes a text, cut to 'limit' bytes (the cut may fall inside a UTF-8
  * sequence).
  */
-void writeText(cbor::Writer *writer, const char *text, size_t length) {
-    writer->text(text, length < MAX_STRING ? length : MAX_STRING);
+void writeText(cbor::Writer *writer, const char *text, size_t length, size_t limit) {
+    writer->text(text, length < limit ? length : limit);
 }
 
 } // namespace
 
 // ### Writing values ##########################################################
+
+/**
+ * A quarter of the largest message at most: a property entry holds up to
+ * three values.
+ */
+size_t Debugger::maxString() const {
+    size_t quarter = _agent->maxMessage() / 4;
+    return quarter < MAX_STRING ? quarter : MAX_STRING;
+}
 
 /**
  * Writes 'value' in the VALUE encoding of the protocol; objects and symbols
@@ -255,10 +266,10 @@ void Debugger::writeValue(cbor::Writer *writer, JSValueConst value, int group) {
             return;
         }
         case JS_TAG_STRING: {
-            // cut to MAX_STRING
+            // cut to maxString()
             size_t length = 0;
             const char *text = JS_ToCStringLen(_ctx, &length, value);
-            writeText(writer, orEmpty(text), text != nullptr ? length : 0);
+            writeText(writer, orEmpty(text), text != nullptr ? length : 0, maxString());
             JS_FreeCString(_ctx, text);
             return;
         }
@@ -457,7 +468,7 @@ void Debugger::writeObject(cbor::Writer *writer, JSValueConst object, int group)
     writer->integer(addHandle(object, group));
     writer->integer(info.kind);
     writer->text(className);
-    writeText(writer, description, strlen(description));
+    writeText(writer, description, strlen(description), maxString());
     writer->integer(size);
 
     // location: [module, function number] for a bytecode function, else null
@@ -481,9 +492,12 @@ void Debugger::writeObject(cbor::Writer *writer, JSValueConst object, int group)
 
 /**
  * Writes [name, flags, value, getter, setter] for each own property (at most
- * MAX_PROPERTIES) and adds their number to *propertyCount.
+ * MAX_PROPERTIES, and while 'writer' holds at most 'budget' bytes: the
+ * answer must fit in a message) and adds their number to *propertyCount. An
+ * entry taken back keeps the handles it made (freed with their group).
  */
-void Debugger::writeProperties(cbor::Writer *writer, JSValueConst object, int group, int *propertyCount) {
+void Debugger::writeProperties(cbor::Writer *writer, JSValueConst object, int group, size_t budget,
+                               int *propertyCount) {
     // a proxy has none here (its ownKeys trap would run): see its internals
     JSDebugObjectInfo info;
     if (JS_DebugGetObjectInfo(_ctx, object, &info) < 0 || info.kind == JS_DEBUG_OBJECT_PROXY) {
@@ -533,6 +547,7 @@ void Debugger::writeProperties(cbor::Writer *writer, JSValueConst object, int gr
 
         // the entry: a data property has its value and no getter / setter, an
         // accessor the opposite (the getter is never called)
+        size_t entryStart = writer->size();
         writer->array(5);
         JSValue name = JS_AtomToValue(_ctx, names[i].atom);
         writeValue(writer, name, group);   // a string, or a symbol
@@ -548,10 +563,17 @@ void Debugger::writeProperties(cbor::Writer *writer, JSValueConst object, int gr
             writer->undefined();
         }
 
-        // free the descriptor, count the property
+        // free the descriptor
         JS_FreeValue(_ctx, descriptor.value);
         JS_FreeValue(_ctx, descriptor.getter);
         JS_FreeValue(_ctx, descriptor.setter);
+
+        // past the budget: take the entry back and stop, else count it
+        if (writer->size() > budget) {
+            writer->truncate(entryStart);
+            break;
+        }
+
         (*propertyCount)++;
     }
 

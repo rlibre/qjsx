@@ -4,22 +4,73 @@
 
 - [x] **Dernier état (2026-11-13 après-midi ; tout le matin est commité dans 3d95c7d ;
       l'utilisateur commite)** :
+      - **noms des objets intégrés en mémoire morte** (FAIT le 2026-11-13 soir, ESSAI sur PC
+        seulement, doc/engine-changes.md P) : `QJSX_ROM_ATOMS` (quickjs.h, 1 ; 0 = QuickJS
+        d'origine ; copie des fichiers d'avant dans temp/rom-atoms-backup/), compteur
+        immortel, `core/rom-atoms.{h,c}` générés par `tools/rom-atoms/generate.sh`.
+        Contexte vide −22,5 Ko sur PC, programme vide sur l'agent 175,0 → 155,6 Ko ;
+        microbench +2,7 %. Suite Debug 109 OK, tests de Bellard OK. GARDÉ par
+        l'utilisateur après lecture du code. Reste : essai sur la carte sans PSRAM, puis les paquets de 4 Ko de
+        l'allocateur de QuickJS (52 % vides sur un contexte vide, −64 Ko sur PC sans eux),
+        noms des globales et modules de qjsx, vérification automatique des fichiers générés.
+      - **taille des messages par board et mesure mémoire** (FAIT le 2026-11-13 soir,
+        architecture.md « Robustness » et « Memory of a device ») : chaque board choisit le
+        plus grand message de l'agent (`board::agentMaxMessage` : 64 Ko avec PSRAM, 8 Ko
+        sans) ; tampon de réception au plus juste (8,2 Ko au lieu de 128 Ko) ; l'outil
+        refuse une requête trop grosse (EMSGSIZE) et découpe `SET_STOPS` par fonctions
+        entières ; l'agent coupe les journaux (UTF-8 gardé), change une réponse trop grosse
+        en erreur, borne GET_PROPERTIES et les chaînes ; `qjsx agent --max-message`
+        (caché) ; `qjsx device info` donne le tas JS (actuel, maximum de l'exécution) et la
+        RAM libre de la carte ; allocateurs comptés (ESP32 PSRAM ou RAM interne, PC) ;
+        `tests/maxmessage.test.js` (12) + cdp à 4 Ko dans la suite. Jumeau de `app/` : tas
+        JS 380 Ko, 400 Ko au plus (chiffre du PC, 64 bits). RESTE : flasher la board client
+        et mesurer ; RP2350 (`memoryStatus`, tas sans PSRAM non mesuré) à sa passe ;
+      - [ ] **débuts d'instruction à la demande, par module** (accord de l'utilisateur,
+            2026-11-13) : la carte les demande quand un pas ou une pause tombe dans un module
+            qui ne les a pas (événement + attente comme SCRIPT_LOADED ; drapeau par fonction
+            dans le moteur, testé à chaque instruction en pas à pas) ; à décider après la
+            mesure sur la board client (RAM des tables : 1 bit par octet de bytecode) ;
+      - [ ] **FILE_LIST paginé** : un dossier de beaucoup de fichiers dépasse un message de
+            8 Ko (la carte répond alors « answer too large ») ;
+      - [ ] **tas JS dans la page du jumeau** (idée de l'utilisateur, 2026-11-13) : aujourd'hui
+            seulement `qjsx device info` ; peut-être une taille de message dans le JSON de
+            la board (le jumeau d'une board sans PSRAM à 8 Ko) ;
       - **depuis 3d95c7d** (non commité) : `host/twin/ui/dist/sources.crc32` remis (perdu
         quand la page avait été reconstruite à la main par `npm run build`, qui vide
         `dist/` ; le build Debug l'a réécrit) ; `intr_type` (obsolète dans ESP-IDF 6.1)
         retiré de `hal_pwm_esp32.cpp` ; `tools/idf.ps1` met `PYTHONUTF8=1` (plus de
         message « not configured to handle Unicode ») ;
       - **firmware ESP32 avec `device/pwm`** : COMPILÉ (949 Ko ; aucun avertissement masqué :
-        restent ceux d'ESP-IDF et le `fallthrough` de json.c, plus bas) et FLASHÉ sur la YD le 2026-11-13, port COM14 ce jour-là (plus COM11) ; PWM
+        restent ceux d'ESP-IDF et le `fallthrough` de json.c, plus bas) et FLASHÉ sur la YD le 2026-11-13, par COM14 ce jour-là = l'USB NATIF de la YD (le port COM
+        CH343 est COM11, branché ensuite) ; PWM
         VÉRIFIÉE à l'oscilloscope par l'utilisateur le 2026-11-13 ;
       - **manuel du développeur JS et `.d.ts`** (FAIT le 2026-11-13, voir le Backlog) :
         `.d.ts` à côté des modules, `qjsx build` les écrit dans `.qjsx/types/`, site
         `doc/jsmanual/` (`npm run dev` : http://localhost:4321/) ; suites Debug ET
         Release 102 OK ; RIEN de commité ;
-      - **conçus, pas codés** (CLAUDE.md) : stockage persistant (LittleFS sur `/data`,
-        `qjsx device ls | read | write | rm | mkdir | mv`, `deploy --data`), module
-        `device/board` (`id()`, `mac()`, `restart()`) ; restent à concevoir : le hasard
-        (`crypto.getRandomValues`), le comportement de `restart()` ;
+      - **hasard** (FAIT le 2026-11-13, CLAUDE.md « Random numbers », architecture.md
+        5.4, moteur O) : `crypto.getRandomValues` / `randomUUID`, `randomBytes` de
+        `sys/crypto`, `Math.random` amorcé par la source, `"twin.randomSeed"` ;
+        `tests/random.test.js` ; firmware ESP32 FLASHÉ et ESSAYÉ sur la YD (COM11) : valeurs
+        différentes à chaque exécution et après chaque redémarrage de la puce ; RP2350 PAS fait
+        (utilisateur : une passe plus tard ; il ne se lie plus sans
+        `platform::randomBytes` : `pico_rand`) ; tests d'origine de QuickJS et
+        microbench pas refaits (fonction ajoutée, rien d'autre ne change) ;
+      - **`device/board`** (FAIT le 2026-11-13, CLAUDE.md) : `id()`, `mac(kind)`,
+        `restart()` (vide les sorties, 500 ms au plus, puis redémarre ; agent de bureau
+        et jumeau : comme RESET) ; `tests/board.test.js` (15) ; firmware ESP32 FLASHÉ et ESSAYÉ sur la YD (COM11) :
+        id = la MAC lue par esptool, dernière ligne avant restart() reçue, redémarrage OK ;
+        RP2350 pas fait ;
+      - **stockage persistant** (FAIT le 2026-11-13, CLAUDE.md « Persistent storage on a
+        device ») : `qjsx device ls | read | write | rm | mkdir | mv`, `deploy --data` et
+        `"data"` de `qjsx.json`, place de `/data` dans `device info` ; ESP32 : LittleFS
+        1.23.1 sur `/data`, `fs` confiné ; `tests/datafiles.test.js` (34) ; suite Debug
+        105 OK ; firmware FLASHÉ et ESSAYÉ sur la YD (COM11) : /data de
+        7,9 Mo, fichiers gardés après un reset, deploy --data relu par le programme ; RP2350 pas fait ;
+      - **site du manuel** : `npm audit` signale 4 vulnérabilités « moderate » (minimatch,
+        GHSA-g3hv-75wg-m249, tirée par TypeDoc ; outil de construction du site seulement) ;
+        le correctif de npm rétrograde TypeDoc (casse le site) : à trancher (attendre une
+        version corrigée, ou un « override » de minimatch) ;
       - **« minimal build » d'ESP-IDF** (utilisateur, FAIT le 2026-11-13) :
         `idf_build_set_property(MINIMAL_BUILD ON)` dans `ports/esp32/CMakeLists.txt`, seuls
         `main` et ses REQUIRES (77 composants au lieu d'environ 150) : plus les
@@ -301,7 +352,34 @@
       possibilité de faire tourner du JS sur plusieurs threads (ou des workers). À étudier :
       un runtime QuickJS par thread, ce que ça coûte en mémoire sur un device, comment les
       threads échangent (messages), et ce que ça change pour la boucle d'événements, l'agent
-      et le debugger.
+      et le debugger. PROPOSITION du 2026-11-13 (pas encore validée) :
+      - Web Workers (API du web, comme Deno : `new Worker("./x.js", { type: "module" })`,
+        `postMessage`, `onmessage`, `terminate()`, `self` dans le worker) ; un runtime
+        QuickJS par worker, sur sa propre tâche (QuickJS : un runtime = un thread) ;
+      - messages copiés par la sérialisation de QuickJS (`JS_WriteObject` /
+        `JS_ReadObject`), déposés dans la boîte aux lettres de la boucle de l'autre thread
+        (le mécanisme existe) ; plus tard `SharedArrayBuffer` + `Atomics` ;
+      - le module du worker est un module du programme (déjà dans le paquet ; `import()`
+        reste interdit) ;
+      - mémoire sur une carte : un runtime + une pile de tâche (16 à 32 Ko de RAM interne ?)
+        par worker ; limite de workers, pile et cœur (ESP32 : cœur 0) dans la description
+        de la carte, refus clair au-delà ; cher sans PSRAM (carte client) ;
+      - modules matériels (gpio, i2c...) réservés au thread principal en première version ;
+      - debugger : seul le thread principal en première version (js-debug suit les workers
+        de Node par `NodeWorker`, à faire plus tard) ;
+      - `process.exit()` et la fin du programme arrêtent les workers ; une exception non
+        rattrapée d'un worker = événement `error` côté principal.
+      Questions posées : les cas d'usage (calcul long, isolement, second cœur ?), API web ou
+      `worker_threads` de Node, modules matériels au principal seulement, debug des workers,
+      limites par carte.
+      À NOTER (utilisateur, 2026-11-13) : le firmware C de la carte client avait des tâches
+      FreeRTOS (LED d'état, bandeau, USB, boucle principale) ; l'agent de conversion les a
+      remplacées sur le thread JS unique par `Repeater` (un pas répété à période fixe, qui ne
+      se chevauche jamais) et `JobQueue` (des travaux l'un après l'autre), dans
+      `app/src/tasks.js` de la carte. Ça suffit tant que ces tâches attendent des E/S ou des
+      délais ; seul du calcul long justifierait des workers. Piste : mettre `sleep`,
+      `Repeater` et `JobQueue` dans la stdlib (avec la lecture série avec délai de
+      `serialreader.js`).
 - [ ] **Statistiques du device** (demande de l'utilisateur, 2026-11-11) : l'agent doit pouvoir
       envoyer des statistiques (mémoire, etc.). À concevoir : quelles valeurs, quel message du
       protocole, quelle commande de `qjsx`.
@@ -375,7 +453,8 @@
             COBS(...) | 0x00` ; côté jumeau `qjsx agent --board ... --usb-relay COM11`, un
             second hal USB qui parle au relais au lieu du TCP. La vraie tablette parle alors
             au programme JS du jumeau, debugger compris ;
-      - [ ] la board : `sdkconfig.board` (8 Mo, `partitions/8MB.csv`, sans PSRAM),
+      - [x] la board (FAIT le 2026-11-13, dossier et JSON ignorés par git) : firmware
+            compilé (968 Ko), PAS flashé ; `sdkconfig.board` (8 Mo, `partitions/8MB.csv`, sans PSRAM),
             `board_config.h` et le JSON du
             jumeau (dossier et fichier ignorés par git) ;
       - [x] `device/serial` sur un UART de carte (un lecteur sur UART). FAIT le 2026-11-12
@@ -761,6 +840,23 @@
       (run-tests.sh), sa doc (architecture.md, guide « Programs of the PC » du manuel,
       aide de `qjsx`) et la section `desktop` de `qjsx.json` si elle ne sert plus qu'à
       lui (elle sert aussi à `qjsx run` d'un paquet : à voir).
+
+- [ ] **« Fusible » contre le debug d'une carte en production** (utilisateur, 2026-11-13) :
+      un réglage, façon eFuse, qui empêche de déboguer (et sans doute de déployer, de lire
+      les fichiers...) une carte livrée ; à concevoir : irréversible ou non (vrai eFuse de
+      l'ESP32, ou drapeau en flash), ce qu'il bloque dans l'agent, comment une carte
+      revient en atelier ; lien avec « Protéger le code d'un programme sur le device ».
+
+- [ ] **Évaluer le gain à retirer BigInt** (utilisateur, 2026-11-13 : « trop pour une
+      board ») : mesurer ce que BigInt coûte au firmware (taille du code : `builtins/bigint.c`,
+      `core/bigint-arith.c`, les chemins BigInt de l'interpréteur et des conversions ; RAM)
+      et ce qui casse sans lui (`BigUint64Array`, `crypto.getRandomValues` sur un tableau
+      BigInt, `JSON`, littéraux `123n` refusés à la compilation) ; changement du moteur à
+      discuter avant de coder.
+
+- [ ] **Le jumeau en option, version pro payante** (utilisateur, 2026-11-13) : mettre le
+      jumeau numérique sur option (une version « pro » payante de qjsx) ; à concevoir
+      (licence, activation, ce qui reste dans la version libre).
 
 - [ ] **Article LinkedIn** (utilisateur, 2026-11-13) : rédiger un article assez complet pour
       LinkedIn, avec de belles images : le jumeau numérique, l'architecture, etc.

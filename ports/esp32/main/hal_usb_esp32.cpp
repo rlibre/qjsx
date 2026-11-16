@@ -270,6 +270,25 @@ bool write(int serial, const uint8_t *data, size_t size) {
 }
 
 /**
+ * Before a restart (board_esp32.cpp): pushes what each serial function has
+ * queued to the host, until 'deadlineMs' (platform::monotonicMs) at most.
+ * Nothing when the device is not started or no host set it up.
+ */
+void drainUntil(int64_t deadlineMs) {
+    if (!started || !tud_mounted()) {
+        return;
+    }
+
+    for (int serial = 0; serial < serialCount; serial++) {
+        int64_t remaining = deadlineMs - platform::monotonicMs();
+        if (remaining <= 0) {
+            return;
+        }
+        tinyusb_cdcacm_write_flush((tinyusb_cdcacm_itf_t)serial, pdMS_TO_TICKS(remaining));
+    }
+}
+
+/**
  * The line state TinyUSB keeps: bit 0 DTR, bit 1 RTS.
  */
 void lineState(int serial, bool *dtr, bool *rts) {

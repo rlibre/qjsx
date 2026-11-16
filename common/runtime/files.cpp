@@ -238,6 +238,22 @@ bool makeDirectory(const char *path) {
 }
 
 /**
+ * Windows version: _wfopen, the mode made wide (it is ASCII).
+ */
+FILE *open(const char *path, const char *mode) {
+    // the mode, as wide characters
+    wchar_t wideMode[8];
+    size_t length = 0;
+    while (mode[length] != 0 && length < 7) {
+        wideMode[length] = (wchar_t)mode[length];
+        length++;
+    }
+    wideMode[length] = 0;
+
+    return openFile(path, wideMode);
+}
+
+/**
  * Windows version: deletes a file with _wunlink.
  */
 bool removeFile(const char *path) {
@@ -570,6 +586,13 @@ bool linkStatus(const char *path, Status *status) {
  */
 bool makeDirectory(const char *path) {
     return mkdir(path, 0777) == 0;
+}
+
+/**
+ * POSIX version: fopen (paths are already UTF-8 bytes).
+ */
+FILE *open(const char *path, const char *mode) {
+    return openFile(path, mode);
 }
 
 /**

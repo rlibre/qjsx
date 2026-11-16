@@ -9,10 +9,13 @@
 #include "memory.h"
 
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "board.h"
 #include "debugger.h"
+#include "jsbind_error.h"
 #include "modules.h"
 #include "protocol.h"
 #include "ram_storage.h"
@@ -99,6 +102,9 @@ struct Agent::Fields {
 };
 
 namespace {
+
+// Bytes of a LOG message around its text: [LOG, 0, {STREAM: n, TEXT: <head>}].
+const size_t LOG_OVERHEAD = 32;
 
 /**
  * Starts a message [kind, id, payload]: the caller writes the payload.
@@ -187,13 +193,13 @@ bool Agent::readFields(cbor::Reader *reader, Fields *fields) {
 /**
  * An agent without host, session nor upload.
  */
-Agent::Agent(Storage *storage, RamStorage *ram, Controller *controller, Identity identity)
-    // the frame parser gets twice the maximum message size: room for the
-    // frame header and the COBS overhead; bytes that are not frames are
+Agent::Agent(Storage *storage, RamStorage *ram, Controller *controller, Identity identity, size_t maxMessage)
+    // the frame parser keeps the frame of the largest message (its header
+    // and the COBS overhead included); bytes that are not frames are
     // dropped (no text callback)
     : _storage(storage), _ram(ram), _uploadStorage(storage), _controller(controller), _debugger(nullptr), _identity(identity),
-      _parser(DEFAULT_MAX_MESSAGE * 2, &onMessage, nullptr, this), _link(nullptr), _session(false),
-      _uploading(false), _uploadSize(0), _uploadReceived(0), _hash(nullptr), _agentAnswer{ -1, nullptr, 0 },
+      _maxMessage(maxMessage), _parser(frames::maxSegmentSize(maxMessage), &onMessage, nullptr, this), _link(nullptr), _session(false),
+      _uploading(false), _uploadSize(0), _uploadReceived(0), _hash(nullptr), _dataTotal(0), _agentAnswer{ -1, nullptr, 0 },
       _debuggerAnswer{ -1, nullptr, 0 } {
     _uploadBuildId[0] = 0;
 }
@@ -335,6 +341,26 @@ void Agent::handle(int64_t kind, int64_t id, const Fields *fields) {
             _controller->reset();
             break;
         }
+        case KIND_FILE_LIST: {
+            handleFileList(id, fields);
+            break;
+        }
+        case KIND_FILE_READ: {
+            handleFileRead(id, fields);
+            break;
+        }
+        case KIND_FILE_WRITE_BEGIN:
+        case KIND_FILE_WRITE_CHUNK:
+        case KIND_FILE_WRITE_END: {
+            handleFileWrite(kind, id, fields);
+            break;
+        }
+        case KIND_FILE_REMOVE:
+        case KIND_FILE_MKDIR:
+        case KIND_FILE_RENAME: {
+            handleFileChange(kind, id, fields);
+            break;
+        }
         default: {
             respondError(id, "unknown request");
             break;
@@ -382,7 +408,7 @@ void Agent::handleHello(int64_t id, const Fields *fields) {
     payload.integer(KEY_VERSION);
     payload.text(_identity.version);
     payload.integer(KEY_MAX_MESSAGE);
-    payload.integer(DEFAULT_MAX_MESSAGE);
+    payload.integer((int64_t)_maxMessage);
 
     // and the native modules of this firmware a program may import (the
     // twin of a board: those of the board): the host refuses to deploy a
@@ -408,7 +434,8 @@ void Agent::handleHello(int64_t id, const Fields *fields) {
 
 /**
  * INFO: is a program running, which package RUN starts: the one loaded in
- * RAM if any (VOLATILE true), else the one installed in flash.
+ * RAM if any (VOLATILE true), else the one installed in flash; the data
+ * folder, the JS heap of the program and the free memory of the board.
  */
 void Agent::handleInfo(int64_t id) {
     // the package in RAM first, else the installed one
@@ -433,7 +460,53 @@ void Agent::handleInfo(int64_t id) {
 
     payload.integer(KEY_PACKAGE_SIZE);
     payload.integer(installed ? (int64_t)packageSize : 0);
-    respond(id, &payload, 4);
+    int fieldCount = 4;
+
+    // the data folder: what its files use, and its size when known
+    uint64_t used = 0;
+    if (_files.usedBytes(&used) == 0) {
+        payload.integer(KEY_DATA_USED);
+        payload.integer((int64_t)used);
+        fieldCount++;
+    }
+    if (_dataTotal > 0) {
+        payload.integer(KEY_DATA_TOTAL);
+        payload.integer((int64_t)_dataTotal);
+        fieldCount++;
+    }
+
+    // the JS heap of the program: now, and the most of this run (or of the
+    // last one)
+    size_t heapUsed = 0;
+    size_t heapPeak = 0;
+    _controller->jsHeap(&heapUsed, &heapPeak);
+    payload.integer(KEY_JS_HEAP_USED);
+    payload.integer((int64_t)heapUsed);
+    payload.integer(KEY_JS_HEAP_PEAK);
+    payload.integer((int64_t)heapPeak);
+    fieldCount += 2;
+
+    // the free memory of the board, when it can tell; PSRAM only if it has some
+    board::MemoryStatus memory = {};
+    if (board::memoryStatus(&memory)) {
+        payload.integer(KEY_RAM_FREE);
+        payload.integer((int64_t)memory.ramFree);
+        payload.integer(KEY_RAM_LARGEST);
+        payload.integer((int64_t)memory.ramLargest);
+        payload.integer(KEY_RAM_LOWEST);
+        payload.integer((int64_t)memory.ramLowest);
+        fieldCount += 3;
+
+        if (memory.psramFree > 0) {
+            payload.integer(KEY_PSRAM_FREE);
+            payload.integer((int64_t)memory.psramFree);
+            payload.integer(KEY_PSRAM_LARGEST);
+            payload.integer((int64_t)memory.psramLargest);
+            fieldCount += 2;
+        }
+    }
+
+    respond(id, &payload, fieldCount);
 }
 
 /**
@@ -585,6 +658,183 @@ void Agent::handleUploadEnd(int64_t id) {
     respond(id, &payload, 1);
 }
 
+// ### Files of the data folder ################################################
+
+/**
+ * FILE_LIST: PATH -> ENTRIES [[name, size, isDirectory]].
+ */
+void Agent::handleFileList(int64_t id, const Fields *fields) {
+    // the folder (no PATH: the data folder itself)
+    const char *path = "";
+    size_t length = 0;
+    fields->text(KEY_PATH, &path, &length);
+
+    // its entries
+    FileEntry *entries = nullptr;
+    int count = 0;
+    int error = _files.list(path, length, &entries, &count);
+    if (error != 0) {
+        respondFileError(id, error, path, length);
+        return;
+    }
+
+    // as an array of [name, size, isDirectory]
+    cbor::Writer payload;
+    payload.integer(KEY_ENTRIES);
+    payload.array((uint64_t)count);
+    for (int index = 0; index < count; index++) {
+        payload.array(3);
+        payload.text(entries[index].name);
+        payload.integer(entries[index].size);
+        payload.boolean(entries[index].isDirectory);
+    }
+
+    DataFiles::freeEntries(entries, count);
+    respond(id, &payload, 1);
+}
+
+/**
+ * FILE_READ: PATH, OFFSET -> DATA (FILE_CHUNK bytes at most), SIZE.
+ */
+void Agent::handleFileRead(int64_t id, const Fields *fields) {
+    const char *path = nullptr;
+    size_t length = 0;
+    int64_t offset = 0;
+    if (!fields->text(KEY_PATH, &path, &length) || !fields->integer(KEY_OFFSET, &offset)) {
+        respondError(id, "FILE_READ: PATH and OFFSET expected");
+        return;
+    }
+
+    // the piece, in a buffer on the heap (thread stacks are small)
+    uint8_t *buffer = (uint8_t *)memory::allocate(FILE_CHUNK);
+    size_t got = 0;
+    int64_t fileSize = 0;
+    int error = _files.read(path, length, offset, buffer, FILE_CHUNK, &got, &fileSize);
+    if (error != 0) {
+        memory::release(buffer);
+        respondFileError(id, error, path, length);
+        return;
+    }
+
+    cbor::Writer payload;
+    payload.integer(KEY_DATA);
+    payload.bytes(buffer, got);
+    payload.integer(KEY_SIZE);
+    payload.integer(fileSize);
+    memory::release(buffer);
+    respond(id, &payload, 2);
+}
+
+/**
+ * FILE_WRITE_BEGIN (PATH, SIZE), FILE_WRITE_CHUNK (OFFSET, DATA),
+ * FILE_WRITE_END: one file at a time, as the upload of a package.
+ */
+void Agent::handleFileWrite(int64_t kind, int64_t id, const Fields *fields) {
+    // begin: where, how much
+    if (kind == KIND_FILE_WRITE_BEGIN) {
+        const char *path = nullptr;
+        size_t length = 0;
+        int64_t size = 0;
+        if (!fields->text(KEY_PATH, &path, &length) || !fields->integer(KEY_SIZE, &size)) {
+            respondError(id, "FILE_WRITE_BEGIN: PATH and SIZE expected");
+            return;
+        }
+
+        int error = _files.beginWrite(path, length, size);
+        if (error != 0) {
+            respondFileError(id, error, path, length);
+            return;
+        }
+        respondEmpty(id);
+        return;
+    }
+
+    // a chunk, in order
+    if (kind == KIND_FILE_WRITE_CHUNK) {
+        int64_t offset = 0;
+        const uint8_t *data = nullptr;
+        size_t size = 0;
+        if (!fields->integer(KEY_OFFSET, &offset) || !fields->bytes(KEY_DATA, &data, &size)) {
+            respondError(id, "FILE_WRITE_CHUNK: OFFSET and DATA expected");
+            return;
+        }
+
+        int error = _files.writeChunk(offset, data, size);
+        if (error != 0) {
+            respondFileError(id, error, "", 0);
+            return;
+        }
+        respondEmpty(id);
+        return;
+    }
+
+    // the end: the file in place
+    int error = _files.endWrite();
+    if (error != 0) {
+        respondFileError(id, error, "", 0);
+        return;
+    }
+    respondEmpty(id);
+}
+
+/**
+ * FILE_REMOVE (PATH), FILE_MKDIR (PATH), FILE_RENAME (PATH, TO).
+ */
+void Agent::handleFileChange(int64_t kind, int64_t id, const Fields *fields) {
+    const char *path = nullptr;
+    size_t length = 0;
+    if (!fields->text(KEY_PATH, &path, &length)) {
+        respondError(id, "PATH expected");
+        return;
+    }
+
+    // the operation
+    int error = 0;
+    if (kind == KIND_FILE_REMOVE) {
+        error = _files.remove(path, length);
+    } else if (kind == KIND_FILE_MKDIR) {
+        error = _files.makeDirectory(path, length);
+    } else {
+        const char *to = nullptr;
+        size_t toLength = 0;
+        if (!fields->text(KEY_TO, &to, &toLength)) {
+            respondError(id, "FILE_RENAME: TO expected");
+            return;
+        }
+        error = _files.rename(path, length, to, toLength);
+    }
+
+    if (error != 0) {
+        respondFileError(id, error, path, length);
+        return;
+    }
+    respondEmpty(id);
+}
+
+/**
+ * [ERROR, id, {MESSAGE, ERROR_CODE}], kept as the agent's last answer.
+ */
+void Agent::respondFileError(int64_t id, int error, const char *path, size_t length) {
+    // "ENOENT: No such file or directory, 'notes.txt'" (the path cut if long)
+    const char *code = js::detail::errnoName(error);
+    int shown = (int)(length > 160 ? 160 : length);
+    char text[256];
+    if (length > 0) {
+        snprintf(text, sizeof(text), "%s: %s, '%.*s'", code, strerror(error), shown, path);
+    } else {
+        snprintf(text, sizeof(text), "%s: %s", code, strerror(error));
+    }
+
+    cbor::Writer message;
+    writeHeader(&message, KIND_ERROR, id);
+    message.map(2);
+    message.integer(KEY_MESSAGE);
+    message.text(text);
+    message.integer(KEY_ERROR_CODE);
+    message.text(code);
+    sendMessage(message.data(), message.size(), id, &_agentAnswer);
+}
+
 // ### Sending #################################################################
 
 /**
@@ -662,10 +912,26 @@ bool Agent::resendAnswer(int64_t id) {
  * answer is kept in 'answer' (nullptr for an event).
  */
 void Agent::sendWithPayload(int kind, int64_t id, const cbor::Writer *payload, int fieldCount, LastAnswer *answer) {
+    // the message
     cbor::Writer message;
     writeHeader(&message, kind, id);
     message.map(fieldCount);
     message.encoded(payload->data(), payload->size());
+
+    // too large for the link (the host could not take it, and its frame
+    // would need two more copies here): an answer becomes an error, an
+    // event is dropped
+    if (message.size() > _maxMessage) {
+        if (answer != nullptr) {
+            char text[96];
+            snprintf(text, sizeof(text), "answer too large for the link: %lu bytes, at most %lu",
+                     (unsigned long)message.size(), (unsigned long)_maxMessage);
+            sendError(answer, id, text);
+        }
+
+        return;
+    }
+
     sendMessage(message.data(), message.size(), id, answer);
 }
 
@@ -735,14 +1001,38 @@ bool Agent::sendLog(int stream, const char *text, size_t length) {
         return false;
     }
 
-    cbor::Writer message;
-    writeHeader(&message, KIND_LOG, 0);
-    message.map(2);
-    message.integer(KEY_STREAM);
-    message.integer(stream);
-    message.integer(KEY_TEXT);
-    message.text(text, length);
-    sendMessage(message.data(), message.size(), 0, nullptr);
+    // one message per piece (one at least: an empty text is sent too)
+    size_t pieceLimit = _maxMessage - LOG_OVERHEAD;
+    size_t offset = 0;
+
+    do {
+        // the piece: what remains, or what fits, cut before a UTF-8
+        // continuation byte (10xxxxxx) so that no character is split; a run
+        // of continuation bytes as long as a piece is not text: cut anywhere
+        size_t piece = length - offset;
+        if (piece > pieceLimit) {
+            piece = pieceLimit;
+            while (piece > 0 && ((uint8_t)text[offset + piece] & 0xC0) == 0x80) {
+                piece--;
+            }
+
+            if (piece == 0) {
+                piece = pieceLimit;
+            }
+        }
+
+        // [LOG, 0, {STREAM, TEXT}]
+        cbor::Writer message;
+        writeHeader(&message, KIND_LOG, 0);
+        message.map(2);
+        message.integer(KEY_STREAM);
+        message.integer(stream);
+        message.integer(KEY_TEXT);
+        message.text(text + offset, piece);
+        sendMessage(message.data(), message.size(), 0, nullptr);
+        offset += piece;
+    } while (offset < length);
+
     return true;
 }
 

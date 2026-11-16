@@ -16,7 +16,9 @@
 import { connect } from "sys/net";
 import { Serial } from "device/serial";
 import { encodeFrame, FrameParser } from "qjsx:frames";
-import { KIND, KEY, PROTOCOL_VERSION, encodeMessage, decodeMessage, kindName } from "qjsx:protocol";
+import {
+    KIND, KEY, PROTOCOL_VERSION, DEFAULT_MAX_MESSAGE, MIN_MAX_MESSAGE, encodeMessage, decodeMessage, kindName,
+} from "qjsx:protocol";
 
 const DEFAULT_TIMEOUT = 3000;
 const DEFAULT_ATTEMPTS = 3;
@@ -33,11 +35,13 @@ export function parseTarget(text) {
     throw new Error(`invalid target '${text}' (expected tcp:<host>:<port> or serial:<port>[@<baud rate>])`);
 }
 
-// Error answered by the agent.
+// Error answered by the agent; 'code' is its Node-like code when it gave one
+// ("ENOENT"... for the files of the data folder), else undefined.
 export class DeviceError extends Error {
-    constructor(message) {
+    constructor(message, code) {
         super(message);
         this.name = "DeviceError";
+        this.code = code;
     }
 }
 
@@ -57,6 +61,7 @@ export class Device {
         this.pending = new Map();   // id -> { resolve, reject, timer, attempts, frame, kind }
         this.nextId = 1;
         this.closed = false;
+        this.maxMessage = undefined;   // largest message of the device (HELLO); undefined before HELLO
         this.parser = new FrameParser(message => this.onMessage(message), bytes => this.handlers.onText?.(bytes));
         link.onData(bytes => this.parser.feed(bytes));
         link.onClose(() => this.onLinkClosed());
@@ -92,8 +97,9 @@ export class Device {
     }
 
     // Opens the session. Keeps the native modules of the firmware in
-    // 'natives' and its qjsx version in 'version' (undefined if an older
-    // firmware does not say). 'options' are those of request().
+    // 'natives', its qjsx version in 'version' (undefined if an older
+    // firmware does not say) and its largest message in 'maxMessage' (64 KB
+    // if it does not say). 'options' are those of request().
     async hello(token, options = {}) {
         const payload = { [KEY.PROTOCOL]: PROTOCOL_VERSION };
         if (token !== undefined) {
@@ -102,18 +108,29 @@ export class Device {
         const answer = await this.request(KIND.HELLO, payload, options);
         this.natives = answer.get(KEY.NATIVES);
         this.version = answer.get(KEY.VERSION);
+        this.maxMessage = answer.get(KEY.MAX_MESSAGE) ?? DEFAULT_MAX_MESSAGE;
+        if (this.maxMessage < MIN_MAX_MESSAGE) {
+            throw new DeviceError(`the device takes messages of ${this.maxMessage} bytes at most (${MIN_MAX_MESSAGE} needed)`);
+        }
         return answer;
     }
 
     // Sends a request; resolves with the answer payload (a Map). A request
     // without answer is sent again with the same id (the agent answers a
-    // repeated id without executing it twice).
+    // repeated id without executing it twice). A request larger than the
+    // device's largest message is refused here (the device would drop it
+    // without a word): code "EMSGSIZE".
     request(kind, payload = {}, { timeout = DEFAULT_TIMEOUT, attempts = DEFAULT_ATTEMPTS } = {}) {
         if (this.closed) {
             return Promise.reject(new Error("device: connection closed"));
         }
         const id = this.nextId++;
-        const frame = encodeFrame(encodeMessage(kind, id, payload));
+        const message = encodeMessage(kind, id, payload);
+        if (this.maxMessage !== undefined && message.length > this.maxMessage) {
+            return Promise.reject(new DeviceError(
+                `${kindName(kind)}: ${message.length} bytes, more than the device takes (${this.maxMessage})`, "EMSGSIZE"));
+        }
+        const frame = encodeFrame(message);
         return new Promise((resolve, reject) => {
             const entry = { resolve, reject, timer: undefined, attempts, frame, kind, timeout };
             this.pending.set(id, entry);
@@ -152,7 +169,7 @@ export class Device {
             if (kind === KIND.RESPONSE) {
                 entry.resolve(payload ?? new Map());
             } else {
-                entry.reject(new DeviceError(payload?.get(KEY.MESSAGE) ?? "error"));
+                entry.reject(new DeviceError(payload?.get(KEY.MESSAGE) ?? "error", payload?.get(KEY.ERROR_CODE)));
             }
             return;
         }

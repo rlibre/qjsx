@@ -12,6 +12,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 namespace files {
 
@@ -59,6 +60,12 @@ bool makeDirectory(const char *path);
  * exists.
  */
 bool makeDirectories(const char *path);
+
+/**
+ * fopen with a UTF-8 path ('mode' as fopen's: "rb", "wb"...). nullptr with
+ * errno set on failure.
+ */
+FILE *open(const char *path, const char *mode);
 
 /**
  * Deletes a file.

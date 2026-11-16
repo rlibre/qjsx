@@ -1,5 +1,5 @@
 diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/date.c engine/qjsx/builtins/date.c
---- build/qjsx-baseline/builtins/date.c	2026-11-12 08:54:32.488220000 +0100
+--- build/qjsx-baseline/builtins/date.c	2026-11-13 19:37:09.472068600 +0100
 +++ engine/qjsx/builtins/date.c	2026-11-11 16:04:41.500342200 +0100
 @@ -39,7 +39,9 @@
          }
@@ -12,8 +12,29 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/date.c engine/qjsx/bu
      {
          struct tm *tm;
          time_t gm_ti, loc_ti;
+diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/math.c engine/qjsx/builtins/math.c
+--- build/qjsx-baseline/builtins/math.c	2026-11-13 19:37:09.471068300 +0100
++++ engine/qjsx/builtins/math.c	2026-11-13 15:45:47.178657000 +0100
+@@ -469,6 +469,17 @@
+         ctx->random_state = 1;
+ }
+ 
++/* qjsx: seeds Math.random() of 'ctx' (the time of js_random_init() is nearly
++   the same at each boot of a board, whose clock starts at 0). The runtime
++   calls it with bytes of the platform's source of randomness. */
++void JS_SetRandomSeed(JSContext *ctx, uint64_t seed)
++{
++    ctx->random_state = seed;
++    /* the state must be non zero */
++    if (ctx->random_state == 0)
++        ctx->random_state = 1;
++}
++
+ static JSValue js_math_random(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+ {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/bytecode/reader.c
---- build/qjsx-baseline/bytecode/reader.c	2026-11-12 08:54:32.483218700 +0100
+--- build/qjsx-baseline/bytecode/reader.c	2026-11-13 19:37:09.468069200 +0100
 +++ engine/qjsx/bytecode/reader.c	2026-11-11 16:04:41.505342000 +0100
 @@ -427,6 +427,11 @@
      bc.js_mode = v8;
@@ -53,7 +74,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/
  {
      uint8_t v8;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/bytecode/writer.c
---- build/qjsx-baseline/bytecode/writer.c	2026-11-12 08:54:32.482217900 +0100
+--- build/qjsx-baseline/bytecode/writer.c	2026-11-13 19:37:09.467068200 +0100
 +++ engine/qjsx/bytecode/writer.c	2026-11-11 16:04:41.506342600 +0100
 @@ -444,6 +444,9 @@
      bc_put_u16(s, flags);
@@ -74,7 +95,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/
          dbuf_put(&s->dbuf, b->debug.pc2line_buf, b->debug.pc2line_len);
          if (b->debug.source) {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjsx/compiler/compiler.h
---- build/qjsx-baseline/compiler/compiler.h	2026-11-12 08:54:32.500230300 +0100
+--- build/qjsx-baseline/compiler/compiler.h	2026-11-13 19:37:09.482084100 +0100
 +++ engine/qjsx/compiler/compiler.h	2026-11-12 08:52:26.317088600 +0100
 @@ -189,8 +189,31 @@
  typedef struct JSVarScope {
@@ -432,7 +453,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/q
 +    js_free(ctx, scopes);
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx/compiler/emitter.c
---- build/qjsx-baseline/compiler/emitter.c	2026-11-12 08:54:32.476222300 +0100
+--- build/qjsx-baseline/compiler/emitter.c	2026-11-13 19:37:09.462069700 +0100
 +++ engine/qjsx/compiler/emitter.c	2026-11-11 16:04:41.508343500 +0100
 @@ -57,6 +57,21 @@
      }
@@ -476,7 +497,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx
          fd->scope_first = get_first_lexical_var(fd, fd->scope_level);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/compiler/eval.c
---- build/qjsx-baseline/compiler/eval.c	2026-11-12 08:54:32.482217900 +0100
+--- build/qjsx-baseline/compiler/eval.c	2026-11-13 19:37:09.467068200 +0100
 +++ engine/qjsx/compiler/eval.c	2026-11-11 16:04:41.508343500 +0100
 @@ -86,6 +86,8 @@
      }
@@ -500,7 +521,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/co
          fun_obj = JS_NewModuleValue(ctx, m);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjsx/compiler/finalize.c
---- build/qjsx-baseline/compiler/finalize.c	2026-11-12 08:54:32.481218400 +0100
+--- build/qjsx-baseline/compiler/finalize.c	2026-11-13 19:37:09.466067900 +0100
 +++ engine/qjsx/compiler/finalize.c	2026-11-12 08:49:49.875951600 +0100
 @@ -401,6 +401,11 @@
      if (resolve_variables(ctx, fd))
@@ -554,7 +575,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjs
          //DynBuf pc2line;
          //compute_pc2line_info(fd, &pc2line);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx/compiler/funcdef.c
---- build/qjsx-baseline/compiler/funcdef.c	2026-11-12 08:54:32.480219900 +0100
+--- build/qjsx-baseline/compiler/funcdef.c	2026-11-13 19:37:09.465067900 +0100
 +++ engine/qjsx/compiler/funcdef.c	2026-11-11 16:04:41.510348300 +0100
 @@ -59,6 +59,8 @@
      fd->scope_count = 1;
@@ -586,7 +607,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx
          printf("%s:%d:%d: ", str, line_num, col_num);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-class.c engine/qjsx/compiler/parser-class.c
---- build/qjsx-baseline/compiler/parser-class.c	2026-11-12 08:54:32.477225900 +0100
+--- build/qjsx-baseline/compiler/parser-class.c	2026-11-13 19:37:09.463072900 +0100
 +++ engine/qjsx/compiler/parser-class.c	2026-11-11 16:04:41.510348300 +0100
 @@ -52,7 +52,7 @@
  
@@ -607,7 +628,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-class.c engine
      if (!fd->strip_source) {
          js_free(ctx, ctor_fd->source);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/qjsx/compiler/parser-expr.c
---- build/qjsx-baseline/compiler/parser-expr.c	2026-11-12 08:54:32.477225900 +0100
+--- build/qjsx-baseline/compiler/parser-expr.c	2026-11-13 19:37:09.463072900 +0100
 +++ engine/qjsx/compiler/parser-expr.c	2026-11-11 16:04:41.512350100 +0100
 @@ -1839,6 +1839,11 @@
          } else {
@@ -664,7 +685,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
          }
          return 0;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/qjsx/compiler/parser-func.c
---- build/qjsx-baseline/compiler/parser-func.c	2026-11-12 08:54:32.481218400 +0100
+--- build/qjsx-baseline/compiler/parser-func.c	2026-11-13 19:37:09.466067900 +0100
 +++ engine/qjsx/compiler/parser-func.c	2026-11-11 16:04:41.513349800 +0100
 @@ -196,6 +196,7 @@
      int func_idx, lexical_func_idx = -1;
@@ -741,7 +762,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/
  
      return 0;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/qjsx/compiler/parser-stmt.c
---- build/qjsx-baseline/compiler/parser-stmt.c	2026-11-12 08:54:32.478219500 +0100
+--- build/qjsx-baseline/compiler/parser-stmt.c	2026-11-13 19:37:09.464067800 +0100
 +++ engine/qjsx/compiler/parser-stmt.c	2026-11-11 16:04:41.515348900 +0100
 @@ -83,7 +83,15 @@
  }
@@ -861,7 +882,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/
              goto fail;
          if (js_parse_expect_semi(s))
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engine/qjsx/compiler/resolve-labels.c
---- build/qjsx-baseline/compiler/resolve-labels.c	2026-11-12 08:54:32.480219900 +0100
+--- build/qjsx-baseline/compiler/resolve-labels.c	2026-11-13 19:37:09.466067900 +0100
 +++ engine/qjsx/compiler/resolve-labels.c	2026-11-12 08:52:26.394888700 +0100
 @@ -36,7 +36,10 @@
              if (pos_next > s->bc_len)
@@ -1266,8 +1287,228 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/tdz.c engine/qjsx/com
 +    js_free(ctx, t.current);
 +    return ret;
 +}
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/atoms.c
+--- build/qjsx-baseline/core/atoms.c	2026-11-13 19:37:09.442958400 +0100
++++ engine/qjsx/core/atoms.c	2026-11-13 19:23:24.606245800 +0100
+@@ -22,11 +22,56 @@
+ {
+ #if defined(DUMP_LEAKS) && DUMP_LEAKS > 1
+         return (int32_t)v <= 0;
++#elif QJSX_ROM_ATOMS
++        /* qjsx: the names in read-only memory are not counted either */
++        return (int32_t)v < QJSX_ROM_ATOM_COUNT;
+ #else
+         return (int32_t)v < JS_ATOM_END;
+ #endif
+ }
+ 
++#if QJSX_ROM_ATOMS
++/* qjsx: atom size of the first table, after the names in read-only memory
++   (it then grows by half, as in __JS_NewAtom) */
++#define QJSX_RAM_ATOM_SLOTS 128
++/* qjsx: first size of the hash table of the atoms in the heap */
++#define QJSX_RAM_ATOM_HASH_SIZE 128
++
++/* qjsx: index of the name in read-only memory equal to 'str' (or to the
++   'len' ASCII characters of 'chars' when 'str' is NULL), 0 if none.
++   Open addressing in qjsx_rom_atom_hash, by the hash of the string. */
++static JSAtom js_rom_find_atom(uint32_t h, int atom_type, JSString *str,
++                               const char *chars, uint32_t len)
++{
++    uint32_t mask = QJSX_ROM_ATOM_HASH_SIZE - 1;
++    uint32_t slot = h & mask;
++    uint32_t i;
++
++    /* every name in read-only memory is an 8 bit string atom */
++    if (atom_type != JS_ATOM_TYPE_STRING) {
++        return JS_ATOM_NULL;
++    }
++
++    /* walk the slots from the one of the hash until an empty one */
++    while ((i = qjsx_rom_atom_hash[slot]) != 0) {
++        JSAtomStruct *p = (JSAtomStruct *)qjsx_rom_atom_ptr[i];
++        if (p->hash == h && p->len == len) {
++            BOOL same;
++            if (str != NULL) {
++                same = js_string_memcmp(p, 0, str, 0, len) == 0;
++            } else {
++                same = memcmp(p->u.str8, chars, len) == 0;
++            }
++            if (same) {
++                return i;
++            }
++        }
++        slot = (slot + 1) & mask;
++    }
++    return JS_ATOM_NULL;
++}
++#endif
++
+ static inline int is_num(int c)
+ {
+     return c >= '0' && c <= '9';
+@@ -200,10 +245,92 @@
+     rt->atom_hash = new_hash;
+     rt->atom_hash_size = new_hash_size;
+     rt->atom_count_resize = JS_ATOM_COUNT_RESIZE(new_hash_size);
++#if QJSX_ROM_ATOMS
++    /* qjsx: the names in read-only memory are not in this table */
++    rt->atom_count_resize += QJSX_ROM_ATOM_COUNT;
++#endif
+     //    JS_DumpAtoms(rt);
+     return 0;
+ }
+ 
++#if QJSX_ROM_ATOMS
++/* qjsx: makes in the heap the predefined atom 'index', a symbol (the names
++   in read-only memory are strings only). As __JS_NewAtom does for a symbol. */
++static JSAtomStruct *js_new_rom_symbol(JSRuntime *rt, const char *str, int len,
++                                       uint32_t index)
++{
++    JSString *p = js_alloc_string_rt(rt, len, 0);
++    if (!p)
++        return NULL;
++    memcpy(p->u.str8, str, len);
++    p->u.str8[len] = '\0';
++    p->hash = index == JS_ATOM_Private_brand ? JS_ATOM_HASH_PRIVATE : 0;
++    p->hash_next = index;   /* atom_index */
++    p->atom_type = JS_ATOM_TYPE_SYMBOL;
++    return p;
++}
++
++/* qjsx: the table of the atoms starts with the names in read-only memory:
++   1. the hash table of the atoms of the heap, small;
++   2. the atom table: entry 0 = JS_ATOM_NULL (in the heap, as in
++      __JS_NewAtom), then the names in read-only memory, where the
++      predefined symbols are made in the heap, then free entries. */
++int JS_InitAtoms(JSRuntime *rt)
++{
++    uint32_t i, size;
++    int len;
++    const char *str;
++    JSAtomStruct *p;
++
++    rt->atom_hash_size = 0;
++    rt->atom_hash = NULL;
++    rt->atom_count = 0;
++    rt->atom_size = 0;
++    rt->atom_free_index = 0;
++    if (JS_ResizeAtomHash(rt, QJSX_RAM_ATOM_HASH_SIZE))
++        return -1;
++
++    /* the atom table, the null atom first */
++    size = QJSX_ROM_ATOM_COUNT + QJSX_RAM_ATOM_SLOTS;
++    rt->atom_array = js_malloc_rt(rt, sizeof(rt->atom_array[0]) * size);
++    if (!rt->atom_array)
++        return -1;
++    p = js_mallocz_rt(rt, sizeof(JSAtomStruct));
++    if (!p)
++        return -1;
++    js_rc(p)->ref_count = 1;  /* not refcounted */
++    p->atom_type = JS_ATOM_TYPE_SYMBOL;
++    rt->atom_array[0] = p;
++
++    /* the names in read-only memory, the predefined symbols in the heap
++       (js_atom_init gives their text) */
++    str = js_atom_init;
++    for(i = 1; i < QJSX_ROM_ATOM_COUNT; i++) {
++        const JSAtomStruct *rom = qjsx_rom_atom_ptr[i];
++        if (i < JS_ATOM_END) {
++            len = strlen(str);
++            if (rom == NULL) {
++                rom = js_new_rom_symbol(rt, str, len, i);
++                if (rom == NULL)
++                    return -1;
++            }
++            str += len + 1;
++        }
++        /* read-only: never written (immortal reference count) */
++        rt->atom_array[i] = (JSAtomStruct *)rom;
++    }
++
++    /* the free entries after them */
++    rt->atom_size = size;
++    rt->atom_count = QJSX_ROM_ATOM_COUNT;
++    rt->atom_free_index = QJSX_ROM_ATOM_COUNT;
++    for(i = QJSX_ROM_ATOM_COUNT; i < size; i++) {
++        uint32_t next = (i == size - 1) ? 0 : i + 1;
++        rt->atom_array[i] = atom_set_free(next);
++    }
++    return 0;
++}
++#else
+ int JS_InitAtoms(JSRuntime *rt)
+ {
+     int i, len, atom_type;
+@@ -232,6 +359,7 @@
+     }
+     return 0;
+ }
++#endif
+ 
+ JSAtom JS_DupAtomRT(JSRuntime *rt, JSAtom v)
+ {
+@@ -289,6 +417,11 @@
+ JSAtom js_get_atom_index(JSRuntime *rt, JSAtomStruct *p)
+ {
+     uint32_t i = p->hash_next;  /* atom_index */
++#if QJSX_ROM_ATOMS
++    /* qjsx: a name in read-only memory keeps its index in hash_next */
++    if (js_atom_is_rom(p))
++        return i;
++#endif
+     if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
+         JSAtomStruct *p1;
+ 
+@@ -320,7 +453,8 @@
+             /* str is the atom, return its index */
+             i = js_get_atom_index(rt, str);
+             /* reduce string refcount and increase atom's unless constant */
+-            if (__JS_AtomIsConst(i))
++            /* qjsx: unless immortal (a name in read-only memory) */
++            if (__JS_AtomIsConst(i) && JS_REF_COUNT_IS_MORTAL(js_rc(str)))
+                 js_rc(str)->ref_count--;
+             return i;
+         }
+@@ -328,6 +462,12 @@
+         len = str->len;
+         h = hash_string(str, atom_type);
+         h &= JS_ATOM_HASH_MASK;
++#if QJSX_ROM_ATOMS
++        /* qjsx: the names in read-only memory first (not counted) */
++        i = js_rom_find_atom(h, atom_type, str, NULL, len);
++        if (i != JS_ATOM_NULL)
++            goto done;
++#endif
+         h1 = h & (rt->atom_hash_size - 1);
+         i = rt->atom_hash[h1];
+         while (i != 0) {
+@@ -482,6 +622,12 @@
+ 
+     h = hash_string8((const uint8_t *)str, len, JS_ATOM_TYPE_STRING);
+     h &= JS_ATOM_HASH_MASK;
++#if QJSX_ROM_ATOMS
++    /* qjsx: the names in read-only memory first (not counted) */
++    i = js_rom_find_atom(h, JS_ATOM_TYPE_STRING, NULL, str, len);
++    if (i != JS_ATOM_NULL)
++        return i;
++#endif
+     h1 = h & (rt->atom_hash_size - 1);
+     i = rt->atom_hash[h1];
+     while (i != 0) {
+@@ -509,6 +655,10 @@
+     }
+ #endif
+     uint32_t i = p->hash_next;  /* atom_index */
++#if QJSX_ROM_ATOMS
++    /* qjsx: a name in read-only memory is never freed (immortal count) */
++    assert(!js_atom_is_rom(p));
++#endif
+     if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
+         JSAtomStruct *p0, *p1;
+         uint32_t h0;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/closures.c engine/qjsx/core/closures.c
---- build/qjsx-baseline/core/closures.c	2026-11-12 08:54:32.472215100 +0100
+--- build/qjsx-baseline/core/closures.c	2026-11-13 19:37:09.459068200 +0100
 +++ engine/qjsx/core/closures.c	2026-11-11 16:38:22.149302500 +0100
 @@ -619,6 +619,7 @@
      rt->current_stack_frame = sf;
@@ -1278,7 +1519,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/closures.c engine/qjsx/co
      sf->arg_count = argc;
      arg_buf = argv;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/core.h engine/qjsx/core/core.h
---- build/qjsx-baseline/core/core.h	2026-11-12 08:54:32.496229700 +0100
+--- build/qjsx-baseline/core/core.h	2026-11-13 19:37:09.478068100 +0100
 +++ engine/qjsx/core/core.h	2026-11-11 17:48:34.850300900 +0100
 @@ -543,4 +543,16 @@
  #endif
@@ -1989,7 +2230,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/debug.c engine/qjsx/core/
 +    return 0;
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core/errors.c
---- build/qjsx-baseline/core/errors.c	2026-11-12 08:54:32.467217600 +0100
+--- build/qjsx-baseline/core/errors.c	2026-11-13 19:37:09.445434600 +0100
 +++ engine/qjsx/core/errors.c	2026-11-11 16:04:41.521349400 +0100
 @@ -30,6 +30,9 @@
      JSRuntime *rt = ctx->rt;
@@ -2017,9 +2258,21 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core
                              atom_str ? atom_str : "<null>");
                  JS_FreeCString(ctx, atom_str);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/gc.c engine/qjsx/core/gc.c
---- build/qjsx-baseline/core/gc.c	2026-11-12 08:54:32.467217600 +0100
-+++ engine/qjsx/core/gc.c	2026-11-11 16:04:41.522349800 +0100
-@@ -1281,8 +1281,10 @@
+--- build/qjsx-baseline/core/gc.c	2026-11-13 19:37:09.445434600 +0100
++++ engine/qjsx/core/gc.c	2026-11-13 19:23:32.493715900 +0100
+@@ -1070,6 +1070,11 @@
+         sizeof(rt->atom_hash[0]) * rt->atom_hash_size;
+     for(i = 0; i < rt->atom_size; i++) {
+         JSAtomStruct *p = rt->atom_array[i];
++#if QJSX_ROM_ATOMS
++        /* qjsx: the names in read-only memory take no heap */
++        if (!atom_is_free(p) && js_atom_is_rom(p))
++            continue;
++#endif
+         if (!atom_is_free(p)) {
+             s->atom_size += (sizeof(*p) + (p->len << p->is_wide_char) +
+                              1 - p->is_wide_char);
+@@ -1281,8 +1286,10 @@
          JS_FreeContext(b->realm);
  
      JS_FreeAtomRT(rt, b->func_name);
@@ -2032,8 +2285,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/gc.c engine/qjsx/core/gc.
          js_free_rt(rt, b->debug.source);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx/core/interpreter.c
---- build/qjsx-baseline/core/interpreter.c	2026-11-12 08:54:32.472215100 +0100
-+++ engine/qjsx/core/interpreter.c	2026-11-11 17:48:34.888853800 +0100
+--- build/qjsx-baseline/core/interpreter.c	2026-11-13 19:37:09.460068000 +0100
++++ engine/qjsx/core/interpreter.c	2026-11-12 09:53:07.314645700 +0100
 @@ -29,8 +29,22 @@
      JSVarRef **var_refs;
      size_t alloca_size;
@@ -2267,7 +2520,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
                      rt->current_exception = JS_UNINITIALIZED;
                      pc = b->byte_code_buf + pos;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/iteration.c engine/qjsx/core/iteration.c
---- build/qjsx-baseline/core/iteration.c	2026-11-12 08:54:32.471215900 +0100
+--- build/qjsx-baseline/core/iteration.c	2026-11-13 19:37:09.459068200 +0100
 +++ engine/qjsx/core/iteration.c	2026-11-11 16:04:41.524857300 +0100
 @@ -25,8 +25,8 @@
                                            JSValueConst this_val)
@@ -2281,7 +2534,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/iteration.c engine/qjsx/c
      return JS_UNDEFINED;
  }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/modules.c engine/qjsx/core/modules.c
---- build/qjsx-baseline/core/modules.c	2026-11-12 08:54:32.479221200 +0100
+--- build/qjsx-baseline/core/modules.c	2026-11-13 19:37:09.464067800 +0100
 +++ engine/qjsx/core/modules.c	2026-11-11 16:04:41.524857300 +0100
 @@ -1206,9 +1206,11 @@
              return JS_ATOM_NULL;
@@ -2318,9 +2571,1705 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/modules.c engine/qjsx/cor
  JSValue JS_GetImportMeta(JSContext *ctx, JSModuleDef *m)
  {
      JSValue obj;
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/rom-atoms.c engine/qjsx/core/rom-atoms.c
+--- build/qjsx-baseline/core/rom-atoms.c	1970-01-01 01:00:00.000000000 +0100
++++ engine/qjsx/core/rom-atoms.c	2026-11-13 19:24:26.771580900 +0100
+@@ -0,0 +1,1156 @@
++/*          _
++ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
++ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
++ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
++ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
++ */
++
++/* GENERATED by tools/rom-atoms/generate.sh: do not edit. Run it again after
++   a change of the engine's built-in objects (names added or removed). */
++
++#include "quickjs-internal.h"
++
++#if QJSX_ROM_ATOMS
++
++/* the layout of a name: the characters follow the JSString, as in a
++   string allocated by QuickJS */
++_Static_assert(offsetof(JSString, u) == sizeof(JSString), "characters after JSString");
++
++const QJSXRomAtoms qjsx_rom_atoms = {
++    .a1 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x14ed0e88, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 1 }, .text = "null" },
++    .a2 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x007f337a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 2 }, .text = "false" },
++    .a3 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1b6b6737, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 3 }, .text = "true" },
++    .a4 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 2, .hash = 0x00017a76, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 4 }, .text = "if" },
++    .a5 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x0b215eea, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 5 }, .text = "else" },
++    .a6 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1b081491, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 6 }, .text = "return" },
++    .a7 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x01928306, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 7 }, .text = "var" },
++    .a8 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1b60cd07, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 8 }, .text = "this" },
++    .a9 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x082273ac, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 9 }, .text = "delete" },
++    .a10 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1d9358fd, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 10 }, .text = "void" },
++    .a11 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x0d2f15ea, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 11 }, .text = "typeof" },
++    .a12 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x018a159f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 12 }, .text = "new" },
++    .a13 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 2, .hash = 0x00017a7e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 13 }, .text = "in" },
++    .a14 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x1d1cf505, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 14 }, .text = "instanceof" },
++    .a15 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 2, .hash = 0x0001755c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 15 }, .text = "do" },
++    .a16 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x37f4cb88, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 16 }, .text = "while" },
++    .a17 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x0181ae58, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 17 }, .text = "for" },
++    .a18 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x1e3901ee, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 18 }, .text = "break" },
++    .a19 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x1163f230, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 19 }, .text = "continue" },
++    .a20 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x13bbdead, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 20 }, .text = "switch" },
++    .a21 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x08ea9a21, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 21 }, .text = "case" },
++    .a22 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x280b39e8, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 22 }, .text = "default" },
++    .a23 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x207c1e45, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 23 }, .text = "throw" },
++    .a24 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x01907822, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 24 }, .text = "try" },
++    .a25 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x29056472, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 25 }, .text = "catch" },
++    .a26 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x2426eafa, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 26 }, .text = "finally" },
++    .a27 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x21bc22b1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 27 }, .text = "function" },
++    .a28 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x3d645ba2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 28 }, .text = "debugger" },
++    .a29 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1ea2a37f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 29 }, .text = "with" },
++    .a30 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x34dec707, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 30 }, .text = "class" },
++    .a31 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x382d3c8a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 31 }, .text = "const" },
++    .a32 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x0b237d62, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 32 }, .text = "enum" },
++    .a33 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x2e50fdcd, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 33 }, .text = "export" },
++    .a34 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x3f063ef8, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 34 }, .text = "extends" },
++    .a35 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x0bc83d3e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 35 }, .text = "import" },
++    .a36 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x11671aa2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 36 }, .text = "super" },
++    .a37 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x06f7e4a9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 37 }, .text = "implements" },
++    .a38 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x292b2db0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 38 }, .text = "interface" },
++    .a39 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x0187f93a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 39 }, .text = "let" },
++    .a40 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x37b79c55, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 40 }, .text = "package" },
++    .a41 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x2390faca, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 41 }, .text = "private" },
++    .a42 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x07c5f985, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 42 }, .text = "protected" },
++    .a43 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x2b062632, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 43 }, .text = "public" },
++    .a44 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x338d11f7, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 44 }, .text = "static" },
++    .a45 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x335cf1dc, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 45 }, .text = "yield" },
++    .a46 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x067551bd, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 46 }, .text = "await" },
++    .a47 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 0, .hash = 0x00000001, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 47 }, .text = "" },
++    .a48 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x119b7bd5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 48 }, .text = "keys" },
++    .a49 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1a4c584a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 49 }, .text = "size" },
++    .a50 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x06f8edf7, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 50 }, .text = "length" },
++    .a51 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x08eba4d0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 51 }, .text = "fileName" },
++    .a52 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x0dd3569e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 52 }, .text = "lineNumber" },
++    .a53 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x0d6de4e0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 53 }, .text = "columnNumber" },
++    .a54 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x22bf0f06, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 54 }, .text = "message" },
++    .a55 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x29068310, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 55 }, .text = "cause" },
++    .a56 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x0177c634, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 56 }, .text = "errors" },
++    .a57 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x1041af57, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 57 }, .text = "stack" },
++    .a58 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x14d7f3b4, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 58 }, .text = "name" },
++    .a59 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x15becee5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 59 }, .text = "toString" },
++    .a60 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x04732bf7, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 60 }, .text = "toLocaleString" },
++    .a61 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x267a59a7, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 61 }, .text = "valueOf" },
++    .a62 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x0b2bda5d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 62 }, .text = "eval" },
++    .a63 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x3dec1b59, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 63 }, .text = "prototype" },
++    .a64 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x09c4a631, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 64 }, .text = "constructor" },
++    .a65 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x266667aa, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 65 }, .text = "configurable" },
++    .a66 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x2fbb9aa9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 66 }, .text = "writable" },
++    .a67 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x17b4c6a9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 67 }, .text = "enumerable" },
++    .a68 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x13358b98, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 68 }, .text = "value" },
++    .a69 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x0182b245, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 69 }, .text = "get" },
++    .a70 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x018f5c91, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 70 }, .text = "set" },
++    .a71 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 2, .hash = 0x000180a0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 71 }, .text = "of" },
++    .a72 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x3081320f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 72 }, .text = "__proto__" },
++    .a73 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x3391bcaf, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 73 }, .text = "undefined" },
++    .a74 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x07bea6aa, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 74 }, .text = "number" },
++    .a75 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x31cc530f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 75 }, .text = "boolean" },
++    .a76 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x05f054ca, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 76 }, .text = "string" },
++    .a77 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x11ddb2a0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 77 }, .text = "object" },
++    .a78 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x125607b1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 78 }, .text = "symbol" },
++    .a79 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x3c163065, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 79 }, .text = "integer" },
++    .a80 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x3a1addd9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 80 }, .text = "unknown" },
++    .a81 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x3e06445d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 81 }, .text = "arguments" },
++    .a82 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1be70b6f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 82 }, .text = "callee" },
++    .a83 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1be70b7c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 83 }, .text = "caller" },
++    .a84 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x23a7f3d7, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 84 }, .text = "<eval>" },
++    .a85 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x09c808e0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 85 }, .text = "<ret>" },
++    .a86 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x0e1a1f6a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 86 }, .text = "<var>" },
++    .a87 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x2bec3ee3, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 87 }, .text = "<arg_var>" },
++    .a88 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x22b095c5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 88 }, .text = "<with>" },
++    .a89 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x31867383, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 89 }, .text = "lastIndex" },
++    .a90 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x134acfaa, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 90 }, .text = "target" },
++    .a91 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x26116c31, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 91 }, .text = "index" },
++    .a92 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x261e26e9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 92 }, .text = "input" },
++    .a93 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 16, .hash = 0x3b4946f7, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 93 }, .text = "defineProperties" },
++    .a94 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x3eee1b55, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 94 }, .text = "apply" },
++    .a95 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x109064f3, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 95 }, .text = "join" },
++    .a96 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x36683ba5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 96 }, .text = "concat" },
++    .a97 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x0bf70049, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 97 }, .text = "split" },
++    .a98 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x2b4c5396, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 98 }, .text = "construct" },
++    .a99 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x25300f94, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 99 }, .text = "getPrototypeOf" },
++    .a100 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x11a7d668, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 100 }, .text = "setPrototypeOf" },
++    .a101 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x3ec5152e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 101 }, .text = "isExtensible" },
++    .a102 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x12c48273, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 102 }, .text = "preventExtensions" },
++    .a103 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x0183bc59, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 103 }, .text = "has" },
++    .a104 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x3d2fe111, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 104 }, .text = "deleteProperty" },
++    .a105 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x035ee5a1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 105 }, .text = "defineProperty" },
++    .a106 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 24, .hash = 0x156a19f5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 106 }, .text = "getOwnPropertyDescriptor" },
++    .a107 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x027d54b9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 107 }, .text = "ownKeys" },
++    .a108 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x017c5c08, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 108 }, .text = "add" },
++    .a109 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x0a0ef003, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 109 }, .text = "done" },
++    .a110 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x14dc37d4, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 110 }, .text = "next" },
++    .a111 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x3c02699b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 111 }, .text = "values" },
++    .a112 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x37618b54, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 112 }, .text = "source" },
++    .a113 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x0c60ead6, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 113 }, .text = "flags" },
++    .a114 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x3e4f2c3c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 114 }, .text = "global" },
++    .a115 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x33d69fcc, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 115 }, .text = "unicode" },
++    .a116 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x018e4a47, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 116 }, .text = "raw" },
++    .a117 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x0fb9f467, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 117 }, .text = "rawJSON" },
++    .a118 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x0cee6f90, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 118 }, .text = "new.target" },
++    .a119 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 16, .hash = 0x18af09be, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 119 }, .text = "this.active_func" },
++    .a120 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x0e95a32a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 120 }, .text = "<home_object>" },
++    .a121 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 16, .hash = 0x338f9c0b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 121 }, .text = "<computed_field>" },
++    .a122 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 23, .hash = 0x07de42e8, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 122 }, .text = "<static_computed_field>" },
++    .a123 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 19, .hash = 0x1d5715ea, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 123 }, .text = "<class_fields_init>" },
++    .a124 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x0620bc12, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 124 }, .text = "<brand>" },
++    .a125 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x0827e460, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 125 }, .text = "#constructor" },
++    .a126 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 2, .hash = 0x0001724b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 126 }, .text = "as" },
++    .a127 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x0c3d4453, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 127 }, .text = "from" },
++    .a128 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x13c69f4e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 128 }, .text = "meta" },
++    .a129 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x026802b2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 129 }, .text = "*default*" },
++    .a130 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 1, .hash = 0x00000131, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 130 }, .text = "*" },
++    .a131 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x24d22895, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 131 }, .text = "Module" },
++    .a132 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1b60c8e6, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 132 }, .text = "then" },
++    .a133 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x2199f503, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 133 }, .text = "resolve" },
++    .a134 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x101f56b8, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 134 }, .text = "reject" },
++    .a135 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x08db9482, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 135 }, .text = "promise" },
++    .a136 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x36a332d5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 136 }, .text = "proxy" },
++    .a137 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1d2ce0df, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 137 }, .text = "revoke" },
++    .a138 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x02385a0b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 138 }, .text = "async" },
++    .a139 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x0b2dfad2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 139 }, .text = "exec" },
++    .a140 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x2d67a995, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 140 }, .text = "groups" },
++    .a141 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x2db1f2ee, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 141 }, .text = "indices" },
++    .a142 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x338d1e5b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 142 }, .text = "status" },
++    .a143 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x066bf2a5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 143 }, .text = "reason" },
++    .a144 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x2e0a4b82, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 144 }, .text = "globalThis" },
++    .a145 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x083e08d8, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 145 }, .text = "bigint" },
++    .a146 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 2, .hash = 0x00013c9c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 146 }, .text = "-0" },
++    .a147 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x22db7af1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 147 }, .text = "Infinity" },
++    .a148 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x13ee0c64, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 148 }, .text = "-Infinity" },
++    .a149 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x01684b3a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 149 }, .text = "NaN" },
++    .a150 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x204861b6, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 150 }, .text = "hasIndices" },
++    .a151 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x10ed3b3b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 151 }, .text = "ignoreCase" },
++    .a152 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x3c389e2c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 152 }, .text = "multiline" },
++    .a153 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x345b0519, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 153 }, .text = "dotAll" },
++    .a154 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x3c27c592, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 154 }, .text = "sticky" },
++    .a155 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x1f0c3175, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 155 }, .text = "unicodeSets" },
++    .a156 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x3753fe81, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 156 }, .text = "not-equal" },
++    .a157 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x37ef57bf, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 157 }, .text = "timed-out" },
++    .a158 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 2, .hash = 0x000180a5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 158 }, .text = "ok" },
++    .a159 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x0c1037ca, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 159 }, .text = "toISOString" },
++    .a160 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x267af0ec, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 160 }, .text = "alphabet" },
++    .a161 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x38173b6b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 161 }, .text = "lastChunkHandling" },
++    .a162 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x2198e15f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 162 }, .text = "omitPadding" },
++    .a163 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x0035facc, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 163 }, .text = "toJSON" },
++    .a164 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x29a97e51, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 164 }, .text = "maxByteLength" },
++    .a165 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1f38ddc0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 165 }, .text = "Object" },
++    .a166 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x1baea8f8, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 166 }, .text = "Array" },
++    .a167 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x105c4cd7, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 167 }, .text = "Error" },
++    .a168 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1519d1ca, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 168 }, .text = "Number" },
++    .a169 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x134b7fea, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 169 }, .text = "String" },
++    .a170 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x2a75a0ef, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 170 }, .text = "Boolean" },
++    .a171 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1fb132d1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 171 }, .text = "Symbol" },
++    .a172 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x26906c3d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 172 }, .text = "Arguments" },
++    .a173 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x310fdbb1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 173 }, .text = "Math" },
++    .a174 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x2dc031e1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 174 }, .text = "JSON" },
++    .a175 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x274da49f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 175 }, .text = "Date" },
++    .a176 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x17ab23d1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 176 }, .text = "Function" },
++    .a177 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x01855bda, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 177 }, .text = "GeneratorFunction" },
++    .a178 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x14ea15c3, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 178 }, .text = "ForInIterator" },
++    .a179 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1a181442, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 179 }, .text = "RegExp" },
++    .a180 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x3be38340, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 180 }, .text = "ArrayBuffer" },
++    .a181 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x139959eb, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 181 }, .text = "SharedArrayBuffer" },
++    .a182 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x3eb01ab4, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 182 }, .text = "Uint8ClampedArray" },
++    .a183 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x044405ff, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 183 }, .text = "Int8Array" },
++    .a184 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x2662965c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 184 }, .text = "Uint8Array" },
++    .a185 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x31a1fa56, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 185 }, .text = "Int16Array" },
++    .a186 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x3f0849e1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 186 }, .text = "Uint16Array" },
++    .a187 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x07c2cadc, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 187 }, .text = "Int32Array" },
++    .a188 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x15291a67, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 188 }, .text = "Uint32Array" },
++    .a189 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x2b6f8c3b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 189 }, .text = "BigInt64Array" },
++    .a190 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x2e172dfa, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 190 }, .text = "BigUint64Array" },
++    .a191 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x23b8c939, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 191 }, .text = "Float16Array" },
++    .a192 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x39d999bf, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 192 }, .text = "Float32Array" },
++    .a193 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x37b407c0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 193 }, .text = "Float64Array" },
++    .a194 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x19149548, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 194 }, .text = "DataView" },
++    .a195 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x15776dd8, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 195 }, .text = "BigInt" },
++    .a196 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x0be9da1a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 196 }, .text = "WeakRef" },
++    .a197 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 20, .hash = 0x247ba554, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 197 }, .text = "FinalizationRegistry" },
++    .a198 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x01673d2b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 198 }, .text = "Map" },
++    .a199 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x016d9671, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 199 }, .text = "Set" },
++    .a200 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x0be48f13, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 200 }, .text = "WeakMap" },
++    .a201 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x0beae859, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 201 }, .text = "WeakSet" },
++    .a202 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x0120349f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 202 }, .text = "Iterator" },
++    .a203 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 15, .hash = 0x327c611f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 203 }, .text = "Iterator Helper" },
++    .a204 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 15, .hash = 0x026201bd, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 204 }, .text = "Iterator Concat" },
++    .a205 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x1197b953, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 205 }, .text = "Iterator Wrap" },
++    .a206 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x06eb2ceb, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 206 }, .text = "Map Iterator" },
++    .a207 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x10fb1f55, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 207 }, .text = "Set Iterator" },
++    .a208 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x288efac6, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 208 }, .text = "Array Iterator" },
++    .a209 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 15, .hash = 0x2bdf27e4, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 209 }, .text = "String Iterator" },
++    .a210 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 22, .hash = 0x3c617acf, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 210 }, .text = "RegExp String Iterator" },
++    .a211 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x08b1234a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 211 }, .text = "Generator" },
++    .a212 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x113686b5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 212 }, .text = "Proxy" },
++    .a213 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x0184e262, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 213 }, .text = "Promise" },
++    .a214 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 22, .hash = 0x0971520a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 214 }, .text = "PromiseResolveFunction" },
++    .a215 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 21, .hash = 0x3e403999, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 215 }, .text = "PromiseRejectFunction" },
++    .a216 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x275c4d3b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 216 }, .text = "AsyncFunction" },
++    .a217 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 20, .hash = 0x372b5bd9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 217 }, .text = "AsyncFunctionResolve" },
++    .a218 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 19, .hash = 0x0e8041b2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 218 }, .text = "AsyncFunctionReject" },
++    .a219 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 22, .hash = 0x3fc82840, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 219 }, .text = "AsyncGeneratorFunction" },
++    .a220 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x27b2af30, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 220 }, .text = "AsyncGenerator" },
++    .a221 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x20778ebb, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 221 }, .text = "EvalError" },
++    .a222 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x12fdbe5c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 222 }, .text = "RangeError" },
++    .a223 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x22f79d9e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 223 }, .text = "ReferenceError" },
++    .a224 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x33bc728c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 224 }, .text = "SyntaxError" },
++    .a225 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x16c4f8dd, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 225 }, .text = "TypeError" },
++    .a226 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x3e962805, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 226 }, .text = "URIError" },
++    .a227 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x0d11fe12, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 227 }, .text = "InternalError" },
++    .a228 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x384dee5a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 228 }, .text = "AggregateError" },
++    .a243 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x052c83a5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 243 }, .text = "isError" },
++    .a244 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 2, .hash = 0x0001724c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 244 }, .text = "at" },
++    .a245 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x3a1194f2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 245 }, .text = "every" },
++    .a246 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1a52a015, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 246 }, .text = "some" },
++    .a247 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x07eb8979, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 247 }, .text = "forEach" },
++    .a248 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x0189034b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 248 }, .text = "map" },
++    .a249 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x2c0a1c01, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 249 }, .text = "filter" },
++    .a250 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x09aebfaf, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 250 }, .text = "reduce" },
++    .a251 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x357b76ed, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 251 }, .text = "reduceRight" },
++    .a252 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x0c33c184, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 252 }, .text = "fill" },
++    .a253 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x0c33c38a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 253 }, .text = "find" },
++    .a254 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x232ca470, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 254 }, .text = "findIndex" },
++    .a255 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x18bf6a48, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 255 }, .text = "findLast" },
++    .a256 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x2b9c9e62, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 256 }, .text = "findLastIndex" },
++    .a257 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x2971b4f0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 257 }, .text = "indexOf" },
++    .a258 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x089097a2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 258 }, .text = "lastIndexOf" },
++    .a259 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x2540edfc, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 259 }, .text = "includes" },
++    .a260 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x018c3c40, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 260 }, .text = "pop" },
++    .a261 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x17183e63, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 261 }, .text = "push" },
++    .a262 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x03472fe9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 262 }, .text = "shift" },
++    .a263 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x1cee2840, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 263 }, .text = "unshift" },
++    .a264 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x2e4aabd1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 264 }, .text = "reverse" },
++    .a265 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x1a045d46, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 265 }, .text = "toReversed" },
++    .a266 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1a52a547, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 266 }, .text = "sort" },
++    .a267 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x03f166d9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 267 }, .text = "toSorted" },
++    .a268 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x079d7e21, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 268 }, .text = "slice" },
++    .a269 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x0ac139ed, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 269 }, .text = "splice" },
++    .a270 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x09a1f49c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 270 }, .text = "toSpliced" },
++    .a271 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x29eee6d9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 271 }, .text = "copyWithin" },
++    .a272 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x242b7832, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 272 }, .text = "flatMap" },
++    .a273 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x0c36e0d2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 273 }, .text = "flat" },
++    .a274 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x2145feef, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 274 }, .text = "entries" },
++    .a275 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x107edfc6, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 275 }, .text = "isArray" },
++    .a276 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 20, .hash = 0x10ffb4cf, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 276 }, .text = "get [Symbol.species]" },
++    .a277 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x177e7632, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 277 }, .text = "hasOwnProperty" },
++    .a278 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x0ee3fe26, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 278 }, .text = "isPrototypeOf" },
++    .a279 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 20, .hash = 0x330b9df0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 279 }, .text = "propertyIsEnumerable" },
++    .a280 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x0bf7859d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 280 }, .text = "get __proto__" },
++    .a281 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x09b3d729, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 281 }, .text = "set __proto__" },
++    .a282 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 16, .hash = 0x3d1c2357, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 282 }, .text = "__defineGetter__" },
++    .a283 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 16, .hash = 0x18e282eb, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 283 }, .text = "__defineSetter__" },
++    .a284 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 16, .hash = 0x2291de46, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 284 }, .text = "__lookupGetter__" },
++    .a285 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 16, .hash = 0x3e583dda, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 285 }, .text = "__lookupSetter__" },
++    .a286 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x04262bcd, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 286 }, .text = "create" },
++    .a287 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 19, .hash = 0x0f237a22, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 287 }, .text = "getOwnPropertyNames" },
++    .a288 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 21, .hash = 0x0676e19d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 288 }, .text = "getOwnPropertySymbols" },
++    .a289 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x257f0635, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 289 }, .text = "groupBy" },
++    .a290 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 25, .hash = 0x0000ab26, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 290 }, .text = "getOwnPropertyDescriptors" },
++    .a291 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 2, .hash = 0x00017a83, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 291 }, .text = "is" },
++    .a292 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x015dc4d8, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 292 }, .text = "assign" },
++    .a293 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1a4805de, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 293 }, .text = "seal" },
++    .a294 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x2ae9deb0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 294 }, .text = "freeze" },
++    .a295 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x0d3d2467, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 295 }, .text = "isSealed" },
++    .a296 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x051b3753, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 296 }, .text = "isFrozen" },
++    .a297 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x15b375ed, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 297 }, .text = "fromEntries" },
++    .a298 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x3949520d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 298 }, .text = "hasOwn" },
++    .a299 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x08ea92f7, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 299 }, .text = "call" },
++    .a300 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x07dd722e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 300 }, .text = "bind" },
++    .a301 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x31a9e752, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 301 }, .text = "get fileName" },
++    .a302 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x04632d80, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 302 }, .text = "get lineNumber" },
++    .a303 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 16, .hash = 0x33986222, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 303 }, .text = "get columnNumber" },
++    .a304 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x0a121ba8, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 304 }, .text = "drop" },
++    .a305 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1b596bb0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 305 }, .text = "take" },
++    .a306 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x12b01265, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 306 }, .text = "toArray" },
++    .a307 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 24, .hash = 0x2b3773ad, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 307 }, .text = "get [Symbol.toStringTag]" },
++    .a308 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 24, .hash = 0x19a9a141, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 308 }, .text = "set [Symbol.toStringTag]" },
++    .a309 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x2cf0bb75, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 309 }, .text = "parseInt" },
++    .a310 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x26170bba, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 310 }, .text = "parseFloat" },
++    .a311 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x2b661568, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 311 }, .text = "isNaN" },
++    .a312 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x3d6d30b2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 312 }, .text = "isFinite" },
++    .a313 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x0517949d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 313 }, .text = "decodeURI" },
++    .a314 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 18, .hash = 0x2bd94530, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 314 }, .text = "decodeURIComponent" },
++    .a315 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x3aa80b0d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 315 }, .text = "encodeURI" },
++    .a316 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 18, .hash = 0x00d59e40, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 316 }, .text = "encodeURIComponent" },
++    .a317 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x0e50b1b2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 317 }, .text = "escape" },
++    .a318 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x28d9d313, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 318 }, .text = "unescape" },
++    .a319 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x308f8b91, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 319 }, .text = "toExponential" },
++    .a320 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x1acd2f68, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 320 }, .text = "toFixed" },
++    .a321 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x3388b51a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 321 }, .text = "toPrecision" },
++    .a322 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x2a673fb3, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 322 }, .text = "isInteger" },
++    .a323 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x0a73d4f6, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 323 }, .text = "isSafeInteger" },
++    .a324 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x379da6ad, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 324 }, .text = "MAX_VALUE" },
++    .a325 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x03d6cebb, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 325 }, .text = "MIN_VALUE" },
++    .a326 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x02464271, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 326 }, .text = "NEGATIVE_INFINITY" },
++    .a327 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x1700709d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 327 }, .text = "POSITIVE_INFINITY" },
++    .a328 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x27493f81, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 328 }, .text = "EPSILON" },
++    .a329 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 16, .hash = 0x283ad9d0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 329 }, .text = "MAX_SAFE_INTEGER" },
++    .a330 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 16, .hash = 0x17dfe152, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 330 }, .text = "MIN_SAFE_INTEGER" },
++    .a331 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x307af347, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 331 }, .text = "charCodeAt" },
++    .a332 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1c2fa192, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 332 }, .text = "charAt" },
++    .a333 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x38ebd6bd, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 333 }, .text = "codePointAt" },
++    .a334 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x1a699574, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 334 }, .text = "isWellFormed" },
++    .a335 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x3590352d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 335 }, .text = "toWellFormed" },
++    .a336 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x3f41ae8f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 336 }, .text = "endsWith" },
++    .a337 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x107588f0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 337 }, .text = "startsWith" },
++    .a338 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x0cb75a3c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 338 }, .text = "match" },
++    .a339 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x35ab6435, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 339 }, .text = "matchAll" },
++    .a340 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x3dfffec1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 340 }, .text = "search" },
++    .a341 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x2a1d4d98, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 341 }, .text = "substring" },
++    .a342 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x11cd08da, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 342 }, .text = "substr" },
++    .a343 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x16a0ceb4, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 343 }, .text = "repeat" },
++    .a344 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x06cb583b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 344 }, .text = "replace" },
++    .a345 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x163921de, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 345 }, .text = "replaceAll" },
++    .a346 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x25a43ef9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 346 }, .text = "padEnd" },
++    .a347 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x0db8fc00, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 347 }, .text = "padStart" },
++    .a348 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1b6b5aeb, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 348 }, .text = "trim" },
++    .a349 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x029c0678, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 349 }, .text = "trimEnd" },
++    .a350 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x047ba311, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 350 }, .text = "trimRight" },
++    .a351 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x2d8e1d4f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 351 }, .text = "trimStart" },
++    .a352 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x35d83672, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 352 }, .text = "trimLeft" },
++    .a353 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x3365c655, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 353 }, .text = "toLowerCase" },
++    .a354 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x24b47c1e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 354 }, .text = "toUpperCase" },
++    .a355 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x0cf9cf73, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 355 }, .text = "toLocaleLowerCase" },
++    .a356 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x3e48853c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 356 }, .text = "toLocaleUpperCase" },
++    .a357 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1e2a7e8e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 357 }, .text = "anchor" },
++    .a358 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x017d6f5f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 358 }, .text = "big" },
++    .a359 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x17bbce03, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 359 }, .text = "blink" },
++    .a360 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x07e3c546, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 360 }, .text = "bold" },
++    .a361 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x0938721b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 361 }, .text = "fixed" },
++    .a362 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x01e89aa3, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 362 }, .text = "fontcolor" },
++    .a363 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x332813a9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 363 }, .text = "fontsize" },
++    .a364 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x26f5bad2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 364 }, .text = "italics" },
++    .a365 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x12b53d9b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 365 }, .text = "link" },
++    .a366 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x08aaaa36, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 366 }, .text = "small" },
++    .a367 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x05f051b3, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 367 }, .text = "strike" },
++    .a368 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x018f6cef, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 368 }, .text = "sub" },
++    .a369 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x018f6cfd, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 369 }, .text = "sup" },
++    .a370 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x002170be, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 370 }, .text = "fromCharCode" },
++    .a371 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x39e52bc0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 371 }, .text = "fromCodePoint" },
++    .a372 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x1bc6e924, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 372 }, .text = "Reflect" },
++    .a373 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x0e53ba73, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 373 }, .text = "description" },
++    .a374 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 15, .hash = 0x1c197ca1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 374 }, .text = "get description" },
++    .a375 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1b2e4da3, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 375 }, .text = "keyFor" },
++    .a376 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x095ca963, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 376 }, .text = "toPrimitive" },
++    .a377 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x0b31337f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 377 }, .text = "iterator" },
++    .a378 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x1196bff5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 378 }, .text = "toStringTag" },
++    .a379 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 18, .hash = 0x2d93f8dc, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 379 }, .text = "isConcatSpreadable" },
++    .a380 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x2ad547ee, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 380 }, .text = "hasInstance" },
++    .a381 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x39d79863, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 381 }, .text = "species" },
++    .a382 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x3cfc4456, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 382 }, .text = "unscopables" },
++    .a383 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x201ce229, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 383 }, .text = "asyncIterator" },
++    .a384 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x3c46c259, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 384 }, .text = "asUintN" },
++    .a385 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x13d8c2c2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 385 }, .text = "asIntN" },
++    .a386 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x0c6c6e01, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 386 }, .text = "toUTCString" },
++    .a387 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x3fdb3653, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 387 }, .text = "toGMTString" },
++    .a388 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x32786783, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 388 }, .text = "toDateString" },
++    .a389 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x252aaa3a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 389 }, .text = "toTimeString" },
++    .a390 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 18, .hash = 0x398dc555, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 390 }, .text = "toLocaleDateString" },
++    .a391 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 18, .hash = 0x2c40080c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 391 }, .text = "toLocaleTimeString" },
++    .a392 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x2f109679, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 392 }, .text = "getTimezoneOffset" },
++    .a393 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x00f5b42a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 393 }, .text = "getTime" },
++    .a394 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x065d54d2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 394 }, .text = "getYear" },
++    .a395 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x021b17e1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 395 }, .text = "getFullYear" },
++    .a396 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x2dc44963, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 396 }, .text = "getUTCFullYear" },
++    .a397 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x36bee98b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 397 }, .text = "getMonth" },
++    .a398 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x3c0182d9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 398 }, .text = "getUTCMonth" },
++    .a399 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x2f940463, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 399 }, .text = "getDate" },
++    .a400 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x2f992325, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 400 }, .text = "getUTCDate" },
++    .a401 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x24ed4ffa, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 401 }, .text = "getHours" },
++    .a402 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x2a2fe948, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 402 }, .text = "getUTCHours" },
++    .a403 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x087f0c8a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 403 }, .text = "getMinutes" },
++    .a404 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x07eea878, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 404 }, .text = "getUTCMinutes" },
++    .a405 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x002587f2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 405 }, .text = "getSeconds" },
++    .a406 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x3f9523e0, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 406 }, .text = "getUTCSeconds" },
++    .a407 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 15, .hash = 0x3d057457, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 407 }, .text = "getMilliseconds" },
++    .a408 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 18, .hash = 0x137f8099, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 408 }, .text = "getUTCMilliseconds" },
++    .a409 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x376ba297, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 409 }, .text = "getDay" },
++    .a410 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x3864d745, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 410 }, .text = "getUTCDay" },
++    .a411 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x3bb636f6, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 411 }, .text = "setTime" },
++    .a412 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 15, .hash = 0x2c12b823, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 412 }, .text = "setMilliseconds" },
++    .a413 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 18, .hash = 0x17ef7aed, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 413 }, .text = "setUTCMilliseconds" },
++    .a414 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x09ebeb46, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 414 }, .text = "setSeconds" },
++    .a415 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x3d51756c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 415 }, .text = "setUTCSeconds" },
++    .a416 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x12456fde, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 416 }, .text = "setMinutes" },
++    .a417 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x05aafa04, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 417 }, .text = "setUTCMinutes" },
++    .a418 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x00b3af8e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 418 }, .text = "setHours" },
++    .a419 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x34fff494, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 419 }, .text = "setUTCHours" },
++    .a420 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x2a54872f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 420 }, .text = "setDate" },
++    .a421 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x395f8679, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 421 }, .text = "setUTCDate" },
++    .a422 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x1285491f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 422 }, .text = "setMonth" },
++    .a423 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x06d18e25, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 423 }, .text = "setUTCMonth" },
++    .a424 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x011dd79e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 424 }, .text = "setYear" },
++    .a425 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x0ceb232d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 425 }, .text = "setFullYear" },
++    .a426 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x1a3c1037, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 426 }, .text = "setUTCFullYear" },
++    .a427 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x018a1fe5, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 427 }, .text = "now" },
++    .a428 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x24377e6a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 428 }, .text = "parse" },
++    .a429 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x016fa12b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 429 }, .text = "UTC" },
++    .a430 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x2e023144, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 430 }, .text = "normalize" },
++    .a431 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x3d616a12, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 431 }, .text = "localeCompare" },
++    .a432 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x30245b24, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 432 }, .text = "get flags" },
++    .a433 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x3529eb76, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 433 }, .text = "get source" },
++    .a434 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x3c178c5e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 434 }, .text = "get global" },
++    .a435 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x077d121d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 435 }, .text = "get ignoreCase" },
++    .a436 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x17aef1ba, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 436 }, .text = "get multiline" },
++    .a437 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x3223653b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 437 }, .text = "get dotAll" },
++    .a438 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x2cb162ba, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 438 }, .text = "get unicode" },
++    .a439 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 15, .hash = 0x2cd1f3a3, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 439 }, .text = "get unicodeSets" },
++    .a440 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x39f025b4, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 440 }, .text = "get sticky" },
++    .a441 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x16d83898, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 441 }, .text = "get hasIndices" },
++    .a442 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x160ad342, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 442 }, .text = "compile" },
++    .a443 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x1b5dacbb, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 443 }, .text = "test" },
++    .a444 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x0042b980, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 444 }, .text = "revocable" },
++    .a445 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x35636319, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 445 }, .text = "getOrInsert" },
++    .a446 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 19, .hash = 0x17e97506, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 446 }, .text = "getOrInsertComputed" },
++    .a447 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x34e2ed4c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 447 }, .text = "clear" },
++    .a448 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x1a6f280c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 448 }, .text = "get size" },
++    .a449 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x2396e601, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 449 }, .text = "isDisjointFrom" },
++    .a450 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x2c9a13b4, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 450 }, .text = "isSubsetOf" },
++    .a451 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x28c887d9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 451 }, .text = "isSupersetOf" },
++    .a452 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x27890f72, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 452 }, .text = "intersection" },
++    .a453 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x2d49d896, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 453 }, .text = "difference" },
++    .a454 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 19, .hash = 0x0339d4bb, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 454 }, .text = "symmetricDifference" },
++    .a455 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x041f7dee, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 455 }, .text = "union" },
++    .a456 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x1e8666ff, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 456 }, .text = "byteLength" },
++    .a457 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x15163de1, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 457 }, .text = "get byteLength" },
++    .a458 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x1f502d1f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 458 }, .text = "get maxByteLength" },
++    .a459 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x02f9cc9a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 459 }, .text = "resizable" },
++    .a460 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x1e702028, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 460 }, .text = "get resizable" },
++    .a461 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x1a27e493, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 461 }, .text = "detached" },
++    .a462 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x02e62715, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 462 }, .text = "get detached" },
++    .a463 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x19e5de1d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 463 }, .text = "resize" },
++    .a464 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x00a50d04, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 464 }, .text = "transfer" },
++    .a465 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 21, .hash = 0x0e87ee03, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 465 }, .text = "transferToFixedLength" },
++    .a466 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x1e952a30, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 466 }, .text = "isView" },
++    .a467 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x2fb43346, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 467 }, .text = "growable" },
++    .a468 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x187275c8, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 468 }, .text = "get growable" },
++    .a469 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x0d52d8b4, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 469 }, .text = "grow" },
++    .a470 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x04c14e19, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 470 }, .text = "get length" },
++    .a471 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 6, .hash = 0x252e0139, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 471 }, .text = "buffer" },
++    .a472 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x22f6615b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 472 }, .text = "get buffer" },
++    .a473 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x19d1388c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 473 }, .text = "byteOffset" },
++    .a474 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 14, .hash = 0x10610f6e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 474 }, .text = "get byteOffset" },
++    .a475 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x185cb85a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 475 }, .text = "subarray" },
++    .a476 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x0a200b48, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 476 }, .text = "TypedArray" },
++    .a477 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 17, .hash = 0x0812fe0d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 477 }, .text = "BYTES_PER_ELEMENT" },
++    .a478 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x3bafd973, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 478 }, .text = "toBase64" },
++    .a479 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x27e6ce57, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 479 }, .text = "toHex" },
++    .a480 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x3777519a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 480 }, .text = "setFromBase64" },
++    .a481 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x23392708, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 481 }, .text = "setFromHex" },
++    .a482 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x07d236ea, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 482 }, .text = "fromBase64" },
++    .a483 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x026d9a38, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 483 }, .text = "fromHex" },
++    .a484 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x350da266, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 484 }, .text = "getInt8" },
++    .a485 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x19989a59, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 485 }, .text = "getUint8" },
++    .a486 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x0101cfcf, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 486 }, .text = "getInt16" },
++    .a487 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x0bc68a74, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 487 }, .text = "getUint16" },
++    .a488 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x0101d1d9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 488 }, .text = "getInt32" },
++    .a489 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x0bc68c7e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 489 }, .text = "getUint32" },
++    .a490 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x0214ab4a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 490 }, .text = "getBigInt64" },
++    .a491 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x2620c60b, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 491 }, .text = "getBigUint64" },
++    .a492 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x3f1f2274, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 492 }, .text = "getFloat16" },
++    .a493 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x3f1f247e, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 493 }, .text = "getFloat32" },
++    .a494 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x3f1f2795, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 494 }, .text = "getFloat64" },
++    .a495 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x2fce2532, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 495 }, .text = "setInt8" },
++    .a496 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x355ef9ed, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 496 }, .text = "setUint8" },
++    .a497 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x1cc82f63, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 497 }, .text = "setInt16" },
++    .a498 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x1492bb80, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 498 }, .text = "setUint16" },
++    .a499 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x1cc8316d, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 499 }, .text = "setInt32" },
++    .a500 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 9, .hash = 0x1492bd8a, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 500 }, .text = "setUint32" },
++    .a501 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 11, .hash = 0x0ce4b696, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 501 }, .text = "setBigInt64" },
++    .a502 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 12, .hash = 0x01dc611f, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 502 }, .text = "setBigUint64" },
++    .a503 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x08e585c8, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 503 }, .text = "setFloat16" },
++    .a504 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x08e587d2, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 504 }, .text = "setFloat32" },
++    .a505 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x08e58ae9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 505 }, .text = "setFloat64" },
++    .a506 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 7, .hash = 0x273e7bcf, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 506 }, .text = "Atomics" },
++    .a507 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x017c6448, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 507 }, .text = "all" },
++    .a508 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x132b6391, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 508 }, .text = "allSettled" },
++    .a509 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 3, .hash = 0x017c6663, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 509 }, .text = "any" },
++    .a510 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 4, .hash = 0x192e3aca, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 510 }, .text = "race" },
++    .a511 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 13, .hash = 0x13c1f4f6, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 511 }, .text = "withResolvers" },
++    .a512 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 5, .hash = 0x0a8500d9, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 512 }, .text = "deref" },
++    .a513 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 8, .hash = 0x02bd786c, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 513 }, .text = "register" },
++    .a514 = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = 10, .hash = 0x383129fd, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = 514 }, .text = "unregister" },
++};
++
++const JSAtomStruct *const qjsx_rom_atom_ptr[QJSX_ROM_ATOM_COUNT] = {
++    [1] = &qjsx_rom_atoms.a1.string,
++    [2] = &qjsx_rom_atoms.a2.string,
++    [3] = &qjsx_rom_atoms.a3.string,
++    [4] = &qjsx_rom_atoms.a4.string,
++    [5] = &qjsx_rom_atoms.a5.string,
++    [6] = &qjsx_rom_atoms.a6.string,
++    [7] = &qjsx_rom_atoms.a7.string,
++    [8] = &qjsx_rom_atoms.a8.string,
++    [9] = &qjsx_rom_atoms.a9.string,
++    [10] = &qjsx_rom_atoms.a10.string,
++    [11] = &qjsx_rom_atoms.a11.string,
++    [12] = &qjsx_rom_atoms.a12.string,
++    [13] = &qjsx_rom_atoms.a13.string,
++    [14] = &qjsx_rom_atoms.a14.string,
++    [15] = &qjsx_rom_atoms.a15.string,
++    [16] = &qjsx_rom_atoms.a16.string,
++    [17] = &qjsx_rom_atoms.a17.string,
++    [18] = &qjsx_rom_atoms.a18.string,
++    [19] = &qjsx_rom_atoms.a19.string,
++    [20] = &qjsx_rom_atoms.a20.string,
++    [21] = &qjsx_rom_atoms.a21.string,
++    [22] = &qjsx_rom_atoms.a22.string,
++    [23] = &qjsx_rom_atoms.a23.string,
++    [24] = &qjsx_rom_atoms.a24.string,
++    [25] = &qjsx_rom_atoms.a25.string,
++    [26] = &qjsx_rom_atoms.a26.string,
++    [27] = &qjsx_rom_atoms.a27.string,
++    [28] = &qjsx_rom_atoms.a28.string,
++    [29] = &qjsx_rom_atoms.a29.string,
++    [30] = &qjsx_rom_atoms.a30.string,
++    [31] = &qjsx_rom_atoms.a31.string,
++    [32] = &qjsx_rom_atoms.a32.string,
++    [33] = &qjsx_rom_atoms.a33.string,
++    [34] = &qjsx_rom_atoms.a34.string,
++    [35] = &qjsx_rom_atoms.a35.string,
++    [36] = &qjsx_rom_atoms.a36.string,
++    [37] = &qjsx_rom_atoms.a37.string,
++    [38] = &qjsx_rom_atoms.a38.string,
++    [39] = &qjsx_rom_atoms.a39.string,
++    [40] = &qjsx_rom_atoms.a40.string,
++    [41] = &qjsx_rom_atoms.a41.string,
++    [42] = &qjsx_rom_atoms.a42.string,
++    [43] = &qjsx_rom_atoms.a43.string,
++    [44] = &qjsx_rom_atoms.a44.string,
++    [45] = &qjsx_rom_atoms.a45.string,
++    [46] = &qjsx_rom_atoms.a46.string,
++    [47] = &qjsx_rom_atoms.a47.string,
++    [48] = &qjsx_rom_atoms.a48.string,
++    [49] = &qjsx_rom_atoms.a49.string,
++    [50] = &qjsx_rom_atoms.a50.string,
++    [51] = &qjsx_rom_atoms.a51.string,
++    [52] = &qjsx_rom_atoms.a52.string,
++    [53] = &qjsx_rom_atoms.a53.string,
++    [54] = &qjsx_rom_atoms.a54.string,
++    [55] = &qjsx_rom_atoms.a55.string,
++    [56] = &qjsx_rom_atoms.a56.string,
++    [57] = &qjsx_rom_atoms.a57.string,
++    [58] = &qjsx_rom_atoms.a58.string,
++    [59] = &qjsx_rom_atoms.a59.string,
++    [60] = &qjsx_rom_atoms.a60.string,
++    [61] = &qjsx_rom_atoms.a61.string,
++    [62] = &qjsx_rom_atoms.a62.string,
++    [63] = &qjsx_rom_atoms.a63.string,
++    [64] = &qjsx_rom_atoms.a64.string,
++    [65] = &qjsx_rom_atoms.a65.string,
++    [66] = &qjsx_rom_atoms.a66.string,
++    [67] = &qjsx_rom_atoms.a67.string,
++    [68] = &qjsx_rom_atoms.a68.string,
++    [69] = &qjsx_rom_atoms.a69.string,
++    [70] = &qjsx_rom_atoms.a70.string,
++    [71] = &qjsx_rom_atoms.a71.string,
++    [72] = &qjsx_rom_atoms.a72.string,
++    [73] = &qjsx_rom_atoms.a73.string,
++    [74] = &qjsx_rom_atoms.a74.string,
++    [75] = &qjsx_rom_atoms.a75.string,
++    [76] = &qjsx_rom_atoms.a76.string,
++    [77] = &qjsx_rom_atoms.a77.string,
++    [78] = &qjsx_rom_atoms.a78.string,
++    [79] = &qjsx_rom_atoms.a79.string,
++    [80] = &qjsx_rom_atoms.a80.string,
++    [81] = &qjsx_rom_atoms.a81.string,
++    [82] = &qjsx_rom_atoms.a82.string,
++    [83] = &qjsx_rom_atoms.a83.string,
++    [84] = &qjsx_rom_atoms.a84.string,
++    [85] = &qjsx_rom_atoms.a85.string,
++    [86] = &qjsx_rom_atoms.a86.string,
++    [87] = &qjsx_rom_atoms.a87.string,
++    [88] = &qjsx_rom_atoms.a88.string,
++    [89] = &qjsx_rom_atoms.a89.string,
++    [90] = &qjsx_rom_atoms.a90.string,
++    [91] = &qjsx_rom_atoms.a91.string,
++    [92] = &qjsx_rom_atoms.a92.string,
++    [93] = &qjsx_rom_atoms.a93.string,
++    [94] = &qjsx_rom_atoms.a94.string,
++    [95] = &qjsx_rom_atoms.a95.string,
++    [96] = &qjsx_rom_atoms.a96.string,
++    [97] = &qjsx_rom_atoms.a97.string,
++    [98] = &qjsx_rom_atoms.a98.string,
++    [99] = &qjsx_rom_atoms.a99.string,
++    [100] = &qjsx_rom_atoms.a100.string,
++    [101] = &qjsx_rom_atoms.a101.string,
++    [102] = &qjsx_rom_atoms.a102.string,
++    [103] = &qjsx_rom_atoms.a103.string,
++    [104] = &qjsx_rom_atoms.a104.string,
++    [105] = &qjsx_rom_atoms.a105.string,
++    [106] = &qjsx_rom_atoms.a106.string,
++    [107] = &qjsx_rom_atoms.a107.string,
++    [108] = &qjsx_rom_atoms.a108.string,
++    [109] = &qjsx_rom_atoms.a109.string,
++    [110] = &qjsx_rom_atoms.a110.string,
++    [111] = &qjsx_rom_atoms.a111.string,
++    [112] = &qjsx_rom_atoms.a112.string,
++    [113] = &qjsx_rom_atoms.a113.string,
++    [114] = &qjsx_rom_atoms.a114.string,
++    [115] = &qjsx_rom_atoms.a115.string,
++    [116] = &qjsx_rom_atoms.a116.string,
++    [117] = &qjsx_rom_atoms.a117.string,
++    [118] = &qjsx_rom_atoms.a118.string,
++    [119] = &qjsx_rom_atoms.a119.string,
++    [120] = &qjsx_rom_atoms.a120.string,
++    [121] = &qjsx_rom_atoms.a121.string,
++    [122] = &qjsx_rom_atoms.a122.string,
++    [123] = &qjsx_rom_atoms.a123.string,
++    [124] = &qjsx_rom_atoms.a124.string,
++    [125] = &qjsx_rom_atoms.a125.string,
++    [126] = &qjsx_rom_atoms.a126.string,
++    [127] = &qjsx_rom_atoms.a127.string,
++    [128] = &qjsx_rom_atoms.a128.string,
++    [129] = &qjsx_rom_atoms.a129.string,
++    [130] = &qjsx_rom_atoms.a130.string,
++    [131] = &qjsx_rom_atoms.a131.string,
++    [132] = &qjsx_rom_atoms.a132.string,
++    [133] = &qjsx_rom_atoms.a133.string,
++    [134] = &qjsx_rom_atoms.a134.string,
++    [135] = &qjsx_rom_atoms.a135.string,
++    [136] = &qjsx_rom_atoms.a136.string,
++    [137] = &qjsx_rom_atoms.a137.string,
++    [138] = &qjsx_rom_atoms.a138.string,
++    [139] = &qjsx_rom_atoms.a139.string,
++    [140] = &qjsx_rom_atoms.a140.string,
++    [141] = &qjsx_rom_atoms.a141.string,
++    [142] = &qjsx_rom_atoms.a142.string,
++    [143] = &qjsx_rom_atoms.a143.string,
++    [144] = &qjsx_rom_atoms.a144.string,
++    [145] = &qjsx_rom_atoms.a145.string,
++    [146] = &qjsx_rom_atoms.a146.string,
++    [147] = &qjsx_rom_atoms.a147.string,
++    [148] = &qjsx_rom_atoms.a148.string,
++    [149] = &qjsx_rom_atoms.a149.string,
++    [150] = &qjsx_rom_atoms.a150.string,
++    [151] = &qjsx_rom_atoms.a151.string,
++    [152] = &qjsx_rom_atoms.a152.string,
++    [153] = &qjsx_rom_atoms.a153.string,
++    [154] = &qjsx_rom_atoms.a154.string,
++    [155] = &qjsx_rom_atoms.a155.string,
++    [156] = &qjsx_rom_atoms.a156.string,
++    [157] = &qjsx_rom_atoms.a157.string,
++    [158] = &qjsx_rom_atoms.a158.string,
++    [159] = &qjsx_rom_atoms.a159.string,
++    [160] = &qjsx_rom_atoms.a160.string,
++    [161] = &qjsx_rom_atoms.a161.string,
++    [162] = &qjsx_rom_atoms.a162.string,
++    [163] = &qjsx_rom_atoms.a163.string,
++    [164] = &qjsx_rom_atoms.a164.string,
++    [165] = &qjsx_rom_atoms.a165.string,
++    [166] = &qjsx_rom_atoms.a166.string,
++    [167] = &qjsx_rom_atoms.a167.string,
++    [168] = &qjsx_rom_atoms.a168.string,
++    [169] = &qjsx_rom_atoms.a169.string,
++    [170] = &qjsx_rom_atoms.a170.string,
++    [171] = &qjsx_rom_atoms.a171.string,
++    [172] = &qjsx_rom_atoms.a172.string,
++    [173] = &qjsx_rom_atoms.a173.string,
++    [174] = &qjsx_rom_atoms.a174.string,
++    [175] = &qjsx_rom_atoms.a175.string,
++    [176] = &qjsx_rom_atoms.a176.string,
++    [177] = &qjsx_rom_atoms.a177.string,
++    [178] = &qjsx_rom_atoms.a178.string,
++    [179] = &qjsx_rom_atoms.a179.string,
++    [180] = &qjsx_rom_atoms.a180.string,
++    [181] = &qjsx_rom_atoms.a181.string,
++    [182] = &qjsx_rom_atoms.a182.string,
++    [183] = &qjsx_rom_atoms.a183.string,
++    [184] = &qjsx_rom_atoms.a184.string,
++    [185] = &qjsx_rom_atoms.a185.string,
++    [186] = &qjsx_rom_atoms.a186.string,
++    [187] = &qjsx_rom_atoms.a187.string,
++    [188] = &qjsx_rom_atoms.a188.string,
++    [189] = &qjsx_rom_atoms.a189.string,
++    [190] = &qjsx_rom_atoms.a190.string,
++    [191] = &qjsx_rom_atoms.a191.string,
++    [192] = &qjsx_rom_atoms.a192.string,
++    [193] = &qjsx_rom_atoms.a193.string,
++    [194] = &qjsx_rom_atoms.a194.string,
++    [195] = &qjsx_rom_atoms.a195.string,
++    [196] = &qjsx_rom_atoms.a196.string,
++    [197] = &qjsx_rom_atoms.a197.string,
++    [198] = &qjsx_rom_atoms.a198.string,
++    [199] = &qjsx_rom_atoms.a199.string,
++    [200] = &qjsx_rom_atoms.a200.string,
++    [201] = &qjsx_rom_atoms.a201.string,
++    [202] = &qjsx_rom_atoms.a202.string,
++    [203] = &qjsx_rom_atoms.a203.string,
++    [204] = &qjsx_rom_atoms.a204.string,
++    [205] = &qjsx_rom_atoms.a205.string,
++    [206] = &qjsx_rom_atoms.a206.string,
++    [207] = &qjsx_rom_atoms.a207.string,
++    [208] = &qjsx_rom_atoms.a208.string,
++    [209] = &qjsx_rom_atoms.a209.string,
++    [210] = &qjsx_rom_atoms.a210.string,
++    [211] = &qjsx_rom_atoms.a211.string,
++    [212] = &qjsx_rom_atoms.a212.string,
++    [213] = &qjsx_rom_atoms.a213.string,
++    [214] = &qjsx_rom_atoms.a214.string,
++    [215] = &qjsx_rom_atoms.a215.string,
++    [216] = &qjsx_rom_atoms.a216.string,
++    [217] = &qjsx_rom_atoms.a217.string,
++    [218] = &qjsx_rom_atoms.a218.string,
++    [219] = &qjsx_rom_atoms.a219.string,
++    [220] = &qjsx_rom_atoms.a220.string,
++    [221] = &qjsx_rom_atoms.a221.string,
++    [222] = &qjsx_rom_atoms.a222.string,
++    [223] = &qjsx_rom_atoms.a223.string,
++    [224] = &qjsx_rom_atoms.a224.string,
++    [225] = &qjsx_rom_atoms.a225.string,
++    [226] = &qjsx_rom_atoms.a226.string,
++    [227] = &qjsx_rom_atoms.a227.string,
++    [228] = &qjsx_rom_atoms.a228.string,
++    [243] = &qjsx_rom_atoms.a243.string,
++    [244] = &qjsx_rom_atoms.a244.string,
++    [245] = &qjsx_rom_atoms.a245.string,
++    [246] = &qjsx_rom_atoms.a246.string,
++    [247] = &qjsx_rom_atoms.a247.string,
++    [248] = &qjsx_rom_atoms.a248.string,
++    [249] = &qjsx_rom_atoms.a249.string,
++    [250] = &qjsx_rom_atoms.a250.string,
++    [251] = &qjsx_rom_atoms.a251.string,
++    [252] = &qjsx_rom_atoms.a252.string,
++    [253] = &qjsx_rom_atoms.a253.string,
++    [254] = &qjsx_rom_atoms.a254.string,
++    [255] = &qjsx_rom_atoms.a255.string,
++    [256] = &qjsx_rom_atoms.a256.string,
++    [257] = &qjsx_rom_atoms.a257.string,
++    [258] = &qjsx_rom_atoms.a258.string,
++    [259] = &qjsx_rom_atoms.a259.string,
++    [260] = &qjsx_rom_atoms.a260.string,
++    [261] = &qjsx_rom_atoms.a261.string,
++    [262] = &qjsx_rom_atoms.a262.string,
++    [263] = &qjsx_rom_atoms.a263.string,
++    [264] = &qjsx_rom_atoms.a264.string,
++    [265] = &qjsx_rom_atoms.a265.string,
++    [266] = &qjsx_rom_atoms.a266.string,
++    [267] = &qjsx_rom_atoms.a267.string,
++    [268] = &qjsx_rom_atoms.a268.string,
++    [269] = &qjsx_rom_atoms.a269.string,
++    [270] = &qjsx_rom_atoms.a270.string,
++    [271] = &qjsx_rom_atoms.a271.string,
++    [272] = &qjsx_rom_atoms.a272.string,
++    [273] = &qjsx_rom_atoms.a273.string,
++    [274] = &qjsx_rom_atoms.a274.string,
++    [275] = &qjsx_rom_atoms.a275.string,
++    [276] = &qjsx_rom_atoms.a276.string,
++    [277] = &qjsx_rom_atoms.a277.string,
++    [278] = &qjsx_rom_atoms.a278.string,
++    [279] = &qjsx_rom_atoms.a279.string,
++    [280] = &qjsx_rom_atoms.a280.string,
++    [281] = &qjsx_rom_atoms.a281.string,
++    [282] = &qjsx_rom_atoms.a282.string,
++    [283] = &qjsx_rom_atoms.a283.string,
++    [284] = &qjsx_rom_atoms.a284.string,
++    [285] = &qjsx_rom_atoms.a285.string,
++    [286] = &qjsx_rom_atoms.a286.string,
++    [287] = &qjsx_rom_atoms.a287.string,
++    [288] = &qjsx_rom_atoms.a288.string,
++    [289] = &qjsx_rom_atoms.a289.string,
++    [290] = &qjsx_rom_atoms.a290.string,
++    [291] = &qjsx_rom_atoms.a291.string,
++    [292] = &qjsx_rom_atoms.a292.string,
++    [293] = &qjsx_rom_atoms.a293.string,
++    [294] = &qjsx_rom_atoms.a294.string,
++    [295] = &qjsx_rom_atoms.a295.string,
++    [296] = &qjsx_rom_atoms.a296.string,
++    [297] = &qjsx_rom_atoms.a297.string,
++    [298] = &qjsx_rom_atoms.a298.string,
++    [299] = &qjsx_rom_atoms.a299.string,
++    [300] = &qjsx_rom_atoms.a300.string,
++    [301] = &qjsx_rom_atoms.a301.string,
++    [302] = &qjsx_rom_atoms.a302.string,
++    [303] = &qjsx_rom_atoms.a303.string,
++    [304] = &qjsx_rom_atoms.a304.string,
++    [305] = &qjsx_rom_atoms.a305.string,
++    [306] = &qjsx_rom_atoms.a306.string,
++    [307] = &qjsx_rom_atoms.a307.string,
++    [308] = &qjsx_rom_atoms.a308.string,
++    [309] = &qjsx_rom_atoms.a309.string,
++    [310] = &qjsx_rom_atoms.a310.string,
++    [311] = &qjsx_rom_atoms.a311.string,
++    [312] = &qjsx_rom_atoms.a312.string,
++    [313] = &qjsx_rom_atoms.a313.string,
++    [314] = &qjsx_rom_atoms.a314.string,
++    [315] = &qjsx_rom_atoms.a315.string,
++    [316] = &qjsx_rom_atoms.a316.string,
++    [317] = &qjsx_rom_atoms.a317.string,
++    [318] = &qjsx_rom_atoms.a318.string,
++    [319] = &qjsx_rom_atoms.a319.string,
++    [320] = &qjsx_rom_atoms.a320.string,
++    [321] = &qjsx_rom_atoms.a321.string,
++    [322] = &qjsx_rom_atoms.a322.string,
++    [323] = &qjsx_rom_atoms.a323.string,
++    [324] = &qjsx_rom_atoms.a324.string,
++    [325] = &qjsx_rom_atoms.a325.string,
++    [326] = &qjsx_rom_atoms.a326.string,
++    [327] = &qjsx_rom_atoms.a327.string,
++    [328] = &qjsx_rom_atoms.a328.string,
++    [329] = &qjsx_rom_atoms.a329.string,
++    [330] = &qjsx_rom_atoms.a330.string,
++    [331] = &qjsx_rom_atoms.a331.string,
++    [332] = &qjsx_rom_atoms.a332.string,
++    [333] = &qjsx_rom_atoms.a333.string,
++    [334] = &qjsx_rom_atoms.a334.string,
++    [335] = &qjsx_rom_atoms.a335.string,
++    [336] = &qjsx_rom_atoms.a336.string,
++    [337] = &qjsx_rom_atoms.a337.string,
++    [338] = &qjsx_rom_atoms.a338.string,
++    [339] = &qjsx_rom_atoms.a339.string,
++    [340] = &qjsx_rom_atoms.a340.string,
++    [341] = &qjsx_rom_atoms.a341.string,
++    [342] = &qjsx_rom_atoms.a342.string,
++    [343] = &qjsx_rom_atoms.a343.string,
++    [344] = &qjsx_rom_atoms.a344.string,
++    [345] = &qjsx_rom_atoms.a345.string,
++    [346] = &qjsx_rom_atoms.a346.string,
++    [347] = &qjsx_rom_atoms.a347.string,
++    [348] = &qjsx_rom_atoms.a348.string,
++    [349] = &qjsx_rom_atoms.a349.string,
++    [350] = &qjsx_rom_atoms.a350.string,
++    [351] = &qjsx_rom_atoms.a351.string,
++    [352] = &qjsx_rom_atoms.a352.string,
++    [353] = &qjsx_rom_atoms.a353.string,
++    [354] = &qjsx_rom_atoms.a354.string,
++    [355] = &qjsx_rom_atoms.a355.string,
++    [356] = &qjsx_rom_atoms.a356.string,
++    [357] = &qjsx_rom_atoms.a357.string,
++    [358] = &qjsx_rom_atoms.a358.string,
++    [359] = &qjsx_rom_atoms.a359.string,
++    [360] = &qjsx_rom_atoms.a360.string,
++    [361] = &qjsx_rom_atoms.a361.string,
++    [362] = &qjsx_rom_atoms.a362.string,
++    [363] = &qjsx_rom_atoms.a363.string,
++    [364] = &qjsx_rom_atoms.a364.string,
++    [365] = &qjsx_rom_atoms.a365.string,
++    [366] = &qjsx_rom_atoms.a366.string,
++    [367] = &qjsx_rom_atoms.a367.string,
++    [368] = &qjsx_rom_atoms.a368.string,
++    [369] = &qjsx_rom_atoms.a369.string,
++    [370] = &qjsx_rom_atoms.a370.string,
++    [371] = &qjsx_rom_atoms.a371.string,
++    [372] = &qjsx_rom_atoms.a372.string,
++    [373] = &qjsx_rom_atoms.a373.string,
++    [374] = &qjsx_rom_atoms.a374.string,
++    [375] = &qjsx_rom_atoms.a375.string,
++    [376] = &qjsx_rom_atoms.a376.string,
++    [377] = &qjsx_rom_atoms.a377.string,
++    [378] = &qjsx_rom_atoms.a378.string,
++    [379] = &qjsx_rom_atoms.a379.string,
++    [380] = &qjsx_rom_atoms.a380.string,
++    [381] = &qjsx_rom_atoms.a381.string,
++    [382] = &qjsx_rom_atoms.a382.string,
++    [383] = &qjsx_rom_atoms.a383.string,
++    [384] = &qjsx_rom_atoms.a384.string,
++    [385] = &qjsx_rom_atoms.a385.string,
++    [386] = &qjsx_rom_atoms.a386.string,
++    [387] = &qjsx_rom_atoms.a387.string,
++    [388] = &qjsx_rom_atoms.a388.string,
++    [389] = &qjsx_rom_atoms.a389.string,
++    [390] = &qjsx_rom_atoms.a390.string,
++    [391] = &qjsx_rom_atoms.a391.string,
++    [392] = &qjsx_rom_atoms.a392.string,
++    [393] = &qjsx_rom_atoms.a393.string,
++    [394] = &qjsx_rom_atoms.a394.string,
++    [395] = &qjsx_rom_atoms.a395.string,
++    [396] = &qjsx_rom_atoms.a396.string,
++    [397] = &qjsx_rom_atoms.a397.string,
++    [398] = &qjsx_rom_atoms.a398.string,
++    [399] = &qjsx_rom_atoms.a399.string,
++    [400] = &qjsx_rom_atoms.a400.string,
++    [401] = &qjsx_rom_atoms.a401.string,
++    [402] = &qjsx_rom_atoms.a402.string,
++    [403] = &qjsx_rom_atoms.a403.string,
++    [404] = &qjsx_rom_atoms.a404.string,
++    [405] = &qjsx_rom_atoms.a405.string,
++    [406] = &qjsx_rom_atoms.a406.string,
++    [407] = &qjsx_rom_atoms.a407.string,
++    [408] = &qjsx_rom_atoms.a408.string,
++    [409] = &qjsx_rom_atoms.a409.string,
++    [410] = &qjsx_rom_atoms.a410.string,
++    [411] = &qjsx_rom_atoms.a411.string,
++    [412] = &qjsx_rom_atoms.a412.string,
++    [413] = &qjsx_rom_atoms.a413.string,
++    [414] = &qjsx_rom_atoms.a414.string,
++    [415] = &qjsx_rom_atoms.a415.string,
++    [416] = &qjsx_rom_atoms.a416.string,
++    [417] = &qjsx_rom_atoms.a417.string,
++    [418] = &qjsx_rom_atoms.a418.string,
++    [419] = &qjsx_rom_atoms.a419.string,
++    [420] = &qjsx_rom_atoms.a420.string,
++    [421] = &qjsx_rom_atoms.a421.string,
++    [422] = &qjsx_rom_atoms.a422.string,
++    [423] = &qjsx_rom_atoms.a423.string,
++    [424] = &qjsx_rom_atoms.a424.string,
++    [425] = &qjsx_rom_atoms.a425.string,
++    [426] = &qjsx_rom_atoms.a426.string,
++    [427] = &qjsx_rom_atoms.a427.string,
++    [428] = &qjsx_rom_atoms.a428.string,
++    [429] = &qjsx_rom_atoms.a429.string,
++    [430] = &qjsx_rom_atoms.a430.string,
++    [431] = &qjsx_rom_atoms.a431.string,
++    [432] = &qjsx_rom_atoms.a432.string,
++    [433] = &qjsx_rom_atoms.a433.string,
++    [434] = &qjsx_rom_atoms.a434.string,
++    [435] = &qjsx_rom_atoms.a435.string,
++    [436] = &qjsx_rom_atoms.a436.string,
++    [437] = &qjsx_rom_atoms.a437.string,
++    [438] = &qjsx_rom_atoms.a438.string,
++    [439] = &qjsx_rom_atoms.a439.string,
++    [440] = &qjsx_rom_atoms.a440.string,
++    [441] = &qjsx_rom_atoms.a441.string,
++    [442] = &qjsx_rom_atoms.a442.string,
++    [443] = &qjsx_rom_atoms.a443.string,
++    [444] = &qjsx_rom_atoms.a444.string,
++    [445] = &qjsx_rom_atoms.a445.string,
++    [446] = &qjsx_rom_atoms.a446.string,
++    [447] = &qjsx_rom_atoms.a447.string,
++    [448] = &qjsx_rom_atoms.a448.string,
++    [449] = &qjsx_rom_atoms.a449.string,
++    [450] = &qjsx_rom_atoms.a450.string,
++    [451] = &qjsx_rom_atoms.a451.string,
++    [452] = &qjsx_rom_atoms.a452.string,
++    [453] = &qjsx_rom_atoms.a453.string,
++    [454] = &qjsx_rom_atoms.a454.string,
++    [455] = &qjsx_rom_atoms.a455.string,
++    [456] = &qjsx_rom_atoms.a456.string,
++    [457] = &qjsx_rom_atoms.a457.string,
++    [458] = &qjsx_rom_atoms.a458.string,
++    [459] = &qjsx_rom_atoms.a459.string,
++    [460] = &qjsx_rom_atoms.a460.string,
++    [461] = &qjsx_rom_atoms.a461.string,
++    [462] = &qjsx_rom_atoms.a462.string,
++    [463] = &qjsx_rom_atoms.a463.string,
++    [464] = &qjsx_rom_atoms.a464.string,
++    [465] = &qjsx_rom_atoms.a465.string,
++    [466] = &qjsx_rom_atoms.a466.string,
++    [467] = &qjsx_rom_atoms.a467.string,
++    [468] = &qjsx_rom_atoms.a468.string,
++    [469] = &qjsx_rom_atoms.a469.string,
++    [470] = &qjsx_rom_atoms.a470.string,
++    [471] = &qjsx_rom_atoms.a471.string,
++    [472] = &qjsx_rom_atoms.a472.string,
++    [473] = &qjsx_rom_atoms.a473.string,
++    [474] = &qjsx_rom_atoms.a474.string,
++    [475] = &qjsx_rom_atoms.a475.string,
++    [476] = &qjsx_rom_atoms.a476.string,
++    [477] = &qjsx_rom_atoms.a477.string,
++    [478] = &qjsx_rom_atoms.a478.string,
++    [479] = &qjsx_rom_atoms.a479.string,
++    [480] = &qjsx_rom_atoms.a480.string,
++    [481] = &qjsx_rom_atoms.a481.string,
++    [482] = &qjsx_rom_atoms.a482.string,
++    [483] = &qjsx_rom_atoms.a483.string,
++    [484] = &qjsx_rom_atoms.a484.string,
++    [485] = &qjsx_rom_atoms.a485.string,
++    [486] = &qjsx_rom_atoms.a486.string,
++    [487] = &qjsx_rom_atoms.a487.string,
++    [488] = &qjsx_rom_atoms.a488.string,
++    [489] = &qjsx_rom_atoms.a489.string,
++    [490] = &qjsx_rom_atoms.a490.string,
++    [491] = &qjsx_rom_atoms.a491.string,
++    [492] = &qjsx_rom_atoms.a492.string,
++    [493] = &qjsx_rom_atoms.a493.string,
++    [494] = &qjsx_rom_atoms.a494.string,
++    [495] = &qjsx_rom_atoms.a495.string,
++    [496] = &qjsx_rom_atoms.a496.string,
++    [497] = &qjsx_rom_atoms.a497.string,
++    [498] = &qjsx_rom_atoms.a498.string,
++    [499] = &qjsx_rom_atoms.a499.string,
++    [500] = &qjsx_rom_atoms.a500.string,
++    [501] = &qjsx_rom_atoms.a501.string,
++    [502] = &qjsx_rom_atoms.a502.string,
++    [503] = &qjsx_rom_atoms.a503.string,
++    [504] = &qjsx_rom_atoms.a504.string,
++    [505] = &qjsx_rom_atoms.a505.string,
++    [506] = &qjsx_rom_atoms.a506.string,
++    [507] = &qjsx_rom_atoms.a507.string,
++    [508] = &qjsx_rom_atoms.a508.string,
++    [509] = &qjsx_rom_atoms.a509.string,
++    [510] = &qjsx_rom_atoms.a510.string,
++    [511] = &qjsx_rom_atoms.a511.string,
++    [512] = &qjsx_rom_atoms.a512.string,
++    [513] = &qjsx_rom_atoms.a513.string,
++    [514] = &qjsx_rom_atoms.a514.string,
++};
++
++const uint16_t qjsx_rom_atom_hash[QJSX_ROM_ATOM_HASH_SIZE] = {
++    0, 47, 0, 109, 0, 226, 0, 0, 0, 0, 0, 0, 391, 448, 0, 0,
++    0, 0, 0, 0, 0, 246, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 24, 412, 0, 0, 0, 0, 460, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 272, 0, 0, 0, 0, 426, 0, 0, 0, 344, 0, 0, 0, 0,
++    219, 263, 0, 0, 0, 0, 0, 0, 0, 97, 49, 0, 0, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 201, 475, 0, 0, 0, 0, 0,
++    0, 0, 0, 381, 0, 79, 0, 0, 0, 0, 0, 0, 513, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 404, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 473, 0, 0, 0,
++    0, 0, 0, 0, 0, 131, 453, 0, 441, 408, 0, 0, 0, 327, 0, 0,
++    71, 0, 0, 0, 0, 158, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 312, 0, 469, 0, 0, 0, 0, 0, 0, 0, 0, 0, 370, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 273, 0, 0, 0, 0, 0, 145, 512, 342, 0, 379, 225, 0, 137,
++    85, 0, 0, 0, 0, 0, 132, 0, 0, 0, 0, 0, 160, 0, 0, 170,
++    337, 0, 0, 0, 0, 0, 0, 0, 166, 0, 0, 0, 0, 10, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 104, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 203,
++    422, 502, 0, 0, 372, 0, 0, 0, 0, 0, 0, 429, 0, 0, 0, 0,
++    0, 130, 0, 0, 0, 0, 0, 0, 0, 191, 39, 471, 0, 0, 0, 0,
++    0, 308, 0, 0, 430, 0, 0, 0, 402, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 330, 205, 0, 0, 0, 0, 0, 0, 0, 472, 0, 0, 0, 162,
++    0, 0, 0, 376, 396, 0, 0, 0, 0, 0, 0, 0, 0, 499, 0, 0,
++    0, 0, 0, 478, 0, 155, 0, 0, 0, 247, 0, 0, 0, 0, 0, 0,
++    444, 0, 0, 0, 252, 42, 0, 0, 0, 0, 0, 397, 0, 0, 0, 0,
++    0, 0, 332, 0, 0, 140, 0, 0, 0, 215, 480, 111, 0, 288, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 61, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 218, 317, 367, 0, 150, 0, 0, 0, 436, 0, 0, 46, 119, 192,
++    204, 0, 0, 0, 0, 0, 0, 0, 0, 0, 168, 0, 0, 0, 0, 0,
++    329, 0, 0, 0, 0, 0, 0, 0, 0, 488, 0, 0, 45, 0, 345, 0,
++    0, 174, 186, 0, 0, 0, 0, 0, 22, 0, 0, 181, 0, 269, 18, 496,
++    0, 0, 0, 0, 0, 106, 0, 44, 0, 0, 0, 0, 0, 514, 0, 0,
++    0, 0, 0, 0, 417, 0, 0, 0, 0, 0, 214, 138, 0, 298, 0, 72,
++    0, 0, 431, 0, 0, 0, 0, 0, 0, 0, 196, 361, 0, 435, 0, 0,
++    0, 21, 287, 303, 0, 0, 0, 0, 0, 383, 0, 0, 0, 0, 300, 0,
++    19, 466, 0, 0, 0, 0, 366, 0, 483, 0, 389, 0, 338, 0, 0, 0,
++    0, 0, 0, 0, 0, 69, 0, 116, 255, 0, 0, 126, 244, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 185, 0, 0, 384, 485, 0, 0, 62, 0, 0,
++    0, 0, 213, 0, 0, 306, 484, 188, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 326, 0, 102, 373, 487, 4, 492, 0, 0, 0, 0, 0, 0, 13, 0,
++    0, 0, 0, 291, 0, 0, 0, 0, 0, 0, 0, 0, 224, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 409, 0, 0, 0, 0, 0, 0, 0, 0,
++    77, 0, 36, 362, 0, 143, 0, 0, 0, 66, 0, 0, 0, 0, 0, 0,
++    0, 27, 129, 0, 182, 0, 0, 0, 0, 0, 438, 0, 0, 0, 0, 0,
++    0, 0, 385, 0, 0, 0, 208, 0, 0, 0, 41, 510, 163, 0, 0, 210,
++    0, 171, 139, 364, 0, 136, 113, 0, 0, 398, 0, 0, 187, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 122, 505, 0, 283, 348, 413, 141, 0,
++    0, 147, 0, 0, 0, 0, 0, 299, 0, 0, 26, 0, 0, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 315, 0, 75,
++    55, 350, 0, 318, 0, 0, 0, 0, 0, 445, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0, 432, 400, 290, 0, 0, 0, 120, 0, 0, 425, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 149, 151, 0, 0, 0, 0,
++    180, 0, 442, 0, 0, 0, 414, 331, 467, 476, 211, 248, 490, 0, 0, 0,
++    0, 0, 0, 0, 112, 94, 0, 282, 0, 63, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 161, 0, 0, 0, 82,
++    0, 0, 0, 0, 0, 309, 433, 0, 0, 0, 2, 0, 83, 0, 0, 29,
++    377, 498, 144, 89, 0, 0, 0, 0, 16, 0, 253, 0, 0, 0, 0, 0,
++    0, 319, 508, 0, 0, 0, 98, 0, 68, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 28, 439, 0, 96, 243, 0, 304, 363, 0, 0, 9, 307, 0, 0,
++    305, 173, 0, 0, 58, 450, 0, 0, 0, 0, 310, 0, 0, 0, 0, 0,
++    371, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 286, 0, 506,
++    0, 176, 264, 0, 0, 48, 0, 84, 0, 217, 177, 0, 0, 0, 0, 0,
++    406, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0,
++    347, 249, 0, 0, 0, 0, 0, 0, 108, 0, 0, 121, 0, 0, 0, 0,
++    0, 0, 124, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 354, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 393, 0, 0, 0, 0, 0,
++    0, 91, 0, 0, 0, 339, 0, 0, 0, 0, 0, 189, 114, 172, 0, 0,
++    260, 0, 179, 0, 0, 0, 0, 0, 507, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 127, 0, 40, 382, 407, 0, 103, 0, 0, 0, 81, 434, 0,
++    125, 0, 0, 399, 148, 0, 0, 117, 295, 0, 0, 0, 0, 0, 0, 0,
++    254, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 489, 493,
++    0, 0, 135, 0, 0, 0, 0, 0, 0, 0, 31, 403, 0, 0, 0, 0,
++    0, 6, 70, 461, 419, 0, 0, 0, 0, 0, 459, 0, 146, 270, 313, 175,
++    202, 374, 0, 0, 0, 0, 0, 0, 0, 37, 0, 0, 0, 0, 0, 73,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 107, 0, 443, 454, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 76, 0, 0, 0, 0, 276,
++    51, 0, 394, 0, 0, 0, 0, 167, 292, 0, 0, 0, 0, 0, 0, 0,
++    53, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 206, 0, 0, 0, 368,
++    257, 0, 245, 95, 0, 0, 323, 511, 0, 0, 0, 0, 0, 369, 0, 0,
++    0, 0, 0, 133, 464, 14, 446, 8, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 153, 321, 0, 0, 0, 0, 458,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 198, 0, 335, 101, 0,
++    314, 0, 495, 0, 0, 0, 0, 0, 0, 0, 0, 216, 356, 437, 35, 0,
++    0, 0, 0, 0, 0, 0, 265, 266, 194, 360, 0, 0, 447, 0, 0, 351,
++    0, 0, 0, 0, 197, 390, 0, 0, 0, 0, 0, 0, 15, 0, 0, 0,
++    0, 0, 32, 0, 0, 0, 0, 0, 311, 0, 0, 0, 415, 0, 0, 0,
++    0, 0, 0, 0, 334, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    302, 0, 0, 0, 0, 0, 0, 0, 0, 0, 500, 0, 0, 0, 0, 0,
++    0, 0, 154, 0, 0, 0, 0, 0, 341, 0, 0, 365, 0, 280, 223, 12,
++    0, 105, 0, 375, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    38, 0, 0, 0, 440, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    165, 0, 0, 178, 0, 88, 0, 0, 468, 503, 0, 0, 0, 33, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 195, 80, 285, 0, 0, 0, 293, 0,
++    0, 457, 0, 0, 0, 0, 0, 0, 0, 0, 11, 123, 0, 297, 455, 0,
++    279, 0, 0, 0, 0, 0, 0, 50, 0, 0, 190, 0, 259, 0, 0, 183,
++    0, 386, 449, 359, 465, 0, 0, 0, 0, 0, 0, 491, 0, 477, 0, 0,
++    0, 0, 227, 0, 0, 0, 0, 0, 0, 470, 0, 0, 0, 463, 0, 0,
++    0, 268, 0, 0, 0, 423, 278, 0, 0, 0, 0, 0, 152, 0, 0, 0,
++    0, 64, 43, 277, 56, 289, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    316, 0, 0, 0, 0, 23, 284, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 164, 0, 387, 0, 353, 0, 479, 17, 0, 228, 142, 184, 222, 0, 0,
++    0, 0, 256, 261, 509, 0, 0, 0, 100, 0, 428, 0, 0, 0, 0, 0,
++    0, 199, 352, 0, 0, 0, 0, 0, 349, 392, 421, 0, 0, 0, 0, 0,
++    0, 156, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 357, 336,
++    0, 0, 0, 0, 0, 0, 501, 0, 0, 0, 0, 0, 0, 0, 52, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 67, 74, 0, 0, 20, 324, 0,
++    294, 0, 0, 0, 343, 212, 0, 0, 134, 0, 0, 221, 325, 333, 0, 0,
++    0, 340, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 267, 271, 0, 0, 0, 0, 0,
++    0, 0, 0, 87, 0, 59, 0, 0, 0, 92, 5, 482, 0, 251, 0, 274,
++    0, 0, 0, 0, 0, 0, 411, 93, 34, 346, 0, 0, 0, 0, 0, 456,
++    0, 0, 0, 0, 0, 0, 54, 30, 481, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 200, 0, 462, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0, 0, 281, 0, 0, 0, 0, 0, 420,
++    220, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0, 0, 410, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0,
++    0, 0, 301, 296, 0, 207, 0, 57, 0, 0, 0, 0, 0, 0, 0, 358,
++    0, 0, 0, 497, 0, 0, 0, 0, 320, 0, 86, 0, 0, 0, 474, 0,
++    0, 0, 452, 355, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++    0, 328, 0, 388, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 418, 0,
++    118, 0, 0, 0, 99, 494, 0, 0, 0, 0, 0, 0, 0, 0, 424, 0,
++    0, 0, 258, 0, 0, 0, 0, 0, 0, 0, 65, 90, 0, 0, 0, 250,
++    0, 78, 0, 322, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 157,
++    193, 0, 0, 0, 0, 0, 275, 0, 0, 0, 159, 0, 115, 0, 0, 486,
++    0, 0, 504, 0, 110, 0, 0, 0, 0, 451, 0, 0, 0, 0, 416, 0,
++    0, 395, 0, 0, 209, 427, 0, 0, 0, 262, 169, 0, 0, 0, 380, 0,
++    0, 0, 405, 0, 0, 378, 0, 0, 0, 0, 401, 0, 0, 0, 0, 0,
++};
++
++#endif
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/rom-atoms.h engine/qjsx/core/rom-atoms.h
+--- build/qjsx-baseline/core/rom-atoms.h	1970-01-01 01:00:00.000000000 +0100
++++ engine/qjsx/core/rom-atoms.h	2026-11-13 19:24:26.767581400 +0100
+@@ -0,0 +1,532 @@
++/*          _
++ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
++ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
++ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
++ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
++ */
++
++/* GENERATED by tools/rom-atoms/generate.sh: do not edit. Run it again after
++   a change of the engine's built-in objects (names added or removed). */
++
++#ifndef QJSX_ROM_ATOMS_H
++#define QJSX_ROM_ATOMS_H
++
++/* atom indexes 0 .. QJSX_ROM_ATOM_COUNT - 1 are made at start */
++#define QJSX_ROM_ATOM_COUNT 515
++/* slots of qjsx_rom_atom_hash (a power of two) */
++#define QJSX_ROM_ATOM_HASH_SIZE 2048
++
++/* the names, each as QuickJS allocates an atom string */
++typedef struct QJSXRomAtoms {
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a1;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a2;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a3;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[3]; } a4;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a5;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a6;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a7;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a8;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a9;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a10;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a11;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a12;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[3]; } a13;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a14;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[3]; } a15;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a16;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a17;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a18;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a19;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a20;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a21;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a22;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a23;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a24;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a25;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a26;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a27;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a28;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a29;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a30;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a31;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a32;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a33;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a34;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a35;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a36;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a37;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a38;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a39;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a40;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a41;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a42;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a43;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a44;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a45;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a46;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[1]; } a47;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a48;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a49;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a50;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a51;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a52;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a53;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a54;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a55;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a56;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a57;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a58;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a59;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a60;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a61;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a62;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a63;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a64;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a65;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a66;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a67;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a68;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a69;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a70;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[3]; } a71;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a72;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a73;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a74;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a75;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a76;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a77;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a78;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a79;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a80;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a81;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a82;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a83;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a84;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a85;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a86;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a87;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a88;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a89;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a90;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a91;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a92;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[17]; } a93;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a94;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a95;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a96;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a97;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a98;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a99;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a100;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a101;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a102;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a103;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a104;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a105;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[25]; } a106;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a107;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a108;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a109;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a110;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a111;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a112;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a113;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a114;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a115;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a116;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a117;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a118;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[17]; } a119;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a120;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[17]; } a121;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[24]; } a122;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[20]; } a123;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a124;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a125;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[3]; } a126;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a127;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a128;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a129;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[2]; } a130;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a131;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a132;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a133;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a134;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a135;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a136;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a137;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a138;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a139;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a140;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a141;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a142;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a143;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a144;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a145;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[3]; } a146;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a147;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a148;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a149;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a150;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a151;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a152;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a153;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a154;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a155;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a156;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a157;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[3]; } a158;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a159;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a160;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a161;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a162;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a163;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a164;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a165;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a166;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a167;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a168;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a169;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a170;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a171;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a172;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a173;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a174;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a175;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a176;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a177;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a178;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a179;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a180;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a181;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a182;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a183;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a184;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a185;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a186;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a187;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a188;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a189;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a190;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a191;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a192;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a193;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a194;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a195;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a196;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[21]; } a197;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a198;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a199;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a200;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a201;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a202;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[16]; } a203;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[16]; } a204;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a205;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a206;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a207;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a208;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[16]; } a209;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[23]; } a210;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a211;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a212;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a213;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[23]; } a214;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[22]; } a215;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a216;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[21]; } a217;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[20]; } a218;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[23]; } a219;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a220;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a221;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a222;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a223;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a224;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a225;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a226;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a227;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a228;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a243;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[3]; } a244;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a245;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a246;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a247;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a248;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a249;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a250;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a251;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a252;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a253;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a254;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a255;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a256;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a257;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a258;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a259;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a260;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a261;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a262;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a263;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a264;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a265;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a266;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a267;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a268;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a269;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a270;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a271;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a272;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a273;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a274;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a275;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[21]; } a276;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a277;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a278;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[21]; } a279;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a280;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a281;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[17]; } a282;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[17]; } a283;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[17]; } a284;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[17]; } a285;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a286;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[20]; } a287;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[22]; } a288;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a289;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[26]; } a290;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[3]; } a291;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a292;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a293;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a294;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a295;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a296;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a297;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a298;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a299;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a300;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a301;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a302;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[17]; } a303;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a304;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a305;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a306;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[25]; } a307;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[25]; } a308;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a309;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a310;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a311;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a312;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a313;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[19]; } a314;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a315;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[19]; } a316;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a317;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a318;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a319;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a320;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a321;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a322;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a323;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a324;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a325;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a326;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a327;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a328;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[17]; } a329;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[17]; } a330;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a331;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a332;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a333;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a334;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a335;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a336;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a337;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a338;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a339;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a340;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a341;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a342;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a343;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a344;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a345;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a346;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a347;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a348;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a349;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a350;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a351;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a352;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a353;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a354;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a355;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a356;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a357;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a358;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a359;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a360;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a361;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a362;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a363;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a364;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a365;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a366;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a367;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a368;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a369;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a370;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a371;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a372;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a373;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[16]; } a374;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a375;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a376;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a377;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a378;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[19]; } a379;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a380;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a381;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a382;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a383;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a384;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a385;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a386;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a387;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a388;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a389;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[19]; } a390;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[19]; } a391;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a392;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a393;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a394;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a395;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a396;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a397;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a398;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a399;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a400;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a401;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a402;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a403;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a404;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a405;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a406;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[16]; } a407;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[19]; } a408;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a409;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a410;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a411;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[16]; } a412;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[19]; } a413;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a414;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a415;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a416;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a417;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a418;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a419;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a420;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a421;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a422;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a423;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a424;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a425;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a426;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a427;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a428;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a429;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a430;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a431;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a432;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a433;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a434;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a435;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a436;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a437;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a438;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[16]; } a439;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a440;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a441;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a442;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a443;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a444;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a445;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[20]; } a446;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a447;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a448;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a449;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a450;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a451;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a452;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a453;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[20]; } a454;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a455;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a456;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a457;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a458;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a459;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a460;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a461;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a462;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a463;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a464;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[22]; } a465;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a466;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a467;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a468;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a469;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a470;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[7]; } a471;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a472;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a473;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[15]; } a474;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a475;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a476;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[18]; } a477;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a478;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a479;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a480;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a481;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a482;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a483;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a484;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a485;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a486;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a487;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a488;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a489;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a490;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a491;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a492;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a493;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a494;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a495;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a496;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a497;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a498;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a499;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[10]; } a500;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[12]; } a501;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[13]; } a502;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a503;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a504;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a505;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[8]; } a506;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a507;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a508;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[4]; } a509;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[5]; } a510;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[14]; } a511;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[6]; } a512;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[9]; } a513;
++    struct { JSMallocBlockHeader header; JSString string; uint8_t text[11]; } a514;
++} QJSXRomAtoms;
++
++/* the names */
++extern const QJSXRomAtoms qjsx_rom_atoms;
++/* the string of each atom index, NULL for a predefined symbol (made in the
++   heap at start) */
++extern const JSAtomStruct *const qjsx_rom_atom_ptr[QJSX_ROM_ATOM_COUNT];
++/* open addressing by hash & (QJSX_ROM_ATOM_HASH_SIZE - 1): atom index, 0 =
++   empty slot */
++extern const uint16_t qjsx_rom_atom_hash[QJSX_ROM_ATOM_HASH_SIZE];
++
++#endif
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/core/runtime.c
---- build/qjsx-baseline/core/runtime.c	2026-11-12 08:54:32.465218400 +0100
-+++ engine/qjsx/core/runtime.c	2026-11-11 16:04:41.528421700 +0100
+--- build/qjsx-baseline/core/runtime.c	2026-11-13 19:37:09.442958400 +0100
++++ engine/qjsx/core/runtime.c	2026-11-13 19:23:32.423311500 +0100
 @@ -617,6 +617,7 @@
      rt->malloc_ctx.mf = *mf;
      rt->malloc_ctx.malloc_state = ms;
@@ -2349,7 +4298,19 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  
      list_for_each_safe(el, el1, &rt->job_list) {
          JSJobEntry *e = list_entry(el, JSJobEntry, link);
-@@ -1140,7 +1147,12 @@
+@@ -1040,6 +1047,11 @@
+     /* free the atoms */
+     for(i = 0; i < rt->atom_size; i++) {
+         JSAtomStruct *p = rt->atom_array[i];
++#if QJSX_ROM_ATOMS
++        /* qjsx: the names in read-only memory were not allocated */
++        if (!atom_is_free(p) && js_atom_is_rom(p))
++            continue;
++#endif
+         if (!atom_is_free(p)) {
+ #ifdef DUMP_LEAKS
+             list_del(&p->link);
+@@ -1140,7 +1152,12 @@
  
      if (JS_AddIntrinsicBaseObjects(ctx) ||
          JS_AddIntrinsicDate(ctx) ||
@@ -2363,9 +4324,29 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
          JS_AddIntrinsicRegExp(ctx) ||
          JS_AddIntrinsicJSON(ctx) ||
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.h
---- build/qjsx-baseline/quickjs.h	2026-11-12 08:54:32.822288000 +0100
-+++ engine/qjsx/quickjs.h	2026-11-11 16:04:41.535423300 +0100
-@@ -345,6 +345,14 @@
+--- build/qjsx-baseline/quickjs.h	2026-11-13 19:37:09.791638000 +0100
++++ engine/qjsx/quickjs.h	2026-11-13 19:36:10.845054600 +0100
+@@ -47,6 +47,19 @@
+ 
+ #define JS_BOOL int
+ 
++/* qjsx: the names of the engine's own objects (the predefined atoms and the
++   names of the built-in methods) are made once, in read-only memory (flash
++   on a device): engine/qjsx/core/rom-atoms.c, generated by
++   tools/rom-atoms/generate.sh. Their reference count is "immortal": it is
++   never written. 0 = the original QuickJS (every name copied in the heap). */
++#ifndef QJSX_ROM_ATOMS
++#define QJSX_ROM_ATOMS 1
++#endif
++
++/* qjsx: a reference count at or above this value is never changed (the
++   object or string lives in read-only memory) */
++#define JS_REF_COUNT_IMMORTAL 0x40000000
++
+ typedef struct JSRuntime JSRuntime;
+ typedef struct JSContext JSContext;
+ typedef struct JSClass JSClass;
+@@ -345,6 +358,14 @@
  /* allow top-level await in normal script. JS_Eval() returns a
     promise. Only allowed with JS_EVAL_TYPE_GLOBAL */
  #define JS_EVAL_FLAG_ASYNC (1 << 7)
@@ -2380,7 +4361,59 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.
  
  typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
  typedef JSValue JSCFunctionMagic(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic);
-@@ -966,6 +974,14 @@
+@@ -684,11 +705,19 @@
+     return (JSRefCountHeader *)((uint32_t *)ptr - 1);
+ }
+ 
++#if QJSX_ROM_ATOMS
++/* qjsx: true if the count may change (not an immortal value in read-only
++   memory) */
++#define JS_REF_COUNT_IS_MORTAL(p) js_likely((p)->ref_count < JS_REF_COUNT_IMMORTAL)
++#else
++#define JS_REF_COUNT_IS_MORTAL(p) 1
++#endif
++
+ static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+ {
+     if (JS_VALUE_HAS_REF_COUNT(v)) {
+         JSRefCountHeader *p = __js_rc(JS_VALUE_GET_PTR(v));
+-        if (--p->ref_count <= 0) {
++        if (JS_REF_COUNT_IS_MORTAL(p) && --p->ref_count <= 0) {
+             __JS_FreeValue(ctx, v);
+         }
+     }
+@@ -698,7 +727,7 @@
+ {
+     if (JS_VALUE_HAS_REF_COUNT(v)) {
+         JSRefCountHeader *p = __js_rc(JS_VALUE_GET_PTR(v));
+-        if (--p->ref_count <= 0) {
++        if (JS_REF_COUNT_IS_MORTAL(p) && --p->ref_count <= 0) {
+             __JS_FreeValueRT(rt, v);
+         }
+     }
+@@ -708,7 +737,9 @@
+ {
+     if (JS_VALUE_HAS_REF_COUNT(v)) {
+         JSRefCountHeader *p = __js_rc(JS_VALUE_GET_PTR(v));
+-        p->ref_count++;
++        if (JS_REF_COUNT_IS_MORTAL(p)) {
++            p->ref_count++;
++        }
+     }
+     return (JSValue)v;
+ }
+@@ -717,7 +748,9 @@
+ {
+     if (JS_VALUE_HAS_REF_COUNT(v)) {
+         JSRefCountHeader *p = __js_rc(JS_VALUE_GET_PTR(v));
+-        p->ref_count++;
++        if (JS_REF_COUNT_IS_MORTAL(p)) {
++            p->ref_count++;
++        }
+     }
+     return (JSValue)v;
+ }
+@@ -966,6 +999,14 @@
  /* return the import.meta object of a module */
  JSValue JS_GetImportMeta(JSContext *ctx, JSModuleDef *m);
  JSAtom JS_GetModuleName(JSContext *ctx, JSModuleDef *m);
@@ -2395,7 +4428,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.
  JSValue JS_GetModuleNamespace(JSContext *ctx, JSModuleDef *m);
  
  /* JS Job support */
-@@ -994,6 +1010,10 @@
+@@ -994,6 +1035,13 @@
  #define JS_READ_OBJ_REFERENCE (1 << 3) /* allow object references */
  JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
                        int flags);
@@ -2403,6 +4436,9 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.
 +   JS_ReadObject() refuses any other. For a loader that wants to refuse a
 +   program compiled for another engine before it loads anything. */
 +int JS_GetBytecodeVersion(void);
++/* qjsx: seeds the generator of Math.random() of 'ctx' (0 is taken as 1).
++   Without it the seed is the time at which the context was created. */
++void JS_SetRandomSeed(JSContext *ctx, uint64_t seed);
  /* instantiate and evaluate a bytecode function. Only used when
     reading a script or module with JS_ReadObject() */
  JSValue JS_EvalFunction(JSContext *ctx, JSValue fun_obj);
@@ -2719,8 +4755,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/qu
 +
 +#endif /* QUICKJS_DEBUG_H */
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx/quickjs-internal.h
---- build/qjsx-baseline/quickjs-internal.h	2026-11-12 08:54:32.499228600 +0100
-+++ engine/qjsx/quickjs-internal.h	2026-11-11 16:38:22.017953400 +0100
+--- build/qjsx-baseline/quickjs-internal.h	2026-11-13 19:37:09.482084100 +0100
++++ engine/qjsx/quickjs-internal.h	2026-11-13 19:22:34.664427400 +0100
 @@ -30,6 +30,7 @@
  #include "cutils.h"
  #include "list.h"
@@ -2817,7 +4853,35 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  
  #define JS_NEW_CTOR_NO_GLOBAL   (1 << 0) /* don't create a global binding */
  #define JS_NEW_CTOR_PROTO_CLASS (1 << 1) /* the prototype class is 'class_id' instead of JS_CLASS_OBJECT */
-@@ -1750,6 +1796,18 @@
+@@ -1607,9 +1653,27 @@
+     return (JSAtomStruct *)(((uintptr_t)v << 1) | 1);
+ }
+ 
++#if QJSX_ROM_ATOMS
++/* qjsx: the names made in read-only memory (core/rom-atoms.c) */
++#include "core/rom-atoms.h"
++
++/* qjsx: true if the atom string 'p' is one of the names in read-only memory
++   (never written, never freed; its atom index is in 'hash_next') */
++static inline BOOL js_atom_is_rom(const JSAtomStruct *p)
++{
++    const uint8_t *address = (const uint8_t *)p;
++    const uint8_t *begin = (const uint8_t *)&qjsx_rom_atoms;
++    return address >= begin && address < begin + sizeof(qjsx_rom_atoms);
++}
++#endif
++
+ /* same as JS_FreeValueRT() but faster */
+ static inline void js_free_string(JSRuntime *rt, JSString *str)
+ {
++    /* qjsx: a name in read-only memory is never freed */
++    if (!JS_REF_COUNT_IS_MORTAL(js_rc(str))) {
++        return;
++    }
+     if (--js_rc(str)->ref_count <= 0) {
+         if (str->atom_type) {
+             JS_FreeAtomStruct(rt, str);
+@@ -1750,6 +1814,18 @@
      }
  }
  
@@ -2837,7 +4901,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  static force_inline BOOL can_extend_fast_array(JSObject *p)
  {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-opcode.h engine/qjsx/quickjs-opcode.h
---- build/qjsx-baseline/quickjs-opcode.h	2026-11-12 08:54:32.871820000 +0100
+--- build/qjsx-baseline/quickjs-opcode.h	2026-11-13 19:37:09.841567600 +0100
 +++ engine/qjsx/quickjs-opcode.h	2026-11-11 16:04:41.534423300 +0100
 @@ -256,6 +256,8 @@
  DEF(is_undefined_or_null, 1, 1, 1, none)

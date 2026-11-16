@@ -18,6 +18,7 @@
 #include "loop.h"
 #include "files.h"
 #include "permissions.h"
+#include "random.h"
 #include "version.h"
 
 #if defined(_WIN32)
@@ -153,6 +154,119 @@ bool writeStdout(js::Str text) {
 bool writeStderr(js::Str text) {
     rt::writeOutput(rt::OUTPUT_STDERR, text.data(), text.size());
     return true;
+}
+
+// ### crypto: random values ###################################################
+
+const size_t MAX_RANDOM_VALUES = 65536;   // bytes per getRandomValues() call (web standard)
+
+/**
+ * True when 'array' (a typed array of 'elementSize' bytes per element) holds
+ * floats: its class is the one of a new Float16Array / Float32Array /
+ * Float64Array of that element size (QuickJS has no public test).
+ */
+bool isFloatArray(JSContext *ctx, JSValueConst array, size_t elementSize) {
+    // the float kind of that element size, if any
+    JSTypedArrayEnum kind;
+    if (elementSize == 2) {
+        kind = JS_TYPED_ARRAY_FLOAT16;
+    } else if (elementSize == 4) {
+        kind = JS_TYPED_ARRAY_FLOAT32;
+    } else if (elementSize == 8) {
+        kind = JS_TYPED_ARRAY_FLOAT64;
+    } else {
+        return false;
+    }
+
+    // an empty array of that kind, to compare the classes (JS_NewTypedArray
+    // always reads 3 arguments)
+    JSValue arguments[3] = { JS_NewInt32(ctx, 0), JS_UNDEFINED, JS_UNDEFINED };
+    JSValue sample = JS_NewTypedArray(ctx, 3, arguments, kind);
+    bool isFloat = !JS_IsException(sample) && JS_GetClassID(sample) == JS_GetClassID(array);
+    JS_FreeValue(ctx, sample);
+    return isFloat;
+}
+
+/**
+ * Throws the error of the web standard for a request too large: an Error
+ * named "QuotaExceededError" (no DOMException in qjsx).
+ */
+void failQuotaExceeded(JSContext *ctx, size_t size) {
+    // a plain Error, then its name
+    (void)js::fail("crypto.getRandomValues: %lu bytes asked, %lu at most", (unsigned long)size, (unsigned long)MAX_RANDOM_VALUES);
+    JSValue error = JS_GetException(ctx);
+    JS_SetPropertyStr(ctx, error, "name", JS_NewString(ctx, "QuotaExceededError"));
+    JS_Throw(ctx, error);
+}
+
+/**
+ * crypto.getRandomValues(array): fills an integer typed array with random
+ * bytes and returns it (web standard). TypeError for anything else (a float
+ * array, a DataView, an ArrayBuffer), QuotaExceededError above 65536 bytes.
+ */
+js::Value getRandomValues(js::Value array) {
+    JSContext *ctx = js::context();
+
+    // a typed array: where its bytes are (anything else throws: replaced by
+    // our own message)
+    size_t offset = 0;
+    size_t size = 0;
+    size_t elementSize = 0;
+    JSValue buffer = JS_GetTypedArrayBuffer(ctx, array.get(), &offset, &size, &elementSize);
+    if (JS_IsException(buffer)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return js::fail<js::TypeError>("crypto.getRandomValues: the argument must be an integer typed array");
+    }
+
+    // integers only, 65536 bytes at most
+    if (isFloatArray(ctx, array.get(), elementSize)) {
+        JS_FreeValue(ctx, buffer);
+        return js::fail<js::TypeError>("crypto.getRandomValues: the argument must be an integer typed array, not a float one");
+    }
+    if (size > MAX_RANDOM_VALUES) {
+        JS_FreeValue(ctx, buffer);
+        failQuotaExceeded(ctx, size);
+        return js::Value();
+    }
+
+    // fill its bytes
+    size_t bufferSize = 0;
+    uint8_t *bytes = JS_GetArrayBuffer(ctx, &bufferSize, buffer);
+    JS_FreeValue(ctx, buffer);
+    if (bytes == nullptr) {
+        return js::fail<js::TypeError>("crypto.getRandomValues: the array has no memory (detached buffer)");
+    }
+    rt::randomBytes(bytes + offset, size);
+    return array;
+}
+
+/**
+ * crypto.randomUUID(): a random UUID, version 4, as 36 lowercase characters
+ * (web standard).
+ */
+js::Value randomUUID() {
+    // 16 random bytes, then the version (4) and the variant (10xx)
+    uint8_t bytes[16];
+    rt::randomBytes(bytes, sizeof(bytes));
+    bytes[6] = (uint8_t)((bytes[6] & 0x0F) | 0x40);
+    bytes[8] = (uint8_t)((bytes[8] & 0x3F) | 0x80);
+
+    // 8-4-4-4-12 hexadecimal digits
+    static const char digits[] = "0123456789abcdef";
+    char text[37];
+    int position = 0;
+    for (int index = 0; index < 16; index++) {
+        bool dashBefore = index == 4 || index == 6 || index == 8 || index == 10;
+        if (dashBefore) {
+            text[position++] = '-';
+        }
+        text[position++] = digits[bytes[index] >> 4];
+        text[position++] = digits[bytes[index] & 0x0F];
+    }
+    text[position] = '\0';
+
+    JSContext *ctx = js::context();
+    return js::Value(ctx, JS_NewString(ctx, text));
 }
 
 // ### timers ##################################################################
@@ -443,11 +557,42 @@ public:
     }
 };
 
+#ifdef QJSX_ALLOC_HISTOGRAM
+/**
+ * Measure (temporary, QJSX_ALLOC_HISTOGRAM): the blocks of the JS heap by
+ * size, one line "size live made" per size in use, then the total.
+ */
+js::Str allocHistogram() {
+    // room for every line (static: js::Str keeps the pointer, it does not
+    // copy the text)
+    const JSAllocHistogram *histogram = JS_GetAllocHistogram();
+    const size_t capacity = 64 * JS_ALLOC_HISTOGRAM_STEPS + 128;
+    static char text[capacity];
+    size_t length = 0;
+
+    // one line per size, the live bytes summed
+    uint32_t liveBytes = 0;
+    for (int step = 0; step < JS_ALLOC_HISTOGRAM_STEPS; step++) {
+        if (histogram->made[step] == 0) {
+            continue;
+        }
+        bool larger = step == JS_ALLOC_HISTOGRAM_STEPS - 1;
+        liveBytes += larger ? histogram->large_live_bytes : histogram->live[step] * step * 8;
+        length += snprintf(text + length, capacity - length, "%s%d %lu %lu\n", larger ? ">=" : "", step * 8,
+            (unsigned long)histogram->live[step], (unsigned long)histogram->made[step]);
+    }
+    length += snprintf(text + length, capacity - length, "live bytes %lu", (unsigned long)liveBytes);
+
+    // the JS string is made from the text when the function returns
+    return js::Str(text, length);
+}
+#endif
+
 } // namespace
 
 /**
  * The global objects installed by rt::installGlobals: console, timers,
- * TextEncoder / TextDecoder and process.
+ * TextEncoder / TextDecoder, crypto and process.
  */
 JS_GLOBALS(runtime, globals) {
     // console: log / info / debug on stdout, warn / error on stderr
@@ -465,9 +610,20 @@ JS_GLOBALS(runtime, globals) {
     JS_FUNCTION(globals, clearTimeout);
     JS_FUNCTION(globals, clearInterval);
 
+#ifdef QJSX_ALLOC_HISTOGRAM
+    // measure (temporary): sizes of the blocks of the JS heap
+    JS_FUNCTION_AS(globals, allocHistogram, "__allocHistogram");
+#endif
+
     // UTF-8 encoder and decoder
     JS_ADD_CLASS(globals, TextEncoder);
     JS_ADD_CLASS(globals, TextDecoder);
+
+    // crypto: random values (web standard)
+    globals.object("crypto", [](js::ModuleBuilder &crypto) {
+        JS_FUNCTION(crypto, getRandomValues);
+        JS_FUNCTION(crypto, randomUUID);
+    });
 
     // process: platform, versions, argv and env (read once, now), exit,
     // cwd, stdout.write, stderr.write

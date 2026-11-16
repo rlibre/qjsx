@@ -41,7 +41,14 @@ void jsTask(void *) {
  * stack, on core 1, then returns (the main task ends).
  */
 extern "C" void app_main(void) {
+    // the random generator, seeded while nothing uses the ADC yet
+    platform::startRandom();
+
+    // the files of the programs: the "data" partition on /data
+    board::mountData();
+
     // the hardware modules of this port, before any program runs
+    rt::registerNativeModule("device/board", &jsNewModule_board);
     rt::registerNativeModule("device/gpio", &jsNewModule_gpio);
     rt::registerNativeModule("device/rmt", &jsNewModule_rmt);
     rt::registerNativeModule("device/i2c", &jsNewModule_i2c);

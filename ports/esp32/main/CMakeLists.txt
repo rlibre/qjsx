@@ -28,6 +28,7 @@ idf_component_register(
         ${QJSX_COMMON_SOURCES}
         ${QJSX_FREERTOS_SOURCES}
         ${QJSX_FREERTOS_GPIO_SOURCES}
+        ${QJSX_DEVICE_BOARD_SOURCES}
         ${QJSX_DEVICE_GPIO_SOURCES}
         ${QJSX_DEVICE_RMT_SOURCES}
         ${QJSX_DEVICE_I2C_SOURCES}
@@ -49,15 +50,19 @@ idf_component_register(
         "${QJSX_BOARD_INCLUDE}"
         ${QJSX_INCLUDE_DIRS}
     REQUIRES
+        bootloader_support
         esp_adc
         esp_driver_gpio
         esp_driver_i2c
         esp_driver_ledc
         esp_driver_rmt
         esp_driver_uart
+        esp_hw_support
         esp_partition
         esp_psram
         esp_timer
+        joltwallet__littlefs
+        mbedtls
         spi_flash
         vfs
         ${QJSX_USB_REQUIRES})

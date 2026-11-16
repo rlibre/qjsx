@@ -20,7 +20,8 @@
 import { encode, decode } from "qjsx:cbor";
 
 export const PROTOCOL_VERSION = 1;
-export const DEFAULT_MAX_MESSAGE = 65536;
+export const DEFAULT_MAX_MESSAGE = 65536;   // a device that does not say (HELLO MAX_MESSAGE)
+export const MIN_MAX_MESSAGE = 4096;        // smallest maximum a device may choose
 export const UPLOAD_CHUNK = 2048;
 
 export const KIND = {
@@ -28,7 +29,9 @@ export const KIND = {
     ERROR: 2,
     // session
     HELLO: 10,          // { PROTOCOL, TOKEN? } -> { PROTOCOL, AGENT, ENGINE, VERSION?, MAX_MESSAGE, NATIVES? }
-    INFO: 11,           // {} -> { RUNNING, BUILD_ID, PACKAGE_SIZE }
+    INFO: 11,           // {} -> { RUNNING, BUILD_ID, PACKAGE_SIZE, VOLATILE, DATA_USED?, DATA_TOTAL?,
+                        //        JS_HEAP_USED?, JS_HEAP_PEAK?, RAM_FREE?, RAM_LARGEST?, RAM_LOWEST?,
+                        //        PSRAM_FREE?, PSRAM_LARGEST? }
     // deployment
     UPLOAD_BEGIN: 20,   // { SIZE, SHA256, BUILD_ID, BYTECODE } -> {}; refused if the device reads another bytecode
     UPLOAD_CHUNK: 21,   // { OFFSET, DATA } -> {}
@@ -75,7 +78,23 @@ export const KIND = {
     RESUMED: 61,        // {}
     SCRIPT_LOADED: 62,  // { MODULE }   a module was loaded and is not run yet: the device
                         //   waits for RESUME (the host sets the stops of the module first)
+
+    // the files of the data folder of the device (qjsx device ls | read | write | rm |
+    // mkdir | mv). PATH: relative to the data folder, '/' separators, ".." refused. An
+    // error answer carries ERROR_CODE, a Node-like code ("ENOENT", "ENOSYS": no file
+    // system on this device...)
+    FILE_LIST: 70,        // { PATH } -> { ENTRIES: [[name, size, isDirectory]] }
+    FILE_READ: 71,        // { PATH, OFFSET } -> { DATA (FILE_CHUNK bytes at most), SIZE (of the file) }
+    FILE_WRITE_BEGIN: 72, // { PATH, SIZE } -> {}   written to "<path>.qjsx-part"
+    FILE_WRITE_CHUNK: 73, // { OFFSET, DATA } -> {}
+    FILE_WRITE_END: 74,   // {} -> {}   every byte arrived: renamed onto PATH
+    FILE_REMOVE: 75,      // { PATH } -> {}   a file, or an empty folder
+    FILE_MKDIR: 76,       // { PATH } -> {}
+    FILE_RENAME: 77,      // { PATH, TO } -> {}   a file replaces a file; folders never replace
 };
+
+// Largest piece of a file read by one FILE_READ (common/agent/protocol.h).
+export const FILE_CHUNK = 2048;
 
 export const KEY = {
     PROTOCOL: 1,
@@ -122,6 +141,18 @@ export const KEY = {
     VERSION: 43,        // HELLO answer: qjsx version of the firmware (older firmware: absent)
     NATIVES: 42,        // HELLO answer: names of the native modules of the firmware (older firmware: absent)
     VOLATILE: 44,       // UPLOAD_BEGIN: the package goes to RAM (lost at restart); INFO answer: the package is in RAM
+    PATH: 45,           // FILE_*: a path in the data folder
+    ENTRIES: 46,        // FILE_LIST answer
+    TO: 47,             // FILE_RENAME: the new path
+    DATA_USED: 48,      // INFO answer: bytes used by the files of the data folder (no file system: absent)
+    DATA_TOTAL: 49,     // INFO answer: bytes of the data partition (absent when unknown: the desktop)
+    JS_HEAP_USED: 50,   // INFO answer: bytes of the JS heap of the running program (0 when none runs)
+    JS_HEAP_PEAK: 51,   // INFO answer: most bytes of JS heap of the current, or last, run
+    RAM_FREE: 52,       // INFO answer: free internal RAM (absent when unknown: the desktop)
+    RAM_LARGEST: 53,    // INFO answer: largest free block of internal RAM
+    RAM_LOWEST: 54,     // INFO answer: lowest free internal RAM since the boot
+    PSRAM_FREE: 55,     // INFO answer: free PSRAM (absent without PSRAM)
+    PSRAM_LARGEST: 56,  // INFO answer: largest free block of PSRAM
 };
 
 export const STREAM = { STDOUT: 1, STDERR: 2 };
@@ -172,6 +203,33 @@ export function encodeStops(functions) {
         }
     }
     return bytes;
+}
+
+// Cuts the stops of 'functions' ([{ number, offsets }]) into groups whose
+// encodeStops() takes at most 'maxBytes' bytes, each function whole: the
+// agent replaces the stops function by function, so several SET_STOPS do
+// what one would. At least one group (empty when 'functions' is). Throws
+// when a function alone does not fit.
+export function splitStops(functions, maxBytes) {
+    const groups = [];
+    let group = [];
+    let size = 0;
+    for (const entry of functions) {
+        const entrySize = 6 + entry.offsets.length * 4;
+        if (entrySize > maxBytes) {
+            throw new Error(`function ${entry.number} has ${entry.offsets.length} stops: `
+                + `more than one message of the device holds (${maxBytes} bytes)`);
+        }
+        if (size + entrySize > maxBytes) {
+            groups.push(group);
+            group = [];
+            size = 0;
+        }
+        group.push(entry);
+        size += entrySize;
+    }
+    groups.push(group);
+    return groups;
 }
 
 export function encodeMessage(kind, id, payload) {

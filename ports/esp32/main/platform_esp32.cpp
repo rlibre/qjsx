@@ -6,15 +6,18 @@
  */
 
 // Part of platform.h specific to the ESP32 (ESP-IDF): clock, fatal stop,
-// tasks. Locks, signal and sleep are shared with the RP2350
+// tasks, random bytes. Locks, signal and sleep are shared with the RP2350
 // (ports/freertos/platform_freertos.cpp).
 #include "platform.h"
 #include "memory.h"
 
 #include <stdio.h>
 
+#include "bootloader_random.h"
+#include "esp_random.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "psa/crypto.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -89,6 +92,50 @@ bool startThread(ThreadFunction *run, void *argument, ThreadOptions options) {
     }
 
     return true;
+}
+
+/**
+ * Seeds the random generator of mbedTLS (PSA: a DRBG fed by the hardware
+ * generator) once, at boot (app_main): the hardware generator is truly random
+ * only while the radio is on or while the entropy source of the SAR ADC is
+ * enabled, so that source is on while psa_crypto_init() takes the seed. It
+ * uses the ADC: called before any program, which may open device/adc.
+ */
+void startRandom() {
+    bootloader_random_enable();
+    psa_status_t status = psa_crypto_init();
+    bootloader_random_disable();
+    if (status != PSA_SUCCESS) {
+        fatal("the random generator could not start (psa_crypto_init)");
+    }
+}
+
+/**
+ * ESP32: the DRBG of mbedTLS (seeded by startRandom), each byte mixed with
+ * one of the hardware generator (truly random once the radio is on), by
+ * pieces of RANDOM_PIECE bytes (small: on the stack). Thread-safe (mbedTLS
+ * is built with its locks).
+ */
+void randomBytes(void *buffer, size_t size) {
+    const size_t RANDOM_PIECE = 64;
+    uint8_t *next = (uint8_t *)buffer;
+    while (size > 0) {
+        // a piece of the DRBG
+        size_t piece = size < RANDOM_PIECE ? size : RANDOM_PIECE;
+        if (psa_generate_random(next, piece) != PSA_SUCCESS) {
+            fatal("the random generator failed (psa_generate_random)");
+        }
+
+        // mixed with the hardware generator
+        uint8_t hardware[RANDOM_PIECE];
+        esp_fill_random(hardware, piece);
+        for (size_t index = 0; index < piece; index++) {
+            next[index] ^= hardware[index];
+        }
+
+        next += piece;
+        size -= piece;
+    }
 }
 
 } // namespace platform

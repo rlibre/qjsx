@@ -57,6 +57,12 @@ JSModuleDef *jsNewModule_adc(JSContext *ctx, const char *moduleName);
 JSModuleDef *jsNewModule_pwm(JSContext *ctx, const char *moduleName);
 
 /**
+ * Creates the module "device/board" (board_module.cpp, JS_MODULE): id(),
+ * mac(), restart(). Needs board.h and a restart handler (restart.h).
+ */
+JSModuleDef *jsNewModule_board(JSContext *ctx, const char *moduleName);
+
+/**
  * Creates the module "device/serial" (serial_module.cpp, JS_MODULE): list()
  * and the class Serial, through the driver given to setSerialDriver().
  */

@@ -18,6 +18,7 @@
 #include "memory.h"
 #include "modules.h"
 #include "platform.h"
+#include "protocol.h"
 #include "psram_rp2350.h"
 #include "region_heap.h"
 
@@ -532,6 +533,22 @@ const JSMallocFunctions *jsAllocator() {
     }
 
     return memory::jsAllocator(&psramHeap, false);
+}
+
+/**
+ * 64 KB with the PSRAM; without it (it did not answer at boot), a small
+ * one: the agent's buffers take SRAM.
+ */
+size_t agentMaxMessage() {
+    return psramReady ? agent::DEFAULT_MAX_MESSAGE : agent::SMALL_MAX_MESSAGE;
+}
+
+/**
+ * Not measured yet on the RP2350 (to do with its pass: SRAM from the C
+ * heap, PSRAM from psramHeap's stats).
+ */
+bool memoryStatus(MemoryStatus *) {
+    return false;
 }
 
 /**

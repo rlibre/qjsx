@@ -305,6 +305,7 @@ void registerProfileTestModule();   // profile_module.cpp
  * typings (creating a module only defines its classes, no hardware is used).
  */
 void registerTestModules() {
+    rt::registerNativeModule("device/board", &jsNewModule_board);
     rt::registerNativeModule("device/gpio", &jsNewModule_gpio);
     rt::registerNativeModule("device/rmt", &jsNewModule_rmt);
     rt::registerNativeModule("device/usb", &jsNewModule_usb);

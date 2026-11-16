@@ -274,7 +274,10 @@ keeps the old name: `C:\Sandbox\espjs`.
   its target): `removeTree` already used lstat. Tests: never a destructive probe outside
   the test's own folder (user); Git Bash turns a "/" argument into its own folder, so the
   disk root test uses "C:/" on Windows and a script granted nothing.
-- Persistent storage on a device (design agreed by the user 2026-11-13, NOT implemented):
+- Persistent storage on a device (design agreed by the user 2026-11-13, IMPLEMENTED the same
+  day for the desktop agent, the twin and the ESP32 (firmware with LittleFS 1.23.1 flashed and
+  tried on the YD: 7.9 MB partition, write / read back / '..' refused, kept after a reset,
+  deploy --data then the program reads the files); RP2350 not done; tests/datafiles.test.js 34 checks):
   - `sys/fs` unchanged, on LittleFS in the `data` partition mounted on `/data`
     (`board::dataDirectory()`; fs goes through fopen / stat, so the ESP-IDF VFS is enough);
     component `joltwallet/littlefs` (version pinned in `idf_component.yml`, download at
@@ -297,10 +300,24 @@ keeps the old name: `C:\Sandbox\espjs`.
   - project data folder: `"data"` in `qjsx.json` (e.g. `"data/"`), sent by `qjsx deploy
     --data`: every file of the folder written, same names overwritten, the other files of
     `/data` kept (what the program wrote itself stays);
-  - SD card later: FatFS on `/sd` (readable on a PC; LittleFS is slow on large volumes),
+  - code: `common/agent/data_files.{h,cpp}` (agent::DataFiles: paths checked, '..' / '\\' /
+    ':' refused, temporary "<name>.qjsx-part" renamed at the end, hidden from FILE_LIST),
+    the FILE_* handlers in agent.cpp (errors: MESSAGE + ERROR_CODE, Node-like),
+    `Agent::setDataFolder(board::dataDirectory(), board::dataCapacity())` in runDevice;
+    `files::open()`; host `qjsx:devicefiles` (host/js/devicefiles.js), cli.js `device`
+    and `deploy --data`, project.js `data`; DeviceError has `code`; jsbind's errno names
+    gained ENOSYS and ENAMETOOLONG; ESP32: `board::mountData()` in app_main
+    (esp_vfs_littlefs_register, label "data", format if the mount fails),
+    `confineFiles()` true, `dataCapacity()` = esp_littlefs_info; component
+    `joltwallet/littlefs` ==1.23.1 (user approved after the check: MIT / BSD-3, no known
+    advisory; 1.23.1 fixes an overflow of esp_littlefs_info);
+  - SD card later: FatFS on `/sd` (readable on a PC; LittleFS is slow on large volumes; FatFs
+    had CVE-2026-6685 / -6688: check them then),
     confinement extended to the list of mount points; on RP2350 / STM32 (no VFS) one small
     layer of ours routes paths to LittleFS or FatFS.
-- `device/board` (agreed by the user 2026-11-13, NOT implemented; name chosen by the user
+- `device/board` (agreed by the user 2026-11-13, IMPLEMENTED the same day for the twin, the
+  desktop agent and the ESP32 (tried on the YD: id = the MAC esptool reads, derived MACs,
+  the last line before restart() arrives, the RAM package is lost); tests/board.test.js 15 checks; RP2350 not done; name chosen by the user
   among device/board, device/system, device/identity, sys/os): what belongs to the board
   the program runs on:
   - `board.id()` -> `Uint8Array`, the unique id of the chip (ESP32: base MAC from the
@@ -308,13 +325,60 @@ keeps the old name: `C:\Sandbox\espjs`.
     program formats it itself;
   - `board.mac(kind)` (ESP32): `"base" | "wifi" | "ap" | "bluetooth" | "ethernet"` ->
     `Uint8Array` of 6 bytes (ESP-IDF derives them from the base MAC);
-  - `board.restart()`: restarts the chip (exact behaviour to agree: what is flushed first);
+  - `board.restart(): never` (agreed 2026-11-13): restarts the chip like a power on (ESP32
+    esp_restart; the installed program starts at boot, a package in RAM is lost). First
+    waits until the pending output is really sent (console / agent link, open
+    device/serial ports, USB serial functions), 500 ms at most; then nothing more runs
+    (no finally, promise, timer: as process.exit). Twin / desktop agent: what `qjsx
+    device reset` does there;
   - twin and desktop agent: the id / base MAC is kept in `<storage>`; when missing, drawn
     at random once and saved (same installation = same id);
+  - code: `common/device/board_module.cpp` (registered by the ESP32 port and by `qjsx agent`
+    for the desktop agent and the twin; in the natives of boards/*.json); `board.h`
+    `chipId()`, `macAddress(MacKind)`, `RESTART_FLUSH_MS` 500; restart through
+    `common/runtime/restart.{h,cpp}` (`rt::setRestartHandler`, set by runDevice to the
+    runner's reset(); none under `qjsx run`: restart() throws); ESP32 `board::restart()`
+    waits for UART0, the UARTs open by device/serial (`hal::serial::drainUntil`) and the
+    USB serial functions (`hal::usb::drainUntil`, board_esp32.h), one 500 ms deadline;
+    desktop agent / twin: `<storage>/board-id` (12 hex digits, random unicast locally
+    administered MAC the first time), MACs base / +1 / +2 / +3;
   - later, with WiFi: `networkInterfaces()` as Node's (with `mac`) in `sys/os`;
-  - random bytes: the web standard `crypto.getRandomValues(typedArray)` (global, as in
-    Node and browsers), agreed in principle; source to design (ESP-IDF: the hardware RNG
-    is truly random only with RF on or the SAR ADC entropy source enabled: to check).
+  - random: see "Random numbers" below.
+- Random numbers (agreed by the user 2026-11-13, IMPLEMENTED the same day for the PC, the
+  twin and the ESP32 (flashed and tried on the YD: other values at each run and after
+  each chip restart); RP2350: NOT done (user: a later
+  pass), it lacks platform::randomBytes and will not link; tests/random.test.js 26
+  checks; engine change O):
+  - API of the web, global `crypto` (as Node and browsers): `crypto.getRandomValues(a)`
+    fills in place an INTEGER typed array (TypeError for a float one, an error named
+    "QuotaExceededError" above 65536 bytes) and returns it; `crypto.randomUUID()` (v4).
+    The global `crypto` is shadowed by `import * as crypto from "sys/crypto"`: say so in
+    the doc; nothing renamed;
+  - one source, `platform::randomBytes(buffer, size)` per port: PC BCryptGenRandom
+    (Windows), getrandom (Linux), arc4random_buf (macOS), also for the twin and the
+    desktop agent; RP2350 the TRNG through pico_rand; ESP32: at boot, before any JS,
+    `bootloader_random_enable()` (SAR ADC entropy; it uses the ADC, so never while
+    device/adc may run), 48 bytes from esp_fill_random, `bootloader_random_disable()`,
+    seed of mbedTLS CTR_DRBG; each call also mixes esp_random() (truly random once the
+    RF is on, WiFi later). Reason: esp_fill_random alone is pseudo-random without RF;
+  - `Math.random` seeded from that source instead of gettimeofday (QuickJS
+    js_random_init, builtins/math.c: on a board the clock starts at 0, so the seed is
+    nearly the same at each boot): engine change (a function that sets the seed of a
+    context, called by the runtime), commented `qjsx:`, engine-changes.md; bytecode
+    unchanged, no BC_VERSION bump. Math.random stays a fast non-cryptographic generator;
+  - `randomBytes(size)` in `sys/crypto` (user: "façon Node"), synchronous only, a
+    Uint8Array;
+  - code: `common/runtime/random.{h,cpp}` (`rt::randomBytes`, `rt::setRandomSeed`,
+    `rt::restartRandom`: the platform's source, or xoshiro256** from a seed); globals.cpp
+    (`crypto`), crypto.cpp; `createRuntime()` (program.cpp) restarts the sequence and
+    seeds Math.random for each run; ESP32: `platform::startRandom()` in app_main
+    (board_esp32.h), PSA (`psa_crypto_init` while `bootloader_random_enable()`, then
+    `psa_generate_random` XOR `esp_fill_random`); REQUIRES mbedtls, bootloader_support,
+    esp_hw_support; Windows links bcrypt;
+  - reproducible random in the twin (user): `"twin": { "randomSeed": <integer> }` of
+    qjsx.json; absent: truly random. Every run of the program then draws the same
+    sequence (getRandomValues, randomUUID, randomBytes, Math.random); draws made by the
+    twin's own runtimes (parts) would shift it.
 - JS developer manual and typings (user, 2026-11-13, IMPLEMENTED the same day):
   - `.d.ts` WRITTEN BY HAND (user chose this over generation from jsbind: the API still
     moves, callbacks / js::Value need hand types anyway), one NEXT TO EACH MODULE (see
@@ -442,6 +506,16 @@ keeps the old name: `C:\Sandbox\espjs`.
   - sidecar collected in js_create_function before stripping (JS_SetDebugInfoCollector); the
     host `compile(..., { debug: true })` returns `{ bytecode, debug }`, `qjsx build` writes it
     as `functions` in the sidecar JSON (format 2).
+- Names of the built-in objects in read-only memory (engine change P, asked and KEPT by the
+  user 2026-11-13 after reading the code; tried on the PC only, Debug suite 109 OK, Bellard's
+  tests OK, microbench +2.7 %): `QJSX_ROM_ATOMS` (quickjs.h, 1; 0 = original QuickJS),
+  immortal reference count `JS_REF_COUNT_IMMORTAL` tested by `JS_REF_COUNT_IS_MORTAL` in
+  JS_DupValue / JS_FreeValue (+RT) and js_free_string; the 514 names a new context makes
+  live in `core/rom-atoms.{h,c}`, GENERATED by `tools/rom-atoms/generate.sh` (run it again
+  when the built-in objects change); predefined symbols stay in the heap. Empty context
+  -22.5 KB on the PC. Measures of the JS heap: QuickJS 2026 has its own allocator with
+  4 KB arenas per block size, 52 % empty on an empty context (-64 KB on the PC without
+  them): the next lever, not done. Old files: temp/rom-atoms-backup/.
 - Temporal dead zone checks (engine change N, agreed by the user 2026-11-12, IMPLEMENTED the
   same day): `compiler/tdz.c`, a data-flow pass between resolve_variables and resolve_labels,
   turns `get_loc_check` / `put_loc_check` on surely initialized locals into `get_loc` /

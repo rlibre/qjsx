@@ -35,6 +35,7 @@ void yieldIfDue() {
 #if defined(_WIN32)
 
 #include <windows.h>
+#include <bcrypt.h>
 
 namespace platform {
 
@@ -43,6 +44,25 @@ namespace platform {
  */
 int64_t monotonicMs() {
     return (int64_t)GetTickCount64();
+}
+
+/**
+ * Windows: the system's preferred generator (BCryptGenRandom), by pieces of
+ * at most 4 GB (its size is a ULONG).
+ */
+void randomBytes(void *buffer, size_t size) {
+    uint8_t *next = (uint8_t *)buffer;
+    while (size > 0) {
+        // one piece
+        ULONG piece = size > 0xFFFFFFFFu ? 0xFFFFFFFFu : (ULONG)size;
+        NTSTATUS status = BCryptGenRandom(nullptr, next, piece, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+        if (status != 0) {
+            fatal("the system gave no random bytes (BCryptGenRandom)");
+        }
+
+        next += piece;
+        size -= piece;
+    }
 }
 
 // What Signal::_state points to.
@@ -190,8 +210,37 @@ void Mutex::unlock() {
 #include <pthread.h>
 #include <time.h>
 #include <errno.h>
+#if defined(__APPLE__)
+#include <stdlib.h>
+#else
+#include <sys/random.h>
+#endif
 
 namespace platform {
+
+/**
+ * macOS: arc4random_buf (the kernel's generator, never fails). Linux:
+ * getrandom, again after an interruption or a partial answer.
+ */
+void randomBytes(void *buffer, size_t size) {
+#if defined(__APPLE__)
+    arc4random_buf(buffer, size);
+#else
+    uint8_t *next = (uint8_t *)buffer;
+    while (size > 0) {
+        ssize_t got = getrandom(next, size, 0);
+        if (got < 0 && errno == EINTR) {
+            continue;
+        }
+        if (got <= 0) {
+            fatal("the system gave no random bytes (getrandom)");
+        }
+
+        next += got;
+        size -= (size_t)got;
+    }
+#endif
+}
 
 /**
  * Milliseconds of CLOCK_MONOTONIC: never goes back.

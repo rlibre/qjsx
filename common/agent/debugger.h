@@ -302,10 +302,17 @@ private:
      */
     void             writeObject(cbor::Writer *writer, JSValueConst object, int group);
     /**
-     * Writes the own properties of 'object' (at most MAX_PROPERTIES) and adds
-     * their number to *propertyCount. The caller writes the array header.
+     * Writes the own properties of 'object' (at most MAX_PROPERTIES, and
+     * while 'writer' stays within 'budget' bytes) and adds their number to
+     * *propertyCount. The caller writes the array header.
      */
-    void             writeProperties(cbor::Writer *writer, JSValueConst object, int group, int *propertyCount);
+    void             writeProperties(cbor::Writer *writer, JSValueConst object, int group, size_t budget,
+                                     int *propertyCount);
+    /**
+     * Longest string sent in a value: MAX_STRING, or a quarter of the
+     * largest message of the link if that is less.
+     */
+    size_t           maxString() const;
     /**
      * Writes the internal properties of 'object' ([[Prototype]]...) and sets
      * *internalCount. The caller writes the array header.

@@ -1070,6 +1070,11 @@ void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)
         sizeof(rt->atom_hash[0]) * rt->atom_hash_size;
     for(i = 0; i < rt->atom_size; i++) {
         JSAtomStruct *p = rt->atom_array[i];
+#if QJSX_ROM_ATOMS
+        /* qjsx: the names in read-only memory take no heap */
+        if (!atom_is_free(p) && js_atom_is_rom(p))
+            continue;
+#endif
         if (!atom_is_free(p)) {
             s->atom_size += (sizeof(*p) + (p->len << p->is_wide_char) +
                              1 - p->is_wide_char);

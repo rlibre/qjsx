@@ -18,6 +18,7 @@
 #include "loop.h"
 #include "modules.h"
 #include "permissions.h"
+#include "random.h"
 
 namespace rt {
 
@@ -375,17 +376,103 @@ struct Runtime {
     Loop *loop;          // current loop of the thread; freed by destroyRuntime()
 };
 
+// ### Measured JS heap ########################################################
+
+/**
+ * The board's JS allocator (one per process), read once; nullptr: QuickJS's
+ * default.
+ */
+const JSMallocFunctions *boardAllocator() {
+    static const JSMallocFunctions *allocator = board::jsAllocator();
+    return allocator;
+}
+
+/**
+ * Records the JS heap of the runtime of 'state' (QuickJS's count, kept by
+ * the board's allocator) and its peak, into the JsHeapUsage given as the
+ * runtime's malloc opaque. JS thread; the stores are atomic: INFO reads them
+ * from the transport thread.
+ */
+void recordHeap(JSMallocState *state) {
+    JsHeapUsage *usage = (JsHeapUsage *)state->opaque;
+    size_t used = state->malloc_size;
+    __atomic_store_n(&usage->used, used, __ATOMIC_RELAXED);
+
+    // a new peak (only this thread writes it)
+    if (used > __atomic_load_n(&usage->peak, __ATOMIC_RELAXED)) {
+        __atomic_store_n(&usage->peak, used, __ATOMIC_RELAXED);
+    }
+}
+
+/**
+ * The board's allocation, then the count recorded.
+ */
+void *measuredMalloc(JSMallocState *state, size_t size) {
+    void *block = boardAllocator()->js_malloc(state, size);
+    recordHeap(state);
+    return block;
+}
+
+/**
+ * The board's free, then the count recorded.
+ */
+void measuredFree(JSMallocState *state, void *block) {
+    boardAllocator()->js_free(state, block);
+    recordHeap(state);
+}
+
+/**
+ * The board's resize, then the count recorded.
+ */
+void *measuredRealloc(JSMallocState *state, void *block, size_t size) {
+    void *resized = boardAllocator()->js_realloc(state, block, size);
+    recordHeap(state);
+    return resized;
+}
+
+/**
+ * The board's block size.
+ */
+size_t measuredUsableSize(const void *block) {
+    return boardAllocator()->js_malloc_usable_size(block);
+}
+
+// The board's allocator with the JS heap recorded after each call.
+const JSMallocFunctions measuredAllocator = { &measuredMalloc, &measuredFree, &measuredRealloc, &measuredUsableSize };
+
+// ### Runtime #################################################################
+
 /**
  * Creates the runtime, the context and the loop of a run. 'session' must
  * outlive the runtime: the module loader reads it.
  */
 Runtime createRuntime(Session *session) {
-    // the runtime on the heap of the board (PSRAM on the targets) or the
-    // default one, then the context
+    // where the JS heap is measured, if the hooks ask and the board's
+    // allocator counts it (QuickJS's default one is not reachable)
+    const JSMallocFunctions *allocator = boardAllocator();
+    JsHeapUsage *usage = session->hooks != nullptr ? session->hooks->heapUsage : nullptr;
+    bool measured = allocator != nullptr && usage != nullptr;
+
+    // the runtime on the heap of the board (PSRAM on the targets), measured
+    // from 0, or the default heap, then the context
     Runtime created;
-    const JSMallocFunctions *allocator = board::jsAllocator();
-    created.runtime = allocator != nullptr ? JS_NewRuntime2(allocator, nullptr) : JS_NewRuntime();
+    if (measured) {
+        __atomic_store_n(&usage->used, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&usage->peak, 0, __ATOMIC_RELAXED);
+        created.runtime = JS_NewRuntime2(&measuredAllocator, usage);
+    } else if (allocator != nullptr) {
+        created.runtime = JS_NewRuntime2(allocator, nullptr);
+    } else {
+        created.runtime = JS_NewRuntime();
+    }
+
     created.ctx = JS_NewContext(created.runtime);
+
+    // a run starts: the reproducible random sequence of a twin starts again,
+    // then Math.random() is seeded from the random bytes (QuickJS takes the
+    // time, nearly the same at each boot of a board)
+    restartRandom();
+    JS_SetRandomSeed(created.ctx, randomUint64());
 
     // the stack limit of the board (a task stack of a few dozen KB on a
     // target), measured from here, on the JS thread

@@ -43,13 +43,16 @@
 import { compile } from "sys/compiler";
 import {
     KIND, KEY, VALUE, OBJECT_KIND, STEP_KIND, STOP_KIND, EXCEPTION_MODE, SLOT_KIND, GROUP, PAUSE_REASON,
-    PROPERTY, encodeStops,
+    PROPERTY, DEFAULT_MAX_MESSAGE, encodeStops, splitStops,
 } from "qjsx:protocol";
 import { VARIABLE_FLAG } from "qjsx:debuginfo";
 import { DeviceError } from "qjsx:device";
 
 // Name of the function made by evaluate(), as the compiler records it.
 const EVALUATION_NAME = "<debugger>";
+
+// Bytes of a SET_STOPS message besides its module name and its DATA.
+const SET_STOPS_OVERHEAD = 32;
 
 export class DebugSession {
     // device: an opened qjsx:device Device, with a session (hello) done;
@@ -216,10 +219,20 @@ export class DebugSession {
         }
 
         const functions = [...numbers].map(number => ({ number, offsets: [...(offsetsByFunction.get(number) ?? [])] }));
-        await this.device.request(KIND.SET_STOPS, {
-            [KEY.MODULE]: module, [KEY.STOP_KIND]: STOP_KIND.BREAKPOINTS, [KEY.DATA]: encodeStops(functions),
-        });
+        await this.sendStops(module, STOP_KIND.BREAKPOINTS, functions);
         this.appliedStops.set(module, new Set(offsetsByFunction.keys()));
+    }
+
+    // Sends SET_STOPS of 'kind' for 'functions' of 'module', in as many
+    // messages as the device's largest message needs (splitStops).
+    async sendStops(module, kind, functions) {
+        const moduleBytes = new TextEncoder().encode(module).length;
+        const maxData = (this.device.maxMessage ?? DEFAULT_MAX_MESSAGE) - SET_STOPS_OVERHEAD - moduleBytes;
+        for (const group of splitStops(functions, maxData)) {
+            await this.device.request(KIND.SET_STOPS, {
+                [KEY.MODULE]: module, [KEY.STOP_KIND]: kind, [KEY.DATA]: encodeStops(group),
+            });
+        }
     }
 
     // Statement stops (pause and steps) and breakpoints of a loaded module.
@@ -230,9 +243,7 @@ export class DebugSession {
             return;
         }
 
-        await this.device.request(KIND.SET_STOPS, {
-            [KEY.MODULE]: module, [KEY.STOP_KIND]: STOP_KIND.STATEMENTS, [KEY.DATA]: encodeStops(script.statementStops()),
-        });
+        await this.sendStops(module, STOP_KIND.STATEMENTS, script.statementStops());
         await this.applyBreakpoints(module);
     }
 

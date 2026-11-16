@@ -13,9 +13,16 @@
 namespace agent {
 
 const int PROTOCOL_VERSION = 1;
-// Largest message the agent accepts (a function compiled by the debugger
-// proxy can be several kilobytes).
+// Largest message of the agent's link with PSRAM (a function compiled by the
+// debugger proxy can be several kilobytes); each board chooses its own
+// (board::agentMaxMessage), said to the host in HELLO.
 const int DEFAULT_MAX_MESSAGE = 65536;
+// Largest message of a board without PSRAM: its receive buffer and the
+// copies of a message being sent take internal RAM.
+const int SMALL_MAX_MESSAGE = 8192;
+// Smallest maximum a board may choose: an upload or file chunk (2048 bytes)
+// and its fields must fit.
+const int MIN_MAX_MESSAGE = 4096;
 
 enum Kind {
     KIND_RESPONSE = 1,
@@ -51,7 +58,20 @@ enum Kind {
     KIND_PAUSED = 60,
     KIND_RESUMED = 61,
     KIND_SCRIPT_LOADED = 62,
+
+    // the files of the data folder (agent::DataFiles)
+    KIND_FILE_LIST = 70,
+    KIND_FILE_READ = 71,
+    KIND_FILE_WRITE_BEGIN = 72,
+    KIND_FILE_WRITE_CHUNK = 73,
+    KIND_FILE_WRITE_END = 74,
+    KIND_FILE_REMOVE = 75,
+    KIND_FILE_MKDIR = 76,
+    KIND_FILE_RENAME = 77,
 };
+
+// Largest piece of a file read by one FILE_READ.
+const int FILE_CHUNK = 2048;
 
 // First and last debugger request kinds.
 const int FIRST_DEBUG_KIND = KIND_DEBUG_ATTACH;
@@ -102,6 +122,18 @@ enum Key {
     KEY_NATIVES = 42,
     KEY_VERSION = 43,
     KEY_VOLATILE = 44,
+    KEY_PATH = 45,
+    KEY_ENTRIES = 46,
+    KEY_TO = 47,
+    KEY_DATA_USED = 48,
+    KEY_DATA_TOTAL = 49,
+    KEY_JS_HEAP_USED = 50,
+    KEY_JS_HEAP_PEAK = 51,
+    KEY_RAM_FREE = 52,
+    KEY_RAM_LARGEST = 53,
+    KEY_RAM_LOWEST = 54,
+    KEY_PSRAM_FREE = 55,
+    KEY_PSRAM_LARGEST = 56,
 };
 
 enum Stream {

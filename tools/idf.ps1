@@ -26,12 +26,22 @@ $board = 'yd-esp32-s3-n16r8'
 $words = @($args)
 if ($words.Count -gt 0 -and $words[0] -like 'board=*') {
     $board = $words[0].Substring(6)
-    $words = if ($words.Count -gt 1) { $words[1..($words.Count - 1)] } else { @() }
+    # assigned inside the blocks: the value of an 'if' goes through the
+    # pipeline, which turns an array of one element into a plain string
+    if ($words.Count -gt 1) {
+        $words = @($words[1..($words.Count - 1)])
+    } else {
+        $words = @()
+    }
 }
 
 $buildDir = "build-$board"
 $tool = if ($words.Count -gt 0) { $words[0] } else { '' }
-$rest = if ($words.Count -gt 1) { $words[1..($words.Count - 1)] } else { @() }
+if ($words.Count -gt 1) {
+    $rest = @($words[1..($words.Count - 1)])
+} else {
+    $rest = @()
+}
 
 # run it, the output also in the log
 if ($tool -eq 'ninja') {

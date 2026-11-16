@@ -43,9 +43,32 @@ stop` and `qjsx deploy` still reach it.
 | `process.exit(code)` | ends the program, not the firmware: the agent stays, `qjsx deploy` or a restart starts a program again |
 | `process.versions` | `{ qjsx, quickjs, build }`: `build` is the build id of the package |
 
+## Random numbers
+
+`crypto.getRandomValues()` and `crypto.randomUUID()` (globals, as on the web) and
+`randomBytes()` of `sys/crypto` give random bytes of cryptographic quality. On an ESP32 the
+generator is seeded at boot from the entropy of the chip (it borrows the ADC for a moment,
+before any program runs). `Math.random()` is seeded from the same source at each run of
+the program: it is not the same sequence after each boot.
+
 ## Uncaught exceptions
 
 An exception nobody catches in a callback is printed and the program goes on.
+
+## Memory
+
+A board without PSRAM gives the program its internal RAM only: a few hundred kilobytes,
+shared with the firmware. `qjsx device info` shows what the program's JS heap uses now
+and the most it used in this run (or the last one), and the free memory of the board:
+
+```text
+JS heap:  182.4 KB used, 197.0 KB at most (this run)
+RAM:      61.3 KB free, largest block 31.7 KB, lowest 40.2 KB since the boot
+```
+
+The digital twin shows the JS heap too, but measured on the PC: values and pointers
+take twice the room there, so the figure is larger than on the board. It is still useful
+to compare two versions of a program.
 
 ## Native modules of a board
 
@@ -55,7 +78,27 @@ the modules of the board it plays.
 
 ## Files
 
-Files on the boards (a file system in the `data` partition, mounted on `/data`) are not
-there yet: on a board, `sys/fs` fails today. The desktop agent and the digital twin keep
-the files of the program in a `data` folder of their storage, and a program cannot reach
-anything outside it.
+An ESP32 board keeps the files of its programs in its `data` partition (LittleFS),
+mounted on `/data`: `process.cwd()` is `/data`, relative paths of `sys/fs` start there,
+and a program cannot reach anything outside it. LittleFS commits a file when it is closed:
+a power cut during `writeFileSync()` keeps the old content whole. The partition is
+formatted the first time, and kept when a program is deployed or the firmware flashed.
+The desktop agent and the digital twin keep these files in a `data` folder of their
+storage. (The RP2350 has no file system yet.)
+
+From the PC:
+
+```bash
+qjsx device ls [folder]
+qjsx device read <file> [local]     # no local: shown
+qjsx device write <local> [file]
+qjsx device rm <file | empty folder>
+qjsx device mkdir <folder>
+qjsx device mv <from> <to>          # a file replaces a file; folders never replace
+qjsx device info                    # also: the space used in /data, the memory
+```
+
+`qjsx deploy --data` also writes the files of the project's `"data"` folder (see
+[The project file](/guides/project/)): files of the same name are replaced, the others
+(what the program wrote itself) are kept. A file is written to a temporary file then put
+in place: a cut transfer never leaves half a file.

@@ -11,7 +11,7 @@
 // Status messages go to stderr; stdout only carries the program output
 // (monitor), so that it can be redirected or compared.
 import * as fs from "sys/fs";
-import { join } from "stdlib/path";
+import { join, basename } from "stdlib/path";
 import { list as listSerialPorts } from "device/serial";
 import { build } from "qjsx:build";
 import { warningText } from "qjsx:compile";
@@ -21,6 +21,7 @@ import { makeExecutable } from "qjsx:executable";
 import { writeTypings } from "qjsx:typings";
 import { loadProject, PROJECT_FILE } from "qjsx:project";
 import { Device } from "qjsx:device";
+import { listFiles, readFile, writeFile, removeFile, makeDirectory, renameFile, sendFolder } from "qjsx:devicefiles";
 import { upload, latestPackage, reducePackage } from "qjsx:deploy";
 import { KIND, KEY, STREAM, kindName } from "qjsx:protocol";
 import { PackageIndex } from "qjsx:debuginfo";
@@ -56,9 +57,13 @@ commands:
       --reset             restart the device after installing (the program starts
                           at boot, like after a power on)
       --monitor           then show the program output (--until-exit: stop when it ends)
+      --data              also write the files of the project's "data" folder (qjsx.json)
+                          to the data folder of the device (others there are kept)
   monitor [options]                            show the output of the program on a device
       --target, --token, --until-exit
   device <info | run | stop | reset> [--target <target>] [--token <token>]
+  device ls [folder] | read <file> [local] | write <local> [file] | rm <path> | mkdir <folder> | mv <from> <to>
+                                               the files of the data folder of the device
   debug [options]                              debugger server for VS Code (CDP, "node" attach)
       --target, --token
       --port <port>       default: "debugPort" of qjsx.json (9339)
@@ -247,18 +252,25 @@ async function sendPackage(device, packagePath, ram) {
 async function deployCommand(args) {
     const { options, positional } = parseArguments(args, {
         values: ["target", "token"],
-        flags: ["no-run", "monitor", "until-exit", "ram", "reset"],
+        flags: ["no-run", "monitor", "until-exit", "ram", "reset", "data"],
     });
     if (options.ram && options.reset) {
         throw new Error("--ram and --reset do not go together: a restart loses the package loaded in RAM");
     }
 
     const project = currentProject();
+    const dataFolder = options.data ? projectDataFolder(project) : undefined;
     const target = targetOf(options, project);
     const packagePath = packageToSend(positional, project);
     let monitor = monitorHandlers(true);
     let device = await openDevice(target, options.token, monitor.handlers);
     await sendPackage(device, packagePath, options.ram === true);
+
+    // the files of the project's data folder, before the program starts
+    if (dataFolder !== undefined) {
+        const count = await sendFolder(device, dataFolder, (path, size) => status(`wrote ${path} (${formatSize(size)})`));
+        status(`${count} file(s) of ${dataFolder} written to the data folder of the device`);
+    }
     if (options["no-run"]) {
         device.close();
         return 0;
@@ -279,6 +291,19 @@ async function deployCommand(args) {
         return 0;
     }
     return waitForExit(device, monitor, options["until-exit"]);
+}
+
+// The folder of the project whose files "deploy --data" sends ("data" of
+// qjsx.json, from the project's folder); an error without one.
+function projectDataFolder(project) {
+    if (project?.data === undefined) {
+        throw new Error(`--data: no "data" folder in ${PROJECT_FILE} (e.g. "data": "data")`);
+    }
+    const folder = join(project.directory, project.data);
+    if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) {
+        throw new Error(`--data: ${folder} is not a folder`);
+    }
+    return folder;
 }
 
 // Sends RESET to an open device, then waits for it to come back (its link may
@@ -316,24 +341,158 @@ async function monitorCommand(args) {
     return waitForExit(device, monitor, options["until-exit"]);
 }
 
+// The size of 'bytes' in a short form: "512 B", "12.4 KB", "1.9 MB".
+function formatSize(bytes) {
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+    if (bytes < 1024 * 1024) {
+        return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const DEVICE_USAGE = `usage: qjsx device <info | run | stop | reset> [--target <target>]
+       qjsx device ls [folder]          the files of the data folder of the device
+       qjsx device read <file> [local]  copies a file of the device to the PC (no local: shown)
+       qjsx device write <local> [file] copies a file of the PC to the device
+       qjsx device rm <file | empty folder>
+       qjsx device mkdir <folder>
+       qjsx device mv <from> <to>       a file replaces a file; folders never replace`;
+
+// The number of positional arguments each action takes: [least, most].
+const DEVICE_ARGUMENTS = {
+    info: [0, 0], run: [0, 0], stop: [0, 0], reset: [0, 0],
+    ls: [0, 1], read: [1, 2], write: [1, 2], rm: [1, 1], mkdir: [1, 1], mv: [2, 2],
+};
+
+// qjsx device info: the firmware, the program, the data folder, the memory.
+async function deviceInfo(device) {
+    const answer = await device.request(KIND.INFO);
+    const where = answer.get(KEY.VOLATILE) === true ? ", in RAM: lost at the next restart" : "";
+    console.log(`firmware: qjsx ${device.version ?? "(unknown: older firmware)"}`);
+    console.log(`running:  ${answer.get(KEY.RUNNING)}`);
+    console.log(`package:  ${answer.get(KEY.BUILD_ID) ?? "(none)"} (${answer.get(KEY.PACKAGE_SIZE)} bytes${where})`);
+
+    // the data folder: used, and the size of its partition when known
+    const used = answer.get(KEY.DATA_USED);
+    const total = answer.get(KEY.DATA_TOTAL);
+    if (used === undefined) {
+        console.log("data:     (no file system)");
+    } else if (total === undefined) {
+        console.log(`data:     ${formatSize(used)} used`);
+    } else {
+        console.log(`data:     ${formatSize(used)} used of ${formatSize(total)}`);
+    }
+
+    // the JS heap of the program (an older firmware does not say); on the
+    // desktop agent and the twin it is the PC's, larger than on a device
+    // (64-bit values and pointers)
+    const heapUsed = answer.get(KEY.JS_HEAP_USED);
+    const heapPeak = answer.get(KEY.JS_HEAP_PEAK);
+    if (heapPeak !== undefined) {
+        const when = answer.get(KEY.RUNNING) === true ? "this run" : "last run";
+        console.log(`JS heap:  ${formatSize(heapUsed)} used, ${formatSize(heapPeak)} at most (${when})`);
+    }
+
+    // the free memory of the board (not the desktop's)
+    const ramFree = answer.get(KEY.RAM_FREE);
+    if (ramFree !== undefined) {
+        console.log(`RAM:      ${formatSize(ramFree)} free, largest block ${formatSize(answer.get(KEY.RAM_LARGEST))}, `
+            + `lowest ${formatSize(answer.get(KEY.RAM_LOWEST))} since the boot`);
+    }
+    const psramFree = answer.get(KEY.PSRAM_FREE);
+    if (psramFree !== undefined) {
+        console.log(`PSRAM:    ${formatSize(psramFree)} free, largest block ${formatSize(answer.get(KEY.PSRAM_LARGEST))}`);
+    }
+
+    // the largest message of the link
+    console.log(`messages: ${formatSize(device.maxMessage)} at most`);
+}
+
+// qjsx device ls [folder]: one line per entry, folders with a '/'.
+async function deviceList(device, folder) {
+    const entries = await listFiles(device, folder ?? "");
+    for (const entry of entries) {
+        const size = entry.isDirectory ? "" : formatSize(entry.size);
+        const name = entry.isDirectory ? `${entry.name}/` : entry.name;
+        console.log(`${size.padStart(10)}  ${name}`);
+    }
+}
+
+// qjsx device read <file> [local]: to a file of the PC, or shown as text.
+async function deviceRead(device, file, local) {
+    const bytes = await readFile(device, file);
+    if (local === undefined) {
+        process.stdout.write(new TextDecoder().decode(bytes));
+        return;
+    }
+    fs.writeFileSync(local, bytes);
+    status(`read ${file} into ${local} (${formatSize(bytes.length)})`);
+}
+
+// qjsx device write <local> [file]: the file of the PC, under its own name
+// when no file is given.
+async function deviceWrite(device, local, file) {
+    const bytes = fs.readFileSync(local);
+    const target = file ?? basename(local);
+    await writeFile(device, target, bytes);
+    status(`wrote ${target} (${formatSize(bytes.length)})`);
+}
+
 async function deviceCommand(args) {
     const { options, positional } = parseArguments(args, { values: ["target", "token"] });
     const action = positional[0];
-    const requests = { info: KIND.INFO, run: KIND.RUN, stop: KIND.STOP, reset: KIND.RESET };
-    if (requests[action] === undefined || positional.length !== 1) {
-        throw new Error("usage: qjsx device <info | run | stop | reset> [--target <target>]");
+    const operands = positional.slice(1);
+    const counts = DEVICE_ARGUMENTS[action];
+    if (counts === undefined || operands.length < counts[0] || operands.length > counts[1]) {
+        throw new Error(DEVICE_USAGE);
     }
+
     const device = await openDevice(targetOf(options, currentProject()), options.token, {});
-    const answer = await device.request(requests[action]);
-    if (action === "info") {
-        const where = answer.get(KEY.VOLATILE) === true ? ", in RAM: lost at the next restart" : "";
-        console.log(`firmware: qjsx ${device.version ?? "(unknown: older firmware)"}`);
-        console.log(`running:  ${answer.get(KEY.RUNNING)}`);
-        console.log(`package:  ${answer.get(KEY.BUILD_ID) ?? "(none)"} (${answer.get(KEY.PACKAGE_SIZE)} bytes${where})`);
-    } else {
-        status(`${kindName(requests[action]).toLowerCase()} done`);
+    try {
+        switch (action) {
+            case "info": {
+                await deviceInfo(device);
+                break;
+            }
+            case "ls": {
+                await deviceList(device, operands[0]);
+                break;
+            }
+            case "read": {
+                await deviceRead(device, operands[0], operands[1]);
+                break;
+            }
+            case "write": {
+                await deviceWrite(device, operands[0], operands[1]);
+                break;
+            }
+            case "rm": {
+                await removeFile(device, operands[0]);
+                status(`removed ${operands[0]}`);
+                break;
+            }
+            case "mkdir": {
+                await makeDirectory(device, operands[0]);
+                status(`created ${operands[0]}/`);
+                break;
+            }
+            case "mv": {
+                await renameFile(device, operands[0], operands[1]);
+                status(`renamed ${operands[0]} to ${operands[1]}`);
+                break;
+            }
+            default: {
+                const requests = { run: KIND.RUN, stop: KIND.STOP, reset: KIND.RESET };
+                await device.request(requests[action]);
+                status(`${kindName(requests[action]).toLowerCase()} done`);
+                break;
+            }
+        }
+    } finally {
+        device.close();
     }
-    device.close();
     return 0;
 }
 

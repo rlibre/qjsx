@@ -15,6 +15,7 @@ const TYPINGS = [
 	'../../common/runtime/modules/crypto.d.ts',
 	'../../host/modules/net.d.ts',
 	'../../host/modules/compiler_module.d.ts',
+	'../../common/device/board_module.d.ts',
 	'../../common/device/gpio_module.d.ts',
 	'../../common/device/pwm_module.d.ts',
 	'../../common/device/adc_module.d.ts',

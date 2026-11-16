@@ -8,12 +8,14 @@
 // Module "sys/crypto":
 //   sha256(data) -> Uint8Array(32)
 //   sha1(data)   -> Uint8Array(20)   (only for what a protocol imposes: SHA-1 is broken)
+//   randomBytes(size) -> Uint8Array(size), random (as Node's, synchronous only)
 // data: a string (hashed as UTF-8) or bytes (Uint8Array, typed array, ArrayBuffer).
 // Base64 is not here: the engine has the standard Uint8Array.prototype.toBase64()
 // and Uint8Array.fromBase64().
 #include <string.h>
 
 #include "jsbind.h"
+#include "random.h"
 #include "sha1.h"
 #include "sha256.h"
 
@@ -92,12 +94,28 @@ js::Buffer sha1(js::Value data) {
     return js::Buffer::copy(digest, sizeof(digest));
 }
 
+/**
+ * crypto.randomBytes(size): a new Uint8Array of 'size' random bytes, as
+ * Node's (synchronous only: no callback), from the same source as the global
+ * crypto.getRandomValues().
+ */
+js::Buffer randomBytes(js::Range<int, 0, 2147483647> size) {
+    // the array (a failed allocation leaves its exception pending), then its
+    // bytes
+    js::Buffer bytes = js::Buffer::create((size_t)(int)size);
+    if (bytes.data() != nullptr) {
+        rt::randomBytes(bytes.data(), bytes.size());
+    }
+    return bytes;
+}
+
 } // namespace
 
 /**
- * The "sys/crypto" module: sha256, sha1.
+ * The "sys/crypto" module: sha256, sha1, randomBytes.
  */
 JS_MODULE(crypto, module) {
     JS_FUNCTION(module, sha256);
     JS_FUNCTION(module, sha1);
+    JS_FUNCTION(module, randomBytes);
 }
