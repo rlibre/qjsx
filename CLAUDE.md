@@ -531,11 +531,21 @@ keeps the old name: `C:\Sandbox\espjs`.
   `INFO` key `JS_HEAP_SIZE`, `board::MemoryStatus.jsHeapSize`. Measure option
   `QJSX_ALLOC_HISTOGRAM` (idf.py -DQJSX_ALLOC_HISTOGRAM=ON, global `__allocHistogram()`).
   The client board's console is at 921600 bauds: `serial:COM10@921600`.
+- Stack of the JS task, a setting of each ESP32 board (user, 2026-11-16: 32 KB for the
+  client board; FLASHED and measured there: 66 nested JS calls, 270 levels for
+  JSON.parse, JS region 232 -> 248 KB; a flash needs the user's explicit yes each time,
+  the classifier refuses it otherwise): `JS_TASK_STACK` in each
+  `boards/<board>/board_config.h` (YD 48 KB), `JS_STACK_LIMIT = JS_TASK_STACK -
+  JS_NATIVE_STACK_MARGIN` (8 KB, board_esp32.h). Measured on the client board with 48 KB:
+  112 nested JS calls (about 366 bytes each), 480 levels of nested arrays for
+  JSON.parse; its program used 8 KB.
 - Package executed in place (design agreed by the user 2026-11-16, steps 1 and 2
   IMPLEMENTED the same day, engine change S, `doc/architecture.md` 4.1; Debug suite 112 OK,
   Bellard's tests OK; FLASHED and MEASURED on the client board: its program's JS heap
-  195.6 -> 156.3 KB, package sent 41.7 -> 55.9 KB; the debugger not tried again on a
-  board):
+  195.6 -> 156.3 KB, package sent 41.7 -> 55.9 KB; debugger on that board 72/72, proxy
+  33/33, cdp 53/53; speed on the board unchanged to the millisecond except functions
+  made in a loop, twice slower than with the firmware before, cause not proven (16 KB
+  instruction cache suspected)):
   - atom indexes are fixed: the engine's names (rom-atoms), then the package's
     (`names.bin`), then the ones made at run time;
   - `qjsx build` links the modules (`linkModules`, build.js, over `link()` of

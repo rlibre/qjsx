@@ -25,6 +25,13 @@
         la flash en QIO. Reste aussi : régler la réserve (paquet en RAM de 44 Ko
         impossible : plus grand bloc libre du firmware 31 Ko), message d'un manque de
         mémoire (« Uncaught (in promise) null »), RP2350 sans PSRAM, manuel JS.
+      - **pile de la tâche JS réglable par board** (2026-11-16, choix de l'utilisateur :
+        32 Ko pour la carte cliente) : `JS_TASK_STACK` dans le `board_config.h` de chaque
+        board ESP32 (YD : 48 Ko), limite du moteur = pile − 8 Ko (`JS_NATIVE_STACK_MARGIN`,
+        board_esp32.h). Mesuré sur la carte avec 48 Ko : 112 appels JS imbriqués (366 o par
+        appel), 480 niveaux pour JSON.parse, l'application n'utilise que 8 Ko. FLASHÉ et
+        mesuré avec 32 Ko : 66 appels imbriqués, 270 niveaux pour JSON.parse, région JS
+        232 → 248 Ko, l'application tourne (156 Ko de tas JS, 92 Ko de marge).
       - **carte mémoire de la carte cliente** (2026-11-16, option de mesure
         `-DQJSX_MEMORY_MAP=ON`, globale `__memoryMap(titre)` ; relevé brut dans
         temp/histo/map-clean.txt) : trois poches de RAM trouvées, rien de corrigé :
@@ -70,7 +77,14 @@
         avant de créer le contexte (`JS_SetPackageAtoms`, program.cpp) et lit le bytecode
         en place. BC_VERSION 0x46. MESURÉ sur la carte cliente : tas JS 195,6 → 156,3 Ko
         (paquet envoyé 41,7 → 55,9 Ko, en flash) ; l'application redémarre et tourne.
-        Débogueur pas réessayé sur la carte. Reste : la marche 3 (tables de variables en place),
+        DÉBOGUEUR sur la carte cliente (sans PSRAM, messages de 8 Ko), 2026-11-16 :
+        debugger 72/72, proxy 33/33, cdp 53/53. VITESSE sur la carte (temp/allocbench) :
+        tout est identique au firmware d'avant le paquet en place, à la ms près (boucle de
+        calcul, tableaux, chaînes, petits objets), SAUF la création de fonctions en boucle,
+        deux fois plus lente (532 → 1146 ms pour 20 000) ; cause non prouvée, le paquet du
+        banc était en RAM (la flash n'y est pour rien). Piste inchangée : cache
+        d'instructions de 16 Ko, la place du code change d'un firmware à l'autre.
+        Reste : la marche 3 (tables de variables en place),
         l'empreinte des noms vérifiée dès l'upload, la RP2350. Proposition d'origine
         (retenue par l'utilisateur le 2026-11-16, après l'allocateur) : sur les 142 Ko que le programme de la carte ajoute, ~76 Ko sont
         chargés avant toute exécution (216 fonctions : structures 18 Ko, bytecode 19 Ko,

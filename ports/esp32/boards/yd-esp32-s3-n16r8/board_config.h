@@ -10,8 +10,11 @@
 // host link on UART0 (COM port, CH343).
 #pragma once
 
+#include <stddef.h>
+
 namespace board {
 
 const char *const BOARD_NAME = "YD-ESP32-S3 (WROOM-1 N16R8)";   // in the identity of the device
+const size_t      JS_TASK_STACK = 48 * 1024;                    // stack of the JS task, bytes: about 110 nested JS calls
 
 } // namespace board

@@ -1255,6 +1255,14 @@ agent went on answering. `idf.py -DQJSX_JS_HEAP_SHARED=ON` builds the former sha
 block is 31 KB); an out of memory is reported as "Uncaught (in promise) null"; the
 RP2350 without PSRAM still uses QuickJS's default allocator.
 
+**Stack of the JS task** (2026-11-16, ESP32): a setting of each board, `JS_TASK_STACK` in
+its `board_config.h`; QuickJS's limit is that less 8 KB kept for the C code called under
+JS (`JS_NATIVE_STACK_MARGIN`, `board_esp32.h`); past it the engine throws a RangeError.
+Measured on an ESP32-S3: a nested JS call takes about 366 bytes of stack, a level of
+nested arrays of `JSON.parse` about 85. 48 KB (boards with PSRAM): 112 nested calls;
+32 KB (the board without PSRAM, whose program used 8 KB): 66 calls, and 16 KB more for
+its JS region (232 -> 248 KB).
+
 **Files of a device** (2026-11-13): the data folder of a device (`/data` on an ESP32, LittleFS on the "data" partition, formatted the first time; `<storage>/data` on the desktop agent and the twin) is reached by its programs (`sys/fs`, confined to it) and by the PC through the agent: FILE_LIST, FILE_READ (2048-byte pieces), FILE_WRITE_BEGIN / CHUNK / END (a temporary `<name>.qjsx-part` renamed at the end), FILE_REMOVE, FILE_MKDIR, FILE_RENAME (`common/agent/data_files.cpp`; errors with a Node-like ERROR_CODE); `qjsx device ls | read | write | rm | mkdir | mv`, `qjsx deploy --data` (the `data` folder of `qjsx.json`; other files of the device kept), `qjsx device info` (used, and the partition size on a board).
 
 **Random numbers** (2026-11-13): the global `crypto` of the web (`getRandomValues()` for
