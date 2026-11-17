@@ -76,14 +76,16 @@ public:
         }
 
         // format the message
-        char message[512];
+        char *message = (char *)memory::allocate(detail::MESSAGE_SIZE);
         va_list args;
         va_start(args, format);
-        vsnprintf(message, sizeof(message), format, args);
+        vsnprintf(message, detail::MESSAGE_SIZE, format, args);
         va_end(args);
 
         // reject with a new error of that kind
-        rejectWithError(makeError<Kind>(_reject.context(), message));
+        JSValue error = makeError<Kind>(_reject.context(), message);
+        memory::release(message);
+        rejectWithError(error);
     }
 
     /**

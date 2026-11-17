@@ -9,13 +9,19 @@
 //
 // Package content (zip, entries stored):
 //   manifest.json          format, name, buildId, created, compiler, bytecode
-//                          (version), main, env, libraries[], natives[], scripts[]
+//                          (version), main, env, libraries[], natives[], scripts[],
+//                          bytes[] ({ path, size, hash } of each file imported as bytes)
 //   bytecode/<name>.qbc    bytecode without debug info (what runs on the ESP):
 //                          no source text, positions nor variable names; the
 //                          module name and the function numbers stay
 //   debug/<name>.json      debug sidecar of the script
 //   names.bin              the names the bytecode is linked to (see linkModules)
 //   src/<path>             exact copy of the compiled source
+//   bytes/<path>           a file imported with { type: "bytes" }, as it is,
+//                          aligned on 8 bytes (qjsx:bytes); <path> is its
+//                          module name: its path in the project, or
+//                          "<library>/..." for a file of a library, taken from
+//                          the .qjslib when a module of the package imports it
 //
 // The modules of the package:
 //   - the modules of the program: every file of 'sources', named by its path
@@ -38,7 +44,8 @@
 // sources, so its modules are compiled again (a note says so).
 //
 // Identifiers (those of a script are in qjsx:compile):
-//   package buildId = first 32 hex digits of sha256 over the scripts' ids and the main module
+//   package buildId = first 32 hex digits of sha256 over the scripts' ids,
+//   the main module and the hashes of the files imported as bytes
 import * as fs from "sys/fs";
 import { join, resolve } from "stdlib/path";
 import { sha256 } from "sys/crypto";
@@ -49,9 +56,10 @@ import { hex, encodeText } from "qjsx:util";
 import { compileModule, compilerId, BYTECODE_VERSION } from "qjsx:compile";
 import { link, engineNames } from "sys/compiler";
 import { checkImports, pruneModules } from "qjsx:prune";
+import { readBytesFile, bytesModule, bytesEntry } from "qjsx:bytes";
 import {
-    readLibrary, libraryModule, libraryOf, isNativeModule, bareNameError, madeByThisCompiler, standardLibraryFile,
-    STANDARD_LIBRARY, NATIVE_PREFIXES,
+    readLibrary, libraryModule, libraryBytesFile, libraryOf, isNativeModule, bareNameError, madeByThisCompiler,
+    standardLibraryFile, STANDARD_LIBRARY, NATIVE_PREFIXES,
 } from "qjsx:library";
 
 export const PACKAGE_FORMAT = 1;
@@ -143,16 +151,30 @@ function packagedLibraryModule(library, name) {
 }
 
 /**
+ * The modules of the package as qjsx:prune reads them: the compiled ones,
+ * then the files imported as bytes, modules that export 'default' only.
+ */
+function modulesWithBytes(packaged, bytesFiles) {
+    const modules = new Map(packaged);
+
+    for (const name of bytesFiles.keys()) {
+        modules.set(name, bytesModule(name));
+    }
+
+    return modules;
+}
+
+/**
  * Leaves out of the modules of the package the top-level declarations
  * nothing uses (qjsx:prune): each module that changes is compiled again from
  * its source with them replaced by spaces; the package keeps its original
  * source (the positions are the same), which the debugger shows. Returns the
- * notes that say what was left out.
+ * notes that say what was left out. A module of bytes never changes.
  */
-function leaveOutUnused(packaged) {
+function leaveOutUnused(packaged, bytesFiles) {
     const notes = [];
 
-    for (const change of pruneModules(packaged)) {
+    for (const change of pruneModules(modulesWithBytes(packaged, bytesFiles))) {
         // compile the module again from its pruned source
         const module = packaged.get(change.name);
         const compiled = compileModule(change.name, change.source);
@@ -248,6 +270,32 @@ function importedModule(importer, imported, libraries, natives) {
 }
 
 /**
+ * An import of bytes of 'importer' (qjsx:bytes): adds its file to
+ * 'bytesFiles' (Map(module name -> file)), read once. The engine keeps one
+ * module per name: a module of the package cannot also be imported as bytes.
+ * A module of the program reads the file in the project 'directory' (named
+ * by its path); a library module takes it from its .qjslib ('libraries').
+ */
+function addBytesFile(directory, importer, imported, packaged, libraries, bytesFiles) {
+    // not a module
+    if (packaged.has(imported.name)) {
+        throw new Error(`${imported.place}: '${imported.name}' is a module of the package, it cannot be imported as bytes`);
+    }
+
+    // already read
+    if (bytesFiles.has(imported.name)) {
+        return;
+    }
+
+    // the file, from the library of the importer or from the project
+    const libraryName = importer.script.library;
+    const file = libraryName !== undefined
+        ? libraryBytesFile(libraries.get(libraryName), imported)
+        : readBytesFile(directory, imported.name, imported);
+    bytesFiles.set(imported.name, file);
+}
+
+/**
  * Removes the oldest packages of the project, keeping 'keep' of them.
  */
 function prune(output, name, keep, current) {
@@ -306,14 +354,27 @@ export function build(directory) {
     }
 
     // follow the imports: add the library modules the program imports, then
-    // those they import, until nothing is missing
+    // those they import, until nothing is missing; a file imported as bytes
+    // is read once and not followed
     const natives = new Set();
+    const bytesFiles = new Map();   // module name -> file (qjsx:bytes readBytesFile), in import order
     const toFollow = [...packaged.values()];
 
     while (toFollow.length > 0) {
         const importer = toFollow.shift();
 
         for (const imported of importer.imports) {
+            // an import of bytes: its file
+            if (imported.bytes) {
+                addBytesFile(directory, importer, imported, packaged, libraries, bytesFiles);
+                continue;
+            }
+
+            // a module, never a file imported as bytes elsewhere
+            if (bytesFiles.has(imported.name)) {
+                throw new Error(`${imported.place}: '${imported.name}' is imported as bytes elsewhere: add with { type: "bytes" }`);
+            }
+
             const isKnown = packaged.has(imported.name) || natives.has(imported.name);
             if (isKnown) {
                 continue;
@@ -327,9 +388,10 @@ export function build(directory) {
         }
     }
 
-    // every imported name must exist, then what nothing uses is left out
-    checkImports(packaged);
-    const prunedNotes = leaveOutUnused(packaged);
+    // every imported name must exist (a file imported as bytes exports
+    // 'default' only), then what nothing uses is left out
+    checkImports(modulesWithBytes(packaged, bytesFiles));
+    const prunedNotes = leaveOutUnused(packaged, bytesFiles);
 
     // link the modules: one table of names for the package, first entry
     // after the manifest
@@ -360,6 +422,15 @@ export function build(directory) {
         }
     }
 
+    // then the files imported as bytes, as they are (their own prefix: no
+    // other entry has their name)
+    const bytesRecords = [];
+
+    for (const bytesFile of bytesFiles.values()) {
+        bytesRecords.push(bytesFile.record);
+        entries.push(bytesEntry(bytesFile));
+    }
+
     // the libraries actually used; one made by another compiler was compiled
     // again from its sources: say so
     const usedNames = new Set(scripts.map(script => script.library).filter(name => name !== undefined));
@@ -382,8 +453,13 @@ export function build(directory) {
     }
 
     // the build id covers what changes the program: scripts, main module,
-    // env, what it may reach on the PC
+    // files imported as bytes, env, what it may reach on the PC
     let identity = scripts.map(script => `${script.path}:${script.buildId}`).join("\n") + `\nmain:${project.main}`;
+
+    for (const record of bytesRecords) {
+        identity += `\nbytes:${record.path}:${record.hash}`;
+    }
+
     if (project.env !== undefined) {
         identity += `\nenv:${JSON.stringify(project.env)}`;
     }
@@ -409,6 +485,7 @@ export function build(directory) {
         libraries: usedLibraries,
         natives: [...natives].sort(),
         scripts,
+        bytes: bytesRecords,   // the files imported as bytes, entries bytes/<path>
     };
     entries.unshift({ name: "manifest.json", data: encodeText(JSON.stringify(manifest, null, 1)) });
 

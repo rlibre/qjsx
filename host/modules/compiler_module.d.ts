@@ -156,6 +156,27 @@ declare module "sys/compiler" {
     }
 
     /**
+     * One module a module asks for (`import`, `export ... from`), with its
+     * import attributes.
+     */
+    export interface OutlineRequest {
+        /**
+         * The module, as written in the source.
+         */
+        module: string;
+
+        /**
+         * Its `with { ... }` clause (`{ type: "bytes" }`); null without one.
+         */
+        attributes: Record<string, string> | null;
+
+        /**
+         * Byte offset of the string that names the module.
+         */
+        position: number;
+    }
+
+    /**
      * The outline of a module (`outline: true`).
      */
     export interface ModuleOutline {
@@ -167,6 +188,12 @@ declare module "sys/compiler" {
         imports: OutlineImport[];
 
         exports: OutlineExport[];
+
+        /**
+         * The modules it asks for, one per `from` clause or `import "x"`, in
+         * the order of `imports` of the compile result.
+         */
+        requests: OutlineRequest[];
 
         /**
          * True when it calls eval() directly: any of its names may be used.
@@ -430,7 +457,7 @@ declare module "sys/compiler" {
     export const quickjsVersion: string;
 
     /**
-     * The qjsx version of the tool, e.g. `"0.1.0"`.
+     * The qjsx version of the tool, e.g. `"0.2.0"`.
      */
     export const qjsxVersion: string;
 

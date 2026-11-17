@@ -139,6 +139,13 @@ which of two versions of a program uses less.
 A load that stays above about 50 % leaves little room for the callbacks: poll less,
 or move work out of the loops.
 
+To see which functions take that time, `qjsx profile` samples the JS thread of the device
+for a while (`--duration`, 5 s by default; `--interval` between two samples, 1 ms) and
+prints the functions that take its time, their own and with what they call (`--top`, 20
+by default), named from the debug files of the project's package. The desktop agent and
+the twin have it; the firmware of a board must be built with the `QJSX_PROFILER` option
+(off by default), else the device answers an error.
+
 ## Memory
 
 The details are in [Programs on a device](../devices/#memory). In short:
@@ -147,6 +154,9 @@ The details are in [Programs on a device](../devices/#memory). In short:
   [Constants cost nothing](../devices/#constants-cost-nothing)): name values freely;
 - the bytecode and the names of the program stay in the flash: a larger program costs
   flash much more than RAM;
+- each function of a loaded module costs RAM, called or not: `qjsx build` leaves out the
+  declarations nothing uses (see
+  [What the build leaves out](../devices/#what-the-build-leaves-out-what-it-refuses));
 - each function made is an object in the heap: make functions once, at the top of a
   module or of a task, not in a loop or at each call;
 - each async function that waits (a task, a loop that awaits) keeps its frame in the

@@ -9,7 +9,8 @@
               "initial": { "temperature": 21.5, "humidity": 40, "pressure": 1013.25 } },
             { "id": "echo", "model": "./parts/echo", "label": "Echo", "i2c": { "sda": 8, "scl": 9 }, "address": "0x50" },
             { "id": "strip", "model": "ws2812", "label": "Strip", "pin": 21, "count": 5 },
-            { "id": "gain", "model": "potentiometer", "label": "Gain", "pin": 6, "position": 50 }
+            { "id": "gain", "model": "potentiometer", "label": "Gain", "pin": 6, "position": 50 },
+            { "id": "spiecho", "model": "./parts/spiecho", "label": "SPI echo", "spi": { "port": 2, "cs": 10 } }
         ]
     }
 }

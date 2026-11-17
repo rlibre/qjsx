@@ -16,7 +16,8 @@
 //
 // With --board, the agent is the digital twin of that board (host/twin/sim/twin.h):
 // a program sees the board's native modules (device/gpio, device/rmt,
-// device/usb, device/i2c and device/serial simulated) and its
+// device/usb, device/i2c, device/spi and device/serial simulated; sys/draw
+// for a board whose firmware has a display) and its
 // process.platform, and a web page shows the pins, the parts and the UARTs
 // (host/twin/js/server.js, run by a JS runtime of its own on a thread of its
 // own). The serial functions of device/usb and the UARTs of device/serial
@@ -57,6 +58,7 @@
 
 #include "board_host.h"
 #include "device_modules.h"
+#include "draw_module.h"
 #include "files.h"
 #include "host.h"
 #include "memory.h"
@@ -610,11 +612,29 @@ bool fixWirings(const Options *options) {
 }
 
 /**
+ * Whether the board of the twin lists the native module 'name' in its
+ * "natives" (what its real firmware registers).
+ */
+bool boardListsNative(const char *name) {
+    const char *const *natives = twin::natives();
+
+    for (int i = 0; i < twin::nativeCount(); i++) {
+        if (strcmp(natives[i], name) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * Makes this agent the twin of options->board:
  * 1. loads the board;
- * 2. registers its simulated modules and the page's module, keeps only the
- *    board's native modules for the program (before any JS runtime exists:
- *    the registry is not thread-safe);
+ * 2. registers its simulated modules (device/dac only when the board has a
+ *    DAC, sys/draw only when the board lists it: a firmware built with a
+ *    display) and the page's module, keeps only the board's native modules for
+ *    the program (before any JS runtime exists: the registry is not
+ *    thread-safe);
  * 3. gives device/serial the board's UARTs; reads the choices kept in the
  *    storage folder; sets up the TCP links of the UARTs and of the USB
  *    functions, and the wiring of the UARTs to PC serial ports;
@@ -635,9 +655,22 @@ bool startTwin(const char *executable, const Options *options) {
     rt::registerNativeModule("device/rmt", &jsNewModule_rmt);
     rt::registerNativeModule("device/usb", &jsNewModule_usb);
     rt::registerNativeModule("device/i2c", &jsNewModule_i2c);
+    rt::registerNativeModule("device/spi", &jsNewModule_spi);
     rt::registerNativeModule("device/adc", &jsNewModule_adc);
     rt::registerNativeModule("device/pwm", &jsNewModule_pwm);
     rt::registerNativeModule("qjsx:twinboard", &jsNewModule_twinboard);
+
+    // device/dac only on a board with a DAC
+    if (twin::dacPresent()) {
+        rt::registerNativeModule("device/dac", &jsNewModule_dac);
+    }
+
+    // sys/draw (displays on SPI) only on a board whose firmware has it
+    if (boardListsNative("sys/draw")) {
+        rt::registerNativeModule("sys/draw", &jsNewModule_draw);
+    }
+
+    // the program gets the board's native modules only
     rt::setDeviceNativeModules(twin::natives(), twin::nativeCount());
 
     // device/serial: the board's UARTs instead of the PC's ports (main.cpp

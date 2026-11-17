@@ -533,7 +533,8 @@ export class CdpServer {
 
     /**
      * The breakpoints of the client hit at the pause: those bound at the
-     * line of the top frame.
+     * instruction of the top frame (its function and offset, not only its
+     * line: two breakpoints on one line are told apart).
      */
     hitBreakpoints(frame) {
         const hits = [];
@@ -541,7 +542,9 @@ export class CdpServer {
         for (const breakpoint of this.breakpoints.values()) {
             const sessionId = breakpoint.bindings.get(frame.module);
             const found = sessionId === undefined ? undefined : this.session.breakpointLocation(sessionId);
-            if (found?.location?.line === frame.line) {
+            const isResolved = found !== undefined && found.location !== null;
+            const isHit = isResolved && found.number === frame.number && found.pcs.includes(frame.pc);
+            if (isHit) {
                 hits.push(breakpoint.id);
             }
         }

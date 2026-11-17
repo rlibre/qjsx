@@ -8,13 +8,14 @@
 // Sends a package to a device and starts it.
 //
 // The device gets a reduced package: manifest.json (with "reduced": true),
-// names.bin and bytecode/ only, what its loader reads. The debug sidecars (debug/) and
+// names.bin, bytecode/ and bytes/ only, what its loader reads. The debug sidecars (debug/) and
 // the sources (src/) stay in the full package on the PC, where the debugger
 // finds it by its build id, which does not change.
 import * as fs from "sys/fs";
 import { sha256 } from "sys/crypto";
 import { readZip, writeZip } from "qjsx:zip";
 import { KIND, KEY, UPLOAD_CHUNK } from "qjsx:protocol";
+import { BYTES_PREFIX, BYTES_ALIGNMENT } from "qjsx:bytes";
 
 // The entry of the names of a package and its alignment (as qjsx:build).
 const NAMES_ENTRY = "names.bin";
@@ -53,8 +54,9 @@ export function latestPackage(directory, name) {
 }
 
 /**
- * The reduced package of a full one: its manifest marked "reduced": true and
- * its bytecode/ entries, stored as in any package (read in place). The
+ * The reduced package of a full one: its manifest marked "reduced": true,
+ * its names, its bytecode/ and bytes/ entries, stored as in any package
+ * (read in place). The
  * scripts of the manifest lose their 'debug' and 'source' entries, which are
  * not in the reduced package.
  */
@@ -78,6 +80,12 @@ export function reducePackage(packageBytes) {
         // package (the engine uses them where the package lies)
         if (name === NAMES_ENTRY) {
             kept.push({ name, data, align: NAMES_ALIGNMENT });
+        }
+
+        // the files imported as bytes, aligned as in the full package (the
+        // program reads them where the package lies)
+        if (name.startsWith(BYTES_PREFIX)) {
+            kept.push({ name, data, align: BYTES_ALIGNMENT });
         }
     }
 

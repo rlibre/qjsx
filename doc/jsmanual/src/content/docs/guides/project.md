@@ -43,7 +43,7 @@ A target names a device:
 
 | Target | Device |
 |---|---|
-| `serial:COM11`, `serial:/dev/ttyUSB0@921600` | a board on a serial port (USB to serial bridge) |
+| `serial:COM11`, `serial:/dev/ttyUSB0@921600` | a board on a serial port (a USB to serial bridge, or the board's own USB port) |
 | `tcp:esp.local:5555` | an agent on the network |
 | `twin` | the digital twin of the project on this PC (`qjsx agent` in its folder) |
 

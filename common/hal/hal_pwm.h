@@ -59,8 +59,9 @@ void close(int handle);
 /**
  * Another frequency for an output; the duty cycle asked last is kept (on the
  * resolution of the new frequency). 0, or errno: EINVAL (out of reach),
- * EBUSY (no timer free for it: the output keeps its frequency). '*out': what
- * the output does after the call.
+ * EBUSY (no timer free for it), EIO (the hardware refused the timer); on an
+ * error the output keeps its frequency. '*out': what the output does after
+ * the call.
  */
 int setFrequency(int handle, uint32_t frequency, Output *out);
 

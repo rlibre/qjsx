@@ -210,7 +210,7 @@ Agent::Agent(Storage *storage, RamStorage *ram, Controller *controller, Identity
  * Frees the upload hash and the remembered last answers.
  */
 Agent::~Agent() {
-    delete _hash;
+    memory::release(_hash);
     forgetAnswer(&_agentAnswer);
     forgetAnswer(&_debuggerAnswer);
 }
@@ -686,9 +686,13 @@ void Agent::handleUploadBegin(int64_t id, const Fields *fields) {
     memcpy(_uploadBuildId, buildId, buildIdLength);
     _uploadBuildId[buildIdLength] = 0;
 
-    // start the hash of the received bytes
-    delete _hash;
-    _hash = new crypto::Sha256();
+    // start the hash of the received bytes (its block made at the first
+    // upload, kept for the next ones)
+    if (_hash == nullptr) {
+        _hash = (crypto::Sha256 *)memory::allocate(sizeof(crypto::Sha256));
+    }
+
+    *_hash = crypto::Sha256();
     respondEmpty(id);
 }
 

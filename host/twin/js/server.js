@@ -47,6 +47,13 @@
 //                                  transfers of the program (bytes as arrays of numbers;
 //                                  the first 32 of each); a page that connects gets
 //                                  what is kept, then the new records
+//   twin.spi.data   twin -> page   { records: [{ sequence, time, port, cs, dc, frequency,
+//                                  mode, bitOrder, outcome, segmentCount, segments:
+//                                  [{ kind, dc, size, delayUs, written, read }] }] }: the
+//                                  SPI transactions of the program (the first 8
+//                                  segments, their first 16 bytes, as arrays of
+//                                  numbers); a page that connects gets what is kept,
+//                                  then the new records
 //   twin.scope.data twin -> page   { now, levels, millivolts, pwm, rmt, changes: [{ pin,
 //                                  records, pwm, dropped, droppedUntil }] }: what the
 //                                  pins did since the last message, for the analyzer,
@@ -65,13 +72,15 @@
 //                                  (the twin keeps the choice in its storage folder)
 //
 // The state: { pins: [{ configured, mode, pull, level, forced, partDrive, partPull,
-//                       conflict, rmt, i2c, adc, voltage, pwm }],
+//                       conflict, rmt, i2c, spi, adc, dac, voltage, pwm }],
 //              uarts: [{ number, link, open, tcp, serial, baudRate, dataBits, parity,
 //                        stopBits, flowControl, tx, rx, rts, cts }],
 //              serialPorts: [names of the PC's serial ports],
 //              usb: { started, manufacturer, product, serialNumber, vendorId,
 //                     productId, serials, functions: [{ tcp }] },
-//              i2c: [{ bus, open, sda, scl, parts: [{ address, id }] }] }
+//              i2c: [{ bus, open, sda, scl, parts: [{ address, id }] }],
+//              spi: [{ port, open, sclk, mosi, miso, devices: [{ cs, dc, frequency,
+//                      mode, bitOrder }], parts: [{ cs, id }] }] }
 // where tcp = { port, listen, listening, client, error } and serial = { port,
 // connect, realSpeed, connected, fixed, error }.
 //
@@ -92,6 +101,9 @@ const PORTS_MS = 1000;
 
 // Lines of the parts (twin.log) kept for a page that connects later.
 const KEPT_LINES = 200;
+
+// The largest record number: asking for the records after it gives none.
+const LAST_RECORD = 4294967295;
 
 // Content type of the files of the page, by extension.
 const CONTENT_TYPES = {
@@ -118,6 +130,20 @@ function readI2c(board) {
         // an open bus: the parts attached on its pins, as { address, id }
         const wired = bus.open ? board._buses.get(`${bus.sda}/${bus.scl}`) : undefined;
         const parts = [...(wired?._parts ?? [])].map(([address, id]) => ({ address, id }));
+        return { ...bus, parts };
+    });
+}
+
+/**
+ * The SPI buses now, each with the parts on its chip selects: [{ port, open,
+ * sclk, mosi, miso, devices, parts: [{ cs, id }] }] ('board': the board of
+ * the parts).
+ */
+function readSpi(board) {
+    return twinboard.spiBuses().map(bus => {
+        // the parts on the chip selects of that controller, as { cs, id }
+        const wired = board._spiBuses.get(bus.port);
+        const parts = [...(wired?._parts ?? [])].map(([cs, id]) => ({ cs, id }));
         return { ...bus, parts };
     });
 }
@@ -152,18 +178,77 @@ function readState(board) {
         serialPorts: pcSerialPorts(),
         usb: twinboard.usb(),
         i2c: readI2c(board),
+        spi: readSpi(board),
     };
 }
 
 /**
- * The twin.i2c.data message of records of the I2C trace (bytes as arrays of
- * numbers).
+ * A record of the I2C trace, or a segment of the SPI trace, with its bytes
+ * as arrays of numbers (JSON has no Uint8Array).
+ */
+function withByteArrays(item) {
+    return { ...item, written: Array.from(item.written), read: Array.from(item.read) };
+}
+
+/**
+ * The twin.i2c.data message of records of the I2C trace.
  */
 function i2cMessage(records) {
-    const params = {
-        records: records.map(record => ({ ...record, written: Array.from(record.written), read: Array.from(record.read) })),
-    };
+    const params = { records: records.map(withByteArrays) };
     return JSON.stringify({ msg: "twin.i2c.data", params });
+}
+
+/**
+ * The twin.spi.data message of records of the SPI trace.
+ */
+function spiMessage(records) {
+    const params = { records: records.map(record => ({ ...record, segments: record.segments.map(withByteArrays) })) };
+    return JSON.stringify({ msg: "twin.spi.data", params });
+}
+
+// A trace of the twin pushed to the pages: what read(after) gives ({
+// sequence, records }), as message(records) makes it.
+class TraceFeed {
+    /**
+     * Nothing sent yet.
+     */
+    constructor(read, message) {
+        this._read = read;          // (after) -> { sequence, records }
+        this._message = message;    // (records) -> the text of the message
+        this._sent = 0;             // the number of the last record sent to the pages
+    }
+
+    /**
+     * A new page: the records kept, up to those the other pages got (the
+     * newer ones come with the next push, to every page).
+     */
+    sendKept(socket) {
+        const kept = this._read(0).records.filter(record => record.sequence <= this._sent);
+        if (kept.length > 0) {
+            socket.send(this._message(kept));
+        }
+    }
+
+    /**
+     * The new records, to every page in 'sockets' (none open: only
+     * skipped).
+     */
+    push(sockets) {
+        // the records after the last one sent; no page: all skipped
+        const after = sockets.size === 0 ? LAST_RECORD : this._sent;
+        const { sequence, records } = this._read(after);
+        this._sent = sequence;
+        if (records.length === 0) {
+            return;
+        }
+
+        // to every page
+        const text = this._message(records);
+
+        for (const entry of sockets) {
+            entry.socket.send(text);
+        }
+    }
 }
 
 /**
@@ -185,9 +270,6 @@ function projectParts(projectDir) {
 
     return parts;
 }
-
-// The largest record number: asking for the records after it gives none.
-const LAST_RECORD = 4294967295;
 
 /**
  * The twin.uart.data message of records of a UART (bytes as arrays of
@@ -449,8 +531,11 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
     const uartCount = twinboard.uarts().length;
     const sentRecords = new Array(uartCount).fill(0);
 
-    // the number of the last record of the I2C trace sent to the pages
-    let sentI2c = 0;
+    // the traces of the I2C and SPI buses, pushed to the pages
+    const traces = [
+        new TraceFeed(after => twinboard.i2cTrace(after), i2cMessage),
+        new TraceFeed(after => twinboard.spiTrace(after), spiMessage),
+    ];
 
     // start the server; it cannot listen: the agent is told why, and stops
     try {
@@ -489,7 +574,11 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
 
                 // the traffic kept, then its messages and its end
                 sendKeptTraffic(socket);
-                sendKeptI2c(socket);
+
+                for (const trace of traces) {
+                    trace.sendKept(socket);
+                }
+
                 socket.onMessage(text => onPageMessage(text, actOnPart));
                 socket.onClose(() => sockets.delete(entry));
             },
@@ -544,37 +633,6 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
     }
 
     /**
-     * A new page: the I2C trace up to what the other pages got.
-     */
-    function sendKeptI2c(socket) {
-        const kept = twinboard.i2cTrace(0).records.filter(record => record.sequence <= sentI2c);
-        if (kept.length > 0) {
-            socket.send(i2cMessage(kept));
-        }
-    }
-
-    /**
-     * The new records of the I2C trace, to every page (none open: only
-     * skipped).
-     */
-    function pushI2c() {
-        // the records after the last one sent; no page: all skipped
-        const after = sockets.size === 0 ? LAST_RECORD : sentI2c;
-        const { sequence, records } = twinboard.i2cTrace(after);
-        sentI2c = sequence;
-        if (records.length === 0) {
-            return;
-        }
-
-        // to every page
-        const text = i2cMessage(records);
-
-        for (const entry of sockets) {
-            entry.socket.send(text);
-        }
-    }
-
-    /**
      * What the pins did since the last turn, to every page (none open: read
      * all the same, so that a page that connects starts from now).
      */
@@ -589,7 +647,11 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
     // the pages
     setInterval(() => {
         pushTraffic();
-        pushI2c();
+
+        for (const trace of traces) {
+            trace.push(sockets);
+        }
+
         pushScope();
         if (sockets.size === 0) {
             return;

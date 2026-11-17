@@ -1,0 +1,203 @@
+---
+title: Displays
+description: Drawing on a color display wired on SPI with stdlib/display.
+---
+
+`stdlib/display` drives a color display wired on SPI: shapes, smoothed arcs and rounded
+rectangles, text in proportional fonts. It is written in JS over `device/spi`, and its
+pixels are made by `sys/draw`, a native renderer that only the firmware of a board with a
+display has (today the WT32-SC01) and the twin of such a board. The controller known
+today is the ST7796 (320 x 480 pixels). Every call is described in the API reference of
+[stdlib/display](../../api/stdlib/display/readme/).
+
+## Open it
+
+The WT32-SC01 has its 3.5" ST7796 on SPI2:
+
+```js
+import { Display } from "stdlib/display";
+
+const lcd = new Display({
+    type: "st7796",
+    port: 2,
+    sclk: 14, mosi: 13, cs: 15, dc: 21,
+    reset: 22,          // pulsed when the display opens
+    backlight: 23,      // a PWM output, fully on at first
+    rotation: 90,       // landscape: 480 x 320
+});
+
+console.log(lcd.width, lcd.height);   // 480 320
+lcd.backlight(0.5);                   // 0 (off) to 1 (full)
+```
+
+`rotation` turns the image clockwise: 0 is portrait with the USB connector of the
+WT32-SC01 at the bottom, 90 and 270 exchange `width` and `height`. The origin (0, 0) is
+the top left of the screen as the program sees it. The constructor blocks the program for
+about a quarter of a second (the controller wants its waits), so open the display once,
+at the start.
+
+`close()` frees the bus and the pins; the backlight goes off, the screen keeps its image.
+
+## Draw, then show
+
+The drawing calls draw nothing: each one adds a command of a few bytes to a list. There
+is no copy of the screen in memory (a 480 x 320 image would take 300 KB).
+`await lcd.show()` hands the list to the task of the SPI bus, which renders the image a
+band of 16 rows at a time while it sends them:
+
+```js
+lcd.background = 0x102030;                       // colors: 0xRRGGBB
+lcd.fillRect(10, 10, 200, 40, 0xff0000);
+lcd.rect(10, 60, 200, 40, 0xffffff);             // one pixel thick
+lcd.line(0, 0, lcd.width - 1, lcd.height - 1, 0x00ff00);
+await lcd.show();                                // now it is on the screen
+```
+
+Colors are numbers `0xRRGGBB`; the display has 16 bits per pixel (5 of red, 6 of green,
+5 of blue), so close colors may look the same. Coordinates are whole pixels: a fraction
+is cut, what lies outside the screen is cut too. The drawing calls check nothing (they
+are called often, on a microcontroller): a wrong argument draws something wrong, it does
+not throw.
+
+The list has room for 256 commands by default (`new Display({ commands: 512, ... })` for
+more; a text takes one more item per character). A command that does not fit is dropped
+and counted in `lcd.dropped`: read it before `show()`, which sets it back to 0.
+
+## The background rule
+
+An image is made of everything drawn since the last `show()`: the display does not
+remember the image before. What no command covers in the area shown takes
+`lcd.background`. So each image draws again everything of the area it shows, in order,
+the later commands over the earlier ones; there is nothing to erase.
+
+## Show one area
+
+`show(x, y, width, height)` sends one area only: the commands are drawn again there, cut
+to it, and the rest of the screen keeps what it shows. A value that changes is redrawn
+alone:
+
+```js
+function showValue(value) {
+    lcd.text(20, 200, `${value.toFixed(1)} °C`, big, 0xffff00);
+    return lcd.show(20, 200, 200, big.lineHeight);   // the rest of the area: background
+}
+```
+
+An area costs its pixels: the whole 480 x 320 screen is 300 KB on a wire of 40 MHz, about
+61 ms before any rendering; an area of 200 x 30 is shown in about 8 ms. Show the smallest
+area that holds what changed.
+
+## One image at a time
+
+While an image goes out, the program goes on, and the list is already empty for the next
+image. A `show()` called before the previous one is over does nothing: its promise
+resolves with `false` and the list is kept. To get the most images per second, list the
+next image while the previous one is sent:
+
+```js
+let sending = Promise.resolve(true);
+for (;;) {
+    drawGauges(lcd);       // lists the next image while the previous one goes out
+    await sending;         // the previous image is on the screen
+    sending = lcd.show();
+}
+```
+
+## Arcs, circles and rounded rectangles
+
+Their edges are smoothed (blended over what is below them). Angles are in degrees, 0 at
+the top, clockwise; an arc goes from its `radius` (its outer edge) inward over its
+`thickness`, and its ends are cut along the radius. An arc as thick as its radius has no
+hole: on part of a turn it is a filled sector, a slice of pie (the way to draw one). A
+gauge:
+
+```js
+function drawGauge(cx, cy, value) {          // value: 0 to 1
+    const start = -135;
+    const sweep = 270;
+    lcd.arc(cx, cy, 100, start, start + sweep, 16, 0x303030);           // the track
+    lcd.arc(cx, cy, 100, start, start + sweep * value, 16, 0x30c060);   // the value
+    lcd.disc(cx, cy, 6, 0xffffff);
+}
+```
+
+`circle(cx, cy, radius, thickness, color)` is a whole ring, `disc(cx, cy, radius, color)`
+a filled one. `fillRoundRect(x, y, width, height, radius, color)` and `roundRect(x, y,
+width, height, radius, thickness, color)` (its outline, inside its box) have the same
+radius at the four corners, at most half the smaller side.
+
+## Text
+
+### Make a font file
+
+The display draws fonts in LVGL's binary format, made WITHOUT compression by
+[lv_font_conv](https://github.com/lvgl/lv_font_conv) (an npm package, MIT; the qjsx
+repository keeps it in `tools/fonts/`). Choose the size, the characters and the bits per
+pixel (4 gives smooth edges):
+
+```bash
+npx lv_font_conv --font Inter-Regular.ttf --size 16 --bpp 4 \
+    -r 0x20-0x7E,0xA0-0xFF --format bin --no-compress --no-kerning \
+    -o fonts/inter16.bin
+```
+
+`--no-compress` is required (a compressed file is refused); the display ignores kerning,
+so `--no-kerning` only makes the file smaller. Each size is a file: Inter 16 px with
+Latin-1 takes about 11 KB. Check the license of the font you convert.
+
+### Use it
+
+A font file is imported as bytes: it stays in the package (in flash on the board), it is
+read in place and never copied to RAM.
+
+```js
+import inter16 from "./fonts/inter16.bin" with { type: "bytes" };
+import inter40 from "./fonts/inter40.bin" with { type: "bytes" };
+
+const label = lcd.font(inter16);
+const big = lcd.font(inter40, { tabularDigits: true });
+
+lcd.text(10, 10, "Température", label, 0xffffff);   // (10, 10): the top left of the line
+lcd.text(10, 40, "21.5 °C", big, 0xffff00);
+```
+
+- `font()` returns a handle for `text()` and `textWidth()` of the same display, with the
+  font's metrics in pixels: `size`, `ascent` (top of the line to the baseline),
+  `descent` (0 or negative), `lineHeight`.
+- A text is ONE line; a character its font lacks is skipped (a line break too). The next
+  line is `lineHeight` lower.
+- A display takes at most 16 font files; the same file with other options counts once.
+- `tabularDigits: true` gives every digit the width of the widest one: a value that
+  changes does not make what follows it move.
+
+`textWidth()` measures a text as `text()` draws it, to center or align it:
+
+```js
+const value = "21.5 °C";
+const x = (lcd.width - lcd.textWidth(value, big)) >> 1;   // centered
+lcd.text(x, 120, value, big, 0xffff00);
+```
+
+## Speed
+
+Measured on the WT32-SC01 (original ESP32 at 240 MHz, display at 40 MHz):
+
+| What | Time |
+|---|---|
+| listing one command | a few microseconds |
+| the whole screen (480 x 320) with shapes and text | about 70 ms |
+| two gauges of 448 x 250, redrawn and shown in a loop | 15.5 images per second |
+| a value of text changed in two areas | about 40 ms |
+| an area of 200 x 30 | about 8 ms |
+
+The rendering runs on the task of the SPI bus, not on the JS thread: while an image goes
+out, the program lists the next one, reads its sensors, answers its links.
+
+## In the twin
+
+The twin of the WT32-SC01 (`qjsx agent --board wt32-sc01`, or `"board": "wt32-sc01"` in
+the `"twin"` section of `qjsx.json`) has `sys/draw` and the screen: the page draws it, its
+backlight included. Its SPI takes the time of the wire (the bytes at the clock of the
+display), so a program that shows too many pixels is as slow there as on the board. The
+rendering runs at the speed of the PC: the gauges above make about 21 images per second
+in the twin. The touch panel is not simulated.

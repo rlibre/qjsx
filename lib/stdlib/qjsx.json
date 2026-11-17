@@ -2,6 +2,10 @@
     "name": "stdlib",
     "version": "0.1.0",
     "modules": {
+        "display": "src/display.js",
+        "fonts/inter16": "src/fonts/inter16.js",
+        "fonts/inter24": "src/fonts/inter24.js",
+        "fonts/inter40": "src/fonts/inter40.js",
         "path": "src/path.js",
         "rgbled": "src/rgbled.js",
         "tasks": "src/tasks.js",

@@ -328,7 +328,9 @@ void JS_SetCompileWarningHandler(JSRuntime *rt, JSCompileWarningHandler *handler
    needs to leave out of a package the declarations that nothing uses. The
    collector is called once per module compiled, after its source is parsed
    (a syntax error calls nothing). Positions are byte offsets in the source.
-   The names are atoms of the context, valid during the call only. */
+   The names are atoms of the context, valid during the call only. The
+   requests (engine change Y) give the import attributes of each module asked
+   for, and where it is named. */
 
 /* One statement at the top level of the module. */
 typedef struct JSOutlineStatement {
@@ -371,6 +373,17 @@ typedef struct JSOutlineExport {
     uint32_t end;
 } JSOutlineExport;
 
+/* qjsx: one module the module asks for (import, export ... from), engine
+   change Y. Same order as JS_GetModuleRequestName(): one per 'from' clause
+   or 'import "x"', a module asked twice comes twice. */
+typedef struct JSOutlineRequest {
+    JSAtom module;               /* the module, as written in the source */
+    /* its import attributes, 'with { type: "bytes" }': JS_UNDEFINED without
+       a 'with' clause, else an object of strings, valid during the call */
+    JSValueConst attributes;
+    uint32_t position;           /* offset of the string that names the module */
+} JSOutlineRequest;
+
 typedef struct JSModuleOutline {
     const JSOutlineStatement *statements;   /* in source order */
     int statement_count;
@@ -378,6 +391,8 @@ typedef struct JSModuleOutline {
     int import_count;
     const JSOutlineExport *exports;
     int export_count;
+    const JSOutlineRequest *requests;       /* qjsx: engine change Y */
+    int request_count;
     int has_eval;                /* TRUE: a direct eval(...) in the module */
 } JSModuleOutline;
 

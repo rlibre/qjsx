@@ -108,8 +108,8 @@ public:
 
     /**
      * JS: another frequency, the duty cycle kept. Throws if closed, EINVAL
-     * (out of reach) or EBUSY (no timer free for it: the output keeps its
-     * frequency).
+     * (out of reach), EBUSY (no timer free for it) or EIO (the hardware
+     * refused the timer); on an error the output keeps its frequency.
      */
     JS_EXPORT(setFrequency) void setFrequency(Frequency hz) {
         // closed: no output

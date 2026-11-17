@@ -398,7 +398,7 @@ private:
     size_t          _uploadReceived;     // bytes written so far
     uint8_t         _uploadHash[32];     // expected SHA-256 of the package
     char            _uploadBuildId[64];  // null terminated
-    crypto::Sha256 *_hash;               // owned; hash of the bytes received; nullptr: no upload yet
+    crypto::Sha256 *_hash;               // owned (memory::); hash of the bytes received; nullptr: no upload yet
 
     // the data folder (transport thread only)
     DataFiles       _files;              // the FILE_* requests

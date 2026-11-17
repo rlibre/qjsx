@@ -12,6 +12,7 @@
 #include "jsbind.h"
 #include "modules.h"
 #include "device_modules.h"
+#include "draw_module.h"
 
 namespace {
 
@@ -300,18 +301,22 @@ void registerProfileTestModule();   // profile_module.cpp
 
 /**
  * Registers the native test modules; called by main() in qjsx-tests only.
- * The modules of a board (device/gpio...) too, registered elsewhere only in
- * the digital twin: tests/types.test.js compares their exports with their
- * typings (creating a module only defines its classes, no hardware is used).
+ * The modules of a board (device/gpio..., and sys/draw of a board with a
+ * display) too, registered elsewhere only in the digital twin:
+ * tests/types.test.js compares their exports with their typings (creating a
+ * module only defines its classes and functions, no hardware is used).
  */
 void registerTestModules() {
+    rt::registerNativeModule("sys/draw", &jsNewModule_draw);
     rt::registerNativeModule("device/board", &jsNewModule_board);
     rt::registerNativeModule("device/gpio", &jsNewModule_gpio);
     rt::registerNativeModule("device/rmt", &jsNewModule_rmt);
     rt::registerNativeModule("device/usb", &jsNewModule_usb);
     rt::registerNativeModule("device/i2c", &jsNewModule_i2c);
+    rt::registerNativeModule("device/spi", &jsNewModule_spi);
     rt::registerNativeModule("device/adc", &jsNewModule_adc);
     rt::registerNativeModule("device/pwm", &jsNewModule_pwm);
+    rt::registerNativeModule("device/dac", &jsNewModule_dac);
     rt::registerNativeModule("jsbind_test", &jsNewModule_jsbind_test);
     registerDebugTestModule();
     registerRegionHeapTestModule();

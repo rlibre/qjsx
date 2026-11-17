@@ -15,7 +15,7 @@ import { BoxProps, DockingView, EvMessage, Menu, StateProxy, VBox } from "x4js";
 import { AppHeader } from "./appheader";
 import { BoardView } from "./boardview";
 import { ConsoleView } from "./consoleview";
-import { BoardInfo, I2cData, LogLine, MSG, PartInfo, PartStateMessage, ScopeData, TwinState, UartData } from "./messages";
+import { BoardInfo, I2cData, LogLine, MSG, PartInfo, PartStateMessage, ScopeData, SpiData, TwinState, UartData } from "./messages";
 import { PinTable } from "./pintable";
 import { ScopeView } from "./scopeview";
 import { applyTheme, DEFAULT_SETTINGS, openSettings, TwinSettings } from "./settings";
@@ -88,8 +88,8 @@ export class TwinView extends VBox {
 
     /**
      * One message of the twin: the board, the state now, the traffic of a
-     * UART, the parts, what a part published, a line of a part, what the
-     * pins did (the analyzer).
+     * UART, the parts, what a part published, a line of a part, the
+     * transfers of the I2C and SPI buses, what the pins did (the analyzer).
      */
     private _onMessage(event: EvMessage) {
         if (event.msg === MSG.board) {
@@ -103,6 +103,7 @@ export class TwinView extends VBox {
             this.refs.board.setUsb(state.usb);
             this.refs.board.setUarts(state.uarts, state.serialPorts ?? []);
             this.refs.board.setI2c(state.i2c);
+            this.refs.board.setSpi(state.spi ?? []);
             this.refs.pins.setPins(state.pins);
             this.refs.board.setPins(state.pins);
             this.refs.scope.setPins(state.pins);
@@ -121,6 +122,8 @@ export class TwinView extends VBox {
             this.refs.console.addLine(event.params as LogLine);
         } else if (event.msg === MSG.i2cData) {
             this.refs.board.addI2cRecords((event.params as I2cData).records);
+        } else if (event.msg === MSG.spiData) {
+            this.refs.board.addSpiRecords((event.params as SpiData).records);
         } else if (event.msg === MSG.scopeData) {
             this.refs.scope.addData(event.params as ScopeData);
         }

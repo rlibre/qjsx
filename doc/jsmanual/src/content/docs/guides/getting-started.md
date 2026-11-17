@@ -109,7 +109,13 @@ qjsx deploy --target serial:COM11 --monitor
 ```
 
 `qjsx deploy` installs the package in the flash of the board and starts it; the program
-starts again at each power on. `--ram` loads it in RAM only, for a quick try.
+starts again at each power on. `--ram` loads it in RAM only, for a quick try (lost at the
+next restart of the board); `--reset` restarts the board after installing, so that the
+program starts as after a power on; `--data` also writes the files of the project's
+`"data"` folder (see [Programs on a device](../devices/#files)).
+
+A Teensy 4.0 or an RP2350 board is reached through its own USB port, which the PC sees as
+a serial port too: `serial:COM28`.
 
 ## Debug it
 

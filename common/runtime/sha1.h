@@ -42,20 +42,16 @@ struct Sha1 {
     }
 
     /**
-     * Processes one 64-byte block into 'state' (FIPS 180-4, 6.1.2).
+     * Processes one 64-byte block into 'state' (FIPS 180-4, 6.1.3: the
+     * message schedule kept in 16 words, 64 bytes of stack, not 80).
      */
     void compress(const uint8_t *data) {
-        uint32_t schedule[80];
+        uint32_t schedule[16];
 
-        // message schedule: the 16 big-endian words of the block...
+        // message schedule: the 16 big-endian words of the block
         for (int i = 0; i < 16; i++) {
             schedule[i] = (uint32_t)data[i * 4] << 24 | (uint32_t)data[i * 4 + 1] << 16
                         | (uint32_t)data[i * 4 + 2] << 8 | (uint32_t)data[i * 4 + 3];
-        }
-
-        // ...extended to 80 words
-        for (int i = 16; i < 80; i++) {
-            schedule[i] = rotateLeft(schedule[i - 3] ^ schedule[i - 8] ^ schedule[i - 14] ^ schedule[i - 16], 1);
         }
 
         // 80 rounds on the working variables a..e, starting from the state;
@@ -67,6 +63,17 @@ struct Sha1 {
         uint32_t e = state[4];
 
         for (int i = 0; i < 80; i++) {
+            // from round 16, the word of the round replaces the one of round
+            // i - 16 in the circular schedule (i & 15): W[i] = rotl1(W[i - 3]
+            // ^ W[i - 8] ^ W[i - 14] ^ W[i - 16])
+            uint32_t word = schedule[i & 15];
+            if (i >= 16) {
+                uint32_t mixedWords = schedule[(i - 3) & 15] ^ schedule[(i - 8) & 15] ^ schedule[(i - 14) & 15] ^ word;
+                word = rotateLeft(mixedWords, 1);
+                schedule[i & 15] = word;
+            }
+
+            // the function and the constant of the round
             uint32_t mixed = 0;
             uint32_t constant = 0;
             if (i < 20) {
@@ -83,7 +90,8 @@ struct Sha1 {
                 constant = 0xca62c1d6;
             }
 
-            uint32_t temp = rotateLeft(a, 5) + mixed + e + constant + schedule[i];
+            // the working variables shifted
+            uint32_t temp = rotateLeft(a, 5) + mixed + e + constant + word;
             e = d;
             d = c;
             c = rotateLeft(b, 30);

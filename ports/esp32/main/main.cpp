@@ -20,6 +20,10 @@
 
 #include "sdkconfig.h"
 
+#if QJSX_HAS_DRAW
+#include "draw_module.h"
+#endif
+
 namespace {
 
 /**
@@ -52,12 +56,19 @@ extern "C" void app_main(void) {
     rt::registerNativeModule("device/gpio", &jsNewModule_gpio);
     rt::registerNativeModule("device/rmt", &jsNewModule_rmt);
     rt::registerNativeModule("device/i2c", &jsNewModule_i2c);
+    rt::registerNativeModule("device/spi", &jsNewModule_spi);
     rt::registerNativeModule("device/adc", &jsNewModule_adc);
     rt::registerNativeModule("device/pwm", &jsNewModule_pwm);
     setSerialDriver(hal::serial::boardDriver());
     rt::registerNativeModule("device/serial", &jsNewModule_serial);
 #if QJSX_HAS_USB
     rt::registerNativeModule("device/usb", &jsNewModule_usb);
+#endif
+#if QJSX_HAS_DAC
+    rt::registerNativeModule("device/dac", &jsNewModule_dac);
+#endif
+#if QJSX_HAS_DRAW
+    rt::registerNativeModule("sys/draw", &jsNewModule_draw);
 #endif
 
     // the JS task

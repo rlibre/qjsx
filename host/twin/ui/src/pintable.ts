@@ -37,15 +37,19 @@ function forceTooltip(level: number) {
 }
 
 /**
- * What the program uses a pin for: an analog input with its voltage ("adc
- * 1.65 V"), a PWM output ("pwm 1 kHz 25 %", "inv" when active low), a bus
- * or a channel ("i2c", "rmt"), else its gpio mode, "-" when it does not use
- * it.
+ * What the program uses a pin for: an analog input or output with its
+ * voltage ("adc 1.65 V", "dac 1.65 V"), a PWM output ("pwm 1 kHz 25 %", "inv" when active low), a bus
+ * or a channel ("i2c", "spi", "rmt"), else its gpio mode, "-" when it does
+ * not use it.
  */
 export function pinMode(state: PinState) {
     // the uses of the device modules first
     if (state.adc) {
         return `adc ${state.voltage.toFixed(2)} V`;
+    }
+
+    if (state.dac) {
+        return `dac ${state.voltage.toFixed(2)} V`;
     }
 
     if (state.pwm !== null) {
@@ -55,6 +59,10 @@ export function pinMode(state: PinState) {
 
     if (state.i2c) {
         return "i2c";
+    }
+
+    if (state.spi) {
+        return "spi";
     }
 
     if (state.rmt) {
@@ -225,11 +233,13 @@ export class PinTable extends VBox {
 
 /**
  * Whether something uses a pin: the program configured it (gpio, rmt, i2c,
- * adc), the page forces it, or a part is on it ('hasPart'). The setting
- * "used pins only" shows only those (the table, the analyzer's list).
+ * spi, adc, dac), the page forces it, or a part is on it ('hasPart'). The
+ * setting "used pins only" shows only those (the table, the analyzer's
+ * list).
  */
 export function pinInUse(state: PinState | undefined, hasPart: boolean): boolean {
-    const usedByProgram = state !== undefined && (state.configured || state.rmt || state.i2c || state.adc);
+    const usedByDevice = state !== undefined && (state.rmt || state.i2c || state.spi || state.adc || state.dac);
+    const usedByProgram = state !== undefined && (state.configured || usedByDevice);
     const forced = state !== undefined && state.forced !== null;
     return usedByProgram || forced || hasPart;
 }

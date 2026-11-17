@@ -232,6 +232,13 @@ for (const typing of TYPINGS) {
         globals = readGlobalTyping(typing.text);
         continue;
     }
+
+    // a wildcard declaration ("*.bin": files imported as bytes) types the
+    // imports of files, not a module of the runtime: nothing to compare
+    if (typing.name.includes("*")) {
+        continue;
+    }
+
     byModule.set(typing.name, readModuleTyping(typing.text));
 }
 check(globals !== null, "common/runtime/modules/globals.d.ts exists");

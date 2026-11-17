@@ -18,7 +18,7 @@ namespace agent {
 namespace {
 
 const char TEMPORARY_SUFFIX[] = ".qjsx-part";   // the file being written, renamed once complete
-const size_t MAX_PATH = 512;                    // bytes of a resolved path
+const size_t MAX_PATH = 512;                    // bytes of a resolved path (on the heap: the stack is small)
 
 /**
  * True when 'name' ends with the suffix of a temporary file.
@@ -55,10 +55,11 @@ bool addEntry(void *opaque, const char *name) {
     }
 
     // its size and type
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s/%s", listing->folder, name);
+    char *path = (char *)memory::allocate(MAX_PATH);
+    snprintf(path, MAX_PATH, "%s/%s", listing->folder, name);
     files::Status status = {};
     files::stat(path, &status);
+    memory::release(path);
 
     // the entry, with a copy of its name
     FileEntry *entry = &listing->entries[listing->count++];
@@ -96,10 +97,11 @@ bool addUsage(void *opaque, const char *name) {
     Usage *usage = (Usage *)opaque;
 
     // its type and size; an entry that vanished meanwhile counts nothing
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s/%s", usage->folder, name);
+    char *path = (char *)memory::allocate(MAX_PATH);
+    snprintf(path, MAX_PATH, "%s/%s", usage->folder, name);
     files::Status status = {};
     if (!files::stat(path, &status)) {
+        memory::release(path);
         return true;
     }
 
@@ -110,6 +112,7 @@ bool addUsage(void *opaque, const char *name) {
         usage->used += (uint64_t)status.size;
     }
 
+    memory::release(path);
     return true;
 }
 
@@ -154,8 +157,8 @@ int DataFiles::resolve(const char *relative, size_t length, bool allowRoot, char
     }
 
     // the folder, then each component
-    char path[MAX_PATH];
-    size_t used = (size_t)snprintf(path, sizeof(path), "%s", _folder);
+    char *path = (char *)memory::allocate(MAX_PATH);
+    size_t used = (size_t)snprintf(path, MAX_PATH, "%s", _folder);
     size_t start = 0;
     bool anyName = false;
 
@@ -183,11 +186,13 @@ int DataFiles::resolve(const char *relative, size_t length, bool allowRoot, char
         bool hasNull = memchr(name, 0, size) != nullptr;
         bool foreign = hasBackslash || hasColon || hasNull;
         if (parent || foreign) {
+            memory::release(path);
             return EINVAL;
         }
 
         // room for it, and for the suffix of a temporary file after it
-        if (used + 1 + size + sizeof(TEMPORARY_SUFFIX) >= sizeof(path)) {
+        if (used + 1 + size + sizeof(TEMPORARY_SUFFIX) >= MAX_PATH) {
+            memory::release(path);
             return ENAMETOOLONG;
         }
 
@@ -200,10 +205,13 @@ int DataFiles::resolve(const char *relative, size_t length, bool allowRoot, char
 
     // the folder itself only where it makes sense (a listing)
     if (!anyName && !allowRoot) {
+        memory::release(path);
         return EINVAL;
     }
 
+    // a copy of its exact size to the caller
     *out = memory::copyText(path, used);
+    memory::release(path);
     return 0;
 }
 

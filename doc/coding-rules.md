@@ -380,7 +380,14 @@ configured formatter, an automatic review):
 - align the names of the members in headers;
 - add a blank line after a closed block and before a loop;
 - convert C++ casts into C-style casts;
-- list the functions without a `/** */` block.
+- turn section separators into `// ### Title ####` lines;
+- list the functions without a `/** */` block;
+- list the data members of structs and classes without a comment.
+
+In qjsx these are `tools/style.pl` (rewrites the files in place: braces, `/** */` blocks,
+alignment, casts, `case` blocks, separators, blank lines; never run on `engine/`),
+`tools/undocumented.pl` (functions without a `/** */` block) and
+`tools/undocumented-members.pl` (members without a comment).
 
 The rest cannot be automated: grouping the lines by logical steps and writing the pseudo-code
 are done by hand, while rereading.
@@ -394,7 +401,7 @@ some). They must be identical. For example:
 
 ```sh
 strip() { perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' "$1" | grep -v '^\s*$' | tr -d '{} \t\n'; }
-diff <(strip avant.cpp) <(strip apres.cpp)
+diff <(strip before.cpp) <(strip after.cpp)
 ```
 
 The result must be empty.

@@ -109,6 +109,7 @@ static __exception int js_parse_from_clause(JSParseState *s, JSModuleDef *m)
         js_parse_error(s, "string expected");
         return -1;
     }
+    const uint8_t *module_ptr = s->token.ptr;   /* qjsx: engine change Y */
     module_name = JS_ValueToAtom(s->ctx, s->token.u.str.str);
     if (module_name == JS_ATOM_NULL)
         return -1;
@@ -120,6 +121,8 @@ static __exception int js_parse_from_clause(JSParseState *s, JSModuleDef *m)
     idx = add_req_module_entry(s->ctx, m, module_name);
     JS_FreeAtom(s->ctx, module_name);
     if (idx < 0)
+        return -1;
+    if (js_outline_request_position(s, idx, module_ptr))   /* qjsx: engine change Y */
         return -1;
     if (s->token.val == TOK_WITH) {
         if (js_parse_with_clause(s, &m->req_module_entries[idx]))
@@ -344,6 +347,7 @@ static __exception int js_parse_import(JSParseState *s)
 
     first_import = m->import_entries_count;
     if (s->token.val == TOK_STRING) {
+        const uint8_t *module_ptr = s->token.ptr;   /* qjsx: engine change Y */
         module_name = JS_ValueToAtom(ctx, s->token.u.str.str);
         if (module_name == JS_ATOM_NULL)
             return -1;
@@ -354,6 +358,8 @@ static __exception int js_parse_import(JSParseState *s)
         idx = add_req_module_entry(ctx, m, module_name);
         JS_FreeAtom(ctx, module_name);
         if (idx < 0)
+            return -1;
+        if (js_outline_request_position(s, idx, module_ptr))   /* qjsx: engine change Y */
             return -1;
         if (s->token.val == TOK_WITH) {
             if (js_parse_with_clause(s, &m->req_module_entries[idx]))

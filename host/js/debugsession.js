@@ -195,8 +195,9 @@ export class DebugSession {
     }
 
     /**
-     * { module, location } of a kept breakpoint ('location' null while it is
-     * not resolved), or undefined for an unknown id.
+     * { module, location, number, pcs } of a kept breakpoint ('location' null
+     * and 'pcs' empty while it is not resolved; 'number' the function, 'pcs'
+     * its offsets in it), or undefined for an unknown id.
      */
     breakpointLocation(id) {
         const breakpoint = this.breakpoints.get(id);
@@ -204,7 +205,7 @@ export class DebugSession {
             return undefined;
         }
 
-        return { module: breakpoint.module, location: breakpoint.location };
+        return { module: breakpoint.module, location: breakpoint.location, number: breakpoint.number, pcs: breakpoint.pcs };
     }
 
     /**

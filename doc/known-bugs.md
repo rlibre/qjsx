@@ -12,16 +12,11 @@ by severity. There is no open "serious" defect any more. The fixed defects are i
 
 ### Recorded during the fixes (2026-11-11)
 
-- **Agent**: the last answers are only forgotten by `attach()`. On a serial link, a new host
-  sends HELLO without `attach()`: a request whose number is the one of the last answer of the
-  previous host (HELLO number 1) receives this old answer.
-  Lead: do not treat HELLO as a repetition and forget both answers in `handleHello`.
 - **Debugger**: only one last answer is kept; with a burst of requests, the repetition of a
   request whose answer was replaced is executed again.
 - **`objectClassName`**: `ownDataProperty` on the prototype and on `constructor` triggers
   the `getOwnPropertyDescriptor` trap of a Proxy (script code runs, with no pause possible
   from now on).
-- **BigInt**: `strtoll` accepts leading spaces and a `+`.
 - **`net`**:
   - MESSAGE_ACCEPTED / MESSAGE_CONNECTED carry a socket: if the message is dropped (source
     removed, mailbox closed at shutdown), the socket leaks;
@@ -31,7 +26,6 @@ by severity. There is no open "serious" defect any more. The fixed defects are i
   when a new host replaces the old one; otherwise the old thread waits for its host to
   disconnect.
 - **`Signal`** is recursive on Windows (CRITICAL_SECTION), not on POSIX.
-- **`readAll`** returns EIO when measuring the size fails, instead of the errno of the `seek`.
 - **`fseeko` / `ftello`** used on everything that is not Windows: to be checked in the
   newlib of ESP-IDF.
 - **jsbind**:
@@ -41,6 +35,28 @@ by severity. There is no open "serious" defect any more. The fixed defects are i
     classes at the same time;
   - `Convert<Range<T,Lo,Hi>>` compares with `(T)Lo`: a negative `Lo` with an unsigned `T`
     overflows.
+
+### To verify: the screen of the twin of the WT32-SC01 (2026-11-17)
+
+- Once, a reload of the twin's page showed an incomplete screen (no title bar, a stale
+  digit) while the user was also clicking in the page; not reproduced in four reloads. The
+  view now asks again for the whole glass until it has it, and `tests/display.test.js`
+  checks that the glass rebuilt from the published rectangles equals a full refresh.
+- The model `st7796-320x480` (host/twin/parts/st7796-320x480/model.js) was written without
+  the ST7796's datasheet: its pixel format after a reset (0x66, 18 bits, assumed), whether
+  a reset clears its memory, and whether "BGR set" is this panel's true color setting
+  (inferred because the colors look right on the real board) are to check against it.
+- The sampling profiler test failed once in the Debug suite on the PC ("the JS thread
+  works about half of the time": 0.30), and passed alone 5 times out of 5: a measure of
+  time that the load of the whole suite disturbs.
+
+### To verify: the data files test failed once in the Release suite (2026-11-17)
+
+`tests/datafiles.test.js` ("the files of the data folder from the PC") failed once in a
+full `bash tests/run-tests.sh Release`, right after `tests/board.test.js` (which restarts
+the twin's program). Run alone in the same order (board, then datafiles, on a fresh twin)
+it passed 4 times out of 4; the Debug suite passed too. The check's own output is not kept
+by run-tests.sh, so the failing check is unknown: a timing after the restart is the lead.
 
 ### To verify: a debugger test failed once after `deploy --reset` (2026-11-12)
 
@@ -212,38 +228,16 @@ behaviour as it is. Nothing fixed.
 
 Seen by the agents that applied `doc/coding-rules.md`; they changed no behaviour.
 
-- **jsbind** (`jsbind_convert.h`): the `from()` of a `JS_ENUM` when `JS_ToCStringLen` fails,
-  and `rejectUnknownFields` when `JS_AtomToCString` fails, throw a new TypeError over the
-  pending exception instead of passing it on.
-- **`device/rmt`** (`rmt_module.cpp`): `init()` calls `hal::rmt::close(-1)` when the open
-  fails; `send()` has no upper bound on the pulse count (a huge array: an allocation that
-  fails is fatal on a board). I2C caps its transfers.
-- **`device/serial`** (`serial_module.cpp`, board path): `JS_ToFloat64` runs on any
-  argument, so an object's `valueOf` can run.
-- **ESP32 `device/pwm`** (`hal_pwm_esp32.cpp` `setFrequency`): the result of `setUpTimer()`
-  is ignored for a new timer: a refused frequency leaves the channel on a timer not set up.
-- **ESP32 `device/adc`** (`hal_adc_esp32.cpp`): `deleteCalibration` assumes the curve
-  scheme (true on the S3); a channel whose configuration fails leaves its unit with no user
-  (reused later, no leak).
-- **RP2350**: `board::confineFiles()` returns false, while the boards confine their files
-  (no effect while `dataDirectory()` is nullptr).
-- **Teensy 4.0**: the default `thread_local` block (`tls_imxrt1062.cpp`) is made without a
-  lock (tasks without a block of their own could race at their first access); the GPIO
-  functions other than `configure` / `reset` do not check the pin number (the common code
-  does); `board::restart()` has no `return` (fine: `NVIC_SystemReset` does not return).
-- **Desktop agent** (`board_host.cpp` `writeUpload`): `offset + size <= _uploadSize` can
-  wrap around on an overflow of `size_t`.
-- **Twin**: `Registers._write` (`twin.js`) does not wrap the register index (a part with
-  fewer than 256 registers in "pairs" mode); `i2cTrace(after = 0xFFFFFFFF)` wraps
+- **`device/rmt`** (`rmt_module.cpp`): `send()` has no upper bound on the pulse count (a
+  huge array: an allocation that fails is fatal on a board). I2C caps its transfers.
+- **Teensy 4.0**: the GPIO functions other than `configure` / `reset` do not check the pin
+  number (the common code does).
+- **Twin**: `i2cTrace(after = 0xFFFFFFFF)` wraps
   (`twin_i2c.cpp`); `applyProject` (`agent_command.cpp`) leaks small allocations when the
   command line wins; `registerTcpLink` drops links past 16 silently.
-- **Debugger** (`cdp.js`): `hitBreakpoints` compares lines only (two breakpoints on one
-  line both reported); `bindBreakpoint` writes the source of every library module of the
-  package into the cache folder, even never loaded ones. `LineTable.offset`
+- **Debugger** (`cdp.js`): `bindBreakpoint` writes the source of every library module of
+  the package into the cache folder, even never loaded ones. `LineTable.offset`
   (`debuginfo.js`): a column past the end of a line gives the start of the next one.
-- **Stack**: arrays of more than 256 bytes remain on the stack (`char[512]` in `js::fail`,
-  `failSystem`, `reportException`, `Resolver::reject`; `char path[MAX_PATH]` in
-  `data_files.cpp`, recursive in `addUsage`; 320 bytes in `sha1.h`).
 - **References in the user-facing API of jsbind** (`Optional::value()`, `Buffer::value()`,
   `Promise::value()`, `Resolver::resolve(const T &)`, `ModuleBuilder &` of `JS_MODULE`):
   against the rules, changing them touches every module.
@@ -259,10 +253,6 @@ Seen by the agents that applied `doc/coding-rules.md`; they changed no behaviour
 
 The local fixes of this section were made on 2026-11-11 (`history.md`); the ones left
 need a decision of the user.
-
-- **Agent upload hash** (`common/agent/agent.cpp`): allocated with `new` / `delete`, outside
-  `memory::allocate` / `release` (the allocation rule only names malloc / realloc / free: to
-  decide).
 
 - **`TextDecoder`**: it does not remove the BOM, does not handle `fatal` nor `ignoreBOM`, and
   rejects an encoding name surrounded by spaces.

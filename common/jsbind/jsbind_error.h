@@ -25,6 +25,7 @@
 #pragma once
 
 #include "jsbind_base.h"
+#include "memory.h"
 
 namespace js {
 
@@ -60,6 +61,10 @@ struct CallScope {
     CallScope(const CallScope &) = delete;
     CallScope &operator=(const CallScope &) = delete;
 };
+
+// Bytes of a formatted error message, the zero included: on the heap (the
+// stack of a task is small), messages truncated to MESSAGE_SIZE - 1 bytes.
+const size_t MESSAGE_SIZE = 512;
 
 // Innermost active call (one JS thread per runtime, hence thread_local).
 inline thread_local CallScope *currentCall = nullptr;
@@ -257,6 +262,12 @@ inline const char *errnoName(int error) {
         }
 
     #endif
+    #ifdef ECANCELED
+        case ECANCELED: {
+            return "ECANCELED";
+        }
+
+    #endif
     #ifdef EADDRINUSE
         case EADDRINUSE: {
             return "EADDRINUSE";
@@ -306,14 +317,15 @@ inline JSContext *context() {
 template<class Kind = Error>
 inline Failure __attribute__((format(printf, 1, 2))) fail(const char *format, ...) {
     // format the message
-    char message[512];
+    char *message = (char *)memory::allocate(detail::MESSAGE_SIZE);
     va_list args;
     va_start(args, format);
-    vsnprintf(message, sizeof(message), format, args);
+    vsnprintf(message, detail::MESSAGE_SIZE, format, args);
     va_end(args);
 
     // record it: only the first error of the call is thrown (see recordError)
     detail::recordError<Kind>(message);
+    memory::release(message);
     return Failure();
 }
 
@@ -323,18 +335,19 @@ inline Failure __attribute__((format(printf, 1, 2))) fail(const char *format, ..
  */
 inline Failure failSystem(int error = errno, const char *what = nullptr) {
     // message "ENOENT: <strerror>[, what]"; 'what' is cut at 400 bytes so
-    // that the code and its text always fit (GCC checks the truncation)
-    char message[512];
+    // that the code and its text always fit
+    char *message = (char *)memory::allocate(detail::MESSAGE_SIZE);
     const char *name = detail::errnoName(error);
     if (what != nullptr) {
-        snprintf(message, sizeof(message), "%s: %s, %.400s", name, strerror(error), what);
+        snprintf(message, detail::MESSAGE_SIZE, "%s: %s, %.400s", name, strerror(error), what);
     } else {
-        snprintf(message, sizeof(message), "%s: %s", name, strerror(error));
+        snprintf(message, detail::MESSAGE_SIZE, "%s: %s", name, strerror(error));
     }
 
     // record it; if it won, take the exception just thrown back out of the
     // context, add 'code' and 'errno', and throw it again
     bool recorded = detail::recordError<Error>(message);
+    memory::release(message);
     if (recorded) {
         JSContext *ctx = detail::currentCall->ctx;
         JSValue exception = JS_GetException(ctx);
@@ -401,17 +414,18 @@ inline void reportException(JSContext *ctx, const char *prefix = "Uncaught") {
         JS_FreeValue(ctx, JS_GetException(ctx));
     }
 
-    // "<prefix> <message>", truncated to 511 bytes
-    char line[512];
+    // "<prefix> <message>", truncated to MESSAGE_SIZE - 1 bytes
+    char *line = (char *)memory::allocate(detail::MESSAGE_SIZE);
     if (text == nullptr) {
-        snprintf(line, sizeof(line), "%s (an exception whose text could not be made: out of memory?)\n", prefix);
+        snprintf(line, detail::MESSAGE_SIZE, "%s (an exception whose text could not be made: out of memory?)\n", prefix);
     } else if (JS_IsNull(exception)) {
-        snprintf(line, sizeof(line), "%s null (out of memory? the engine throws null when it has no room left to make the error)\n", prefix);
+        snprintf(line, detail::MESSAGE_SIZE, "%s null (out of memory? the engine throws null when it has no room left to make the error)\n", prefix);
     } else {
-        snprintf(line, sizeof(line), "%s %s\n", prefix, text);
+        snprintf(line, detail::MESSAGE_SIZE, "%s %s\n", prefix, text);
     }
 
     detail::writeError(line);
+    memory::release(line);
     JS_FreeCString(ctx, text);
 
     // then its stack, when it has one (an error made out of memory has none)

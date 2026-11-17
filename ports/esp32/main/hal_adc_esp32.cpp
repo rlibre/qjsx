@@ -43,13 +43,26 @@ const Attenuation ATTENUATIONS[] = {
     { ADC_ATTEN_DB_12, 3100 },
 };
 
+// The calibration schemes of ESP-IDF.
+enum class Scheme {
+    None,
+    Curve,
+    Line,
+};
+
+// The calibration of an input, and the scheme that made it (to delete it).
+struct Calibration {
+    adc_cali_handle_t handle;   // nullptr: none (a straight line)
+    Scheme            scheme;   // None when handle is nullptr
+};
+
 // An open input.
 struct Input {
-    bool              used;          // open() gave it
-    int               pin;           // its GPIO
-    adc_channel_t     channel;       // its channel of ADC1
-    int               spanMv;        // the span of its attenuation
-    adc_cali_handle_t calibration;   // nullptr: none (a straight line)
+    bool          used;          // open() gave it
+    int           pin;           // its GPIO
+    adc_channel_t channel;       // its channel of ADC1
+    int           spanMv;        // the span of its attenuation
+    Calibration   calibration;   // its calibration, with its scheme
 };
 
 adc_oneshot_unit_handle_t unit = nullptr;   // ADC1, made at the first open
@@ -72,9 +85,9 @@ Attenuation attenuationFor(int rangeMv) {
 
 /**
  * The calibration of a channel at an attenuation, by the scheme the chip
- * has; nullptr when none.
+ * has; a null handle when none.
  */
-adc_cali_handle_t makeCalibration(adc_channel_t channel, adc_atten_t atten) {
+Calibration makeCalibration(adc_channel_t channel, adc_atten_t atten) {
     adc_cali_handle_t handle = nullptr;
 
     // curve fitting, where the chip has it
@@ -85,7 +98,7 @@ adc_cali_handle_t makeCalibration(adc_channel_t channel, adc_atten_t atten) {
     curve.atten = atten;
     curve.bitwidth = ADC_BITWIDTH_DEFAULT;
     if (adc_cali_create_scheme_curve_fitting(&curve, &handle) == ESP_OK) {
-        return handle;
+        return Calibration{ handle, Scheme::Curve };
     }
 #endif
 
@@ -96,30 +109,36 @@ adc_cali_handle_t makeCalibration(adc_channel_t channel, adc_atten_t atten) {
     line.atten = atten;
     line.bitwidth = ADC_BITWIDTH_DEFAULT;
     if (adc_cali_create_scheme_line_fitting(&line, &handle) == ESP_OK) {
-        return handle;
+        return Calibration{ handle, Scheme::Line };
     }
 #endif
 
     // no scheme, or it failed: none
     (void)channel;
     (void)atten;
-    return nullptr;
+    return Calibration{ nullptr, Scheme::None };
 }
 
 /**
- * Lets the calibration of an input go.
+ * Lets the calibration of an input go, by the scheme that made it.
  */
-void deleteCalibration(adc_cali_handle_t handle) {
-    if (handle == nullptr) {
-        return;
-    }
-
-    // by the scheme makeCalibration() chose
+void deleteCalibration(Calibration calibration) {
+    // made by curve fitting
 #if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
-    adc_cali_delete_scheme_curve_fitting(handle);
-#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
-    adc_cali_delete_scheme_line_fitting(handle);
+    if (calibration.scheme == Scheme::Curve) {
+        adc_cali_delete_scheme_curve_fitting(calibration.handle);
+    }
 #endif
+
+    // made by line fitting
+#if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    if (calibration.scheme == Scheme::Line) {
+        adc_cali_delete_scheme_line_fitting(calibration.handle);
+    }
+#endif
+
+    // none (a chip with no scheme: the parameter unused)
+    (void)calibration;
 }
 
 /**
@@ -189,6 +208,12 @@ Opened open(int pin, int rangeMv) {
     channelConfig.atten = attenuation.atten;
     channelConfig.bitwidth = ADC_BITWIDTH_DEFAULT;
     if (adc_oneshot_config_channel(unit, channel, &channelConfig) != ESP_OK) {
+        // a unit made for this input only goes with it
+        if (unitUsers == 0) {
+            adc_oneshot_del_unit(unit);
+            unit = nullptr;
+        }
+
         return Opened{ -1, EIO, 0, 0 };
     }
 
@@ -248,7 +273,7 @@ int readMillivolts(int handle) {
     // calibrated
     Input *input = inputOf(handle);
     int millivolts = 0;
-    bool calibrated = input->calibration != nullptr && adc_cali_raw_to_voltage(input->calibration, raw, &millivolts) == ESP_OK;
+    bool calibrated = input->calibration.handle != nullptr && adc_cali_raw_to_voltage(input->calibration.handle, raw, &millivolts) == ESP_OK;
     if (calibrated) {
         return millivolts;
     }

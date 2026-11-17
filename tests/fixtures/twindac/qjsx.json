@@ -1,0 +1,7 @@
+{
+    "name": "twindac",
+    "twin": {
+        "board": "esp32-devkitc-wroom32",
+        "ports": { "agent": 45732, "ui": 45733 }
+    }
+}

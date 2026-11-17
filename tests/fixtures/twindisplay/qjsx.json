@@ -1,0 +1,7 @@
+{
+    "name": "twindisplay",
+    "twin": {
+        "board": "wt32-sc01",
+        "ports": { "agent": 45786, "ui": 45787 }
+    }
+}

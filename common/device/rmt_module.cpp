@@ -138,7 +138,12 @@ public:
         RmtOptions settings = options.has() ? options.value() : RmtOptions();
         int channel = hal::rmt::open((int)pin, (uint32_t)(int)settings.resolution);
         if (channel < 0 || channel >= MAX_CHANNELS) {
-            hal::rmt::close(channel);
+            // a channel past our table goes back to the hal (none opened when < 0)
+            bool opened = channel >= 0;
+            if (opened) {
+                hal::rmt::close(channel);
+            }
+
             return (void)js::fail("rmt: cannot open a channel on pin %d", (int)pin);
         }
 

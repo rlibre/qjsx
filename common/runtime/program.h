@@ -12,6 +12,8 @@
 // Modules are found, in this order: native modules (C++), the bytecode of
 // the package being run, the JS modules embedded in the executable, then
 // RunHooks::loadModule (the host tool loads the files on disk there).
+// A module imported with { type: "bytes" } is a file of the package
+// ("bytes/<name>", a Uint8Array over it), else RunHooks::loadBytes.
 #pragma once
 
 #include <stddef.h>
@@ -50,6 +52,10 @@ struct RunHooks {
     // Loads a module that is neither native nor in the package; returns
     // nullptr with a pending exception if it cannot.
     JSModuleDef *(*loadModule)(JSContext *ctx, const char *name, void *opaque);
+    // Loads a module imported as bytes (with { type: "bytes" }) that is not
+    // in the package, with newBytesModule(); returns nullptr with a pending
+    // exception if it cannot.
+    JSModuleDef *(*loadBytes)(JSContext *ctx, const char *name, void *opaque);
     // What the program may reach (files, network, environment, serial
     // ports), those of the thread during the run; borrowed. nullptr: the
     // tool's own commands, everything allowed.
@@ -94,6 +100,19 @@ int runPackage(const uint8_t *data, size_t size, const RunHooks *hooks, int argu
  * fails: "eval is not supported". Returns nullptr with a pending exception.
  */
 JSModuleDef *compileModule(JSContext *ctx, const char *name, const char *source, size_t size);
+
+/**
+ * Creates the module 'name' of an import of bytes (with { type: "bytes" }):
+ * its only export, 'default', is a Uint8Array over 'data' (not copied).
+ * 'release' frees 'data' once the array is collected, also when this call
+ * fails; nullptr: 'data' is not freed (the bytes of the package, which
+ * outlives the run). Returns nullptr with a pending exception.
+ * The bytes are meant to be read only, but nothing stops a write into the
+ * array (the engine has no immutable ArrayBuffer): on a device they lie in
+ * flash, a write there is an undetected error.
+ */
+JSModuleDef *newBytesModule(JSContext *ctx, const char *name, uint8_t *data, size_t size,
+                            JSFreeArrayBufferDataFunc *release);
 
 /**
  * import.meta.url and import.meta.main, like Node and Deno.

@@ -53,7 +53,12 @@
 //     exports: [{ exported (null for export * from), local, module (null for
 //                 a name of the module), start, end (a name of an export
 //                 clause, else 0, 0) }],
+//     requests: [{ module, attributes, position }],
 //     hasEval }
+// 'requests' are the modules it asks for, in the order of 'imports' (engine
+// change Y): 'attributes' is the 'with { ... }' of the import (an object of
+// strings: { type: "bytes" }), null without one; 'position' is where the
+// string naming the module starts.
 // Positions are byte offsets in the UTF-8 source.
 //
 // Constants: 'quickjsVersion', 'qjsxVersion', and 'bytecodeVersion', the
@@ -317,17 +322,43 @@ JSValue outlineExportsToJs(JSContext *ctx, const JSModuleOutline *outline) {
 }
 
 /**
+ * The modules asked for as an array of { module, attributes, position }
+ * ('attributes' null without a 'with' clause, else an object of strings).
+ */
+JSValue outlineRequestsToJs(JSContext *ctx, const JSModuleOutline *outline) {
+    JSValue array = JS_NewArray(ctx);
+
+    for (int i = 0; i < outline->request_count; i++) {
+        const JSOutlineRequest *request = &outline->requests[i];
+
+        // the attributes object of the engine is only valid during the call:
+        // the record keeps its own reference
+        bool hasAttributes = !JS_IsUndefined(request->attributes);
+        JSValue attributes = hasAttributes ? JS_DupValue(ctx, request->attributes) : JS_NULL;
+
+        JSValue record = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, record, "module", JS_AtomToString(ctx, request->module));
+        JS_SetPropertyStr(ctx, record, "attributes", attributes);
+        setNumber(ctx, record, "position", request->position);
+        JS_SetPropertyUint32(ctx, array, i, record);
+    }
+
+    return array;
+}
+
+/**
  * Module outline collector (JS_SetModuleOutlineCollector): '*opaque' (a
- * JSValue) receives { statements, imports, exports, hasEval }.
+ * JSValue) receives { statements, imports, exports, requests, hasEval }.
  */
 void collectOutline(JSContext *ctx, const JSModuleOutline *outline, void *opaque) {
     JSValue *result = (JSValue *)opaque;
 
-    // { statements, imports, exports, hasEval }
+    // { statements, imports, exports, requests, hasEval }
     JSValue record = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, record, "statements", outlineStatementsToJs(ctx, outline));
     JS_SetPropertyStr(ctx, record, "imports", outlineImportsToJs(ctx, outline));
     JS_SetPropertyStr(ctx, record, "exports", outlineExportsToJs(ctx, outline));
+    JS_SetPropertyStr(ctx, record, "requests", outlineRequestsToJs(ctx, outline));
     JS_SetPropertyStr(ctx, record, "hasEval", JS_NewBool(ctx, outline->has_eval));
 
     // it replaces what *result held

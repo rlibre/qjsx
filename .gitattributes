@@ -3,3 +3,7 @@
 # them, and the hash of a source recorded in a package (sourceHash) and the
 # positions of its debug info must not depend on the machine that built it.
 * text=auto eol=lf
+
+# Files imported as bytes by the test programs (tests/fixtures/bytes): kept
+# exactly as they are, never converted.
+*.bin binary

@@ -86,13 +86,16 @@ public:
             return js::failSystem(errno, _given);
         }
 
-        // refused: say which access, to what, and how to grant it
-        char what[512];
+        // refused: say which access, to what, and how to grant it (on the
+        // heap: the stack of a task is small)
+        char *what = (char *)memory::allocate(js::detail::MESSAGE_SIZE);
         const char *hint = rt::permissions()->hint();
         const char *separator = hint[0] != 0 ? ": " : "";
-        snprintf(what, sizeof(what), "%s access to \"%s\" is not allowed%s%s", rt::accessName(_access), _given,
-                 separator, hint);
-        return js::failSystem(EACCES, what);
+        snprintf(what, js::detail::MESSAGE_SIZE, "%s access to \"%s\" is not allowed%s%s", rt::accessName(_access),
+                 _given, separator, hint);
+        js::Failure failure = js::failSystem(EACCES, what);
+        memory::release(what);
+        return failure;
     }
 
 private:

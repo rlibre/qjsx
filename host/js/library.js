@@ -30,21 +30,31 @@
 //                            same condition)
 //   src/<module>.js          its source: what a build with another compiler
 //                            compiles again, and what the debugger shows
+//   bytes/<name>             a file a module imports as bytes, named by its
+//                            module name ("stdlib/fonts/inter16.bin"), as it
+//                            is, aligned on 8 bytes (qjsx:bytes)
 //
 // manifest.modules[]: { name ("sensors/bme280"), buildId, sourceHash,
-// bytecode, debug, outline, source (entry names), imports (module names) }.
+// bytecode, debug, outline, source (entry names), imports ([{ name, bytes }]:
+// the modules it imports, 'bytes' true for a file imported as bytes) }.
 // A library made before the outlines has no 'outline': its modules are
-// compiled again from their sources when a program uses them.
+// compiled again from their sources when a program uses them. One of format
+// 1 (before the imports of bytes) lists its imports as plain names.
 // manifest.natives[]: the native modules the library imports ("sys/fs",
 // "device/gpio"...): see isNativeModule.
+// manifest.bytes[]: { name, entry, size, hash } of each file imported as
+// bytes (absent in format 1).
 import * as fs from "sys/fs";
 import { join, dirname } from "stdlib/path";
 import { writeZip, readZip } from "qjsx:zip";
 import { loadProject, PROJECT_FILE } from "qjsx:project";
 import { encodeText } from "qjsx:util";
-import { compileModule, compilerId, BYTECODE_VERSION } from "qjsx:compile";
+import { compileModule, compilerId, normalizeImport, BYTECODE_VERSION } from "qjsx:compile";
+import { readBytesFile, bytesFile, bytesEntry } from "qjsx:bytes";
 
-export const LIBRARY_FORMAT = 1;
+// The format this tool writes (2: the imports of bytes), and those it reads.
+export const LIBRARY_FORMAT = 2;
+const READABLE_FORMATS = [1, 2];
 export const LIBRARY_EXTENSION = ".qjslib";
 export const STANDARD_LIBRARY = "stdlib";
 
@@ -88,11 +98,33 @@ export function bareNameError(where, name) {
 }
 
 /**
+ * The file that a module of the library project in 'directory' imports as
+ * bytes ('imported', of compileModule().imports), as qjsx:bytes
+ * readBytesFile() gives it. On the disk it is next to the source of the
+ * module ('sourcePath', in the project), by the same relative specifier; its
+ * module name must stay in the library 'libraryName'.
+ */
+function readLibraryBytes(directory, libraryName, sourcePath, imported) {
+    // the file, relative to the source of the module
+    const path = normalizeImport(sourcePath, imported.specifier);
+    const file = readBytesFile(directory, path, imported);
+
+    // its name, in the library: a program finds it among the library's files
+    const insideLibrary = imported.name.startsWith(`${libraryName}/`) && !imported.name.split("/").includes("..");
+    if (!insideLibrary) {
+        throw new Error(`${imported.place}: '${imported.specifier}' is the module '${imported.name}', outside the library '${libraryName}'`);
+    }
+
+    return file;
+}
+
+/**
  * Compiles the modules of a library project (qjsx.json with 'modules') and
  * writes its .qjslib file: 'outputFile', or <output>/<name>.qjslib in the
- * project. Returns { file, name, version, moduleCount, size, warnings };
- * 'warnings' has one { file, kind, line, column } per use of eval() or of the
- * Function constructor in the sources (qjsx:compile, warningText).
+ * project. The files the modules import as bytes go into it too. Returns
+ * { file, name, version, moduleCount, size, warnings }; 'warnings' has one
+ * { file, kind, line, column } per use of eval() or of the Function
+ * constructor in the sources (qjsx:compile, warningText).
  */
 export function makeLibrary(directory, outputFile) {
     // a library project: modules, a version, a name that is not a native prefix
@@ -115,12 +147,21 @@ export function makeLibrary(directory, outputFile) {
     const modules = [];
     const entries = [];
     const warnings = [];
+    const bytesFiles = new Map();   // module name -> file imported as bytes (qjsx:bytes bytesFile)
 
     for (const [key, sourcePath] of Object.entries(project.modules)) {
         const name = `${project.name}/${key}`;
         const source = fs.readFileSync(join(directory, sourcePath), "utf8");
         const compiled = compileModule(name, source);
         warnings.push(...compiled.warnings.map(warning => ({ file: sourcePath, ...warning })));
+
+        // the files it imports as bytes, each read once
+        for (const imported of compiled.imports) {
+            const isNewFile = imported.bytes && !bytesFiles.has(imported.name);
+            if (isNewFile) {
+                bytesFiles.set(imported.name, readLibraryBytes(directory, project.name, sourcePath, imported));
+            }
+        }
 
         // its record of the manifest
         const module = {
@@ -131,7 +172,7 @@ export function makeLibrary(directory, outputFile) {
             debug: `debug/${key}.json`,
             outline: `outline/${key}.json`,
             source: `src/${key}.js`,
-            imports: compiled.imports.map(imported => imported.name),
+            imports: compiled.imports.map(imported => ({ name: imported.name, bytes: imported.bytes })),
         };
         modules.push(module);
 
@@ -145,12 +186,19 @@ export function makeLibrary(directory, outputFile) {
     // what the modules import: a module of this library must exist; sys/...
     // and device/... are native modules; a bare name is an error; the rest
     // belongs to other libraries, which the program that uses this one must
-    // declare
+    // declare. A file imported as bytes is not a module of the library.
     const names = new Set(modules.map(module => module.name));
     const natives = new Set();
 
     for (const module of modules) {
-        for (const imported of module.imports) {
+        for (const { name: imported, bytes } of module.imports) {
+            if (bytes) {
+                if (names.has(imported)) {
+                    throw new Error(`${module.name} imports '${imported}' as bytes, but it is a module of the library`);
+                }
+                continue;
+            }
+
             const libraryName = libraryOf(imported);
             const isMissingNeighbour = libraryName === project.name && !names.has(imported);
             if (isMissingNeighbour) {
@@ -167,6 +215,15 @@ export function makeLibrary(directory, outputFile) {
         }
     }
 
+    // the files imported as bytes: their entries, aligned, and their records
+    const bytesRecords = [];
+
+    for (const file of bytesFiles.values()) {
+        const entry = bytesEntry(file);
+        entries.push(entry);
+        bytesRecords.push({ name: file.name, entry: entry.name, size: file.record.size, hash: file.record.hash });
+    }
+
     // the manifest, first entry of the archive
     const manifest = {
         format: LIBRARY_FORMAT,
@@ -178,6 +235,7 @@ export function makeLibrary(directory, outputFile) {
         bytecode: BYTECODE_VERSION,
         natives: [...natives].sort(),
         modules,
+        bytes: bytesRecords,
     };
     entries.unshift({ name: "manifest.json", data: encodeText(JSON.stringify(manifest, null, 1)) });
 
@@ -199,8 +257,9 @@ export function makeLibrary(directory, outputFile) {
 
 /**
  * Opens a .qjslib file. Returns { file, name, version, compiler, bytecode,
- * modules, entries }: 'modules' is a Map(module name -> its record of the
- * manifest), 'entries' the content of the archive (Map(entry name -> bytes)).
+ * modules, bytes, entries }: 'modules' is a Map(module name -> its record of
+ * the manifest), 'bytes' a Map(module name -> record of a file imported as
+ * bytes), 'entries' the content of the archive (Map(entry name -> bytes)).
  */
 export function readLibrary(file) {
     // its manifest
@@ -216,12 +275,13 @@ export function readLibrary(file) {
         throw new Error(`${file}: not a library (its manifest is not of kind "library")`);
     }
 
-    if (manifest.format !== LIBRARY_FORMAT) {
-        throw new Error(`${file}: library format ${manifest.format} is not supported (this qjsx reads format ${LIBRARY_FORMAT})`);
+    if (!READABLE_FORMATS.includes(manifest.format)) {
+        throw new Error(`${file}: library format ${manifest.format} is not supported (this qjsx reads formats ${READABLE_FORMATS.join(", ")})`);
     }
 
-    // its modules by name
+    // its modules and its files of bytes (none before format 2) by name
     const modules = new Map(manifest.modules.map(module => [module.name, module]));
+    const bytes = new Map((manifest.bytes ?? []).map(record => [record.name, record]));
     return {
         file,
         name: manifest.name,
@@ -229,6 +289,7 @@ export function readLibrary(file) {
         compiler: manifest.compiler,
         bytecode: manifest.bytecode,
         modules,
+        bytes,
         entries,
     };
 }
@@ -280,8 +341,35 @@ export function libraryModule(library, name) {
         sourceHash: record.sourceHash,
         bytecode: entryOf(library, record.bytecode),
         sidecar: JSON.parse(decoder.decode(entryOf(library, record.debug))),
-        imports: record.imports.map(imported => ({ specifier: imported, name: imported })),
+        imports: record.imports.map(imported => storedImport(name, imported)),
         warnings: [],
         outline: JSON.parse(decoder.decode(entryOf(library, record.outline))),
     };
+}
+
+/**
+ * An import of the library module 'importer' as compileModule() gives it,
+ * from its record in the manifest: { name, bytes } (format 2), or a plain
+ * name (format 1, which had no import of bytes). The name stands for the
+ * specifier, the module for the place.
+ */
+function storedImport(importer, imported) {
+    const isPlainName = typeof imported === "string";
+    const name = isPlainName ? imported : imported.name;
+    const bytes = isPlainName ? false : imported.bytes;
+    return { specifier: name, name, bytes, place: importer };
+}
+
+/**
+ * A file that a module of an open library imports as bytes ('imported', of
+ * libraryModule().imports), as qjsx:bytes readBytesFile() gives one, taken
+ * from the entries of the library. Throws when the library does not hold it.
+ */
+export function libraryBytesFile(library, imported) {
+    const record = library.bytes.get(imported.name);
+    if (record === undefined) {
+        throw new Error(`${imported.place}: the library '${library.name}' (${library.file}) has no file '${imported.name}' imported as bytes`);
+    }
+
+    return bytesFile(imported.name, entryOf(library, record.entry), record.hash);
 }

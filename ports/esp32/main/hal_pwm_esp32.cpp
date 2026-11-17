@@ -79,6 +79,26 @@ bool setUpTimer(int index, uint32_t frequency, const hal::pwm::TimerSetting *set
 }
 
 /**
+ * Undoes a timerMove() from timer 'from' (at 'formerFrequency') to the new
+ * timer 'to' that LEDC refused to set up: the output back on 'from', as
+ * before the move.
+ */
+void undoMove(int from, int to, uint32_t formerFrequency) {
+    // its own timer, alone on it: its former frequency, given to LEDC again
+    // (the refused configuration may have touched the timer)
+    if (to == from) {
+        timers.timers[from].frequency = formerFrequency;
+        hal::pwm::TimerSetting former = settings[from];
+        setUpTimer(from, formerFrequency, &former);
+        return;
+    }
+
+    // a free timer it took: free again (never set up), its user back on 'from'
+    hal::pwm::timerLeave(&timers, to);
+    timers.timers[from].users++;
+}
+
+/**
  * Pauses timer 'index' when its last output left it.
  */
 void leaveTimer(int index) {
@@ -236,6 +256,7 @@ int setFrequency(int handle, uint32_t frequency, Output *out) {
     }
 
     // a timer for it
+    uint32_t formerFrequency = timers.timers[from].frequency;
     bool fresh = false;
     int timer = timerMove(&timers, from, frequency, &fresh);
     if (timer < 0) {
@@ -243,9 +264,11 @@ int setFrequency(int handle, uint32_t frequency, Output *out) {
         return EBUSY;
     }
 
-    // a new timer: set up for the frequency
-    if (fresh) {
-        setUpTimer(timer, frequency, &setting);
+    // a new timer: set up for the frequency; refused: the output stays as it was
+    if (fresh && !setUpTimer(timer, frequency, &setting)) {
+        undoMove(from, timer, formerFrequency);
+        *out = outputOf(handle);
+        return EIO;
     }
 
     // the channel on it; the timer it left paused when nobody uses it

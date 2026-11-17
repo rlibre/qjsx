@@ -25,8 +25,11 @@
 #   QJSX_DEVICE_RMT_SOURCES   the module device/rmt (common/hal/hal_rmt.h)
 #   QJSX_DEVICE_USB_SOURCES   the module device/usb (common/hal/hal_usb.h)
 #   QJSX_DEVICE_I2C_SOURCES   the module device/i2c (common/hal/hal_i2c.h)
+#   QJSX_DEVICE_SPI_SOURCES   the module device/spi (common/hal/hal_spi.h)
 #   QJSX_DEVICE_ADC_SOURCES   the module device/adc (common/hal/hal_adc.h)
 #   QJSX_DEVICE_PWM_SOURCES   the module device/pwm (common/hal/hal_pwm.h)
+#   QJSX_DEVICE_DAC_SOURCES   the module device/dac (common/hal/hal_dac.h: only the
+#                             chips with a DAC)
 #   QJSX_DEVICE_SERIAL_SOURCES the module device/serial (common/hal/hal_serial.h:
 #                             the port gives its driver, hal::serial::boardDriver)
 #   QJSX_INCLUDE_DIRS      every source folder (headers are included by name)
@@ -73,9 +76,18 @@ set(QJSX_DEVICE_GPIO_SOURCES "${QJSX_ROOT}/common/device/gpio_module.cpp")
 set(QJSX_DEVICE_RMT_SOURCES "${QJSX_ROOT}/common/device/rmt_module.cpp")
 set(QJSX_DEVICE_USB_SOURCES "${QJSX_ROOT}/common/device/usb_module.cpp")
 set(QJSX_DEVICE_I2C_SOURCES "${QJSX_ROOT}/common/device/i2c_module.cpp")
+set(QJSX_DEVICE_SPI_SOURCES "${QJSX_ROOT}/common/device/spi_module.cpp")
 set(QJSX_DEVICE_ADC_SOURCES "${QJSX_ROOT}/common/device/adc_module.cpp")
 set(QJSX_DEVICE_PWM_SOURCES "${QJSX_ROOT}/common/device/pwm_module.cpp")
+set(QJSX_DEVICE_DAC_SOURCES "${QJSX_ROOT}/common/device/dac_module.cpp")
 set(QJSX_DEVICE_SERIAL_SOURCES "${QJSX_ROOT}/common/device/serial_module.cpp")
+
+# the module sys/draw (common/draw: drawing in memory for the displays;
+# EVALUATION, 2026-11-17): only the ports built with -DQJSX_DRAW=ON add it
+set(QJSX_DRAW_SOURCES
+    "${QJSX_ROOT}/common/draw/draw.cpp"
+    "${QJSX_ROOT}/common/draw/font.cpp"
+    "${QJSX_ROOT}/common/draw/draw_module.cpp")
 
 set(QJSX_INCLUDE_DIRS
     "${QJSX_ROOT}/engine/qjsx"
@@ -86,6 +98,7 @@ set(QJSX_INCLUDE_DIRS
     "${QJSX_ROOT}/common/board"
     "${QJSX_ROOT}/common/hal"
     "${QJSX_ROOT}/common/device"
+    "${QJSX_ROOT}/common/draw"
     "${QJSX_ROOT}/ports/freertos")
 
 set(QJSX_DEFINES

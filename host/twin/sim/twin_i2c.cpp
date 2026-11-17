@@ -44,8 +44,7 @@ Device devices[DEVICES];                 // lock
 platform::Mutex lock;                    // buses, devices, the trace
 
 // The trace: a ring of the last records (lock).
-twin::I2cRecord trace[twin::I2C_TRACE_RECORDS];
-uint32_t traceSequence = 0;              // number of the newest record; 0: none
+twin::TraceRing<twin::I2cRecord, twin::I2C_TRACE_RECORDS> trace;
 int64_t traceStartMs = -1;               // when the twin started (the first open)
 
 /**
@@ -56,10 +55,7 @@ void record(int bus, int address, uint32_t frequencyHz, const uint8_t *written, 
     lock.lock();
 
     // the slot of the new record, overwriting the oldest
-    traceSequence++;
-    twin::I2cRecord *entry = &trace[traceSequence % twin::I2C_TRACE_RECORDS];
-    memset(entry, 0, sizeof(*entry));
-    entry->sequence = traceSequence;
+    twin::I2cRecord *entry = trace.add();
     entry->timeMs = platform::monotonicMs() - traceStartMs;
     entry->bus = bus;
     entry->address = address;
@@ -124,19 +120,7 @@ void i2cBusStates(I2cBusState *states) {
  */
 uint32_t i2cTrace(uint32_t after, I2cTraceVisitor *visit, void *context) {
     lock.lock();
-
-    // the oldest record still in the ring, and the first one asked
-    bool ringFull = traceSequence > (uint32_t)I2C_TRACE_RECORDS;
-    uint32_t oldest = ringFull ? traceSequence - I2C_TRACE_RECORDS + 1 : 1;
-    uint32_t first = after + 1 > oldest ? after + 1 : oldest;
-
-    // each one, oldest first
-    for (uint32_t sequence = first; sequence <= traceSequence; sequence++) {
-        visit(context, &trace[sequence % I2C_TRACE_RECORDS]);
-    }
-
-    // the newest number, for the next call
-    uint32_t newest = traceSequence;
+    uint32_t newest = trace.visit(after, visit, context);
     lock.unlock();
     return newest;
 }

@@ -747,6 +747,15 @@ bool Debugger::readValue(cbor::Reader *reader, JSValue *value) {
         memcpy(digits, text, length);
         digits[length] = 0;
 
+        // a digit first, after an optional '-': strtoll would also take
+        // leading spaces and a '+'
+        bool isNegative = length > 0 && digits[0] == '-';
+        size_t first = isNegative ? 1 : 0;
+        bool startsWithDigit = first < length && digits[first] >= '0' && digits[first] <= '9';
+        if (!startsWithDigit) {
+            return false;
+        }
+
         // the whole text must be a number of the 64-bit range: strtoll
         // saturates out of range and only says so through errno
         char *end = nullptr;

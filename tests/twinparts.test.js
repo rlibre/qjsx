@@ -11,7 +11,8 @@
 // of its own) on the I2C bus of pins 8 / 9, read by the program of the
 // project with device/i2c; the page sets the temperature of the BME280; a
 // potentiometer read with device/adc; the I2C trace of a bus with nothing on
-// it.
+// it; an SPI echo device (a model of the project) on chip select 10 of
+// controller 2, read by device/spi, and the SPI trace of the page.
 //
 //   qjsx run tests/twinparts.test.js tcp:127.0.0.1:<agent port> <page port>
 import * as fs from "sys/fs";
@@ -102,12 +103,13 @@ async function get(path) {
 const socket = await connect({ port: PAGE_PORT, path: "/ws", protocol: "messaging" });
 socket.onMessage(onPageMessage);
 const parts = await message(item => item.msg === "twin.parts");
-equal(parts?.map(part => part.id).join(","), "boot,reset,rgb,meteo,echo,strip,gain", "the page gets the board's parts then the project's");
+equal(parts?.map(part => part.id).join(","), "boot,reset,rgb,meteo,echo,strip,gain,spiecho", "the page gets the board's parts then the project's");
 const meteo = parts?.find(part => part.id === "meteo");
 equal(meteo?.controls.map(control => control.type).join(","), "knob,knob,knob,value", "the bme280 declares its controls");
 equal(JSON.stringify(meteo?.pins), "[8,9]", "... and is on the pins of its bus");
 const echoPart = parts?.find(part => part.id === "echo");
 equal(echoPart?.view, "/parts/echo/view.js", "the project's part has a view of its own");
+equal(JSON.stringify(parts?.find(part => part.id === "spiecho")?.pins), "[10]", "an SPI part is on its chip select pin");
 const view = await get("/parts/echo/view.js");
 check(view.head.includes("text/javascript") && view.body.includes("createView"), "... served by the twin");
 const meteoState = await message(item => item.msg === "twin.part.state" && item.params.id === "meteo");
@@ -128,6 +130,34 @@ check(await printed("weather 21.50 C 40.0 % 1013.25 hPa"),
     "the program's driver reads the initial weather (calibration, forced measurement, compensation)");
 const logged = await message(item => item.msg === "twin.log" && item.params.id === "echo");
 equal(logged?.text, "transfer 3/3", "a part's log reaches the page");
+
+// --- the SPI part of the project
+check(await printed("spi echo 1,2,3"), "the SPI part answers a read with the bytes last written (Sync)");
+check(await printed("spi transfer 1,2,3"), "... a transfer through a promise gives them, full duplex");
+check(await printed("spi read 5 7,8,9,255,255"), "... the bytes the part does not give read 0xFF");
+check(await printed("spi cs high 255,255"), "a device without chip select: nobody answers while the program holds GPIO10 high");
+check(await printed("spi cs low 7,8,9"), "... and the part on chip select 10 answers while it holds it low");
+const spiLogged = await message(item => item.msg === "twin.log" && item.params.id === "spiecho");
+equal(spiLogged?.text, "transaction C1 D3 w10 R3", "the part gets the segments with the level of the DC pin and the delay");
+
+// the page: the SPI trace, the bus with its part and pins
+const spiData = await message(item => item.msg === "twin.spi.data" && item.params.records.some(record => record.cs === 10));
+const first = spiData?.records.find(record => record.cs === 10);
+equal(first?.port, 2, "the page gets the SPI trace: the controller");
+equal(first?.dc, 14, "... the DC pin of the device");
+equal(first?.outcome, "answered", "... answered by the part");
+equal(first?.segments.map(segment => segment.kind).join(","), "write,write,delay,read", "... each segment with its kind");
+equal(`${first?.segments[0].dc},${first?.segments[1].dc}`, "0,1", "... the level of the DC pin of each write");
+equal(first?.segments[2].delayUs, 10, "... the length of a delay");
+equal(JSON.stringify(first?.segments[3].read), "[1,2,3]", "... and the bytes read");
+const nobody = await message(item => item.msg === "twin.spi.data" && item.params.records.some(record => record.cs === null));
+check(nobody?.records.find(record => record.cs === null)?.outcome === "nobody",
+    "... a transaction nobody heard says so");
+const spiState = JSON.parse((await get("/state")).body);
+const spiBus = spiState.spi?.find(bus => bus.port === 2);
+check(spiBus?.open === true && spiBus?.sclk === 12 && JSON.stringify(spiBus?.parts) === '[{"cs":10,"id":"spiecho"}]',
+    "the state gives the open bus, its pins and the part on its chip select");
+check(spiState.pins[12].spi === true && spiState.pins[11].spi === true, "the pins of the bus are shown as SPI pins");
 
 // --- the page sets the temperature, the program reads it
 socket.send(JSON.stringify({ msg: "twin.part.action", params: { id: "meteo", action: "set", args: { temperature: 30 } } }));

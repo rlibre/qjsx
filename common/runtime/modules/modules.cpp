@@ -56,6 +56,12 @@ EmbeddedTable &embeddedTable() {
     return table;
 }
 
+// The last embedded file of bytes registered (EmbeddedBytesRegistration
+// objects, before main()), each linked to the one before. A pointer with a
+// constant initializer is set before any constructor runs, whatever the
+// order of the files. A device firmware registers none.
+const EmbeddedBytes *lastEmbeddedBytes = nullptr;
+
 } // namespace
 
 /**
@@ -143,6 +149,29 @@ void registerEmbeddedModule(const char *name, const char *source) {
     if (table.count < capacity) {
         table.modules[table.count++] = EmbeddedModule{ name, source };
     }
+}
+
+/**
+ * Embedded file of bytes registered under this module name, or nullptr.
+ */
+const EmbeddedBytes *findEmbeddedBytes(const char *name) {
+    // linear search along the list: a few files
+    for (const EmbeddedBytes *file = lastEmbeddedBytes; file != nullptr; file = file->next) {
+        if (strcmp(file->name, name) == 0) {
+            return file;
+        }
+    }
+
+    return nullptr;
+}
+
+/**
+ * Links a file of bytes at the head of the embedded list; it is kept, not
+ * copied.
+ */
+void registerEmbeddedBytes(EmbeddedBytes *file) {
+    file->next = lastEmbeddedBytes;
+    lastEmbeddedBytes = file;
 }
 
 /**

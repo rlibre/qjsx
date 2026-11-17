@@ -35,6 +35,7 @@ struct Pin {
     hal::gpio::ChangeHandler *handler;       // called when its level changes (watched)
     uint8_t                   latch;         // what an output or open drain drives
     int64_t                   pwmStartUs;    // when its PWM got its frequency, duty cycle (scopeNowUs)
+    int                       dacMv;         // the voltage its DAC drives, in mV (state.dac)
 };
 
 // What a change of a pin calls once the lock is released.
@@ -123,12 +124,15 @@ uint8_t pwmLevel(const Pin *pin, int64_t nowUs) {
  * conflict between the program and a component. stateLock held.
  */
 uint8_t computeLevel(Pin *pin) {
-    // what the program drives: a PWM output, a push-pull output, or an open
-    // drain at 0
+    // what the program drives: a DAC output (1 from half of vref up), a PWM
+    // output, a push-pull output, or an open drain at 0
     bool output = pin->state.configured && pin->state.mode == (uint8_t)hal::gpio::Mode::output;
     bool openDrain = pin->state.configured && pin->state.mode == (uint8_t)hal::gpio::Mode::openDrain;
     int programLevel = -1;
-    if (pin->state.pwm) {
+    if (pin->state.dac) {
+        bool high = pin->dacMv * 2 >= vrefMv;
+        programLevel = high ? 1 : 0;
+    } else if (pin->state.pwm) {
         programLevel = pwmLevel(pin, scopeNowUs());
     } else if (output) {
         programLevel = pin->latch;
@@ -158,11 +162,17 @@ uint8_t computeLevel(Pin *pin) {
 }
 
 /**
- * The voltage on a pin in mV: what a component sets, else its level times
- * vref. stateLock held.
+ * The voltage on a pin in mV: what the program's DAC drives, else what a
+ * component sets, else its level times vref. stateLock held.
  */
 int voltageOf(const Pin *pin) {
+    // the program's DAC first, as its levels win over a component's
     const PinState *state = &pin->state;
+    if (state->dac) {
+        return pin->dacMv;
+    }
+
+    // a component's voltage, else the level's
     bool setByPart = state->voltageMv >= 0;
     return setByPart ? state->voltageMv : state->level * vrefMv;
 }
@@ -189,6 +199,34 @@ Change update(int index) {
         if (!pin->state.pwm) {
             scopeRecord(index, pin->state.level, voltageOf(pin));
         }
+    }
+
+    return change;
+}
+
+/**
+ * The DAC of pin 'index' drives 'millivolts' ('driven'), or not any more;
+ * its level computed again. The analyzer gets the new voltage: from
+ * update() when the level changed, else here (not under a PWM: its changes
+ * are recorded instead). Returns what update() returned. stateLock held.
+ */
+Change setDacOutput(int index, bool driven, int millivolts) {
+    // the voltage and level before
+    Pin *pin = &pinTable[index];
+    int previousMv = voltageOf(pin);
+    uint8_t previousLevel = pin->state.level;
+
+    // the DAC's, then the level again
+    pin->state.dac = driven;
+    pin->dacMv = driven ? millivolts : 0;
+    Change change = update(index);
+
+    // a new voltage on the same level: update() did not record it
+    int nowMv = voltageOf(pin);
+    bool levelKept = pin->state.level == previousLevel;
+    bool voltageChanged = nowMv != previousMv;
+    if (levelKept && voltageChanged && !pin->state.pwm) {
+        scopeRecord(index, pin->state.level, nowMv);
     }
 
     return change;
@@ -229,38 +267,6 @@ char *copyString(JSContext *ctx, JSValueConst object, const char *name) {
     JS_FreeCString(ctx, text);
     JS_FreeValue(ctx, value);
     return copy;
-}
-
-/**
- * The integers of the array property 'name' of 'object' into 'out' (at most
- * 'capacity'); the count read, -1 if an item is not an integer from 'low'
- * to 'high'. A missing property reads 0 items.
- */
-int readIntegers(JSContext *ctx, JSValueConst object, const char *name, int low, int high, int *out, int capacity) {
-    JSValue array = JS_GetPropertyStr(ctx, object, name);
-    int count = 0;
-
-    for (uint32_t i = 0; JS_IsArray(ctx, array) && count >= 0; i++) {
-        // the next item; the end of the array stops
-        JSValue item = JS_GetPropertyUint32(ctx, array, i);
-        if (JS_IsUndefined(item)) {
-            break;
-        }
-
-        // an integer in range, and room for it; else -1
-        int32_t value = 0;
-        bool isInteger = JS_IsNumber(item) && JS_ToInt32(ctx, &value, item) == 0;
-        bool valid = isInteger && value >= low && value <= high;
-        JS_FreeValue(ctx, item);
-        if (!valid || count >= capacity) {
-            count = -1;
-        } else {
-            out[count++] = value;
-        }
-    }
-
-    JS_FreeValue(ctx, array);
-    return count;
 }
 
 /**
@@ -390,11 +396,44 @@ bool readDescription(JSContext *ctx, JSValueConst description, const char *path)
     // drive and pull the pins
     JS_FreeValue(ctx, nativesValue);
 
-    // the analog inputs, the PWM outputs
-    return readAdc(ctx, description, path) && pwmRead(ctx, description, path);
+    // the analog inputs and outputs, the PWM outputs, the SPI controllers
+    return readAdc(ctx, description, path) && dacRead(ctx, description, path) && pwmRead(ctx, description, path) &&
+           spiRead(ctx, description, path);
 }
 
 } // namespace
+
+/**
+ * The integers of the array property 'name' of 'object' into 'out' (at most
+ * 'capacity'); the count read, -1 if an item is not an integer from 'low'
+ * to 'high'. A missing property reads 0 items.
+ */
+int readIntegers(JSContext *ctx, JSValueConst object, const char *name, int low, int high, int *out, int capacity) {
+    JSValue array = JS_GetPropertyStr(ctx, object, name);
+    int count = 0;
+
+    for (uint32_t i = 0; JS_IsArray(ctx, array) && count >= 0; i++) {
+        // the next item; the end of the array stops
+        JSValue item = JS_GetPropertyUint32(ctx, array, i);
+        if (JS_IsUndefined(item)) {
+            break;
+        }
+
+        // an integer in range, and room for it; else -1
+        int32_t value = 0;
+        bool isInteger = JS_IsNumber(item) && JS_ToInt32(ctx, &value, item) == 0;
+        bool valid = isInteger && value >= low && value <= high;
+        JS_FreeValue(ctx, item);
+        if (!valid || count >= capacity) {
+            count = -1;
+        } else {
+            out[count++] = value;
+        }
+    }
+
+    JS_FreeValue(ctx, array);
+    return count;
+}
 
 /**
  * 1. read the file;
@@ -745,6 +784,49 @@ void partVoltage(int pin, int millivolts) {
 }
 
 /**
+ * The program's DAC drives a pin at a voltage (opened, or a new code).
+ */
+void dacDrive(int pin, int millivolts) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
+        return;
+    }
+
+    // its voltage and level; the change told outside the lock
+    stateLock.lock();
+    Change change = setDacOutput(pin, true, millivolts);
+    stateLock.unlock();
+
+    notify(change, pin);
+}
+
+/**
+ * The DAC of a pin stopped: the pin given back, as hal::gpio::reset does
+ * (gpio_reset_pin on the board).
+ */
+void dacStop(int pin) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
+        return;
+    }
+
+    stateLock.lock();
+
+    // nobody configures it any more
+    Pin *target = &pinTable[pin];
+    target->state.configured = false;
+    target->latch = 0;
+
+    // no DAC: its level from the rest; the change told outside the lock
+    Change change = setDacOutput(pin, false, 0);
+    stateLock.unlock();
+
+    notify(change, pin);
+}
+
+/**
  * A bus of hal::i2c takes or lets go a pin.
  */
 void setI2c(int pin, bool used) {
@@ -757,6 +839,22 @@ void setI2c(int pin, bool used) {
     // shown on the page
     stateLock.lock();
     pinTable[pin].state.i2c = used;
+    stateLock.unlock();
+}
+
+/**
+ * A bus or a device of hal::spi takes or lets go a pin.
+ */
+void setSpi(int pin, bool used) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
+        return;
+    }
+
+    // shown on the page
+    stateLock.lock();
+    pinTable[pin].state.spi = used;
     stateLock.unlock();
 }
 

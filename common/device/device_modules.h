@@ -45,6 +45,12 @@ JSModuleDef *jsNewModule_usb(JSContext *ctx, const char *moduleName);
 JSModuleDef *jsNewModule_i2c(JSContext *ctx, const char *moduleName);
 
 /**
+ * Creates the module "device/spi" (spi_module.cpp, JS_MODULE): the classes
+ * Spi and SpiDevice. Needs hal_spi.h.
+ */
+JSModuleDef *jsNewModule_spi(JSContext *ctx, const char *moduleName);
+
+/**
  * Creates the module "device/adc" (adc_module.cpp, JS_MODULE): the class
  * Adc. Needs hal_adc.h.
  */
@@ -55,6 +61,12 @@ JSModuleDef *jsNewModule_adc(JSContext *ctx, const char *moduleName);
  * Pwm. Needs hal_pwm.h.
  */
 JSModuleDef *jsNewModule_pwm(JSContext *ctx, const char *moduleName);
+
+/**
+ * Creates the module "device/dac" (dac_module.cpp, JS_MODULE): the class
+ * Dac. Needs hal_dac.h (only the chips with a DAC).
+ */
+JSModuleDef *jsNewModule_dac(JSContext *ctx, const char *moduleName);
 
 /**
  * Creates the module "device/board" (board_module.cpp, JS_MODULE): id(),

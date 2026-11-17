@@ -623,7 +623,7 @@ keeps the old name: `C:\Sandbox\espjs`.
   exception reporting once per thrown value. caught/uncaught prediction: static, at the throw
   (see "Pause on exceptions"), done.
 - Host tool `qjsx`: a single executable (host QuickJS + C modules: event loop, sockets, serial,
-  SHA-256, compile API; commands written in JS, precompiled and embedded). Commands: build,
+  SHA-256, compile API; commands written in JS, embedded as source by tools/embed-js.lua). Commands: build,
   deploy, debug (proxy, CDP server for VS Code), monitor, targets, device ls|reset|info, trace,
   run. Targets: `serial:COM3`, `serial:/dev/ttyUSB0@921600`, `tcp:esp.local:5555`.
   Project file `qjsx.json` at the project root (name, main module, source folders + globs,
@@ -688,7 +688,7 @@ keeps the old name: `C:\Sandbox\espjs`.
   (an `await null` 304 us, a setTimeout(0) awaited 1000 us, a 10 ms ticker loop with
   nothing in it 35.6 % of the JS thread), so the client's program, three loops at
   100 Hz, saturates the JS thread (92-94 %). Flash in QIO (user; sdkconfig.board of
-  the client board; the YD and the defaults are still DIO): about x1.6 (195 us, 20.5 %),
+  the client board, the YD and the DevKitC; sdkconfig.defaults sets no mode): about x1.6 (195 us, 20.5 %),
   the program stays saturated (88-89 %). The user: optimize algorithms, not low level
   (no IRAM / cache tuning for now). Guided by `qjsx profile` (2026-11-16): the ticker
   of stdlib/tasks no longer makes an object, a closure and a Set entry per step (one
@@ -722,8 +722,10 @@ keeps the old name: `C:\Sandbox\espjs`.
   halfway to the limit; `board::jsHeapLimit()` (region size; 0 = PSRAM / malloc / RP2350)
   is given by `createRuntime()` to `JS_SetMemoryLimit`. tests/gclimit.test.js
   (`QJSX_JS_HEAP_MB=1`). Board: 20,000 cycles ran out of memory before, 2.3 s with T
-  (about 13 ms a GC pass with a small live heap, estimated). Idle GC (user's idea): to
-  propose with a measure of a pass on the client's program, not done.
+  (about 13 ms a GC pass with a small live heap, estimated). Idle GC (user's idea): MEASURED,
+  useless for the client's program (no automatic pass in 30 s, a forced pass ~3 ms frees
+  nothing: no cycles; history.md "Measures and findings"); to reconsider for a program
+  that makes cycles.
 - Await without allocation (engine change V, agreed by the user 2026-11-17, V1 and V2
   together, IMPLEMENTED the same day; Debug suite 112 OK, Bellard's tests OK, microbench
   -4.0 %; `doc/engine-changes.md` V): V1 = an async function keeps in its state what
@@ -805,6 +807,26 @@ keeps the old name: `C:\Sandbox\espjs`.
 - Async styles in modules: callbacks for spontaneous events (`uart.onData(fn)`), promises for
   operations started by the script (`await uart.readLine({ timeout })`); a module may offer
   both. Async iteration (`for await`) maybe later, built on promises.
+- Errors of the JS API (agreed by the user 2026-11-17; device/spi follows them from the
+  start, the other modules in ONE later pass through jsbind; known-bugs.md "Found while
+  writing the typings"):
+  1. argument of a wrong type: TypeError; value out of range: RangeError (no `code`);
+     resource / state: an Error with a Node-like `code`, one meaning per code: EBUSY
+     taken, ENOENT no such port / channel, EINVAL the hardware cannot do it, EBADF a
+     CLOSED object (everywhere, never ENXIO), ENOTCONN not started (USB), ETIMEDOUT,
+     EIO hardware failure, ENXIO nobody answered (I2C), ECANCELED cancelled by close(),
+     EAGAIN queue full;
+  2. a method that returns a promise NEVER throws: every failure, argument errors
+     included, rejects (web / fs.promises); Sync methods and constructors throw;
+  3. integers are strict: a non-integer, NaN or Infinity where an integer is expected is a
+     RangeError (no silent truncation; check the client board's program when applied);
+     TO DISCUSS AGAIN (user, 2026-11-17: "pour les erreurs rangeerror, on en rediscute"):
+     device/spi already follows it (StrictInt in spi_module.cpp), device/dac planned so;
+  proposed in the same discussion, no objection, to confirm at the pass: fields reflecting the hardware are read-only; classes made only by a
+  module (`Connection`, `I2cDevice`...) throw "Illegal constructor" on `new`; `close()`
+  changes the state at once (`isOpen()` false); `onX(null)` removes the callback (one
+  callback per event); align with Node where cheap (`existsSync` never throws, ENOTFOUND,
+  `basename` ext, TextDecoder `fatal` / `ignoreBOM`, `path` on Windows).
 - Names of the native modules (user, 2026-11-11, DONE the same day except `device/gpio`;
   replaces "native modules keep their short names"; `process` is a global, not a module:
   not renamed): two reserved prefixes, `sys/` and `device/`; no library may take
@@ -909,7 +931,193 @@ keeps the old name: `C:\Sandbox\espjs`.
   `common/device/adc_module.cpp`, `ports/esp32/main/hal_adc_esp32.cpp` (adc_oneshot, ADC1
   ONLY (user: ADC2 fails with WiFi), attenuation from the range, curve / line fitting
   calibration), twin `host/twin/sim/twin_adc.cpp` (saturates at the span, as the S3).
-  RP2350 later. DAC: postponed (our boards have none; with the twin's oscilloscope).
+  RP2350 later.
+- `device/dac` (API agreed by the user 2026-11-17, IMPLEMENTED the same day: hal_dac.h,
+  dac_module.cpp, ESP32 hal_dac_esp32.cpp compiled only for esp32 / esp32s2
+  (`QJSX_DAC_TARGETS`, `QJSX_HAS_DAC`), fullScale from `board::DAC_FULL_SCALE_MV` of the
+  board_config.h (ESP32) or `"dac": { pins, bits, fullScale }` of the board JSON (twin),
+  nearest code; twin_dac.cpp, the DAC first in the pin's voltage, "dac 1.66 V" in the
+  pins table, analog trace in the analyzer; twin board `boards/esp32-devkitc-wroom32.json`
+  (values from memory); `common/device/strict_int.h` shared with device/spi; Debug suite
+  117 OK, tests/dac.test.js 45 checks; FLASHED on the WT32-SC01, demo `temp/dacdemo`
+  (GPIO25 1.00 V, GPIO26 ramp), output NOT measured yet):
+  `new Dac(pin, { value = 0 })`, read-only `bits` (8 on ESP32 / S2, 12 on STM32H743),
+  `fullScale` (volts, from the board description), `value` (last raw written);
+  `write(raw)` (0..2^bits-1, strict integer), `writeVoltage(volts)` (0..fullScale,
+  rounded to the DAC's step; RangeError outside, user), `close()`; synchronous; errors
+  EINVAL (pin without DAC), EBUSY, EBADF (closed). `close()` AND the end of the program
+  stop the output and give the pin back (user: like Pwm). Only the original ESP32
+  (GPIO25 / 26, ESP-IDF dac_oneshot) and the S2 (GPIO17 / 18) have one: none of the
+  ESP32-S3 boards, the Teensy 4.0 nor the RP2350. Twin: `"dac"` in a board JSON, voltage
+  seen by parts (`pin.voltage`) and the analyzer; a twin JSON of an ESP32-WROOM-32 board
+  AND the firmware of the user's real original-ESP32 board (user; not identified yet:
+  esptool flash-id when plugged; a new chip for the port: no USB OTG, PSRAM maybe absent).
+  Later: `play(samples, { rate, loop })` in DMA, `tone()` (the ESP32's cosine generator).
+  The user's original-ESP32 board: WT32-SC01 v3.2 (see "Fifth board" below).
+  PAGE OF THE TWIN (user, 2026-11-17): a section "DAC" shown by the page itself when the
+  board has a DAC, NO part to declare; one meter per output
+  (`host/twin/ui/src/dacpanel.ts`, `controls/meter.ts`), as the user asked from a photo
+  of a panel meter: 160 px wide, LOW (78 px; pivot under the dial, not drawn), graduated
+  in volts (one number per volt, ONE mark between two numbers: more was "too many"), a
+  band of segments lit in green up to the voltage, a short red needle, the pin and the
+  voltage in digits inside the dial, no black band; dimmed while not driven. The test
+  project `tests/fixtures/twindac` has NO part any more (the user: the twin is not a
+  place for test parts; its potentiometer and voltmeter removed), so "a part reads the
+  DAC" and "the DAC wins over a part" are no longer tested. A new source of
+  `host/twin/ui/src` needs a premake run, else make does not rebuild the page. Demo
+  `temp/dacdemo`: sine 0.7-2.8 V at 2 Hz on GPIO25, ramp of 1 s on GPIO26 (twin only).
+- `stdlib/display` + `sys/draw` (user, 2026-11-17; WORKS on the WT32-SC01, seen by the user;
+  NOT finished: no typing, no manual, no test, nothing in doc/architecture.md, the twin
+  cannot run it; the user: "attends pour typage, manuel et doc, on fait des essais"):
+  - the WT32-SC01's screen: ST7796-compatible, 320 x 480, SPI2 SCLK 14, MOSI 13, CS 15,
+    DC 21, reset 22, backlight 23 (PWM), MISO not wired (every read gives 0); touch
+    FT6336 at I2C 0x38, SDA 18, SCL 19 (chip 0x64, vendor 0x11); rotation 0 = USB at the
+    bottom, origin top left (MEMORY_ACCESS 0x48; 90 / 180 / 270 clockwise: 0x28, 0x88,
+    0xe8); first real use of device/spi and device/i2c on a board;
+  - MEASURED there (JS heap in PSRAM): any call from JS to native code costs about
+    0.25 ms (writeSync of 2 bytes 245 us), `transactionSync` 1.3 ms + 0.35 ms per segment
+    (the JS_STRUCT conversion of each segment, suspected, not proven), an array of
+    numbers instead of a typed array +0.45 ms; PSRAM writes about 4 MB/s (a 307 KB
+    canvas: 82 ms to fill, 92 ms to send); doubles are computed in software;
+  - TRIED and dropped: drawing at once (one SPI call per primitive: a pixel 2.7 ms), a
+    canvas of the screen in JS (3.6 images/s, 304 KB), the same with native primitives
+    (4.4), a native list filled by one call per command (38 ms an image to fill);
+  - KEPT (the user chose B after seeing both): the program's drawing calls only write
+    commands in an Int16Array (6 items: kind, pixel, x0, y0, x1, y1; kind 0 filled
+    rectangle, 1 line); `await lcd.show()` (or `show(x, y, w, h)`) hands a copy of the
+    list to `show` of the native `sys/draw`, which queues ONE "made" segment on the
+    display's SpiDevice: the task of the SPI bus renders each band (16 rows) into a
+    buffer of internal RAM just before sending it. 13.5 images/s full screen when the
+    next image is listed during the send, 8.3 ms for 200 x 30, +4.9 KB of JS heap,
+    +4.6 KB of firmware;
+  - agreed rules: ALL IN JS except that renderer; one way of drawing (no immediate
+    drawing, no canvas); the program redraws everything in the area it shows, the rest
+    takes `lcd.background`; a `show()` during a send is IGNORED (resolves false, the
+    list kept); no argument checks in the drawing calls (user: "on dirait du C
+    converti", "on est sur un uC": cut with `| 0`, no validation helper); a full list
+    drops the command (`dropped`); nothing may cost RAM or flash to a board without a
+    screen (the firmware holds no JS; `sys/draw` only in a firmware built for it);
+  - code: `common/draw/` (draw.h / draw.cpp: no JS, no allocation, any thread;
+    draw_module.cpp), `hal::spi::Segment` gained `make`, `makeOpaque`, `piece`,
+    `pieceSize` (ESP32 only: the twin's hal ignores them), `common/device/spi_module.h`
+    (`device::queueSpiSegments`, for native modules), `lib/stdlib/src/display.js`;
+    in the firmware of a board whose `ports/esp32/boards/<board>/board.cmake` (new,
+    optional: what the firmware adds for the board) sets `QJSX_BOARD_DRAW ON` (the
+    WT32-SC01's does; DONE 2026-11-17, checked: built with -DQJSX_DRAW=OFF, sys/draw
+    is still in, same size); `idf.py -DQJSX_DRAW=ON` adds it to another board for a
+    try; credit to Moddable's Poco in display.js and
+    draw.h ("comes from", no code used: user agreed the wording);
+  - TEXT (user, 2026-11-17, DONE the same day, SEEN on the board by the user: "superbe"):
+    `lcd.font(bytes, { tabularDigits })` -> a handle { index, flags, bytes, size, ascent,
+    descent, lineHeight } (bytes = a font file imported as bytes, read IN PLACE),
+    `lcd.text(x, y, string, font, color)` (top left of the line; one line; UTF-16 units
+    written by JS after a 6-item command, kind 2; x1 = font index (4 bits) | flags << 4),
+    `lcd.textWidth(string, font)`; at most 16 fonts per display (user agreed: was 255);
+    renderer `common/draw/font.{h,cpp}` (LVGL binary format, uncompressed, cmap formats
+    0-3, kerning ignored, 1-8 bpp coverage blended over the band) + `draw::text`;
+    tabular digits = OUR option (each digit centered in the widest digit's width);
+    `sys/draw` gained `fontMetrics(font)`, `textWidth(font, text, flags)`, and `show(...,
+    fonts)`. Measured (temp/wttext, Inter 16 + 40 px, 10.6 + 4.7 KB in flash): whole
+    screen with text 82 ms, a value listed in 4 ms, two areas shown in 44 ms, JS heap
+    +0.9 KB. Firmware of the WT32-SC01 +14.0 KB against the one before the display work
+    (was +4.6 KB with show() only: the rest is the font reader, the text and the bytes
+    loader; not split in the symbol table). Arc: still to discuss (thickness, filled disc
+    / sector). The TWIN: an agent was launched (2026-11-17) for made segments in the
+    twin's SPI, `sys/draw` in a twin whose board lists it, `boards/wt32-sc01.json`, a
+    part `st7796` drawn in the page, tests/display.test.js;
+  - ARC and ROUNDED RECTANGLES (user, 2026-11-17, DONE the same day): `lcd.arc(cx, cy,
+    radius, start, end, thickness, color)` (degrees, 0 at the top, clockwise; radius =
+    outer edge, thickness inward; edges ALWAYS smoothed; ends cut along the radius; no
+    filled sector: user), `circle(cx, cy, radius, thickness, color)`, `disc(cx, cy,
+    radius, color)`, `fillRoundRect(x, y, w, h, radius, color)`, `roundRect(x, y, w, h,
+    radius, thickness, color)` (same radius at the 4 corners, at most half the smaller
+    side, outline inward). Commands kind 3 / 4 take 2 more items (angles in tenths of a
+    degree; radius and thickness). SPEED, measured on the WT32-SC01 with temp/wtgauge
+    (two gauges, 448 x 250): 4.3 -> 15.5 images/s, whole screen 248 -> 71 ms, by (the
+    user's order) 1. an arc skips the hole of its ring, 2. square roots only on the one
+    pixel wide edges, 3. the SPI hal makes the next band while the previous one goes out
+    (`runMadeSegment`: two halves of `piece`, DEVICE_QUEUE_SIZE 2; `piece` is now room
+    for TWO pieces), then (user: "fixed 24.8 au lieu de flottant") fixed point
+    everywhere (coverage 0..256, distances 24.8, directions 2.14, blend by >> 8, integer
+    square root, 32 BITS ONLY: 64-bit ops are library calls on the ESP32) and rounded
+    rectangles by spans. The reasons and measures are written at the top of
+    common/draw/draw.cpp (user: "tu documentes dans le code ce genre de truc"). 80 MHz
+    on the ST7796: white screen (40 MHz is the limit; rendering was the bottleneck
+    anyway). The measure code (`QJSX_DRAW_STATS`, `drawStats()`) was REMOVED
+    (2026-11-17, user). Firmware of the WT32-SC01: +21.0 KB against before the
+    display work. TYPINGS AND GUIDE DONE (agent, 2026-11-17): lib/stdlib/src/
+    display.d.ts, common/draw/draw_module.d.ts (sys/draw registered in qjsx-tests
+    for the drift test), guide doc/jsmanual/.../guides/displays.md; types 427/427,
+    manual 182 pages. The defects it found were FIXED (user, 2026-11-17; history.md):
+    show() never throws, text() takes any value, a failing constructor frees the bus,
+    `"*.bin"` imports typed (common/runtime/modules/bytes_import.d.ts). An arc as thick as
+    its radius on part of a turn IS a filled sector: ACCEPTED as the way to draw one
+    (user, 2026-11-17; no sector() function), documented in the typing and the guide;
+  - TWIN of the screen (agent, 2026-11-17, DONE; tried by me in the browser pane:
+    gauges move): `boards/wt32-sc01.json` (natives incl. `sys/draw`, RESET button,
+    screen part), part `st7796-320x480` (NAMED after the controller + size, never the
+    board: user) = host/twin/parts/st7796-320x480/model.js + host/twin/ui/src/
+    screenview.ts (built-in view, `BUILT_IN_VIEWS` of partview.ts), made segments in
+    twin_spi.cpp, `sys/draw` registered only for a board that lists it, `pin.pwm` in
+    qjsx:twin, the SPI section of a bus with a part HIDDEN (user), TraceRing::visit
+    wrap-around fixed (8-12 % of a core wasted), tests/display.test.js 42/42.
+    CPU of the twin with the text demo: 78 % -> 34 % of a core in Debug, 10-11 % in
+    Release. WIRE TIME (user, 2026-11-17, DONE): an SPI transaction of the twin lasts
+    its bytes at its device's clock plus its delay segments (twin_spi.cpp
+    `wireMicros` / `waitWire`, under a millisecond added up per bus), minus the time
+    spent making and answering it (overlap, as the ESP32): the gauges 21.7 images/s
+    in the twin (the board 15.5: its rendering is not simulated), a full screen
+    62 ms; display 42/42, spi 59/59, twinparts 38/38. A video stream (MJPEG / BMP) for the page: postponed until needed (user
+    agreed to wait for these figures);
+  - trials in temp/: wtscreen (probe), spibench, wtdisplay, wtcanvas, wtdraw, wtshow, wttext,
+    wtgauge (+ wtgauge-twin), drawcheck (renderer on the PC, ASCII);
+  - NEXT, to discuss with the user first: text and fonts ("pour les fontes, on
+    discute"; each font its own module, data in flash if the engine can read it in
+    place: to check), images, touch (`stdlib/touch`, after the screen), the twin,
+    listing an image costs 49 ms (as long as the send); maybe later: the slowness of
+    transactionSync and of native calls in general (user: "on reviendra peut-être
+    dessus").
+- Files imported as bytes (agreed by the user 2026-11-17, IMPLEMENTED the same day by an
+  agent, checked by me on the PC: tests/bytes.test.js 24/24 (48/48 with libraries), the
+  fixture run from its sources, its package and with qjsx-target; engine change Y,
+  compiler only, BC_VERSION not bumped, Bellard's tests 0 failure (2026-11-17); `doc/architecture.md`
+  4.1): `import font from "./inter16.bin" with { type: "bytes" };` gives a Uint8Array on
+  the file's bytes, which stay in the package (`bytes/<module name>`, stored, aligned on
+  8 bytes; manifest `"bytes": [{ path, size, hash }]`; part of the build id; kept in the
+  reduced package): on a device they are read in flash, nothing copied to RAM. Only an
+  imported file is in the package. For fonts, tables, images... (user: "ce truc servira
+  pour d'autres utilisations"). Code: `host/js/bytes.js` (`qjsx:bytes`), compile.js,
+  build.js, deploy.js, `rt::newBytesModule` and `loadModule` (program.cpp),
+  `RunHooks::loadBytes` (host.cpp: `qjsx run script.js` reads the file). KNOWN LIMIT:
+  read-only but not enforced (no immutable ArrayBuffer in the engine: a write is an
+  undetected error, a crash on a device). NOT done: the same import in a library
+  (`qjsx mklib` refuses it; what is needed is listed in bytes.js), its typing, the
+  manual. Font files (user, 2026-11-17): LVGL's binary font format, made WITHOUT
+  compression by `lv_font_conv` 1.5.3 (MIT; an external tool run by hand, installed in
+  `tools/fonts/` with the user's agreement, npm audit clean; never in qjsx nor in a
+  firmware); checked by `temp/fonts/inter/parse.js` on Inter 16 px (OFL; 191 glyphs,
+  10.6 KB): bits most significant first, glyph offsets from the start of `glyf`, box
+  x / y signed; the user wants proportional fonts, digits of one width as an option of
+  OUR renderer (Inter's are not), BMFont (AngelCode) as the fallback format.
+- `device/wifi` (API agreed by the user 2026-11-17, NOT implemented): functions, no class
+  (one radio). Station: `connect({ ssid, password?, timeout = 15000, reconnect = true,
+  hostname?, ip?: { address, netmask, gateway, dns? } })` -> Promise<StationStatus>,
+  `disconnect()`, `scan()` -> Promise<[{ ssid, bssid, rssi, channel, security }]>.
+  Access point: `startAccessPoint({ ssid, password? (none = open, else >= 8 chars WPA2),
+  channel = 1, hidden = false, maxClients = 4, ip = "192.168.4.1" })`,
+  `stopAccessPoint()`, `clients()`; both modes at once allowed (user). `status()`,
+  `onChange(callback)` (events connected / disconnected with reason / gotIp / lostIp /
+  clientJoined / clientLeft). Errors: ENOENT network not found, EACCES wrong password,
+  ETIMEDOUT, EBUSY a connect in progress, RangeError (AP password too short). The
+  connection OUTLIVES the program (user, as device/usb): a new program's `connect` to
+  the same network takes it over. Board without PSRAM: an option (`"wifi": true`, board
+  or project) leaves the WiFi's ~50-60 KB of internal RAM BEFORE the JS region is
+  reserved (user). Version 1: WPA2 / WPA3 personal only (no 802.1X, WPS, power save).
+  Credentials kept by the program (e.g. a file of /data), nothing stored by the module.
+  Sockets = `sys/net` on lwIP (next item); `networkInterfaces()` in `sys/os` with `mac`.
+  Twin: `"twin.wifi"` networks in qjsx.json (ssid, password, rssi), a page section
+  (state, cut the network, fake AP clients); sockets of the twin stay the PC's. The
+  agent's link over WiFi: TO DISCUSS (user).
 - `device/pwm` (agreed by the user 2026-11-13, IMPLEMENTED the same day for the ESP32
   and the twin, `doc/architecture.md` 5.4, `tests/pwm.test.js`; ESP32 firmware built and
   flashed, VERIFIED on the YD board by the user with an oscilloscope, 2026-11-13): `new Pwm(pin, { frequency
@@ -944,6 +1152,30 @@ keeps the old name: `C:\Sandbox\espjs`.
   shared by every bus runs the queued jobs (blocking hal), a Sync call waits for the jobs of
   its bus then runs on the JS thread; 16 promises pending per bus at most; a device finds
   its bus by number + generation. Twin: nothing answers. ENXIO added to jsbind's errno names.
+- `device/spi` (API agreed by the user 2026-11-17, IMPLEMENTED the same day for the ESP32
+  and the twin, `doc/architecture.md` 5.4; Debug suite 116 OK, `tests/spi.test.js`, part
+  `spiecho` of twinparts, demo `temp/spidemo`; NOT tried on a board yet; same shape as
+  device/i2c): `new Spi(port, { sclk, mosi?, miso?, maxTransfer = 4096 })`, port 2 or 3
+  (SPI2 / SPI3 of the ESP32-S3 doc; the flash's SPI0 / SPI1 refused, EBUSY);
+  `bus.device({ cs?, frequency = 1000000, mode = 0..3, bitOrder = "msb" | "lsb",
+  csActiveHigh = false, dc?, fill = 0x00 })` -> `SpiDevice` (`frequency` field = what the
+  hardware does); transfers only on devices, in call order on the whole bus:
+  `transaction(segments)` / `transactionSync` = CS held from the first segment to the
+  last, a segment is ONE of `{ write: bytes }`, `{ read: n }`, `{ transfer: bytes }`,
+  `{ delay: us }` (CS kept), with `dc?: 0 | 1` (default 1 = data; TypeError when the
+  device has no dc pin); result: one Uint8Array per read / transfer segment. Shortcuts
+  (promise + Sync): `write`, `read`, `transfer` (full duplex), `writeRead`, `command`
+  (write with DC low). DC set by the driver just before each segment (ESP32: `pre_cb` of
+  spi_master, as esp_lcd), so a JS display driver needs no Gpio. ESP32 as BUILT (deviations
+  told to the user): one worker task per open port runs the started transactions (a done
+  from the driver's interrupt cannot post to the loop: lock + allocation), the chip select
+  is a GPIO driven by the hal (held through delays and pieces); pieces <= 32 bytes polled,
+  larger in DMA, cut in `maxTransfer` pieces; a helper `promiseOrRejection` and a type
+  `StrictInt` local to spi_module.cpp, to move into jsbind with the errors pass. Errors
+  EBUSY / EINVAL / ENOENT / EBADF (closed) / EAGAIN / ECANCELED, as the "Errors of the JS API" rules. Twin (this pass too): `"spi"` in the board JSON,
+  trace of the transactions in the page, `board.spi` in qjsx:twin for SPI part models (a
+  model gets each transaction as its segments with their DC level). Later: Teensy
+  (LPSPI), RP2350, slave mode, 3-wire, quad / octal.
 - Firmware version (user, 2026-11-11, DONE): `QJSX_VERSION` is in `common/runtime/version.h`
   (moved from host/), the same for the tool and the firmwares; `agent::Identity.version`,
   sent in the HELLO answer (`VERSION`), shown by `qjsx device info` ("firmware: qjsx ...")
@@ -1195,6 +1427,15 @@ in the include path (no two headers share a name; keep it so).
   - order: minimal firmware (agent, deploy, run, debugger, same board tests as the ESP32),
     then PSRAM heap + microbench, then device/gpio (native SIO XOR toggle), then device/rmt
     on PIO.
+- Fifth board, first ORIGINAL ESP32 (user, 2026-11-17): Wireless-Tag WT32-SC01 v3.2,
+  ESP32-WROVER-B (ESP32-D0WD chip REVISION v1.0: PSRAM cache bug worked around by
+  ESP-IDF), 4 MB flash XMC 3.3 V (DIO), 4 MB of PSRAM seen, 3.5" display on SPI and
+  capacitive touch on I2C (controllers from memory, to check: ST7796, FT6336), CP210x on
+  COM29 (`serial:COM29@921600`), MAC a8:03:2a:74:ab:3c; flash freely (user, MAC check
+  first). Folder `ports/esp32/boards/wt32-sc01/` (target esp32, partitions/4MB.csv).
+  FLASHED 2026-11-17 with no code change: RAM 166.7 KB free, PSRAM 4.0 MB, /data 448 KB;
+  debugger 72/72, proxy 33/33, cdp 53/53. The board for device/dac (GPIO25 / 26: check
+  they reach a connector), device/spi (display) and device/i2c (touch). No twin JSON yet.
 - Fourth target board: PJRC Teensy 4.0 (NXP i.MX RT1062, Cortex-M7 600 MHz single core,
   32 KB I-cache + 32 KB D-cache, 1 MB RAM = 512 KB ITCM/DTCM + 512 KB OCRAM, NO PSRAM,
   2 MB QSPI flash (64 KB kept by PJRC), USB high speed only, LED on pin 13, HalfKay

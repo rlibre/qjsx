@@ -6,22 +6,15 @@
  */
 
 // What the section of an I2C bus shows: the trace of the transfers of the
-// program on it, one line each: when, the address, the bytes written and
-// read (hexadecimal), and the result (NACK, timeout...). The section is
-// shown only for a bus the program opened with no part wired on its pins
-// (a part has a section of its own: boardview.ts). Clearing the trace is in
-// the menu of a settings button the section shows on its title line
-// (menuButton), as for a UART.
-import { BoxProps, Button, Label, VBox } from "x4js";
-import { LogView } from "./controls/logview";
+// program on it (tracepanel.ts), one line each: when, the address, the bytes
+// written and read (hexadecimal), and the result (NACK, timeout...). The
+// section is shown only for a bus the program opened with no part wired on
+// its pins (a part has a section of its own: boardview.ts).
+import { BoxProps } from "x4js";
 import { frequencyText } from "./frequency";
 import { I2cBusState, I2cRecord } from "./messages";
 import { tx } from "./texts";
-
-import gearIcon from "./assets/gear.svg";
-
-// Lines kept in the trace; the oldest go first.
-const MAX_LINES = 500;
+import { asHex, timeText, TracePanel } from "./tracepanel";
 
 /**
  * The title line of the section of a bus: "closed", or "sda 8 · scl 9 · 100
@@ -37,23 +30,6 @@ export function i2cSummary(state: I2cBusState) {
     const pins = `sda ${state.sda} · scl ${state.scl}`;
     const frequencies = state.frequencies.map(frequencyText).join(", ");
     return frequencies === "" ? pins : `${pins} · ${frequencies}`;
-}
-
-/**
- * Bytes in hexadecimal: "D0 60"; "…" after them when there were more than
- * the trace keeps.
- */
-function asHex(bytes: number[], size: number) {
-    const text = bytes.map(byte => byte.toString(16).toUpperCase().padStart(2, "0")).join(" ");
-    const isCut = size > bytes.length;
-    return isCut ? `${text} …` : text;
-}
-
-/**
- * Milliseconds since the twin started, as "12.345 s".
- */
-function timeText(ms: number) {
-    return `${(ms / 1000).toFixed(3)} s`;
 }
 
 /**
@@ -91,61 +67,19 @@ function recordText(record: I2cRecord) {
     return parts.join("  ");
 }
 
-export class I2cPanel extends VBox {
-    declare protected refs: { log: LogView };
-
-    private _lines: Label[] = [];   // the lines shown, oldest first
-
-    // The settings button, for the title line of the section: its menu
-    // clears the trace.
-    readonly menuButton: Button;
-
+export class I2cPanel extends TracePanel {
     /**
      * An empty trace, and the settings button its section shows.
      */
     constructor(props: BoxProps) {
-        super({ ...props, cls: `i2c-panel ${props.cls ?? ""}` });
-
-        // the settings button: its menu clears the trace
-        this.menuButton = new Button({
-            cls: "outline menu-button",
-            icon: gearIcon,
-            tooltip: tx.twin.i2c_menu_tooltip,
-            menu: () => [{ text: tx.twin.i2c_clear, click: () => this.clear() }],
-        });
-
-        // the trace
-        this.setContent([
-            this.refs.log = new LogView({ cls: "i2c-log" }),
-        ]);
+        super(props, tx.twin.i2c_menu_tooltip, tx.twin.i2c_clear);
     }
 
     /**
-     * Adds transfers to the trace, the newest in view unless the user
-     * scrolled up (LogView).
+     * Adds transfers to the trace (a transfer that did not go through has the
+     * class of its status).
      */
     addRecords(records: I2cRecord[]) {
-        // the lines
-        for (const record of records) {
-            const line = new Label({ cls: `i2c-line ${record.status}`, text: recordText(record) });
-            this._lines.push(line);
-            this.refs.log.appendContent(line);
-        }
-
-        // the oldest dropped past MAX_LINES
-        while (this._lines.length > MAX_LINES) {
-            this.refs.log.removeChild(this._lines.shift());
-        }
-
-        // the newest in view
-        this.refs.log.followNewest();
-    }
-
-    /**
-     * Empties the trace.
-     */
-    clear() {
-        this._lines = [];
-        this.refs.log.clearLines();
+        this.addLines(records.map(record => ({ text: recordText(record), cls: record.status })));
     }
 }

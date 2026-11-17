@@ -1,0 +1,6 @@
+{
+    "name": "fonts",
+    "main": "src/main.js",
+    "sources": ["src/**/*.js"],
+    "keep": 1
+}

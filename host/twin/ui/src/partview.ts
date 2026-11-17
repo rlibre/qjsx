@@ -13,12 +13,14 @@
 //      them (ControlsView); a control sends "set" { name: value };
 //   3. a view of its own: a module whose createView(x4, part) returns a
 //      Component (a project's view.js, loaded with import(): the page gives
-//      it x4js, which its bundle does not export).
+//      it x4js, which its bundle does not export); for a part of qjsx, a
+//      view built into the page (BUILT_IN_VIEWS, by model).
 import * as x4 from "x4js";
 import { BoxProps, Checkbox, Component, HBox, Knob, Label, Select, Slider, VBox } from "x4js";
 import { HoldButton } from "./controls/holdbutton";
 import { Led } from "./controls/led";
 import { PartControl, PartInfo, PartState, sendPartAction } from "./messages";
+import { ScreenView } from "./screenview";
 
 // What a view of its own gets: the part, its state, and how to act on it.
 export interface PartHandle {
@@ -33,6 +35,12 @@ export interface PartHandle {
 interface ViewModule {
     createView: (x4js: typeof x4, part: PartHandle) => Component;
 }
+
+// The views of the parts of qjsx that have one, by model: built into the
+// page (a part of qjsx has no view.js).
+const BUILT_IN_VIEWS: Record<string, (part: PartHandle) => Component> = {
+    "st7796-320x480": part => new ScreenView({}, part),
+};
 
 /**
  * Digits after the point that 'step' needs (0.1: 1, 0.25: 2, 1: 0).
@@ -341,10 +349,14 @@ export class PartView extends VBox {
     constructor(props: BoxProps, part: PartInfo) {
         super(props);
 
-        // a view of its own, else its controls, else its state as a list;
-        // each listener shows the states that come
+        // a view of its own (the project's, or built into the page), else its
+        // controls, else its state as a list; each listener shows the states
+        // that come
+        const builtIn = BUILT_IN_VIEWS[part.model];
         if (part.view !== null) {
             this._loadView(part);
+        } else if (builtIn !== undefined) {
+            this.setContent(builtIn(this._handleOf(part)));
         } else if (part.controls.length > 0) {
             const controls = new ControlsView({}, part);
             this._listeners.push(state => controls.setState(state));
@@ -369,13 +381,11 @@ export class PartView extends VBox {
     }
 
     /**
-     * Loads a view of its own and gives it the part; a view that fails shows
-     * why.
+     * What a view of its own gets of 'part': a listener it gives is called
+     * at once with the last state, if any.
      */
-    private async _loadView(part: PartInfo) {
-        // what the view gets: a listener it gives is called at once with the
-        // last state, if any
-        const handle: PartHandle = {
+    private _handleOf(part: PartInfo): PartHandle {
+        return {
             id: part.id,
             label: part.label,
             model: part.model,
@@ -387,11 +397,17 @@ export class PartView extends VBox {
             },
             send: (action, args) => sendPartAction(part.id, action, args),
         };
+    }
 
+    /**
+     * Loads a view of its own and gives it the part; a view that fails shows
+     * why.
+     */
+    private async _loadView(part: PartInfo) {
         // the module loaded, its view built; any failure shown instead
         try {
             const module = (await import(part.view)) as ViewModule;
-            this.setContent(module.createView(x4, handle));
+            this.setContent(module.createView(x4, this._handleOf(part)));
         } catch (error) {
             this.setContent(new Label({ cls: "error", text: `${part.view}: ${String(error)}` }));
         }

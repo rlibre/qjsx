@@ -91,8 +91,8 @@ declare module "device/pwm" {
          * Another frequency in Hz, an integer 1 to 40000000 (RangeError
          * otherwise); the duty cycle asked last is kept, on the resolution of
          * the new frequency. Throws an `Error` with `code` `"EINVAL"` (out of
-         * reach) or `"EBUSY"` (no timer free for it: the output keeps its
-         * frequency).
+         * reach), `"EBUSY"` (no timer free for it) or `"EIO"` (the hardware
+         * refused the timer); in each case the output keeps its frequency.
          */
         setFrequency(frequency: number): void;
 

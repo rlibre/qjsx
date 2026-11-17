@@ -1,0 +1,9 @@
+{
+    "name": "qjsx-font-tools",
+    "version": "1.0.0",
+    "private": true,
+    "description": "Converts a TrueType / OpenType font into the binary font file stdlib/display draws (LVGL's binary font format). Used by hand on the PC; nothing of it is in qjsx or in a firmware.",
+    "dependencies": {
+        "lv_font_conv": "1.5.3"
+    }
+}

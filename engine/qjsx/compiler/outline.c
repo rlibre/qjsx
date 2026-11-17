@@ -25,7 +25,9 @@
  *      top-level variables added since 1; it is removable when it declared
  *      some, imported nothing, and its bytecode only creates values;
  *   4. js_outline_report() once the module is parsed: the collector gets
- *      the statements, the imports and the exports of the module.
+ *      the statements, the imports and the exports of the module, and the
+ *      modules it asks for with their import attributes (engine change Y:
+ *      js_outline_request_position() notes where each one is named).
  */
 
 #include "quickjs-internal.h"
@@ -62,6 +64,10 @@ typedef struct JSOutlineBuilder {
     /* the range of a name of an export clause, by export entry */
     OutlineRange *export_ranges;
     int export_range_size;
+    /* offset of the string naming the module, by module request (engine
+       change Y) */
+    uint32_t *request_positions;
+    int request_position_size;
     BOOL has_eval;
     /* the statement being parsed */
     BOOL in_statement;
@@ -306,24 +312,49 @@ void js_outline_name_used(JSParseState *s, JSAtom name)
     outline_add_atom(s, name);   /* out of memory: the name is not recorded, the parse fails later */
 }
 
+/* Makes the array '*array' ('*size' elements of 'element_size' bytes
+   allocated) hold the element 'index', the elements added zeroed. -1 when
+   out of memory. */
+static int outline_reserve(JSParseState *s, void **array, int element_size, int *size, int index)
+{
+    int size_before = *size;
+
+    if (js_resize_array(s->ctx, array, element_size, size, index + 1))
+        return -1;
+    if (*size > size_before) {
+        memset((uint8_t *)*array + size_before * element_size, 0,
+               (*size - size_before) * element_size);
+    }
+    return 0;
+}
+
 /* The imported name of import entry 'import_index' is at 'ptr'. -1 when
    out of memory. */
 int js_outline_import_position(JSParseState *s, int import_index, const uint8_t *ptr)
 {
     JSOutlineBuilder *b = s->outline;
-    int size_before;
 
     if (!b)
         return 0;
-    size_before = b->import_position_size;
-    if (js_resize_array(s->ctx, (void **)&b->import_positions, sizeof(b->import_positions[0]),
-                        &b->import_position_size, import_index + 1))
+    if (outline_reserve(s, (void **)&b->import_positions, sizeof(b->import_positions[0]),
+                        &b->import_position_size, import_index))
         return -1;
-    if (b->import_position_size > size_before) {
-        memset(b->import_positions + size_before, 0,
-               (b->import_position_size - size_before) * sizeof(b->import_positions[0]));
-    }
     b->import_positions[import_index] = ptr - s->buf_start;
+    return 0;
+}
+
+/* The string naming the module of request 'request_index' is at 'ptr'
+   (engine change Y). -1 when out of memory. */
+int js_outline_request_position(JSParseState *s, int request_index, const uint8_t *ptr)
+{
+    JSOutlineBuilder *b = s->outline;
+
+    if (!b)
+        return 0;
+    if (outline_reserve(s, (void **)&b->request_positions, sizeof(b->request_positions[0]),
+                        &b->request_position_size, request_index))
+        return -1;
+    b->request_positions[request_index] = ptr - s->buf_start;
     return 0;
 }
 
@@ -333,18 +364,12 @@ int js_outline_export_range(JSParseState *s, int export_index, const uint8_t *st
                             const uint8_t *end)
 {
     JSOutlineBuilder *b = s->outline;
-    int size_before;
 
     if (!b)
         return 0;
-    size_before = b->export_range_size;
-    if (js_resize_array(s->ctx, (void **)&b->export_ranges, sizeof(b->export_ranges[0]),
-                        &b->export_range_size, export_index + 1))
+    if (outline_reserve(s, (void **)&b->export_ranges, sizeof(b->export_ranges[0]),
+                        &b->export_range_size, export_index))
         return -1;
-    if (b->export_range_size > size_before) {
-        memset(b->export_ranges + size_before, 0,
-               (b->export_range_size - size_before) * sizeof(b->export_ranges[0]));
-    }
     b->export_ranges[export_index].start = start - s->buf_start;
     b->export_ranges[export_index].end = end - s->buf_start;
     return 0;
@@ -367,6 +392,7 @@ void js_outline_report(JSParseState *s, JSModuleDef *m)
     JSOutlineStatement *statements = NULL;
     JSOutlineImport *imports = NULL;
     JSOutlineExport *exports = NULL;
+    JSOutlineRequest *requests = NULL;
     JSModuleOutline outline;
     int i, export_count;
 
@@ -423,18 +449,32 @@ void js_outline_report(JSParseState *s, JSModuleDef *m)
         e->module = m->req_module_entries[m->star_export_entries[i].req_module_idx].module_name;
     }
 
+    /* the modules asked for, with their attributes (engine change Y) */
+    requests = js_mallocz(ctx, sizeof(requests[0]) * max_int(m->req_module_entries_count, 1));
+    if (!requests)
+        goto done;
+    for(i = 0; i < m->req_module_entries_count; i++) {
+        const JSReqModuleEntry *rme = &m->req_module_entries[i];
+        requests[i].module = rme->module_name;
+        requests[i].attributes = rme->attributes;
+        requests[i].position = i < b->request_position_size ? b->request_positions[i] : 0;
+    }
+
     outline.statements = statements;
     outline.statement_count = b->statement_count;
     outline.imports = imports;
     outline.import_count = m->import_entries_count;
     outline.exports = exports;
     outline.export_count = export_count;
+    outline.requests = requests;
+    outline.request_count = m->req_module_entries_count;
     outline.has_eval = b->has_eval;
     ctx->rt->debug.outline_collector(ctx, &outline, ctx->rt->debug.outline_opaque);
  done:
     js_free(ctx, statements);
     js_free(ctx, imports);
     js_free(ctx, exports);
+    js_free(ctx, requests);
 }
 
 /* Frees the outline of 's' (after the parse, whatever its result). */
@@ -448,6 +488,7 @@ void js_outline_free(JSParseState *s)
     js_free(s->ctx, b->atoms);
     js_free(s->ctx, b->import_positions);
     js_free(s->ctx, b->export_ranges);
+    js_free(s->ctx, b->request_positions);
     js_free(s->ctx, b);
     s->outline = NULL;
 }

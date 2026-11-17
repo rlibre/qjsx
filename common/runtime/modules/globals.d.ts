@@ -218,7 +218,7 @@ declare namespace process {
     const platform: "win32" | "darwin" | "linux" | "esp32" | "rp2350";
 
     /**
-     * Versions, as plain strings: `qjsx` (the runtime, e.g. `"0.1.0"`; on a
+     * Versions, as plain strings: `qjsx` (the runtime, e.g. `"0.2.0"`; on a
      * device the firmware's), `quickjs` (the engine, e.g. `"2026-06-04"`) and,
      * when the program runs from a package (`.qjspkg`, an executable, a
      * device), `build`: the build id of the package (a hash of its bytecode).

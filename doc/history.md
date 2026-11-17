@@ -1,9 +1,90 @@
 # History of fixed defects
 
 A fixed defect leaves `known-bugs.md` and arrives here, with what was done. The most recent
-one comes first.
+one comes first. The section "Measures and findings" at the end keeps the results of
+measurements that changed no code but settle a question.
 
 ## 2026-11-17
+
+### Defects of `stdlib/display` found while writing its typing
+
+Found by the agent that wrote `display.d.ts` (it only reported them); fixed and checked on
+the twin of the WT32-SC01 (temp/displayfix) and by `tests/display.test.js` (42/42).
+- A `show()` whose native part threw left the display "sending" for good: every later
+  `show()` resolved false. It also threw instead of rejecting (rule 2 of the errors of the
+  JS API), as did a `show()` after `close()`. `show()` now never throws: a failure rejects
+  and the display is free for the next image (`#startShow()`).
+- `text()` with something else than a string (a number) made the list's length NaN and
+  corrupted the list until the next `show()`. The value is now written as it would print
+  (`String(value)`): `lcd.text(10, 10, 21.5, font, color)` works.
+- The constructor left the SPI bus (and the reset pin) taken when a later step failed (a
+  backlight pin refused, a controller command): the port stayed EBUSY until the end of the
+  program. A failing step now closes what was opened before throwing.
+- Stale comments: the kinds 3 and 4 of a command list in `draw_module.cpp`, "a buffer" of a
+  band where there are two, an error message naming an Int16Array where any typed array is
+  read.
+- No type for a file imported as bytes: the editor said "Cannot find module './x.bin'". New
+  `common/runtime/modules/bytes_import.d.ts` declares `"*.bin"` (a `Uint8Array`); the drift
+  test leaves wildcard declarations out.
+
+### The twin rebuilt its whole SPI trace every 50 ms with no page open
+
+Found by the agent that brought the WT32-SC01's screen into the twin, while measuring its
+CPU use. When no page is open, the page's server asks for the trace records after
+4294967295 to skip them all; `TraceRing::visit` (host/twin/sim/twin.h) computed `after + 1`
+on 32 bits, which wrapped to 0, so every 50 ms it made all 256 kept SPI records into JS
+objects and dropped them: 8 to 12 % of a core once the trace was full. Now computed on 64
+bits; the twin is idle at 0 % after a reset.
+
+### Small defects of the coding rules pass and older ones
+
+Fixed in the code without a build nor a test run by the agent that made them; built and
+tested afterwards with the rest of the day's work.
+
+- **Twin: `Registers` did not wrap a written register index** (a part with fewer than 256
+  registers in "pairs" mode) -> `_write` and the register pointer wrap around, as reads
+  do. `host/twin/api/twin.js`.
+- **`device/rmt`: `hal::rmt::close(-1)` when the open failed** -> the hal is given back
+  only a channel it opened (one past the module's table). `common/device/rmt_module.cpp`.
+- **ESP32 `device/pwm`: result of `setUpTimer()` ignored in `setFrequency`** -> a timer
+  LEDC refuses undoes the move (`undoMove`: the channel back on its timer, at its former
+  frequency) and the call fails with EIO (documented in `hal_pwm.h`, `pwm_module.cpp`,
+  `pwm_module.d.ts`). `ports/esp32/main/hal_pwm_esp32.cpp`.
+- **ESP32 `device/adc`: `deleteCalibration` assumed the curve fitting scheme** -> each
+  input keeps the scheme that made its calibration (`Calibration { handle, scheme }`) and
+  is deleted by it; a channel whose configuration fails no longer leaves a unit with no
+  user (deleted when it was made for that input). `ports/esp32/main/hal_adc_esp32.cpp`.
+- **`device/serial` (board path): `JS_ToFloat64` on any argument** -> only a number is
+  converted (no `valueOf` runs). `common/device/serial_module.cpp`.
+- **jsbind: a failed `JS_ToCStringLen` (`JS_ENUM`) or `JS_AtomToCString`
+  (`rejectUnknownFields`) threw a TypeError over the pending exception** -> the pending
+  exception is passed on (`markPendingException`). `common/jsbind/jsbind_convert.h`.
+- **Teensy 4.0: default `thread_local` block made without a lock** -> made once with the
+  scheduler suspended (tasks without a block of their own: idle, timer); read without it
+  once it exists. `ports/imxrt1062/main/tls_imxrt1062.cpp`.
+- **Teensy 4.0: `board::restart()` without `return`** -> group comments, and why none is
+  needed (`NVIC_SystemReset()` is `__NO_RETURN` in CMSIS). `ports/imxrt1062/main/board_imxrt1062.cpp`.
+- **Desktop agent: `offset + size <= _uploadSize` could wrap around** -> compared without
+  the addition (`offset <= _uploadSize && size <= _uploadSize - offset`).
+  `host/platform/board_host.cpp`.
+- **Debugger: `hitBreakpoints` compared lines only** -> a breakpoint is hit when the top
+  frame is in its function at one of its offsets (`breakpointLocation` of the session also
+  gives `number` and `pcs`). `host/js/cdp.js`, `host/js/debugsession.js`.
+- **RP2350: `board::confineFiles()` returned false** -> true, as the other boards (no
+  effect while `dataDirectory()` is nullptr). `ports/rp2350/main/board_rp2350.cpp`.
+- **Agent upload hash allocated with `new` / `delete`** -> `memory::allocate` /
+  `release`, one block made at the first upload and reused. `common/agent/agent.cpp`.
+- **`readAll` returned EIO when measuring the size failed** -> the errno of the seek (or
+  the tell), kept across `fclose`; EIO only if none was set. `common/runtime/files.cpp`.
+- **BigInt (debugger values): `strtoll` accepted leading spaces and a `+`** -> a digit
+  must come first, after an optional `-`. `common/agent/debugger_values.cpp`.
+- **Arrays of more than 256 bytes on the stack** -> the 512-byte messages of `js::fail`,
+  `failSystem`, `reportException`, `Resolver::reject` and of the EACCES message of `fs`
+  on the heap (`js::detail::MESSAGE_SIZE`, same truncation); the paths of `data_files.cpp`
+  on the heap (`addEntry`, the recursive `addUsage`, `resolve`); SHA-1 keeps its message
+  schedule in 16 words (FIPS 180-4, 6.1.3) instead of 80. `common/jsbind/jsbind_error.h`,
+  `jsbind_promise.h`, `common/runtime/modules/fs.cpp`, `common/agent/data_files.cpp`,
+  `common/runtime/sha1.h`.
 
 ### A request of a new session answered with an answer of the previous one (USB links)
 
@@ -136,7 +217,8 @@ one comes first.
   for it in vain.
 - **Fix.** `board::restart()` (`ports/esp32/main/board_esp32.cpp`) waits for the end of the
   transmission (`uart_wait_tx_done`, at most `RESTART_FLUSH_MS` = 100 ms) before
-  `esp_restart()`.
+  `esp_restart()`. Since `device/board` (2026-11-13), `RESTART_FLUSH_MS` is 500 ms, in
+  `common/board/board.h`, and also covers the open UARTs and USB serial functions.
 - **Verified.** On the board: `qjsx device reset` answers ("reset done").
 
 ### `onData` callback freed while it runs (`net`, `serial`)
@@ -148,7 +230,8 @@ one comes first.
   fault, found by `tests/websocket.test.js`).
 - **Fix.** Both call through a local copy of the callback, which keeps the function alive
   until the call returns, as `onClose` already did (`host/modules/net.cpp`,
-  `host/modules/serial_module.cpp`).
+  `host/modules/serial_module.cpp`; the serial module is now
+  `common/device/serial_module.cpp`, which keeps the local copy).
 - **Verified.** `tests/websocket.test.js`, tests in Debug.
 
 ### Minor defects with a local fix
@@ -211,7 +294,8 @@ Fixed together, after the review of `new-device.md` (user: "the small cleanups")
 - **Fix.** The port is opened with `FILE_FLAG_OVERLAPPED`; every read and every write has its
   `OVERLAPPED` structure and its event (`beginOperation`, `endOperation`). Reads and writes
   are independent. The rest does not change (read that returns after 100 ms, `closing`
-  flag).
+  flag). Since `device/serial` (2026-11-11), this Windows code is the PC driver
+  `host/platform/serial_host.cpp`, under `common/device/serial_module.cpp`.
 - **Verified.** On the board: a one-byte write takes 0 to 1 ms; sending 47 KB goes from
   16–26 s to 1.5 s (50 ms per 2 KB chunk, regular); the debugger passes 52/52 in 1.7 s. PC
   tests in Release and in Debug.
@@ -250,7 +334,8 @@ defects in particular.
    - Fix: `removeTree` uses `files::linkStatus` (lstat; Windows junctions and links through
      the reparse point attribute). A link is removed itself, never the content of its
      target.
-2. **`serial`, `SerialPort::write` after `close()`** (`host/modules/serial_module.cpp`).
+2. **`serial`, `SerialPort::write` after `close()`** (`host/modules/serial_module.cpp`, now
+   `common/device/serial_module.cpp`: `PortState`, `releasePortState`).
    - Defect: `_state` was `nullptr` while `_open` was still true, hence a `nullptr`
      dereference. After a read error, the reader thread freed `PortState` while the JS still
      pointed to it: `write()` and `requestClose()` used freed memory.
@@ -294,8 +379,9 @@ defects in particular.
 
 The tests of `run-tests.sh` pass in Release and in Debug, but no test was written for these
 defects in particular. The POSIX / macOS branches were only reread, not compiled
-(`pthread_condattr_setclock`, `poll`, `fseeko`, `MSG_NOSIGNAL`...). Step over / step out is
-not fixed: it stays in `known-bugs.md`.
+(`pthread_condattr_setclock`, `poll`, `fseeko`, `MSG_NOSIGNAL`...). Step over / step out was
+not fixed in this pass: it was fixed later the same day (see "Step over / step out stopping
+in unrelated code" above).
 
 - **Runner and debugger**:
   - STOP and DEBUG_ATTACH during startup;
@@ -341,3 +427,90 @@ not fixed: it stays in `known-bugs.md`.
   process ("process.exit" tests of `run-tests.sh`).
 - **`setImportMeta` kept the `\` of Windows paths** in the `file:///` URL: fixed by
   `files::useSlashes`.
+
+## Measures and findings
+
+Results taken out of `TODO.md`: measurements and conclusions recorded nowhere else.
+
+### Drawing on a display from JS, on the ESP32 (WT32-SC01, 2026-11-17)
+
+Measured while designing `stdlib/display` (architecture.md 5.4); the program for each is
+in `temp/` (wtscreen, spibench, wtdisplay, wtcanvas, wtdraw, wtshow, wtgauge).
+- A call from JS to native code costs about 0.25 ms (JS heap in PSRAM): drawing at once,
+  with one SPI call per primitive, gave 2.7 ms a pixel and 1 s for a line across the screen.
+- `transactionSync` of one segment of 2 bytes 1.3 ms, each segment 0.35 ms more; an array
+  of numbers instead of a typed array 0.45 ms more (suspected: the conversion of each
+  segment object; not proven).
+- A canvas of the screen (307 KB in PSRAM): 82 ms to fill, 92 ms to send; 3.6 images a
+  second drawn in JS, 4.4 with native primitives. A list of commands rendered band by
+  band: 8.1, then 13.5 when the next image is listed during the send.
+- The ST7796 shows nothing at 80 MHz; 40 MHz works (61 ms for a full screen of wire).
+- Fixed point with 64-bit integers is no faster than float on the ESP32 (a 64-bit
+  multiply or compare is a library call); with 32-bit integers the arcs went from 37 to
+  19 ms an image. The details are at the top of common/draw/draw.cpp.
+### Idle GC: useless for the client board's application
+
+- **Question.** Would a GC pass run while the loop waits (the user's idea) help a board
+  without PSRAM?
+- **Measure.** The client board's application, copied into a probe project, run on the
+  board with the `__gc()` probe of the measure option `QJSX_MEMORY_MAP`: the JS heap stayed
+  at 200.8-201.6 KB for 30 s, and NO automatic pass ran (everything is freed by the
+  reference counts: the application makes no cycles). A forced pass took about 3 ms and
+  freed nothing.
+- **Conclusion.** Nothing to gain for that application; to reconsider for a program that
+  makes cycles.
+
+### JS region against the shared heap, measured again with the flash in QIO
+
+- **Measure.** `temp/allocfull` and `temp/allocbench` on the client board (ESP32-S3 without
+  PSRAM), flash in QIO, logs `temp/alloc*-qio.log`; times region / shared heap: compute
+  1263 = 1263 ms, arrays equal, closures 553 / 546 ms (the +85 % measured in DIO is gone:
+  it was the flash), JSON +8 %, properties +24 %, objects +24 % (in DIO the region was 9 %
+  faster: noise of the code placement), string building +64 % (the same in DIO and QIO):
+  strings of 400 and 2400 bytes x2.2 and +64 %, strings of 100 bytes equal.
+- **Lead.** Blocks of more than 128 bytes go to the `RegionHeap`, whose code runs from the
+  flash behind the 16 KB instruction cache, while ESP-IDF's heap (the shared heap) runs
+  from IRAM. Trying the `RegionHeap` in IRAM (a low level setting) is postponed by the user
+  (TODO.md).
+
+### Speed of the client board after the package executed in place
+
+- **Measure.** `temp/allocbench` on the client board, firmware with the package executed in
+  place (engine change S) against the firmware just before: identical to the millisecond
+  (compute loop, arrays, strings, small objects), except the creation of functions in a
+  loop, twice slower (532 -> 1146 ms for 20,000). The benchmark's package was in RAM, so
+  the flash is not the cause. Not proven; the lead is still the 16 KB instruction cache
+  (the place of the code changes from one firmware to the next).
+
+### Flash in QIO on the ESP32-S3 boards
+
+- **Done.** `CONFIG_ESPTOOLPY_FLASHMODE_QIO` in the `sdkconfig.board` of the client board,
+  of the YD-ESP32-S3 and of the ESP32-S3-DevKitC-1 N8R8. On the client board the waits
+  got about 1.6 times faster. A `toggle()` loop on GPIO20: 244 kHz in DIO as in QIO (the
+  interpreter loop stays in the cache).
+
+### Memory map of the client board
+
+- **Measure option** `-DQJSX_MEMORY_MAP=ON` (global `__memoryMap(title)`), raw output in
+  `temp/histo/map-clean.txt`. Static RAM of the firmware: 72.6 KB (code in RAM 43.5 KB,
+  `.data` 16.5 KB, `.bss` 12.6 KB).
+- **Three pockets of RAM found**: (1) the JS task's stack of 48 KB, 41.3 KB never used
+  (the board's stack is 32 KB since, which gave 16 KB more to the JS region); (2) a 32 KB
+  heap at 0x3fcf0000 and the 7.8 KB RTC heap, entirely free, which the JS region (one
+  block of the main heap) cannot take: not used yet (TODO.md); (3) a "211 KB peak for
+  166 KB loaded", which was a measure artifact (history.md "Peak of the JS region counted
+  since the boot").
+- **On the twin** (PC, 64-bit values): the peak of a run equals the heap used just after
+  loading (284.2 KB), then 300-304 KB while running (316 KB at most); the 45 KB between
+  "loaded" and "running" are the live memory of the application (about 57 async functions
+  waiting, 102 closures, 313 objects, 55 shapes, 4 ArrayBuffers). An earlier measure of the
+  same application on the twin gave 380 KB, 400 KB at most (before the engine's memory
+  work).
+
+### Trial projects of the twin page
+
+- `temp/scopedemo` (`qjsx agent -p temp/scopedemo`): the analyzer; `temp/pwmdemo`: four PWM
+  outputs and a turning RGB LED, deployed on the agent of `temp/togglestress`;
+  `temp/togglestress`: an endless `toggle()` loop: the page does not saturate, but
+  `twin.state` is sent at each turn, 127 KB/s (TODO.md); `tests/fixtures/twinparts`: the
+  parts.

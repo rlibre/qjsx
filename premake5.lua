@@ -29,6 +29,7 @@
 local QJSX = "engine/qjsx"
 local QUICKJS_VERSION = io.readfile(QJSX .. "/VERSION"):gsub("%s+", "")
 local EMBED_TOOL = path.getabsolute("tools/embed-js.lua")
+local EMBED_BYTES_TOOL = path.getabsolute("tools/embed-bytes.lua")
 local EMBED_TWIN_UI_TOOL = path.getabsolute("tools/embed-twin-ui.lua")
 local TWIN_UI = path.getabsolute("host/twin/ui")
 
@@ -51,8 +52,10 @@ local TYPES_INPUTS = table.join(
     { EMBED_TYPES_TOOL },
     os.matchfiles("common/runtime/modules/*.d.ts"),
     os.matchfiles("common/device/*.d.ts"),
+    os.matchfiles("common/draw/*.d.ts"),
     os.matchfiles("host/modules/*.d.ts"),
-    os.matchfiles("lib/stdlib/src/*.d.ts"))
+    os.matchfiles("lib/stdlib/src/*.d.ts"),
+    os.matchfiles("lib/stdlib/src/*/*.d.ts"))
 TYPES_INPUTS = table.translate(TYPES_INPUTS, function(file)
     return path.getabsolute(file)
 end)
@@ -128,6 +131,7 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
             "common/board",
             "common/hal",
             "common/device",
+            "common/draw",
             "host",
             "host/modules",
             "host/platform",
@@ -152,6 +156,10 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
             "common/hal/*.h",
             "common/device/*.h",
             "common/device/*.cpp",
+            -- sys/draw: registered only in a twin whose board lists it
+            -- (host/agent_command.cpp)
+            "common/draw/*.h",
+            "common/draw/*.cpp",
             "host/*.h",
             "host/*.cpp",
             "host/modules/*.h",
@@ -166,6 +174,8 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
             "host/twin/parts/*/model.js",
             "host/twin/ui/x4.config.json",
             "lib/stdlib/src/*.js",
+            "lib/stdlib/src/*/*.js",
+            "lib/stdlib/src/*/*.bin",
             "common/runtime/modules/globals.d.ts",
         }
         files(extraFiles)
@@ -246,6 +256,33 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
             }
             buildoutputs { "%{cfg.objdir}/stdlib-%{file.basename}.js.cpp" }
             buildinputs { EMBED_TOOL }   -- regenerate when the tool changes
+            compilebuildoutputs "On"
+
+        -- Those of a folder of the standard library
+        -- (lib/stdlib/src/<folder>/name.js), as "stdlib/<folder>/name"
+        -- ("stdlib/fonts/inter16").
+        filter "files:lib/stdlib/src/*/*.js"
+            buildmessage "embedding stdlib/%{path.getname(file.directory)}/%{file.name}"
+            buildcommands {
+                'premake5 --file="' .. EMBED_TOOL .. '" embed-js --input="%{file.abspath}"'
+                    .. ' --output="%{cfg.objdir}/stdlib-%{path.getname(file.directory)}-%{file.basename}.js.cpp"'
+                    .. ' --name="stdlib/%{path.getname(file.directory)}/%{file.basename}"',
+            }
+            buildoutputs { "%{cfg.objdir}/stdlib-%{path.getname(file.directory)}-%{file.basename}.js.cpp" }
+            buildinputs { EMBED_TOOL }
+            compilebuildoutputs "On"
+
+        -- The files they import as bytes (lib/stdlib/src/<folder>/name.bin),
+        -- under the name the import gives them: "stdlib/<folder>/name.bin".
+        filter "files:lib/stdlib/src/*/*.bin"
+            buildmessage "embedding stdlib/%{path.getname(file.directory)}/%{file.name}"
+            buildcommands {
+                'premake5 --file="' .. EMBED_BYTES_TOOL .. '" embed-bytes --input="%{file.abspath}"'
+                    .. ' --output="%{cfg.objdir}/stdlib-%{path.getname(file.directory)}-%{file.basename}.bin.cpp"'
+                    .. ' --name="stdlib/%{path.getname(file.directory)}/%{file.name}"',
+            }
+            buildoutputs { "%{cfg.objdir}/stdlib-%{path.getname(file.directory)}-%{file.basename}.bin.cpp" }
+            buildinputs { EMBED_BYTES_TOOL }
             compilebuildoutputs "On"
 
         -- The TypeScript declarations of the JS API (a .d.ts next to each

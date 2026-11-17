@@ -1,0 +1,18 @@
+{
+    "name": "ESP32-DevKitC",
+    "chip": "ESP32",
+    "description": "Espressif ESP32-DevKitC, ESP32-WROOM-32 (original ESP32, 4 MB flash, no PSRAM)",
+    "platform": "esp32",
+    "pins": 40,
+    "uarts": 3,
+    "linkUart": 0,
+    "adc": { "pins": [32, 33, 34, 35, 36, 39], "bits": 12, "spans": [950, 1250, 1750, 3100], "vref": 3.3 },
+    "dac": { "pins": [25, 26], "bits": 8, "fullScale": 3.3 },
+    "pwm": { "outputs": 8, "timers": 4, "clock": 80000000, "maxBits": 20 },
+    "spi": { "ports": [2, 3], "reserved": [0, 1] },
+    "natives": ["sys/fs", "sys/crypto", "device/board", "device/gpio", "device/rmt", "device/i2c", "device/spi", "device/adc", "device/pwm", "device/serial", "device/dac"],
+    "parts": [
+        { "id": "boot", "model": "button", "label": "BOOT", "pin": 0, "activeLow": true },
+        { "id": "reset", "model": "button", "label": "EN (reset)", "reset": true }
+    ]
+}

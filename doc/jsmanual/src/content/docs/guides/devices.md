@@ -3,7 +3,7 @@ title: Programs on a device
 description: What a program meets on a board, and what it cannot do there.
 ---
 
-A device (an ESP32 or RP2350 board today) runs the qjsx firmware: the QuickJS engine
+A device (an ESP32, Teensy 4.0 or RP2350 board today) runs the qjsx firmware: the QuickJS engine
 without its compiler, the native modules of the board and an agent that talks to the PC.
 The program arrives as a package of bytecode, compiled on the PC by `qjsx build`.
 
@@ -26,16 +26,41 @@ that value wherever the module reads it:
 const DELAY = 5 * 1000;      // no variable is made for it
 const LABEL = "led-" + 2;
 
-export function wait() {
-    return sleep(DELAY);     // compiled as sleep(5000)
+export function later(job) {
+    return setTimeout(job, DELAY);     // compiled as setTimeout(job, 5000)
 }
 ```
 
 Such a constant takes no memory on the device, so naming values costs nothing. Two
 things follow: reading it before its declaration ran gives its value (JavaScript throws
 a ReferenceError there), and a breakpoint set on its line stops at the next statement.
-The debugger still shows it, with its value. An exported constant, a `const` holding an
-object, an array or the result of a call, and a `let` stay ordinary variables.
+The debugger still shows it, with its value. An exported constant is replaced the same
+way inside its module, but keeps its variable for the modules that import it. A `const`
+holding an object, an array or the result of a call, and a `let`, stay ordinary
+variables.
+
+## What the build leaves out, what it refuses
+
+On a device every function costs RAM as soon as its module is loaded, called or not
+(about 275 bytes on a 32-bit board). `qjsx build` therefore leaves out of the package the
+top-level declarations nothing uses (functions, classes, constants, in the program and in
+the library modules it imports), and says which:
+
+```text
+qjsx: stdlib/tasks: left out, not used: Mutex
+```
+
+What is used is followed from the code that runs: the statements of each module that do
+something, the names they use, the imports and re-exports (`import * as ns` uses every
+export of the module). A module that calls `eval()` keeps everything. The package keeps
+the original sources: the debugger shows them, at the same positions.
+
+An import of a name the other module does not export is a build error, with its
+position, instead of a program the device refuses when it starts:
+
+```text
+qjsx: src/main.js:3:10: 'sleep' is not exported by stdlib/tasks
+```
 
 ## One thread, one loop
 
@@ -59,7 +84,7 @@ stop` and `qjsx deploy` still reach it.
 |---|---|
 | `process.argv` | `["qjsx", "<main module>"]` |
 | `process.env` | the `env` object of `qjsx.json`, `{}` without one; never the PC's environment |
-| `process.platform` | `"esp32"`, `"rp2350"` (the twin: the platform of its board) |
+| `process.platform` | `"esp32"`, `"imxrt1062"` (Teensy 4.0), `"rp2350"` (the twin: the platform of its board) |
 | `process.cwd()` | the data folder of the device |
 | `process.exit(code)` | ends the program, not the firmware: the agent stays, `qjsx deploy` or a restart starts a program again |
 | `process.versions` | `{ qjsx, quickjs, build }`: `build` is the build id of the package |
@@ -83,7 +108,8 @@ An exception nobody catches in a callback is printed and the program goes on.
 A board with PSRAM puts the JS heap there: several megabytes. A board without PSRAM gives
 the program its internal RAM only: when the first program starts, the firmware reserves
 one region of it for the JS heap (the largest free block, less 16 KB it keeps for itself),
-about 250 KB on an ESP32-S3. `qjsx device info` shows what the program's JS heap uses now,
+about 250 KB on an ESP32-S3 (the Teensy 4.0, which has no PSRAM either, gives it a fixed
+512 KB region). `qjsx device info` shows what the program's JS heap uses now,
 the most it used in this run (or the last one), the size of that region, and the free
 memory left to the firmware:
 
@@ -155,7 +181,8 @@ and a program cannot reach anything outside it. LittleFS commits a file when it 
 a power cut during `writeFileSync()` keeps the old content whole. The partition is
 formatted the first time, and kept when a program is deployed or the firmware flashed.
 The desktop agent and the digital twin keep these files in a `data` folder of their
-storage. (The RP2350 has no file system yet.)
+storage. (The Teensy 4.0 and the RP2350 have no file system yet: `sys/fs` throws
+`ENOSYS` there.)
 
 From the PC:
 
@@ -173,3 +200,64 @@ qjsx device info                    # also: the space used in /data, the memory
 [The project file](../project/)): files of the same name are replaced, the others
 (what the program wrote itself) are kept. A file is written to a temporary file then put
 in place: a cut transfer never leaves half a file.
+
+## SPI
+
+`device/spi` drives SPI chips: displays, flash memories, sensors, converters. A bus is a
+controller of the chip on its pins (port 2 or 3 on the ESP32); each chip on it is a
+device with its chip select, clock, mode and, for a display, its data / command (DC) pin.
+A transaction holds the chip select from its first segment to the last, and the driver
+sets the DC pin just before each segment: a display needs no `Gpio` of its own.
+
+```js
+import { Spi } from "device/spi";
+
+const bus = new Spi(2, { sclk: 12, mosi: 11 });
+const lcd = bus.device({ cs: 10, dc: 9, frequency: 20000000 });
+
+// waking up: a command, 120 ms, the next one
+await lcd.command([0x01]);                                  // SWRESET
+await new Promise((resolve) => setTimeout(resolve, 120));
+await lcd.command([0x11]);                                  // SLPOUT
+
+// a window of 128 x 160 pixels, then its pixels, as an ST7735 wants them:
+// each command with DC low, its parameters and the pixels with DC high
+const pixels = new Uint8Array(128 * 160 * 2).fill(0xff);   // white, RGB565
+await lcd.transaction([
+    { write: [0x2a], dc: 0 }, { write: [0, 0, 0, 127] },   // CASET: columns 0..127
+    { write: [0x2b], dc: 0 }, { write: [0, 0, 0, 159] },   // RASET: rows 0..159
+    { write: [0x2c], dc: 0 }, { write: pixels },           // RAMWR, then the pixels
+]);
+```
+
+Transactions run one at a time per bus, in the order of the calls. The promise forms
+(`transaction`, `write`, `read`, `transfer`, `writeRead`, `command`) copy the bytes they
+send; the `Sync` forms block the JS thread and send the bytes in place, which spares a copy
+of a large frame on a board with little RAM. A promise form never throws: a wrong argument
+rejects its promise too. A `delay` segment waits at most 1 ms with the chip select held;
+a longer wait is an `await` between two transactions.
+
+## DAC
+
+`device/dac` drives a pin with a voltage, through the DAC (digital to analog converter)
+of the chip. Only the original ESP32 (GPIO25 and GPIO26) and the ESP32-S2 (GPIO17 and
+GPIO18) have one, of 8 bits: 256 codes from 0 V to the full scale (3.3 V), a step of
+about 13 mV. The ESP32-S3, the RP2350 and the Teensy 4.0 have none: there, a `device/pwm`
+output behind an RC filter (a resistor, then a capacitor to the ground) makes a voltage
+(this module does not do it for you).
+
+```js
+import { Dac } from "device/dac";
+
+const out = new Dac(25);              // GPIO25, at 0 V
+out.writeVoltage(1.2);                // the nearest code: 93, about 1.203 V
+out.write(255);                       // a raw code: the full scale
+console.log(out.bits, out.fullScale, out.value);   // 8 3.3 255
+out.close();
+```
+
+Everything is synchronous. A code must be an integer of the resolution and a voltage
+within 0 and `fullScale`: anything else is a `RangeError`, never rounded silently into
+range. Like a `Pwm`, a `Dac` stops its output when it is closed AND at the end of the
+program: the pin is given back. In the digital twin (board `esp32-devkitc-wroom32`), the
+parts wired on the pin read its voltage, and the page shows it ("dac 1.20 V").

@@ -80,8 +80,9 @@ public:
      * the chunk goes past its end.
      */
     bool writeUpload(size_t offset, const uint8_t *data, size_t size) override {
-        // the chunk must fit in the open upload
-        bool fits = _upload != nullptr && offset + size <= _uploadSize;
+        // the chunk must fit in the open upload (compared without adding:
+        // offset + size could wrap around)
+        bool fits = _upload != nullptr && offset <= _uploadSize && size <= _uploadSize - offset;
         if (!fits) {
             return false;
         }

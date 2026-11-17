@@ -671,10 +671,15 @@ struct Convert<E, typename meta::EnableIf<detail::IsEnum<E>::value>::Type> {
         // a string: look for it among the names
         detail::EnumNames names = jsEnumNames((E *)nullptr);
         if (JS_IsString(value)) {
+            // its UTF-8 text (fails only with an exception pending: passed on)
             size_t size = 0;
             const char *text = JS_ToCStringLen(ctx, &size, value);
+            if (text == nullptr) {
+                detail::markPendingException();
+                return false;
+            }
 
-            for (int i = 0; text != nullptr && i < names.count; i++) {
+            for (int i = 0; i < names.count; i++) {
                 bool same = strlen(names.names[i]) == size && memcmp(names.names[i], text, size) == 0;
                 if (same) {
                     JS_FreeCString(ctx, text);
@@ -850,8 +855,15 @@ private:
             // look the name up by visiting the fields of a scratch S; an
             // unknown name is an error that names it
             const char *name = JS_AtomToCString(ctx, properties[i].atom);
+            if (name == nullptr) {
+                // fails only with an exception pending: passed on
+                detail::markPendingException();
+                ok = false;
+                break;
+            }
+
             S probe;
-            detail::StructFieldFinder finder = { name != nullptr ? name : "", false };
+            detail::StructFieldFinder finder = { name, false };
             jsStructFields(probe, finder);
             if (!finder.found) {
                 char expectation[160];

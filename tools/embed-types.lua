@@ -31,8 +31,10 @@ local DELIMITER = "qjsx_types"   -- C++ raw string delimiter (16 characters at m
 TYPING_FILES = {
     "common/runtime/modules/*.d.ts",
     "common/device/*.d.ts",
+    "common/draw/*.d.ts",
     "host/modules/*.d.ts",
     "lib/stdlib/src/*.d.ts",
+    "lib/stdlib/src/*/*.d.ts",
 }
 
 -- ### JS text #################################################################

@@ -33,6 +33,7 @@
 // the debugger reads the original source.
 import { normalizeImport } from "qjsx:compile";
 import { isNativeModule } from "qjsx:library";
+import { placeOf } from "qjsx:util";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -85,20 +86,6 @@ function exportsName(modules, name, exported, seen = new Set()) {
 
     // else the modules it re-exports
     return table.starModules.some(star => exportsName(modules, star, exported, seen));
-}
-
-// ### Positions ################################################################
-
-/**
- * "file:line:column" of a byte offset of a source (line and column from 1,
- * the column in characters).
- */
-function placeOf(path, sourceBytes, offset) {
-    const before = decoder.decode(sourceBytes.subarray(0, offset));
-    const lineStart = before.lastIndexOf("\n") + 1;
-    const line = before.split("\n").length;
-    const column = before.length - lineStart + 1;
-    return `${path}:${line}:${column}`;
 }
 
 // ### Import check #############################################################

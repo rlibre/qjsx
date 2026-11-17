@@ -1,7 +1,8 @@
 # Changes to the QuickJS engine
 
 This document describes the changes made by hand in `engine/qjsx/`: first for the
-debugger (A to F, L, M), then for the packages, the devices and the libraries (G to K). It
+debugger (A to F, L, M), then for the packages, the devices and the libraries (G to K),
+then for the speed and the memory of the devices and for the tool (N to Y). It
 completes [architecture.md](architecture.md) (sections 2.6, 2.7, 3 and 4).
 
 - Every change is commented `qjsx:` in the code.
@@ -12,10 +13,10 @@ completes [architecture.md](architecture.md) (sections 2.6, 2.7, 3 and 4).
 - `tools/quickjs-split/regen.sh` refuses to overwrite `engine/qjsx/` without `--force`, because
   that would erase these changes. To move to a new version of QuickJS: regenerate
   in another folder, then reapply `engine-changes.patch`.
-- The bytecode format changes: `BC_VERSION` goes from 5 to `0x45`. A bytecode of another
-  version is refused when it is read.
+- The bytecode format changes: `BC_VERSION` goes from 5 to `0x45` (A, D), then to `0x46` (S).
+  A bytecode of another version is refused when it is read.
 
-Changes A to M below are in the order in which they were made. The "Limits" section
+Changes A to Y below are in the order in which they were made. The "Limits" section
 lists what is not done or behaves differently from what was planned.
 
 ## A. Module name kept without the debug info
@@ -571,8 +572,8 @@ sequence.
 ## P. Names of the built-in objects in read-only memory
 
 2026-11-13, asked by the user (an ESP32-S3 without PSRAM had 5 KB of RAM left), TRIED
-ON THE PC ONLY. A new context makes 515 atoms: the 242 predefined ones and 272 names of
-built-in methods (`copyWithin`, `toLocaleDateString`...). Each one was a copy in the heap
+ON THE PC ONLY. A new context makes 515 atom indexes (`QJSX_ROM_ATOM_COUNT`): index 0
+(`JS_ATOM_NULL`), the 242 predefined atoms and 272 names of built-in methods (`copyWithin`, `toLocaleDateString`...). Each one was a copy in the heap
 of a text already in the firmware: on a 32-bit board about 5 KB of text, 6 KB of
 `JSString` headers, 4 KB of block headers, plus the rounding.
 
@@ -641,13 +642,18 @@ without (`JS_MALLOC_LARGE_BLOCKS_ONLY`).
     free list only holds freed blocks; QuickJS chains every block when it makes an
     arena), and a large block of at most 1 KB that grows is given a multiple of 32 bytes
     (`__js_realloc`: QuickJS's arenas gave that room up to 512 bytes).
-- Two `_Static_assert`: the largest small size is at most 512 and fits in an arena.
+- Three `_Static_assert`: the largest small size is at most 512 and fits in an arena;
+  with `JS_MALLOC_ARENA_CACHE`, the block count of an arena fits in the byte
+  `n_init_blocks`.
 - The host under it, on a board without PSRAM: one region of internal RAM managed by
   `memory::RegionHeap` (see architecture.md, "Memory of a device"); not an engine change.
 - **Measure option** `QJSX_ALLOC_HISTOGRAM` (2026-11-13, temporary: `idf.py
   -DQJSX_ALLOC_HISTOGRAM=ON`): every block goes to the host and is counted by size
   (`JSAllocHistogram`, `JS_GetAllocHistogram()`, the global `__allocHistogram()` of
-  globals.cpp). It gave the figures above.
+  globals.cpp). It gave the figures above. A second measure option, `QJSX_MEMORY_MAP`
+  (temporary too), adds `JS_DumpMallocMap(rt)` (`quickjs.h`, `core/runtime.c`): the
+  arenas by block size, the arenas kept aside and the bytes of the large blocks (the
+  global `__memoryMap()` of globals.cpp).
 - **Measures on the board** (ESP32-S3 without PSRAM, 2026-11-16, with the region of
   architecture.md): its program 255.8 KB -> 205.8 KB of JS heap; an empty program
   62.0 KB (157.1 KB at the start of this work, with the names in the heap).
@@ -780,8 +786,8 @@ the end of the program; a program making such cycles ran out of memory (found wi
   the threshold to it (unless the automatic GC is disabled, -1). Without a limit, QuickJS
   behaves as before. Near the limit the GCs come more often (halfway of what is left).
 - The runtime gives the limit: `board::jsHeapLimit()` (new in `board.h`; the size of the
-  JS region on an ESP32 without PSRAM, of `QJSX_JS_HEAP_MB` on the PC, 0 elsewhere:
-  PSRAM, malloc, the RP2350 for now), `JS_SetMemoryLimit` in `createRuntime()`
+  JS region on an ESP32 without PSRAM and on the Teensy 4.0, of `QJSX_JS_HEAP_MB` on the
+  PC, 0 elsewhere: PSRAM, malloc, the RP2350 for now), `JS_SetMemoryLimit` in `createRuntime()`
   (`common/runtime/program.cpp`) right after the runtime is made.
 - Bytecode unchanged: no BC_VERSION bump.
 - `tests/gclimit.test.js` (`QJSX_JS_HEAP_MB=1`: 450 pieces of live data, then 60,000
@@ -969,6 +975,36 @@ flash.
   13.80 us, hand-over between two tasks 192 -> 133 us (-30 % each); the RAM per waiting
   task is unchanged (the kept states are at most 2 KB in all).
 
+## Y. Import attributes of the requests of a module, in the outline
+
+2026-11-17. A program imports a file as its bytes, `import font from "./font.bin" with
+{ type: "bytes" }` (`doc/architecture.md` 4.1, `host/js/bytes.js`). The parser already
+reads the `with` clause into `JSReqModuleEntry.attributes` and the module loader gets
+it (`JS_SetModuleLoaderFunc2`), but the tool could not see it before the program runs,
+nor where the import is written. Compiler only: nothing changes on the devices.
+
+- **API** (`quickjs-debug.h`): `JSModuleOutline` (W) gains `requests` /
+  `request_count`, one `JSOutlineRequest` per module request, in the order of
+  `JS_GetModuleRequestName` (J): the module as written, its `attributes`
+  (`JS_UNDEFINED` without `with`, else the object of strings, valid during the call)
+  and the byte offset of the string that names the module. Host: `outline.requests` of
+  `compile()` (sys/compiler), `attributes` null without `with`.
+- **Collection** (`compiler/outline.c`, `compiler/parser-module.c`):
+  `js_parse_from_clause` and the `import "x"` form of `js_parse_import` note where the
+  string naming the module is (`js_outline_request_position`); `js_outline_report`
+  gives the requests. `outline_reserve()` now grows the three arrays of positions and
+  ranges of the outline (imports, exports, requests).
+- **Bytecode unchanged**: the outline is not written; the attributes were already
+  serialized with the module (`bytecode/writer.c`, upstream). `BC_VERSION` not bumped.
+  Checked by hashing, with the executable before and after the change, the bytecode
+  of three modules (one with `with` clauses) as compiled and as linked: identical
+  (`temp/bytes/bytecode-probe.js`).
+- **In the tool**: `qjsx:compile` checks the attributes of every import (only `type:
+  "bytes"`, else an error at the position of the module string) and marks the imports
+  of bytes; `qjsx build` copies their files into the package (`bytes/<module name>`).
+- Tests: `tests/bytes.test.js`, `tests/fixtures/bytes` run from its sources and from its
+  package (with and without compiler) in `tests/run-tests.sh`.
+
 ## Limits and items not done
 
 - **"Uncaught" prediction**: done statically (section M), not with the planned
@@ -1056,10 +1092,14 @@ Measurements of 2026-11-10:
 | `quickjs-internal.h`, `quickjs-debug.h`, `core/debug.c`, `core/interpreter.c`, `core/closures.c` (also) | activation number of the frames, `is_async`, async frames seen as bytecode (L) |
 | `quickjs-debug.h`, `core/debug.c`, `core/core.h`, `core/interpreter.c` (also) | prediction of uncaught exceptions, `JSDebugEvent.uncaught` (M) |
 | `compiler/tdz.c` (new), `compiler/compiler.h`, `compiler/finalize.c`, `compiler/resolve-labels.c`, `compiler/debug-info.c` (also) | temporal dead zone checks removed where useless; `set_x` fusion not across a stop position (N) |
+| `builtins/math.c`, `quickjs.h` (also) | `JS_SetRandomSeed` (O) |
 | `quickjs.h`, `quickjs-internal.h`, `core/atoms.c`, `core/runtime.c`, `core/gc.c` (also), `core/rom-atoms.h` and `core/rom-atoms.c` (new, generated) | names in read-only memory, immortal reference count (P) |
 | `core/package-atoms.c` (new), `quickjs.h`, `quickjs-internal.h`, `core/atoms.c`, `bytecode/reader.c`, `bytecode/writer.c` (also) | names of a package, bytecode with fixed atom indexes read in place, `JSString` layout, `BC_VERSION` 0x46 (S) |
 | `compiler/fold.c` (new), `compiler/compiler.h`, `compiler/finalize.c`, `compiler/funcdef.c`, `compiler/resolve-vars.c`, `compiler/resolve-labels.c`, `compiler/debug-info.c`, `quickjs-debug.h` (also) | constant folding, constants of a module replaced by their value (R) |
-| `quickjs-internal.h`, `core/runtime.c` (also) | arenas of the allocator tuned for a small heap, arenas kept (Q); `quickjs.h`, `quickjs-internal.h`, `core/runtime.c`: measure of the block sizes (`QJSX_ALLOC_HISTOGRAM`) |
+| `quickjs-internal.h`, `core/runtime.c` (also) | arenas of the allocator tuned for a small heap, arenas kept (Q); `quickjs.h`, `quickjs-internal.h`, `core/runtime.c`: measure of the block sizes (`QJSX_ALLOC_HISTOGRAM`) and map of the arenas (`QJSX_MEMORY_MAP`) |
+| `core/runtime.c` (also) | `js_next_gc_threshold`, GC threshold capped by the memory limit (T) |
+| `quickjs.h`, `core/errors.c`, `quickjs-debug.h`, `core/debug.c` (also) | `JS_RequestInterrupt`, `JS_DebugSampleStack` (U) |
 | `quickjs-internal.h`, `builtins/promise.c`, `builtins/builtins.h`, `core/generators.c`, `core/core.h`, `core/gc.c`, `core/runtime.c`, `core/interpreter.c` (also) | the await kept in the state of an async function, `await f()` without promise (V) |
 | `quickjs-internal.h`, `core/generators.c`, `core/core.h`, `core/runtime.c` (also) | stock of states of async functions (X) |
 | `compiler/outline.c` (new), `quickjs-debug.h`, `quickjs-internal.h`, `compiler/compiler.h`, `compiler/eval.c`, `compiler/emitter.c`, `compiler/parser-func.c`, `compiler/parser-expr.c`, `compiler/parser-module.c`, `compiler/debug-info.c` (also) | outline of a module: statements, names declared and used, imports, exports (W) |
+| `quickjs-debug.h`, `compiler/outline.c`, `compiler/compiler.h`, `compiler/parser-module.c` (also) | requests of a module in the outline: import attributes and position (Y) |

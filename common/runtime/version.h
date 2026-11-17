@@ -11,4 +11,4 @@
 // (ports/esp32/CMakeLists.txt): keep the #define on one line.
 #pragma once
 
-#define QJSX_VERSION "0.1.0"
+#define QJSX_VERSION "0.2.0"

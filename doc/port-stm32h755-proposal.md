@@ -12,6 +12,16 @@
 > is used. Facts that come from memory only are marked *(to check)*: they must be checked
 > against UM2408 / RM0399 / the MB1363 schematic before any code is written. Chapter titles
 > of the ST documents are given instead of section numbers that could not be verified.
+>
+> **Outdated in part (reviewed 2026-11-17).** Since this was written, the i.MX RT1062 port
+> (`ports/imxrt1062/`, Teensy 4.0, 2026-11-16) has solved most of the generic questions for
+> a Cortex-M7 without a runtime SDK: FreeRTOS `ARM_CM4F` port, own linker script, hot engine
+> code in ITCM, newlib system calls, `thread_local` blocks, 64-bit atomics, the shared
+> `ports/freertos/compat/` and `ports/freertos/slot_storage.*`, a JS heap of 512 KB without
+> PSRAM. Packages are now executed in place (engine change S), and `board.h` / `platform.h`
+> gained functions (data folder, chip id, MACs, memory status, JS heap limit, link message
+> size, random bytes). The sections below were corrected where they referred to the code;
+> read `ports/imxrt1062/` before any STM32 code.
 
 ## 1. The board
 
@@ -176,19 +186,22 @@ Total ~1 MB of RAM, of which the largest contiguous block is the 512 KB AXI SRAM
 | Stacks: JS task (48 KB), link reader, timer task, idle, main stack | **DTCM** (a FreeRTOS heap_4 / heap_5 region placed in DTCM, or static task buffers) | ~70 KB | QuickJS keeps the JS values of every frame on the C stack (`alloca` in `JS_CallInternal`): 0-wait-state stack accesses matter |
 | `.data`, `.bss` of the firmware | DTCM | ~20-30 KB *(to measure)* | small and hot |
 | **JS heap** | **AXI SRAM, all of it**, managed by `memory::RegionHeap` (`board::jsAllocator()` = `memory::jsAllocator(&axiHeap, false)`) | **~512 KB** | the largest block; `RegionHeap` was designed for it ("later the AXI SRAM of an STM32H7", `region_heap.h`) |
-| C heap (`malloc` → `memory::allocate`) | **SRAM1-3**, 288 KB, through our `_sbrk` | 288 KB | the agent's frame parser alone takes 2 × 64 KB (`DEFAULT_MAX_MESSAGE`, `common/agent/agent.cpp`); later the DMA buffers of Ethernet / RMT, which cannot live in DTCM |
+| C heap (`malloc` → `memory::allocate`) | **SRAM1-3**, 288 KB, through our `_sbrk` | 288 KB | the agent's receive buffer is sized by `board::agentMaxMessage()`: 64 KB (`DEFAULT_MAX_MESSAGE`) or, as on the boards without PSRAM, 8 KB (`SMALL_MAX_MESSAGE`, `common/agent/protocol.h`); later the DMA buffers of Ethernet / RMT, which cannot live in DTCM |
 | SRAM4 | free (later: BDMA buffers, or a second region of the C heap) | 64 KB | |
 | Backup SRAM | free (lead: keep the text of the last `fatal()` across the restart) | 4 KB | |
 
-**What 512 KB of JS heap means.** The other boards have 8 MB of PSRAM. Here a program and
-its data must fit in about half a megabyte, *including the bytecode of every module*: the
-engine copies each module's bytecode from the package into the JS heap when it loads it
-(`JS_ReadObject` without `JS_READ_OBJ_ROM_DATA`, new-device.md 4.9). Expect "small
-programs": a few thousand lines, a few thousand live objects. Two things to measure in
-step 2: the heap taken by an empty runtime and context, and by `tests/fixtures/debuggee`.
-Leads if it is too tight: running the bytecode in place from flash
-(`JS_READ_OBJ_ROM_DATA`, already listed as "to verify" for the ESP32), and putting SRAM1-3
-in the JS heap too (a second `RegionHeap` region, or a C heap moved to SRAM4 + DTCM).
+**What 512 KB of JS heap means.** The ESP32-S3 and RP2350 test boards have 8 MB of PSRAM;
+the Teensy 4.0 (512 KB of JS heap in OCRAM) and the client's ESP32-S3 board without PSRAM
+(a region of about 250 KB) have run programs since. Here a program and its data must
+fit in about half a megabyte. The bytecode of the modules is no longer copied into the JS
+heap: since engine change S (2026-11-16) the package is read in place
+(`JS_READ_OBJ_ROM_DATA | JS_READ_OBJ_FIXED_ATOMS`, `common/runtime/program.cpp`). A small
+heap also takes the engine settings `QJSX_SMALL_HEAP_DEFINES` (`ports/cmake/qjsx.cmake`)
+and gives its size to `board::jsHeapLimit()` (QuickJS's memory limit, so that cycles are
+collected in time). Expect "small programs": a few thousand lines, a few thousand live
+objects. Two things to measure in step 2: the heap taken by an empty runtime and context,
+and by `tests/fixtures/debuggee`. Lead if it is too tight: putting SRAM1-3 in the JS heap
+too (a second `RegionHeap` region, or a C heap moved to SRAM4 + DTCM).
 **(decision 3: the split JS heap / C heap.)**
 
 ### 3.3 Caches and MPU
@@ -226,7 +239,9 @@ built with `-ffunction-sections`; after the build, `objcopy --rename-section
 linker script places in ITCM with its load address in flash; the startup code copies it
 (as it copies `.data`). Same list (`QJSX_SRAM_FUNCTIONS`), same `-fira-region=one` on
 `interpreter.c`. ITCM holds 64 KB, the list takes ~40 KB: room for a few more functions
-chosen by measurement.
+chosen by measurement. The i.MX RT1062 port, a Cortex-M7 too, does the same with its own
+list (`QJSX_ITCM_FUNCTIONS` in `ports/imxrt1062/CMakeLists.txt`, sections renamed
+`.ramfunc.*`, placed in ITCM by `imxrt1062.ld`): the closest model.
 
 ## 4. Flash
 
@@ -260,7 +275,11 @@ slots are 384 KB.
 ### 4.3 The storage, adapted from `board_rp2350.cpp`
 
 The same two-slot design (header written last, highest sequence wins, the running slot
-never erased), with these differences:
+never erased). It is now shared as `slots::SlotStorage` (`ports/freertos/slot_storage.*`,
+used by the i.MX RT1062 port; the port gives its sector size, page size, erase / program
+functions and XIP address in a `slots::Flash`), but its header takes a whole sector: with
+128 KB sectors, either `SlotStorage` gains a header smaller than a sector or this port keeps
+its own copy. The differences:
 
 - **No `flash_safe_execute`.** Writes go to bank 2 while the code runs from bank 1 and
   ITCM: no other core to hold, interrupts stay on, the UART keeps receiving.
@@ -284,8 +303,9 @@ never erased), with these differences:
 - `openPackage()` returns `0x0810_0000 + slot offset + 256`: the package is read in place
   through the cache; `closePackage()` only forgets the slot (nothing to unmap).
 - A package upload while a program runs from the other slot of the same bank: the program
-  only reads its package while modules load (the bytecode is then in the JS heap), so the
-  stalls of 4.1 should not show; to check.
+  reads its bytecode in place from bank 2 all the time it runs (engine change S), so it
+  stalls during each erase / program of that bank (4.1); to measure (a stop of the program
+  before the upload would avoid it).
 
 ### 4.4 The M4 and bank 2
 
@@ -312,7 +332,8 @@ packages.
   newlib `_write` (console, `printf`) takes the same mutex: a frame is never cut by text.
   TX through a ring buffer emptied by the TX-empty interrupt, or polled at first.
 - `restart()` waits for the "transmission complete" flag before resetting, so the answer
-  to `RESET` leaves the wire (the ESP32 port does not wait; here it costs nothing).
+  to `RESET` leaves the wire (`board.h`: the pending output is sent first, for at most
+  `RESTART_FLUSH_MS`, 500 ms; the ESP32 port does it with `uart_wait_tx_done`).
 - The host target: `serial:COMx@921600`.
 
 ## 6. `platform.h` and `board.h` for this port
@@ -327,6 +348,7 @@ as is. The port writes `platform_stm32.cpp`:
 | `monotonicMs()` | **TIM2** (32-bit) at 1 MHz, extended to 64 bits by counting its overflows (every 71.6 min) in its update interrupt; read as high word, counter, high word again (retry if the overflow count changed). Not the FreeRTOS tick: the ARM_CM4F port has a 32-bit `TickType_t`, and `platform.h` forbids a 32-bit source. *(Alternative to discuss: TIM2 and TIM5 chained, the second counting the overflows of the first in hardware.)* |
 | `fatal(message)` | print `qjsx: fatal: <message>` on USART3 by **polling** (the scheduler or the TX interrupt may be what failed), wait for "transmission complete", `NVIC_SystemReset()` |
 | `startThread()` | `xTaskCreate` (single core: `options.core` ignored); stack in bytes / 4 (FreeRTOS counts words); defaults 4096 bytes, priority 5, as on the other ports; the same `ThreadStart` record as `platform_rp2350.cpp` |
+| `randomBytes()` | the RNG peripheral of the H7 *(to check)*, as the i.MX RT1062 port uses its TRNG and the RP2350 `pico_rand` (added to `platform.h` on 2026-11-13) |
 | `sleepMs`, `yieldIfDue`, `Mutex`, `Signal` | shared (`ports/freertos/`); tick 1 kHz on SysTick, owned by FreeRTOS |
 | `atomicIncrement` / `Decrement` | GCC builtins (LDREX / STREX on the M7): nothing to write |
 
@@ -343,9 +365,13 @@ FreeRTOS tick (or TIM2), since FreeRTOS owns SysTick.
 |---|---|
 | `identity()` | chip `"STM32H755ZI"` (from `DBGMCU->IDCODE` for the revision letter, *option*), `BOARD_NAME` = `"ST NUCLEO-H755ZI-Q"`, flash size from the flash size register (`FLASHSIZE_BASE`), `psramSize` 0 |
 | `platformName()` | `"stm32"` or `"stm32h7"` **(decision 4)**, like `"esp32"` and `"rp2350"` |
-| `dataDirectory()` | `nullptr`: no file system (no SD slot on this board) |
+| `dataDirectory()`, `confineFiles()`, `dataCapacity()` | `nullptr`, false, 0: no file system (no SD slot on this board), as the RP2350 and i.MX RT1062 ports today |
 | `restart()` | wait for the UART's transmission complete, `NVIC_SystemReset()`; does not return |
-| `jsAllocator()` | `memory::jsAllocator(&axiHeap, false)`, `axiHeap` initialised over the AXI SRAM at boot (`board::startMemory()`, as on the RP2350) |
+| `chipId()`, `macAddress()` | the 96-bit unique id (12 bytes); MACs: none in the chip *(to check)*, false (or derived from the id once Ethernet comes) |
+| `jsAllocator()` | `memory::jsAllocator(&axiHeap, false)`, `axiHeap` initialised over the AXI SRAM at boot (`board::startMemory()`, as on the RP2350 and the i.MX RT1062) |
+| `jsHeapLimit()` | the size of the AXI region (as the i.MX RT1062), so that QuickJS collects cycles before the heap is full |
+| `agentMaxMessage()` | `agent::SMALL_MAX_MESSAGE` (8 KB), as the i.MX RT1062 |
+| `memoryStatus()` | free C heap (SRAM1-3), its largest block and lowest point; `psramFree` 0; `jsHeapSize` the AXI region |
 | `jsStackSize()` | 40 KB of the 48 KB JS task stack (DTCM), as on the other ports |
 | `packageStorage()` | the `FlashStorage` of 4.3, on bank 2 |
 | `openPackage()` / `closePackage()` | the slot's address in the memory-mapped flash / forget the slot |
@@ -364,14 +390,14 @@ QJSX_VERSION }`.
 There is no SDK below us here (the pico-sdk provided the newlib system calls and
 `_gettimeofday`; here nobody does). Three groups:
 
-1. **The same as `ports/rp2350/compat/`**: `pthread.h` + mutex / condition on FreeRTOS
-   semaphores (the engine's class-id lock, `Atomics.wait`), `dirent.h` and the directory /
-   file calls failing with `ENOSYS`, `clock_gettime` (from `monotonicMs()`'s timer instead
-   of `time_us_64()`). Proposal **(decision 5)**: move these files to
-   `ports/freertos/compat/`, shared by both ports, the clock read through one small
-   per-port function; or copy them into `ports/stm32h7/compat/` and leave the RP2350
-   untouched.
-2. **The newlib system calls** the pico-sdk used to provide (`syscalls.cpp` of the port):
+1. **`ports/freertos/compat/`** (`QJSX_NEWLIB_COMPAT_DIR` / `QJSX_NEWLIB_COMPAT_SOURCES` of
+   `qjsx.cmake`): `pthread.h` + mutex / condition on FreeRTOS semaphores (the engine's
+   class-id lock, `Atomics.wait`), `dirent.h` and the directory / file calls failing with
+   `ENOSYS`, `clock_gettime` (from `platform::monotonicMs()`). Decision 5 was settled by
+   the i.MX RT1062 port: these files moved from `ports/rp2350/compat/` to
+   `ports/freertos/compat/`, shared by both ports; this port uses them as they are.
+2. **The newlib system calls** the pico-sdk used to provide (`syscalls.cpp` of the port;
+   model: `ports/imxrt1062/main/syscalls_imxrt1062.cpp`):
    `_sbrk` (over SRAM1-3, fatal past the end), `_write` (USART3, under the TX mutex), `_read`
    (none: returns 0), `_close`, `_fstat` (character device, so stdout is line-buffered),
    `_isatty`, `_lseek`, `_getpid`, `_kill`, `_exit` (→ `fatal`), `_gettimeofday` (boot time,
@@ -380,6 +406,11 @@ There is no SDK below us here (the pico-sdk provided the newlib system calls and
    mutex (the pico-sdk had `PICO_USE_MALLOC_MUTEX`); `configUSE_NEWLIB_REENTRANT 1` so that
    `errno` and stdio state are per task *(to decide with the newlib flavour: the full newlib,
    not newlib-nano, is proposed, since QuickJS and our code use `snprintf` with doubles)*.
+   The i.MX RT1062 port's `__malloc_lock` suspends the scheduler.
+4. **What the i.MX RT1062 port also had to bring** (no SDK runtime there either):
+   `thread_local` blocks, one per task made by `startThread` (`tls_imxrt1062.*`,
+   `tls_read_tp_imxrt1062.S`), and 64-bit atomics with interrupts masked
+   (`atomics64_imxrt1062.c`). Expect the same here.
 
 The engine stays a library of its own (its `list.h` against FreeRTOS's), as on the RP2350.
 
@@ -405,6 +436,11 @@ Estimate: **250 to 450 clocks per turn**, i.e. **0.6 to 1.1 us per toggle**, a p
 **450 to 800 kHz** in the toggle loop: **about 2 to 3 times the ESP32-S3, 4 to 6 times the
 RP2350**. This is reasoning, not a measure: step 3 runs the same `C:\temp\qjsx-speed`
 program and the toggle loop.
+
+Measured since on another Cortex-M7, the Teensy 4.0 (i.MX RT1062, 600 MHz, 32 KB caches,
+hot code in ITCM, JS heap in OCRAM; measured 2026-11-16): 2.3 to 6.7 times the client's
+ESP32-S3 on the speed programs, a `toggle()` loop at 267-313 kHz; and code left in flash
+mattered a lot there (`doc/known-bugs.md`, "Speed of the Teensy 4.0").
 
 ## 9. Hardware modules
 
@@ -472,7 +508,7 @@ ports/stm32h7/                      (decision 8: or ports/stm32/)
     hal_rmt_stm32h7.cpp             hal_rmt.h (step 5)
     FreeRTOSConfig.h
     stm32h7xx_hal_conf.h            the HAL modules used
-  compat/                           or ports/freertos/compat/ (decision 5)
+  (compat: ports/freertos/compat/, shared; decision 5 settled)
   boards/nucleo-h755zi-q/
     board.cmake                     MCU define (STM32H755xx, CORE_CM7), memory sizes
     board_config.h                  BOARD_NAME, SUPPLY = direct SMPS, HSE 8 MHz bypass,
@@ -498,7 +534,7 @@ board folder holds the supply mode, the clock source, the pins and the flash map
    port, `FlashStorage` on bank 2, JS heap in AXI SRAM, ITCM code from the start. The
    checks of new-device.md section 5: `qjsx device info`, deploy and run of
    `tests/fixtures/nocompiler` compared with `qjsx-target`, `tests/debugger.test.js`
-   (72 checks), `proxy.test.js` (30), `cdp.test.js` (53), an upload cut in the middle,
+   (72 checks), `proxy.test.js` (33), `cdp.test.js` (53), an upload cut in the middle,
    `qjsx device stop` / `reset` (the COM port stays: check the tool keeps the session).
 3. **Memory and speed**: heap used by an empty runtime and by the test programs (decide
    3.2's split), the speed program and the toggle loop against the ESP32-S3 and the
@@ -506,8 +542,8 @@ board folder holds the supply mode, the clock source, the pins and the flash map
 4. **`device/gpio`** (`hal_gpio_stm32h7.cpp`, `gpio_watch` at 128 pins), LEDs and B1;
    toggle loop on a pin measured with the oscilloscope.
 5. **`device/rmt`** (timer + DMA) and `stdlib/rgbled` on an external WS2812.
-6. Later, to discuss: USB CDC, Ethernet + TCP link, bytecode in place
-   (`JS_READ_OBJ_ROM_DATA`), the M4.
+6. Later, to discuss: USB CDC, Ethernet + TCP link, the M4. (Bytecode in place is done:
+   engine change S.)
 
 ## 12. Risks
 
@@ -515,7 +551,7 @@ board folder holds the supply mode, the clock source, the pins and the flash map
 |---|---|
 | Wrong supply configuration locks the board (1.1) | constant of the board folder; first flash from a debug session; recovery procedure written in the port's notes before step 1 |
 | M4 booting into package data (1.3, 4.4) | decision 2 before step 2; BCM4 checked at boot |
-| 512 KB JS heap too small for useful programs | measure in step 3; leads: bytecode in place, SRAM1-3 in the JS heap |
+| 512 KB JS heap too small for useful programs | measure in step 3; bytecode already read in place; lead: SRAM1-3 in the JS heap |
 | Erase time vs the host's 3 s timeout | erase on demand, sector by sector (4.3) |
 | ECC double error after a power cut during an upload → fault at every boot | ECC-safe header reads (4.3) |
 | Stale D-cache lines after programming | invalidate the written range (3.3) |
@@ -534,8 +570,8 @@ board folder holds the supply mode, the clock source, the pins and the flash map
 3. **RAM split**: JS heap = AXI SRAM 512 KB, C heap = SRAM1-3 288 KB, stacks and data in
    DTCM (proposed); to revisit after the measures of step 3.
 4. **`process.platform`**: `"stm32"` or `"stm32h7"`.
-5. **compat**: shared `ports/freertos/compat/` (touches the RP2350 port) or a copy in the
-   new port.
+5. **compat**: settled since (2026-11-16): `ports/freertos/compat/` is shared by the
+   RP2350 and i.MX RT1062 ports.
 6. **Pin names**: numbers only (`port * 16 + pin`), or names (`"PB0"`) somewhere.
 7. **`gpio_watch`**: raise `MAX_PINS` to 128 (shared code) or key it by EXTI line.
 8. **Folder name**: `ports/stm32h7/` (proposed) or `ports/stm32/`; board folder
@@ -570,7 +606,8 @@ board folder holds the supply mode, the clock source, the pins and the flash map
 - STM32CubeProgrammer 2.23: https://community.st.com/stm32cubeprogrammer-mcus-30/stm32cubeprogrammer-v2-23-released-166573
 - xPack OpenOCD: https://github.com/xpack-dev-tools/openocd-xpack/releases
 - In this repository: `doc/new-device.md`, `doc/architecture.md` 5.4 / 5.5,
-  `doc/known-bugs.md` "Speed", `ports/rp2350/`, `ports/esp32/main/board_esp32.cpp`,
+  `doc/known-bugs.md` "Speed", `ports/rp2350/`, `ports/imxrt1062/` (written after this
+  proposal), `ports/freertos/`, `ports/esp32/main/board_esp32.cpp`,
   `common/board/board.h`, `common/runtime/platform.h`, `common/runtime/region_heap.h`,
   `common/hal/hal_gpio.h`, `common/hal/hal_rmt.h`, `ports/freertos/gpio_watch.*`,
   `host/js/device.js` (request timeout).

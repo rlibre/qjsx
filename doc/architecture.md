@@ -14,9 +14,13 @@ prevails.
 **Device.** In this document, a *device* is a target board that runs the programs
 (precompiled bytecode, debug and deployment agent, no compiler):
 
-- the **ESP32** (ESP32-S3, YD board with a WROOM-1 module, PSRAM): ported, runs on the board;
+- the **ESP32** (ESP32-S3: the YD board with a WROOM-1 N16R8 module and PSRAM, an
+  ESP32-S3-DevKitC-1 N8R8, and a client board without PSRAM): ported, runs on the boards;
 - the **RP2350** (Olimex PICO2-XXL, RP2350B, 8 MB of PSRAM): ported (pico-sdk + FreeRTOS
-  SMP, USB link, JS heap in PSRAM), runs on the board.
+  SMP, USB link, JS heap in PSRAM), runs on the board;
+- the **i.MX RT1062** (PJRC Teensy 4.0, Cortex-M7 at 600 MHz, 1 MB of RAM, no PSRAM):
+  ported (MCUXpresso SDK + FreeRTOS, USB link, JS heap in its internal RAM), runs on the
+  board (2026-11-16).
 
 This list will grow: what is said of a device holds for any new target
 (one more port in `ports/`, one implementation of `board.h`). A chip is named only
@@ -56,13 +60,12 @@ project.
 
 ## 1. Overview
 
-> **Status: in progress** (2026-11-11). What runs today, on the PC and on an ESP32-S3 board:
-> the engine (section 2), the packages and the libraries (4.1, 4.5), the device agent and its
-> protocol (4.3), the runtime (5), the host tool (6) and the ESP32-S3 firmware (5.5). For the
-> debugger, the part that lives on the device is done and tested (4.3); the host part (proxy,
-> CDP server, VS Code) is not written (section 3). Not started: hardware modules (GPIO,
-> I2C…), files on a device, WiFi links. The RP2350 port is written and builds (5.5), not tried
-> on the board yet.
+> **Status: in progress** (updated 2026-11-17). What runs today, on the PC and on the
+> boards: the engine (section 2), the packages and the libraries (4.1, 4.5), the device
+> agent and its protocol (4.3), the debugger with VS Code (section 3), the runtime and the
+> hardware modules (5), the host tool and the digital twin (6), and the firmwares of the
+> ESP32-S3, the RP2350 and the Teensy 4.0 (5.5). Files on a device: the ESP32 only (LittleFS,
+> 5.4). Not started: WiFi links.
 
 ### 1.1 Goals
 
@@ -81,7 +84,7 @@ target.
 | Target | Role |
 |---|---|
 | Development machine (Windows, macOS, Linux) | runs the host tool `qjsx` (compilation, package, deployment, debug proxy); can also run scripts |
-| Device (ESP32, RP2350…) | runs the precompiled bytecode, the device agent (debug and deployment); no compiler, no `eval` |
+| Device (ESP32, RP2350, i.MX RT1062…) | runs the precompiled bytecode, the device agent (debug and deployment); no compiler, no `eval` |
 
 ### 1.3 Components
 
@@ -90,7 +93,7 @@ target.
 | QuickJS engine | host and device | interpreter; the compiler exists only on the host |
 | Host tool `qjsx` | host | one executable: host QuickJS + C modules (event loop, sockets, serial port, SHA-256, compile API); its commands are written in JS, embedded as source and compiled when the tool starts. The standard library is delivered next to it (`stdlib.qjslib`) |
 | Firmware + device agent | device | runs the scripts; the agent ("device agent") contains the debug stub and receives the deployments |
-| Debug proxy (not written) | host, in `qjsx debug` | CDP adapter written in JS; translates CDP into agent messages; compiles the expressions to evaluate |
+| Debug proxy | host, in `qjsx debug` | CDP adapter written in JS; translates CDP into agent messages; compiles the expressions to evaluate |
 | VS Code + js-debug | host | debugger client, built into VS Code, speaks CDP |
 
 ### 1.4 The end-to-end flow
@@ -98,8 +101,8 @@ target.
 1. The developer writes JavaScript sources in a project described by `qjsx.json`.
 2. `qjsx build` compiles the sources with the host compiler ("debug info" option), and
    produces a `.qjspkg` package: bytecode, debug sidecars, copy of the sources, manifest, with
-   the library modules the program imports (4.5). Planned, not done: it also writes the
-   `.d.ts` typings of the native modules for VS Code.
+   the library modules the program imports (4.5). It also writes the `.d.ts` typings of
+   the modules for VS Code (6.5).
 3. `qjsx deploy` sends the package to the device, through the agent, which writes it to
    flash. It sends a reduced package (2026-11-11): the manifest (`"reduced": true`) and
    `bytecode/` only; the debug sidecars and the sources stay in the full package on the PC.
@@ -113,7 +116,7 @@ target.
    restarts the device after installing and waits for it to come back (`Device.reopen`:
    a native USB port goes away meanwhile); the program starts at boot, as after a power on.
 4. The device runs the bytecode, with no compilation on the target.
-5. Planned, not written: `qjsx debug` starts the proxy. It opens a CDP server for VS Code
+5. `qjsx debug` starts the proxy (3.9). It opens a CDP server for VS Code
    (through js-debug) and talks to the device agent over a serial or TCP link. It finds the
    debug sidecars thanks to the build ids that the agent reports to it.
 
@@ -131,8 +134,9 @@ flowchart LR
 
 Three links are planned: serial (UART, COM/USB), WiFi and wired network (TCP). The debug
 protocol is independent of the transport: the same framing applies everywhere (section 4.3).
-Done today: the serial link of the ESP32-S3 (UART0), and TCP for the desktop agent that stands
-in for a board.
+Done today: the serial link of the ESP32-S3 (UART0), the native USB serial port (CDC) of the
+RP2350 and of the Teensy 4.0, and TCP for the desktop agent and the twin, which stand in for
+a board.
 
 ---
 
@@ -159,8 +163,11 @@ and the list of every item in [quickjs-items.csv](quickjs-items.csv).
 > by hand since 2026-11-10 (section 2.3 and [engine-changes.md](engine-changes.md)).
 
 `engine/qjsx/` contains the same engine split into **55 source files** by the generator. The
-hand changes added three files: `quickjs-debug.h`, `core/debug.c` and
-`compiler/debug-info.c`. Each generated file
+hand changes added more files ([engine-changes.md](engine-changes.md), "Files touched"):
+`quickjs-debug.h`, `core/debug.c`, `core/rom-atoms.{h,c}` (generated by
+`tools/rom-atoms/generate.sh`, change P), `core/package-atoms.c` (S),
+`compiler/debug-info.c`, `compiler/tdz.c` (N), `compiler/fold.c` (R) and
+`compiler/outline.c` (W). The tables below list the generated files only. Each generated file
 states at its top the lines of `quickjs.c` it comes from (for example `builtins/json.c`:
 "Lines of quickjs.c: 23156-23360, 49092-50177").
 
@@ -350,6 +357,11 @@ a device does.
 > - the scopes are **source** ranges, not pc ranges;
 > - no build id in the bytecode and no per-script table in the reader: a script is
 >   identified by the build id of the package and the module name, which is now always present.
+>
+> Later changes of the compiler, in [engine-changes.md](engine-changes.md): refusal of
+> `import()` (J), `eval` / `Function` warnings (K), temporal dead zone checks removed where
+> useless (N), constant folding and constants of a module (R), linking of the names of a
+> package (S), outline of a module (W).
 
 - **Statement start positions.** Today, a `pc2line` entry is recorded only
   when `resolve_labels` emits instructions (`add_pc2line_info`). A temporary opcode
@@ -383,17 +395,21 @@ a device does.
 
 ### 2.7 Interpreter changes
 
-> **Status: done on 2026-11-10, except `sf->call_sp`** (prediction of uncaught
-> exceptions, not done). Public API in `engine/qjsx/quickjs-debug.h`, details in
-> [engine-changes.md](engine-changes.md), section F. The debugger stub of the device agent
-> uses it (section 4.3).
+> **Status: done on 2026-11-10; the prediction of uncaught exceptions on 2026-11-11, without
+> `sf->call_sp`** (change M, 3.4). Public API in `engine/qjsx/quickjs-debug.h`, details in
+> [engine-changes.md](engine-changes.md), sections F, L (activation number of the frames)
+> and M. The debugger stub of the device agent uses it (section 4.3). Later changes of the
+> interpreter and runtime: `Math.random` seed (O), names of the built-in objects in
+> read-only memory (P), arenas for a small heap (Q), package executed in place (S), GC
+> threshold capped by the memory limit (T), interrupt on request for the profiler (U), await
+> without allocation (V), stock of states of async functions (X).
 
 - **Two dispatch tables** (option C): a normal table and a debug table. The debug
   table checks a per-function bitmap of the stop positions. When "computed goto" is
   not available, a per-opcode test is the fallback. Details in 3.2.
-- **`sf->call_sp`**: a new field of `JSStackFrame`, saved before each call, for
-  the prediction of uncaught exceptions (3.4). The existing field `cur_sp` does not fit:
-  it already has a meaning for generators.
+- **`sf->call_sp`** (first design, not done): a new field of `JSStackFrame`, saved before
+  each call, for the prediction of uncaught exceptions. Replaced by a static prediction at
+  the throw (change M, 3.4), which costs nothing when no debugger is attached.
 - **`OP_debugger`** to execute (see 2.6).
 
 Existing entry points useful to the debugger (lines of the original `quickjs.c`, see
@@ -422,14 +438,14 @@ Existing entry points useful to the debugger (lines of the original `quickjs.c`,
 
 ## 3. The debugger
 
-> **Status of the whole section: in progress.** This section is the design. What exists
-> today (2026-11-11):
+> **Status of the whole section: done, except 3.6.** This section is the design. What exists
+> today (2026-11-11, board runs updated 2026-11-17):
 > - **done, on the device**: the debugger stub of the agent (`common/agent/debugger.*`):
 >   breakpoints and statement stops, pause of a running program, stepping, pause on every
 >   exception, stack, slots and properties, changing a variable, loading and calling
 >   bytecode compiled on the host. Messages in 4.3; tested through the desktop agent and on the
->   ESP32-S3 (`tests/debugger.test.js`, 52 checks on the board; 72 since the stepping by
->   activation number of 3.3, checked on the desktop agent only);
+>   boards (`tests/debugger.test.js`: 72 checks since the stepping by activation number of
+>   3.3; 72/72 on the ESP32-S3, the RP2350 and the Teensy 4.0, with the proxy and CDP suites);
 > - **done, on the host**: the core of the proxy, without CDP (2026-11-11):
 >   `host/js/debuginfo.js` (packages indexed by build id, sidecars, byte offsets ↔ lines and
 >   UTF-16 columns, where a breakpoint goes, visible variables by scope) and
@@ -558,14 +574,17 @@ Two modes, set by `SET_EXCEPTIONS` (done on 2026-11-11):
 
 ### 3.6 Conditional breakpoints, logpoints, hit counts
 
+> **Status: designed, not implemented** (postponed by the user; the CDP server refuses a
+> breakpoint with a condition and a logpoint, 3.9).
+
 Conditions, logpoints and hit counts are compiled by the proxy and
 **evaluated on the device itself**, with no round trip to the host at each hit.
 
 ### 3.7 Source / bytecode / sidecar consistency
 
 - Each script has a build id: the first 32 hexadecimal digits of the SHA-256 of its
-  bytecode. It is recorded in the manifest of the package and in the sidecar, not in the
-  bytecode itself.
+  bytecode as compiled (before the names are linked, 4.1). It is recorded in the manifest
+  of the package and in the sidecar, not in the bytecode itself.
 - The device reports the build id of the package it runs (`STARTED`, `INFO`) and the name of
   each module it loads (`SCRIPT_LOADED`, `LIST_SCRIPTS`): a script is identified by both.
 - The proxy indexes the `.qjspkg` packages it finds to find the package, then the sidecar of
@@ -592,8 +611,8 @@ Conditions, logpoints and hit counts are compiled by the proxy and
 ### 3.9 The CDP server (`qjsx debug`)
 
 > **Status: done on 2026-11-11** (`host/js/websocket.js`, `host/js/cdp.js`, command in
-> `host/js/cli.js`), tested by a client that plays js-debug's part; not tried in VS Code
-> itself yet.
+> `host/js/cli.js`), tested by a client that plays js-debug's part (`tests/cdp.test.js`);
+> tried in VS Code itself by the user on 2026-11-11 (desktop agent).
 
 `qjsx debug [--target t] [--port p] [--host a]`, in a project folder, opens the device and
 listens (default 127.0.0.1:9339, `debugPort` of `qjsx.json`; not Node's 9229, which a Node
@@ -661,7 +680,7 @@ What the server does:
 > **Status: done** (`qjsx build`, `host/js/build.js` and `zip.js`; reading
 > `common/runtime/package.*`). Current content:
 > - `manifest.json`: `format` (1), `name`, `buildId`, `created`, `compiler`
->   (`"qjsx 0.1.0 / QuickJS 2026-06-04"`), `main`, `scripts[]` with, for each one, `path`,
+>   (`"qjsx 0.2.0 / QuickJS 2026-06-04"`), `main`, `scripts[]` with, for each one, `path`,
 >   `module`, `buildId`, `sourceHash`, and the names of its `bytecode`, `debug`, `source` entries;
 >   a module that comes from a library also carries `library` (section 4.5);
 > - `libraries[]` (name and version of the libraries used) and `natives[]` (native modules
@@ -670,10 +689,14 @@ What the server does:
 >   another engine" below);
 > - `names`: `{ entry: "names.bin", engine }`, the entry of the names of the package and
 >   the fingerprint of the engine's names they follow (see "Executed in place" below);
-> - `names.bin`, `bytecode/<path>.qbc`, `debug/<path>.json`, `src/<path>`;
+> - `bytes[]`: `{ path, size, hash }` of each file imported as bytes (see "Files imported
+>   as bytes" below);
+> - `names.bin`, `bytecode/<path>.qbc`, `debug/<path>.json`, `src/<path>`, `bytes/<path>`;
 > - ids: build id of a script = first 32 hexadecimal digits of the SHA-256 of its
->   bytecode; `sourceHash` = SHA-256 of the source; build id of the package = SHA-256 of the
->   ids of the scripts and of the main module; file `<name>-<12 digits>.qjspkg`;
+>   bytecode; `sourceHash` = SHA-256 of the source; build id of the package = first 32
+>   hexadecimal digits of the SHA-256 of the paths and ids of the scripts, the main module,
+>   the paths and hashes of the files imported as bytes, and the `env` and `desktop`
+>   sections when present; file `<name>-<12 digits>.qjspkg`;
 > - zip with stored entries, fixed dates (1980-01-01): same content, same archive.
 >
 > The bytecode is compiled with every debug info stripped (`strip: "all"`, `JS_STRIP_DEBUG`):
@@ -685,12 +708,14 @@ What the server does:
 - **One zip per build**, extension `.qjspkg`. `qjsx build` writes the full package;
   `qjsx deploy` sends the device a reduced one, made on the fly (`reducePackage`,
   `host/js/deploy.js`, 2026-11-11): same extension, `manifest.json` marked `"reduced": true`
-  (its scripts without their `debug` and `source` entries) and `bytecode/` only. The build
-  id does not change: the debugger finds the full package on the PC by it.
+  (its scripts without their `debug` and `source` entries), `names.bin`, `bytecode/` and
+  `bytes/` only. The build id does not change: the debugger finds the full package on the
+  PC by it.
 - **Entries stored without compression**: no dependency on a compression library, and
   the device reads the package in place. On the ESP32 the slot of the package is mapped with
   `esp_partition_mmap` and the modules are read from there, without copying the package into
-  RAM.
+  RAM; on the RP2350 and the Teensy 4.0 the slots are read through the flash's memory
+  window (XIP / FlexSPI).
 - **Executed in place** (2026-11-16, change S of [engine-changes.md](engine-changes.md)):
   the bytecode runs where the package lies, and the names of the program (properties,
   variables of modules, module names) stay in the package too.
@@ -711,14 +736,44 @@ What the server does:
     program is never erased, and a package in RAM is kept until its run ends.
   - A package without `names.bin` is still read the former way. The `.qjslib` libraries
     are not linked: the build links their modules with the program's.
+- **Files imported as bytes** (2026-11-17, `host/js/bytes.js`, change Y of
+  [engine-changes.md](engine-changes.md)): `import font from "./fonts/inter16.bin" with
+  { type: "bytes" }` gives a `Uint8Array` over the file's bytes, the only export
+  (`default`) of a module named like the program's, by its path (`src/fonts/inter16.bin`).
+  - `qjsx build` reads the import attributes from the outline of each module: `type:
+    "bytes"` is the only attribute accepted, anything else is an error at the position of
+    the module string, as a missing file, a specifier that is not relative, a file outside
+    the project, a name imported other than `default`, or a file imported both as bytes
+    and as a module. Each file imported is copied as it is into the entry
+    `bytes/<module name>`, at a multiple of 8 bytes; a file never imported is never
+    copied. Its content is part of the build id.
+  - On a device (and `qjsx run app.qjspkg`), the loader (`loadModule`,
+    `common/runtime/program.cpp`) sees `type: "bytes"` and makes a module whose array
+    lies over the entry, where the package lies: nothing is copied into RAM. Not a
+    script: the debugger is not told. Not in the package: a ReferenceError naming it.
+    `qjsx run src/main.js` (sources) reads the file from the disk into memory instead
+    (`RunHooks::loadBytes`, `host/host.cpp`), whatever the permissions, as code. The files
+    of the tool's own copy of the standard library are embedded in the executable
+    (`tools/embed-bytes.lua`, `rt::EmbeddedBytesRegistration`), found before the disk.
+  - A module of a library imports bytes the same way (2026-11-17, see 4.5): the file is
+    in the `.qjslib`, and goes into the package, as `bytes/<module name>`
+    (`bytes/stdlib/fonts/inter16.bin`), only when a library module of the package
+    imports it.
+  - The bytes are read-only, but the engine has no immutable `ArrayBuffer`: a write into
+    the array is an error that is not detected (on a device the memory is flash). Its
+    `buffer.transfer()` detaches it for every importer.
+  - Not done: the `.d.ts` typing of such imports in a program (a module of the standard
+    library that exports bytes has its typing: `stdlib/fonts/inter16`...).
 - The zip (with its CRC32) is written by the host JS.
 
 Content:
 
 | Entry | Content |
 |---|---|
-| `manifest.json` | format version, build id, compiler id, bytecode version, main module, `env`, libraries, native modules, list of the scripts (path, script build id, source hash) |
+| `manifest.json` | format version, build id, compiler id, bytecode version, main module, `env`, `desktop` (6.7), libraries, native modules, names, list of the scripts (path, script build id, source hash), files imported as bytes (path, size, hash) |
+| `names.bin` | the names of the package, linked (see "Executed in place") |
 | `bytecode/` | the bytecode, that is, what goes to the device |
+| `bytes/` | the files imported as bytes, as they are (they go to the device) |
 | `debug/` | one JSON debug sidecar per script |
 | `src/` | exact copy of the compiled sources |
 
@@ -726,8 +781,8 @@ The exact names of the manifest fields are in the status block above; every hash
 SHA-256.
 
 **Package compiled for another engine** (done on 2026-11-11). An engine only reads the
-bytecode of its own version (QuickJS's `BC_VERSION`, `0x45` today, given by
-`JS_GetBytecodeVersion()`). `qjsx build` writes this number in the manifest (`bytecode`), and
+bytecode of its own version (QuickJS's `BC_VERSION`, `0x46` since change S of 2026-11-16,
+`0x45` before; given by `JS_GetBytecodeVersion()`). `qjsx build` writes this number in the manifest (`bytecode`), and
 it is checked in two places:
 
 1. **When sending.** `qjsx deploy` puts it in `UPLOAD_BEGIN`. The agent compares it to its own and
@@ -774,7 +829,10 @@ function in `functions` is its function number. Each function carries:
 - `scopes`: parent and **source range** of each scope. Deviation from the original
   design, which planned pc ranges: the proxy goes from the pc of the stop to a source
   position, then to the scopes that contain it. Internal variables are recognized by their
-  name (`<ret>`, `this`, …). A variable in the TDZ reads with the tag `JS_TAG_UNINITIALIZED`.
+  name (`<ret>`, `this`, …). A variable in the TDZ reads with the tag `JS_TAG_UNINITIALIZED`;
+- `constants` (the function of a module only, change R): `[{ name, value }]`, the
+  top-level constants the compiler replaced by their value; the debugger shows them in the
+  closure scope of every function of the module.
 
 The positions are **byte offsets in the source**. The proxy derives from them the lines and
 the UTF-16 columns that CDP expects.
@@ -798,7 +856,7 @@ never travel to or from the device: they are read in the sidecar.
 >   0 for an event; content = integer-keyed map (or `null`);
 > - **types**: `RESPONSE` 1, `ERROR` 2 (`{MESSAGE}`), `HELLO` 10 (`{PROTOCOL, TOKEN?}` →
 >   `{PROTOCOL, AGENT, ENGINE, VERSION, MAX_MESSAGE, NATIVES}`; VERSION: qjsx version of the
->   firmware, NATIVES: names of its native modules, 2026-11-11), `INFO` 11 (→ `{RUNNING, BUILD_ID, PACKAGE_SIZE, VOLATILE}`: the package RUN starts, VOLATILE when it is in RAM),
+>   firmware, NATIVES: names of its native modules, 2026-11-11), `INFO` 11 (→ `{RUNNING, BUILD_ID, PACKAGE_SIZE, VOLATILE}`: the package RUN starts, VOLATILE when it is in RAM; since then also the data folder, memory and load keys of 5.4),
 >   `UPLOAD_BEGIN` 20 (`{SIZE, SHA256, BUILD_ID, BYTECODE, VOLATILE?}`, refused if the bytecode number
 >   is not that of the device's engine; VOLATILE true: to RAM, refused if it does not fit), `UPLOAD_CHUNK` 21 (`{OFFSET, DATA}`, 2,048
 >   bytes, in order), `UPLOAD_END` 22 (checks size and SHA-256, installs), `RUN` 23,
@@ -821,19 +879,27 @@ never travel to or from the device: they are read in the sidecar.
 > - **values**: primitives in direct CBOR, objects behind grouped handles (group
 >   `PAUSE` released on resume, `CONSOLE`, `PERSISTENT`). Objects are described without
 >   running JS;
-> - **maximum size of a message**: 64 KB (functions compiled by the proxy). The C++ CBOR
->   now reads and writes floats and `undefined`;
+> - **maximum size of a message**: given by the agent in `HELLO` (`MAX_MESSAGE`), 64 KB or
+>   8 KB depending on the board (see "Robustness" below). The C++ CBOR now reads and writes
+>   floats and `undefined`;
 > - **threads**: requests arrive on the transport thread and run on the
 >   JS thread:
 >   - while paused, in the pause loop;
 >   - when idle, through a message of the event loop;
 >   - while JS is running, from the interrupt handler, and only the
 >     requests that run no JS (`PAUSE`, `SET_STOPS`…);
-> - **tested** by `tests/debugger.test.js` through the desktop agent (52 checks:
->   breakpoints, step into / over / out, pausing an infinite loop, variables and closures
->   modified, calling functions compiled on the host, exceptions, `debugger;`);
-> - **not done yet**: the "uncaught" prediction (the `UNCAUGHT` mode does not
->   pause), `[[Entries]]` of Map/Set, `--wait-debugger`, conditional breakpoints.
+> - **tested** by `tests/debugger.test.js` through the desktop agent and on the boards (72
+>   checks today: breakpoints, step into / over / out, pausing an infinite loop, variables
+>   and closures modified, calling functions compiled on the host, exceptions, `debugger;`);
+> - **not done yet**: `[[Entries]]` of Map/Set, conditional breakpoints (3.6). The
+>   "uncaught" mode pauses since 2026-11-11 (3.4); `--wait-debugger` was dropped for
+>   `qjsx debug --restart` (3.8).
+>
+> **Files of the data folder** (2026-11-13): `FILE_LIST` 70, `FILE_READ` 71,
+> `FILE_WRITE_BEGIN` 72, `FILE_WRITE_CHUNK` 73, `FILE_WRITE_END` 74, `FILE_REMOVE` 75,
+> `FILE_MKDIR` 76, `FILE_RENAME` 77 (5.4, "Files of a device"). **Profiler** (2026-11-16):
+> `PROFILE_START` 80, `PROFILE_STOP` 81 (6.2, `qjsx profile`); a firmware built without
+> `QJSX_PROFILER` answers an error.
 
 The protocol between the stub and the proxy is called "device agent": it serves debug **and**
 deployment.
@@ -877,7 +943,7 @@ integer-keyed maps.
 - The agent gives the largest message of the link, both ways, in its answer to `HELLO`
   (`MAX_MESSAGE`). Each board chooses it (`board::agentMaxMessage`, 2026-11-13): 64 KB
   with PSRAM, 8 KB without (an ESP32 without PSRAM; the RP2350 whose PSRAM did not
-  answer), 4 KB at least; `qjsx agent --max-message <bytes>` (hidden, for the tests) makes
+  answer; the Teensy 4.0), 4 KB at least; `qjsx agent --max-message <bytes>` (hidden, for the tests) makes
   the desktop agent small too. The agent's receive buffer is the frame of that message
   (`frames::maxSegmentSize`: header and COBS overhead, about 8.2 KB for 8 KB; it was
   twice 64 KB = 128 KB on every board).
@@ -906,10 +972,12 @@ integer-keyed maps.
 | Modification | `SET_SLOT` |
 | Code execution | `LOAD_FUNCTION`, `CALL` |
 | Handles | `RELEASE` |
+| Files of the data folder | `FILE_LIST`, `FILE_READ`, `FILE_WRITE_BEGIN`, `FILE_WRITE_CHUNK`, `FILE_WRITE_END`, `FILE_REMOVE`, `FILE_MKDIR`, `FILE_RENAME` |
+| Profiler | `PROFILE_START`, `PROFILE_STOP` |
 | Events (agent → host) | `LOG`, `STARTED`, `EXITED`, `PAUSED`, `RESUMED`, `SCRIPT_LOADED` |
 
 The numbers and the fields of each message are in `host/js/protocol.js` and
-`common/agent/protocol.h`, which must stay identical. Not done: listing the files of a device.
+`common/agent/protocol.h`, which must stay identical.
 
 #### Security over TCP
 
@@ -934,8 +1002,11 @@ Each position recorded by the compiler carries a kind:
 
 > **Status: done on 2026-11-11** (`qjsx mklib`, `host/js/library.js`, `compile.js`,
 > `build.js`; engine change J). Tested by `run-tests.sh` (fixtures `testlib`,
-> `uselib`, `dynamicimport`, `nolibrary`) and `tests/tools.test.js`. Not done: checking
-> the native modules against the firmware, the `.d.ts`.
+> `uselib`, `dynamicimport`, `nolibrary`) and `tests/tools.test.js`. Outlines and the
+> leaving out of unused declarations: 2026-11-17 (engine change W). Files imported as
+> bytes by a library module: 2026-11-17 (format 2, `tests/bytes.test.js`, fixture
+> `fonts`). Not done: the `.d.ts` of a user's library. The native modules are checked against the firmware by `qjsx
+> deploy` (see "Limits").
 
 **The problem.** A device has no compiler: a module written in JS and embedded as
 source in the firmware (this was the case of `path`) cannot load there. And a generic
@@ -968,16 +1039,34 @@ import { read } from "sensors/bme280";
 
 | Entry | Content |
 |---|---|
-| `manifest.json` | `format` (1), `kind` (`"library"`), `name`, `version`, `created`, `compiler`, `bytecode`, `natives[]`, `modules[]` |
+| `manifest.json` | `format` (2), `kind` (`"library"`), `name`, `version`, `created`, `compiler`, `bytecode`, `natives[]`, `modules[]`, `bytes[]` |
 | `bytecode/<module>.qbc` | bytecode of the module: a cache, used only by a build whose compiler is the one that produced it |
 | `debug/<module>.json` | its debug sidecar (same condition) |
 | `outline/<module>.json` | its outline (engine change W): what `qjsx build` reads to leave out what nothing uses (same condition) |
 | `src/<module>.js` | its source: what a build made with another compiler recompiles, and what the debugger shows |
+| `bytes/<name>` | a file a module imports as bytes, named by its module name (`bytes/stdlib/fonts/inter16.bin`), as it is, at a multiple of 8 bytes |
 
 Each item of `modules[]` gives `name` (`"sensors/bme280"`), `buildId`, `sourceHash`, the
-names of its four entries and `imports` (the names of the modules it imports). A library
-made before the outlines (2026-11-17) has no `outline`: its modules are compiled again from
-their sources.
+names of its four entries and `imports` (`[{ name, bytes }]`: the modules it imports,
+`bytes` true for a file imported as bytes). Each item of `bytes[]` gives `name`, `entry`,
+`size` and `hash` (SHA-256). A library made before the outlines (2026-11-17) has no
+`outline`: its modules are compiled again from their sources. A library of format 1 (before
+the imports of bytes) lists its imports as plain names and has no `bytes[]`: it is still
+read.
+
+**Files imported as bytes** (2026-11-17). A module of a library imports a file as a
+program does (4.1): `import inter16 from "./inter16.bin" with { type: "bytes" }` in
+`stdlib/fonts/inter16` is the module `stdlib/fonts/inter16.bin` (the engine's normalizer,
+from the module name). `qjsx mklib` reads the file next to the SOURCE of the module, by the
+same relative specifier (`src/fonts/inter16.bin` for `src/fonts/inter16.js`), with the
+checks of a program (relative specifier, inside the project, existing file); its module
+name must stay in the library (`stdlib/...`), else an error at the position of the
+string. `qjsx build` takes the file from the `.qjslib`, never from the disk, and only for
+a library module that is in the package: the package gets `bytes/<module name>` and its
+record in the manifest, as for a file of the program (build id, reduced package). The
+leaving out of unused declarations never removes an import, so a module that imports
+several files brings them all: a library that offers files one by one gives each its
+module (the fonts of `stdlib`).
 
 **Making a library: `qjsx mklib [directory] [--output <file>]`.** The command serves
 `stdlib` as well as a user's libraries. The folder contains a library
@@ -986,20 +1075,29 @@ module name to its source file. It compiles each module under its full name, che
 that an import to the library itself does name one of its modules, notes the native
 modules imported, and writes `<output>/<name>.qjslib`.
 
-**The standard library.** Its sources are in `lib/stdlib/` (today `path`). The
+**The standard library.** Its sources are in `lib/stdlib/src/` (today `path`, `rgbled`,
+`tasks`, `usb`, each with its `.d.ts`; `fonts/inter16`, `fonts/inter24`, `fonts/inter40`
+in `lib/stdlib/src/fonts/`, each exporting a font file of Inter as bytes, made by
+`tools/fonts/make-stdlib-fonts.sh`). The
 build of `qjsx` makes `stdlib.qjslib` next to the executable, with the tool it has just
 linked; this file is what is shipped, not the sources. The tool finds it in the folder of
 its executable (`process.argv[0]` is the full path of the executable, as in Node).
 
 The same sources are also embedded in the host executable, under the same names
-(`stdlib/path`): the tool needs them for its own commands, `mklib` among them, before
-`stdlib.qjslib` exists, and `qjsx run script.js` uses them for a script started without a build.
+(`stdlib/path`, `stdlib/fonts/inter16`...): the tool needs them for its own commands,
+`mklib` among them, before `stdlib.qjslib` exists, and `qjsx run script.js` uses them for
+a script started without a build. The files they import as bytes are embedded too
+(`tools/embed-bytes.lua`), under their module names (`stdlib/fonts/inter16.bin`).
 
 **What `qjsx build` does.**
 
 1. It compiles the modules of the program (the files of `sources`).
 2. It reads the libraries: `stdlib.qjslib`, then those of `libraries` in `qjsx.json`.
-3. It follows the imports of each module. A name that is not a module of the program is:
+3. It follows the imports of each module. An import `with { type: "bytes" }` is a file
+   of the project, or of the `.qjslib` for a library module, copied as it is (4.1, "Files
+   imported as bytes"), not followed; it counts as a module that exports `default` only
+   in steps 4 and 5. A name that is not
+   a module of the program is:
    - a module of a known library: it is added to the package, whole, and its own
      imports are followed in turn;
    - a `sys/...` or `device/...` name: a native module, recorded in `natives` of the
@@ -1095,8 +1193,9 @@ continues; restarting remains an option.
 ### 5.2 Async styles
 
 > **Status: rule applied** by the modules written so far (`sys/net`, `device/serial`: callbacks for
-> the data and the close, a promise for `connect`). The `uart` example below is the design:
-> that module does not exist yet.
+> the data and the close, a promise for `connect`; `device/gpio`: `onChange` and `waitFor`;
+> `device/i2c`: promises and `Sync` versions). The `uart` example below is the design: the
+> UARTs are `device/serial` (5.4), which has `onData`; `readLine` is not done.
 
 - **Callbacks** for spontaneous events: `uart.onData(fn)`.
 - **Promises** for operations started by the script:
@@ -1110,7 +1209,10 @@ continues; restarting remains an option.
 > with the native module `tests/native/test_module.cpp` (42 checks, no leak in a Debug
 > build). It replaces the `uart`/`console` code of `legacy/devices/` (which had bugs,
 > `console.cpp` did not compile). It answers the task "make it easier to write C objects
-> visible in JS" of `TODO.md`. Not done: the generation of the `.d.ts`.
+> visible in JS" of `TODO.md`. The `.d.ts` are written by hand instead of generated
+> (2026-11-13, see "Typings" below). Since 2026-11-16 the methods of a bound class are a
+> QuickJS function list (`MethodList`, one per class and per thread), made on first read;
+> fields and module functions are still made at once.
 >
 > Deviations from the design:
 > - in a `void` function, C++ forbids `return <value>`: one writes
@@ -1170,16 +1272,19 @@ C++17, header-only, **no `std::` at all**, no C++ exceptions, no RTTI.
 
 #### Typings
 
-`.d.ts` typings for VS Code can be generated from the declarations. Planned, not done:
-`qjsx build` would write them (section 6).
+The first design generated the `.d.ts` typings from the declarations. Decided instead
+(user, 2026-11-13): they are written by hand, next to each module, because the API still
+moves and callbacks or `js::Value` need hand types anyway; `qjsx build` writes them for
+VS Code (6.5).
 
 ### 5.4 Standard library
 
 > **Status: done for what is listed here** (`common/runtime/modules/` for what is shared
 > with the devices, `host/modules/` for the host only), tested by `tests/runtime.test.js`:
 > - globals: `console` (`log`, `info`, `debug`, `warn`, `error`), `setTimeout`, `setInterval`,
->   `clearTimeout`, `clearInterval`, `TextEncoder` / `TextDecoder` (UTF-8 only), `process`
->   (`argv`, `env`, `platform`, `exit`, `cwd`), global as in Node; on a device (agent),
+>   `clearTimeout`, `clearInterval`, `TextEncoder` / `TextDecoder` (UTF-8 only), `crypto`
+>   (`getRandomValues`, `randomUUID`, below), `process` (`argv`, `env`, `platform`,
+>   `versions`, `exit`, `cwd`, `stdout`, `stderr`), global as in Node; on a device (agent),
 >   `argv` is `["qjsx", main module]`, `env` comes from the `env` section of qjsx.json (through
 >   the manifest), `cwd()` is the data folder of the board (`board::dataDirectory()`,
 >   `<storage>/data` for the desktop agent) and `sys/fs` resolves relative paths against it;
@@ -1190,8 +1295,9 @@ C++17, header-only, **no `std::` at all**, no C++ exceptions, no RTTI.
 > - `stdlib/path`: written in JS, in the standard library (`lib/stdlib`, section 4.5);
 >   semantics of Node's `path.posix`, plus drive letters and `\` as input on
 >   Windows; results always with `/` (Node on Windows produces `\`);
-> - `sys/crypto`: `sha256(string or bytes)` and `sha1(...)` → `Uint8Array` (base64: the
->   standard `Uint8Array.prototype.toBase64` / `Uint8Array.fromBase64` of the engine).
+> - `sys/crypto`: `sha256(string or bytes)` and `sha1(...)` → `Uint8Array`, `randomBytes(size)`
+>   (base64: the standard `Uint8Array.prototype.toBase64` / `Uint8Array.fromBase64` of the
+>   engine).
 >
 > - `sys/net`: `connect({host, port})` → promise of a connection, `listen({host, port},
 >   onConnection)` → server (`port()`, `close()`); connection: `onData`, `onClose`,
@@ -1219,6 +1325,7 @@ the device where it makes sense.
 - `console`;
 - `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`;
 - `TextEncoder`, `TextDecoder`;
+- `crypto` (`getRandomValues`, `randomUUID`, as the web's);
 - `process`;
 - `Uint8Array` for bytes (no Node-style `Buffer`).
 
@@ -1226,21 +1333,27 @@ the device where it makes sense.
 
 | Module | Platform | Description |
 |---|---|---|
-| `sys/fs` | host; ESP32 (LittleFS on the "data" partition, `/data`); the twin and the desktop agent (`<storage>/data`); RP2350: present, fails with `ENOSYS` | files, synchronous; on a device confined to its data folder |
+| `sys/fs` | host; ESP32 (LittleFS on the "data" partition, `/data`); the twin and the desktop agent (`<storage>/data`); RP2350 and i.MX RT1062: present, fails with `ENOSYS` | files, synchronous; on a device confined to its data folder |
 | `stdlib/path` | all (standard library, in JS) | paths |
 | `sys/crypto` | all | `sha256`, `sha1`, `randomBytes` |
 | `sys/net` | host | TCP, asynchronous |
 | `device/serial` | host, ESP32, the twin (class `Serial`) | serial ports: the PC's by name, the UARTs of a board by number with their pins |
 | `sys/compiler` | host | compile API |
-| `device/board` | ESP32, the twin, the desktop agent | `id()` (unique id of the chip: the base MAC on an ESP32), `mac(kind)`, `restart()` (sends the pending output, 500 ms at most, then restarts the chip; desktop agent and twin: what RESET does) |
-| `device/gpio` | ESP32, RP2350 | class `Gpio`: `read`, `write`, `toggle`, `onChange`, `waitFor`, `close` |
-| `device/rmt` | ESP32 | class `Rmt`: pulse trains (`send`, `sendBytes`), promises |
+| `device/board` | ESP32, i.MX RT1062, the twin, the desktop agent | `id()` (unique id of the chip: the base MAC on an ESP32, the OCOTP UID on the i.MX RT1062), `mac(kind)`, `restart()` (sends the pending output, 500 ms at most, then restarts the chip; desktop agent and twin: what RESET does), `memory()`, `load()` (2026-11-16: JS heap, free RAM, share of time the JS thread works) |
+| `device/gpio` | ESP32, RP2350, i.MX RT1062, the twin | class `Gpio`: `read`, `write`, `toggle`, `onChange`, `waitFor`, `close` |
+| `device/rmt` | ESP32, the twin | class `Rmt`: pulse trains (`send`, `sendBytes`), promises |
 | `stdlib/rgbled` | boards with `device/rmt` (standard library, in JS) | class `RgbLed` (WS2812…): `set`, `fill`, `setHsv`, `fillHsv`, `show`, `close` |
 | `device/usb` | ESP32 with USB OTG (S2, S3, P4), the twin | class `Usb`: the board as a composite USB device (`serial()`, `start()`, `close()`); class `UsbCdc`: a serial function (`onData`, `onLineState`, `write`, `lineState`) |
 | `stdlib/usb` | boards with `device/usb` (standard library, in JS) | re-exports `Usb`, `UsbCdc`; class `UsbSerial extends Usb`: one serial function, started at once |
 | `device/i2c` | ESP32, the twin | class `I2c`: an I2C master bus (`device`, `probe`, `probeSync`, `reset`, `close`); class `I2cDevice`: `write`, `read`, `writeRead` (promises) and their `Sync` versions, `close` |
+| `device/spi` | ESP32, the twin | class `Spi`: an SPI master bus (`device`, `close`); class `SpiDevice`: `transaction`, `write`, `read`, `transfer`, `writeRead`, `command` (promises) and their `Sync` versions, `frequency`, `close` |
+| `device/dac` | the original ESP32 and the S2 (WT32-SC01), the twin | class `Dac`: `write(raw)`, `writeVoltage(volts)`, `bits`, `fullScale`, `value`, `close`; the output stops at `close()` and at the end of the program |
+| `stdlib/display` | boards whose firmware has `sys/draw` (today the WT32-SC01), their twin (standard library, in JS) | class `Display`: color SPI displays (ST7796); drawing commands kept in a list (`fillRect`, `line`, `pixel`, `rect`, `arc`, `circle`, `disc`, `fillRoundRect`, `roundRect`, `text` with fonts imported as bytes), shown by `show()` while the program goes on |
+| `sys/draw` | the same | the engine of `stdlib/display`: renders a list of commands band by band while the SPI bus sends it (`show`, `fontMetrics`, `textWidth`); not meant to be used directly |
 | `device/adc` | ESP32 (ADC1), the twin | class `Adc`: `read`, `readVoltage`, `bits`, `close` |
-| `device/pwm` | ESP32 (LEDC), the twin | class `Pwm`: `setDuty`, `setFrequency`, `setPulseWidth`, `duty`, `frequency`, `bits`, `close` |
+| `device/pwm` | ESP32 (LEDC), i.MX RT1062 (FlexPWM, QuadTimer), the twin | class `Pwm`: `setDuty`, `setFrequency`, `setPulseWidth`, `duty`, `frequency`, `bits`, `close` |
+| `stdlib/fonts/inter16`, `inter24`, `inter40` | all (standard library, files imported as bytes) | the default export is a font file of Inter Regular (LVGL's binary format, 4 bits per pixel, not compressed): 16 and 24 px with ASCII and Latin-1, 40 px with ASCII and `°`; one module per font, so a package holds only the fonts its program imports |
+| `stdlib/tasks` | all (standard library, in JS) | `task(name, body)` → a `Task` (`stop`, `join`, and for its body `sleep`, `every` → a `Ticker`, `mailbox`), class `Mutex` (`withLock`): small tasks written as sequential code that waits |
 
 `process` is a global, on every platform. `process.versions` (2026-11-12) holds `qjsx` (the
 version of the tool or of the firmware), `quickjs` (the engine) and, for a package run,
@@ -1257,6 +1370,10 @@ the ESP32's (PSRAM, or internal RAM without PSRAM), the desktop's (malloc, writt
 because QuickJS's is not reachable), the RegionHeap; QuickJS's default (RP2350 without
 PSRAM) is not measured. On the desktop agent and the twin the figure is the PC's, larger
 than on a device (16-byte values and 8-byte pointers against 8 and 4).
+Since 2026-11-16 the program reads them too (`memory()` of `device/board`), with the load of
+the JS thread (`load()`: the time between two waits of the loop counts as work, over the
+last second, `rt::LoadMeter` of `loop.h`), also given by `INFO` (`JS_LOAD`, `JS_LOAD_PEAK`,
+in thousandths) and shown by `qjsx device info`.
 
 **JS heap of a board without PSRAM** (2026-11-16, ESP32): the JS heap is one region of internal RAM, reserved once by the JS task at its
 first runtime (`reserveJsRegion()`, `board_esp32.cpp`: the largest free block less
@@ -1277,7 +1394,11 @@ agent went on answering. `idf.py -DQJSX_JS_HEAP_SHARED=ON` builds the former sha
 (to compare). Open: the speed (engine-changes.md Q); the reserve (a package in RAM,
 `qjsx deploy --ram` / `qjsx debug`, comes from the firmware's part: its largest free
 block is 31 KB); an out of memory is reported as "Uncaught (in promise) null"; the
-RP2350 without PSRAM still uses QuickJS's default allocator.
+RP2350 without PSRAM still uses QuickJS's default allocator. QuickJS's first GC threshold
+(256 KB) was above such a region, so no cycle was ever collected: the threshold is now
+capped halfway to the memory limit (`board::jsHeapLimit()`, given to `JS_SetMemoryLimit`
+by `createRuntime()`; engine change T, 2026-11-16). The Teensy 4.0 (no PSRAM) has its JS
+heap in a `RegionHeap` of 512 KB of its OCRAM, with the same arenas.
 
 **Stack of the JS task** (2026-11-16, ESP32): a setting of each board, `JS_TASK_STACK` in
 its `board_config.h`; QuickJS's limit is that less 8 KB kept for the C code called under
@@ -1297,7 +1418,8 @@ the system on the PC (BCryptGenRandom, getrandom, arc4random_buf); on the ESP32 
 of mbedTLS (PSA), seeded at boot by `psa_crypto_init()` while the entropy source of the
 SAR ADC is on (`bootloader_random_enable()`: the hardware generator is truly random only
 with it or the radio; it borrows the ADC, hence before any program), each byte mixed with
-`esp_fill_random()`; RP2350: not done yet. `Math.random()` is seeded from it at each
+`esp_fill_random()`; RP2350: `pico_rand`, seeded by the chip's TRNG (2026-11-17); i.MX
+RT1062: the chip's TRNG. `Math.random()` is seeded from it at each
 program run (engine change O: QuickJS took the time, nearly the same at each boot of a
 board). A twin with `"randomSeed"` in the `twin` section of `qjsx.json` replaces the
 source by a reproducible sequence (xoshiro256** from the seed), started again at each
@@ -1306,7 +1428,9 @@ program run: the program draws the same numbers every time.
 **Hardware modules** (2026-11-11): three layers. An interface of the hardware in
 `common/hal/` (`hal_gpio.h`, `hal_rmt.h`, `hal_usb.h`, `hal_i2c.h`, `hal_adc.h`, `hal_pwm.h`: free functions, called on the JS thread; events
 reported by an event task of the hal), one implementation per port
-(`ports/esp32/main/hal_*_esp32.cpp`, `ports/rp2350/main/hal_gpio_rp2350.cpp`), and the JS
+(`ports/esp32/main/hal_*_esp32.cpp`, `ports/rp2350/main/hal_gpio_rp2350.cpp`,
+`ports/imxrt1062/main/hal_gpio_imxrt1062.cpp` and `hal_pwm_imxrt1062.cpp`; the twin's in
+`host/twin/sim/`), and the JS
 class written once with the binding
 library in `common/device/`, which the port compiles and registers in its entry point
 (`device_modules.h`). Interrupts never post to the loop themselves: they queue to the
@@ -1321,7 +1445,8 @@ the pin, `write(1)` / `write(0)` 183 kHz; the WS2812 LED on GPIO48 takes about 6
 per second from a JS loop with a 10 ms pause. On the PICO2-XXL (RP2350 at 150 MHz, JS heap in
 PSRAM), a `toggle()` loop on GPIO15 gives 122 kHz (2026-11-12), 132 kHz once the hot code of
 the engine runs from SRAM (known-bugs.md "Speed"): about 570 clocks per turn against 490 on
-the ESP32-S3; the rest of the gap is the clock (150 MHz against 240).
+the ESP32-S3; the rest of the gap is the clock (150 MHz against 240). On the Teensy 4.0
+(2026-11-16): 267 to 313 kHz, 105 kHz while the pin is watched by `onChange`.
 
 **`device/usb`** (2026-11-12; design agreed with the user, tried on the YD-ESP32-S3): the
 board as a USB **device** for a host (a PC, a tablet), on the chip's native USB port, not
@@ -1419,6 +1544,149 @@ const there = await bus.probe(0x70);                              // true / fals
   wired: a probe answers false, a transfer ENXIO. Tested by `tests/i2c.test.js`. Code that
   plays components on the ports of a twin is in TODO.md.
 
+**`device/spi`** (2026-11-17; API agreed with the user, built for the ESP32 and the twin;
+tried on the WT32-SC01: its screen on SPI2 at 40 MHz (80 MHz: the ST7796 shows nothing),
+its touch controller on I2C; Teensy and RP2350 later):
+
+```js
+import { Spi } from "device/spi";
+const bus = new Spi(2, { sclk: 12, mosi: 11, miso: 13 });             // SPI2; maxTransfer 4096
+const lcd = bus.device({ cs: 10, dc: 14, frequency: 26_000_000 });    // lcd.frequency: the real one
+await lcd.transaction([
+    { write: [0x2a], dc: 0 }, { write: [0, 0, 0, 119] },             // command, then its data
+    { delay: 10 },                                                    // µs, chip select held
+    { write: [0x2c], dc: 0 }, { write: pixels },                      // DMA for big buffers
+]);
+const id = lcd.writeReadSync([0x04], 3);                              // blocking the JS thread
+```
+
+- **Buses, devices, transactions**: a bus is a controller (2 and 3 on the ESP32-S3: the
+  names SPI2 / SPI3 of Espressif's documents; 0 and 1 belong to the flash and are EBUSY); a
+  device has its chip select (or none: the program drives it), frequency, mode, bit order,
+  optional DC pin and fill byte (sent while reading). A transaction is a list of segments
+  (`write`, `read`, `transfer` full duplex, `delay` of at most 1000 µs), the chip select held
+  from the first to the last, the DC pin set by the driver to each segment's level (default
+  1 = data). `write`, `read`, `transfer`, `writeRead`, `command` (write with DC low) are
+  transactions of one or two segments; each has a `Sync` version.
+- **Errors** (the error rules agreed for every module; the other modules will follow them
+  in a later pass): TypeError / RangeError for arguments (integers strict), ENOENT no such port, EBUSY taken, EINVAL bad
+  pin, EBADF a closed bus or device, EAGAIN more than 16 transactions pending, ECANCELED the
+  pending ones dropped by `close()`. A method that returns a promise never throws: every
+  error rejects (a local helper `promiseOrRejection` of `spi_module.cpp`, to move into
+  jsbind with the pass on every module).
+- **Order and threads**: the transactions of a bus run in call order. A promise: the bytes
+  are copied into the job, `hal::spi::start()` starts it, its `done` posts a message to the
+  loop, the JS thread then calls `finish()`, settles the promise and starts the next one. A
+  `Sync` call first waits for the started job (without the loop) and runs the queued ones,
+  then runs its own on the JS thread without copying.
+- **hal** (`common/hal/hal_spi.h`): `run()` blocks, `start()` / `done` / `finish()` for the
+  promises. ESP32 (`ports/esp32/main/hal_spi_esp32.cpp`, `spi_master`): one worker task per
+  open port ("spi2", "spi3") runs the started transactions (a `done` from the driver's
+  interrupt could not post to the loop, which locks and allocates); the chip select is a
+  GPIO driven by the hal (held through delays and through the pieces of a segment larger
+  than `maxTransfer`); DC set in the driver's `pre_cb`; pieces of 32 bytes or less polled,
+  larger ones in DMA.
+- **Made segments** (2026-11-17, for `sys/draw`; not seen by JS): a segment of the hal may
+  have its bytes made piece by piece just before they go out (`make`, `makeOpaque`,
+  `piece`, `pieceSize` of `hal::spi::Segment`), so that a display's pixels are rendered a
+  band at a time with no memory for the whole image. The ESP32 hal makes the next piece
+  while the previous one goes out in DMA (`runMadeSegment`: `piece` holds two pieces, the
+  driver's queue two transfers): rendering and sending overlap. Native modules queue such
+  a transaction on a device the program opened with `device::queueSpiSegments`
+  (`common/device/spi_module.h`), in the order of the bus like any other.
+- **Speed measured on the WT32-SC01** (ESP32, JS heap in PSRAM): any call from JS to native
+  code costs about 0.25 ms; `writeSync` of 2 bytes 0.25 ms, `transactionSync` 1.3 ms plus
+  0.35 ms a segment (the conversion of each segment object), an array of numbers instead of
+  a typed array 0.45 ms more. Hence the display writes its commands in a typed array and
+  makes one native call an image.
+- **Twin** (`host/twin/sim/twin_spi.cpp`): a part sits on a port and a chip select
+  (`"spi": { "port", "cs" }` in `twin.parts`, `board.spi(...).attach(cs, part)` in
+  `qjsx:twin`) and gets each transaction as its segments with their DC level, answering the
+  read / transfer bytes; with no part a read gives 0xFF. The page has a section per open bus
+  with a trace of the transactions (kinds, DC, bytes, "no part"). Tested by
+  `tests/spi.test.js` and the `spiecho` part of `tests/twinparts.test.js`.
+  A transaction of the twin lasts its time on the wire (2026-11-17): its bytes at the
+  clock of its device plus its delays, less the time spent making and answering it; times
+  under a millisecond are added up per bus. A program paces itself as on the board.
+
+**`device/dac`** (2026-11-17; API agreed with the user, built for the ESP32 and the twin;
+flashed on the WT32-SC01, output not measured yet):
+
+```js
+import { Dac } from "device/dac";
+const out = new Dac(25);          // GPIO25 or 26 on the original ESP32, 17 or 18 on the S2
+out.writeVoltage(1.0);            // nearest code: out.value 77 of 255 (fullScale 3.3 V)
+out.write(128);                   // raw code, 0 .. 2^bits - 1, strict integer
+```
+
+- **Only two chips have one**: the original ESP32 and the S2 (8 bits). The ESP32-S3 boards,
+  the Teensy 4.0 and the RP2350 have none: the hal (`ports/esp32/main/hal_dac_esp32.cpp`,
+  ESP-IDF `dac_oneshot`) is compiled and the module registered only for the targets of
+  `QJSX_DAC_TARGETS` (esp32, esp32s2). The full-scale voltage comes from the board:
+  `board::DAC_FULL_SCALE_MV` in its `board_config.h` (required on those targets).
+- **Errors**: EINVAL a pin without DAC, EBUSY open already, EBADF after `close()`,
+  RangeError a value out of range or not an integer (the rules of device/spi; `strict_int.h`
+  is shared by both). `close()` and the end of the program stop the output and give the pin
+  back (like `Pwm`, not like `Gpio`).
+- **Twin** (`host/twin/sim/twin_dac.cpp`): `"dac": { "pins", "bits", "fullScale" }` in the
+  board JSON (`boards/esp32-devkitc-wroom32.json`, an ESP32-DevKitC with a WROOM-32, written
+  from memory); the DAC comes first in the voltage of its pin (before a part's), parts read
+  it with `pin.voltage`, the pins table shows "dac 1.66 V", the analyzer draws it as an
+  analog trace. The board view has a section "DAC" of its own when the board has one (no
+  part to declare): a meter per output (`host/twin/ui/src/dacpanel.ts`,
+  `controls/meter.ts`: a low dial graduated in volts up to the full scale, a band of
+  segments lit up to the voltage, a short needle, the pin and the voltage in digits; dimmed
+  while the program does not drive the output). Tested by `tests/dac.test.js` (the pins as
+  the page's server gives them; that a part reads the DAC's voltage, and that the DAC wins
+  over a part's, are no longer tested: the project of the test has no part).
+
+**`stdlib/display` and `sys/draw`** (2026-11-17; designed with the user step by step,
+tried on the WT32-SC01 and its twin; guide `doc/jsmanual/.../guides/displays.md`):
+
+```js
+import { Display } from "stdlib/display";
+import inter16 from "./fonts/inter16.bin" with { type: "bytes" };
+const lcd = new Display({ type: "st7796", port: 2, sclk: 14, mosi: 13, cs: 15, dc: 21,
+                          reset: 22, backlight: 23, rotation: 90 });
+const label = lcd.font(inter16);
+lcd.fillRoundRect(10, 10, 200, 60, 12, 0x203050);
+lcd.text(24, 30, "Température", label, 0xffffff);
+lcd.arc(240, 200, 80, -135, 135, 12, 0x30c060);     // degrees, 0 at the top, clockwise
+await lcd.show();                                   // or show(x, y, width, height)
+```
+
+- **A list of commands, rendered band by band.** The drawing calls draw nothing: they write
+  commands in an `Int16Array` (6 items each, a text followed by its characters, an arc and
+  a rounded rectangle by 2 more items), no native call per command. `show()` copies the
+  list and queues ONE made segment on the display's SPI device: the task of the bus renders
+  each band (16 rows, two buffers of a band in internal RAM) just before sending it. No
+  copy of the screen anywhere; the program goes on during the send and lists the next
+  image. The display remembers nothing: what no command covers in the area shown takes
+  `background`. One way of drawing only (immediate drawing and a canvas of the screen were
+  tried and dropped: 3.6 to 4.4 images a second for 304 KB of RAM). The idea of a display
+  list rendered a few rows at a time comes from Poco, the renderer of the Moddable SDK; no
+  code of it is used (credited in the sources).
+- **Text**: fonts are files in LVGL's binary bitmap format, made by `lv_font_conv`
+  (tools/fonts, an external tool run by hand) WITHOUT compression, and imported as bytes:
+  read in place, in flash on a device (`common/draw/font.{h,cpp}`: character maps of the
+  four formats, 1 to 8 bits per pixel blended over the band, kerning ignored). Tabular
+  digits are an option of the renderer; `textWidth()` for centering; 16 fonts a display.
+- **Arcs and rounded rectangles**: smoothed edges, fixed point (coverage 0..256, distances
+  24.8, 32-bit integers only: a 64-bit operation is a library call on the ESP32), work only
+  where it matters (the hole of a ring skipped, square roots on the one pixel wide edges
+  only, the straight parts of a rounded rectangle filled as they are). The reasons and the
+  measures are written at the top of `common/draw/draw.cpp`.
+- **Speed on the WT32-SC01** (temp/wtgauge: two gauges of 448 x 250 with text): 4.3 images
+  a second at first, 15.5 after the work above; a full screen 70 ms (61 ms of wire at
+  40 MHz); rendering 34 ms an image. In the twin: 21.7 images a second (its SPI takes the
+  wire time, its rendering costs nothing).
+- **Cost**: nothing for a board without a display: `sys/draw` is compiled only for a board
+  whose `ports/esp32/boards/<board>/board.cmake` sets `QJSX_BOARD_DRAW` (the WT32-SC01;
+  `idf.py -DQJSX_DRAW=ON` for a try elsewhere): +21 KB of firmware there; `stdlib/display`
+  is JS, in the package only of a program that imports it; a font only in the package of a
+  program that imports it.
+- **Twin**: the part `st7796-320x480` and the board `wt32-sc01` (see 6.6).
+
 **`device/serial` on the UARTs of a board** (2026-11-12; design agreed with the user, built
 for the ESP32 and the twin; not tried on a board, nothing wired; RP2350 later):
 
@@ -1458,7 +1726,8 @@ reader.port();                                             // 2 ("COM3" on the P
   `tests/serial.test.js`.
 
 **`device/pwm`** (2026-11-13; design agreed with the user, built for the ESP32 and the twin;
-verified on the YD-ESP32-S3 with an oscilloscope by the user the same day; RP2350 later):
+verified on the YD-ESP32-S3 with an oscilloscope by the user the same day; i.MX RT1062 on
+2026-11-16, below; RP2350 later):
 
 ```js
 import { Pwm } from "device/pwm";
@@ -1496,6 +1765,12 @@ led.close();
   the S3 (14 bits at 1 kHz, 11 at 20 kHz, 1 at 40 MHz; under about 5 Hz out of reach);
   inverted by the matrix; closed, the channel stops at its idle level, then the pin
   becomes a plain GPIO output at that level.
+- **i.MX RT1062** (`ports/imxrt1062/main/hal_pwm_imxrt1062.cpp`, table
+  `boards/teensy40/board_pwm.h`: 31 pins on FlexPWM or QuadTimer; tried on the Teensy 4.0,
+  not measured with an oscilloscope): the 150 MHz IPG clock divided by 2^0..7, a 16-bit
+  count (about 18 Hz to 40 MHz), whole ticks of duty cycle (15 bits at 1 kHz); a FlexPWM
+  submodule has one frequency for its outputs (another one: EBUSY). On a QuadTimer a duty
+  cycle of exactly 0 or 1 makes the pin a GPIO at that level.
 - **Twin**: the board's `"pwm"` section (section 6.6), tested by `tests/pwm.test.js`
   (rounding, limits of the S3, the pins on the page, the levels once stopped).
 
@@ -1510,25 +1785,35 @@ led.close();
 
 > **Status: ESP32-S3 done on 2026-11-11** (ESP-IDF v6.1, 700 KB firmware, with no
 > JS at all), flashed and tried on the YD board: agent over UART0, deployment and execution in place,
-> debugger 52/52, program using `.qjslib` libraries.
+> debugger 52/52 then (72/72 since), program using `.qjslib` libraries. Since then: the
+> hardware modules, `/data` on LittleFS, `device/board`, random numbers (5.4); boards
+> YD-ESP32-S3, ESP32-S3-DevKitC-1 N8R8 and a client board without PSRAM.
 > RP2350: written on 2026-11-11 (pico-sdk 2.3.1, FreeRTOS SMP V11.3.3, 740 KB firmware), builds,
 > flashed and tried on the board on 2026-11-12: deploy and run in place, 4 MB buffer in PSRAM, debugger 72/72, proxy 30/30, cdp 53/53. JS is slow there for now (a loop of 10^6 simple turns: 4 s; 20,000 small
 > objects: 3 s), to measure against the ESP32-S3 and to understand (see below).
+> On 2026-11-17 it builds again and a hang after a few uploads was fixed (below); debugger
+> 72/72, proxy 33/33, cdp 53/53, 24 uploads in a row. Not done there: `device/board`,
+> `/data`.
+> i.MX RT1062 (Teensy 4.0): written and tried on the board on 2026-11-16 (MCUXpresso SDK
+> 26.06 LTS, FreeRTOS, 690 KB firmware): debugger 72/72, proxy 33/33, cdp 53/53;
+> `device/gpio`, `device/board`, `device/pwm` (below).
 
 One firmware per board, generic: everything the chip can do, flashed once; the
 programs then arrive as packages. Each port provides three things around the common code,
 identical on every board (`agent::runDevice()`):
 
-| Part | Role | ESP32 | RP2350 |
-|---|---|---|---|
-| `ports/cmake/qjsx.cmake` | common sources (engine without compiler, runtime, agent), engine options | shared | shared |
-| `platform.h` | clock, fatal stop, tasks, locks, signal, periodic pause of the JS thread | `ports/freertos/` (locks, signal, `sleepMs`, `yieldIfDue`) + `platform_esp32.cpp` (`esp_timer`, `esp_system_abort`, pinned tasks) | `ports/freertos/` + `platform_rp2350.cpp` (`time_us_64`, watchdog reboot, `xTaskCreateAffinitySet`) |
-| `board.h` | identity, JS heap, JS stack, package storage, links, console | `board_esp32.cpp` | `board_rp2350.cpp`, `psram_rp2350.cpp` |
-| entry point | creates the JS task, which calls `agent::runDevice()` | `main.cpp` (48 KB task on core 1) |
+| Part | Role | ESP32 | RP2350 | i.MX RT1062 |
+|---|---|---|---|---|
+| `ports/cmake/qjsx.cmake` | common sources (engine without compiler, runtime, agent), engine options | shared | shared | shared |
+| `platform.h` | clock, fatal stop, tasks, locks, signal, periodic pause of the JS thread | `ports/freertos/` (locks, signal, `sleepMs`, `yieldIfDue`) + `platform_esp32.cpp` (`esp_timer`, `esp_system_abort`, pinned tasks) | `ports/freertos/` + `platform_rp2350.cpp` (`time_us_64`, watchdog reboot, `xTaskCreateAffinitySet`) | `ports/freertos/` + `platform_imxrt1062.cpp` |
+| `board.h` | identity, JS heap, JS stack, package storage, links, console | `board_esp32.cpp` | `board_rp2350.cpp`, `psram_rp2350.cpp` | `board_imxrt1062.cpp`, `flash_imxrt1062.cpp`, `usb_serial_imxrt1062.cpp` |
+| entry point | creates the JS task, which calls `agent::runDevice()` | `main.cpp` (task on core 1, `JS_TASK_STACK` of the board) | `main.cpp` (task on core 1) | `main.cpp` (single core) |
 
 **One description per board.** `ports/esp32` serves every ESP32 board; what changes from one
 board to another is in `boards/<board>/`: `sdkconfig.board` (chip, flash size, table from
-`partitions/`, PSRAM mode) and `board_config.h` (name, later links and pins). The
+`partitions/`, PSRAM mode), `board_config.h` (name, `JS_TASK_STACK`, `DAC_FULL_SCALE_MV`) and,
+optionally, `board.cmake`: what the firmware adds for that board (2026-11-17:
+`QJSX_BOARD_DRAW` compiles `sys/draw` for a board with a display, the WT32-SC01). The
 board is chosen at build time (`QJSX_BOARD`), each one in its `build-<board>` folder. The partition
 tables go by flash size (4, 8, 16 MB), not by board.
 
@@ -1556,13 +1841,44 @@ V11.3.3 and its `RP2350_ARM_NTZ` port, ninja, picotool):
   8-byte headers, merge in constant time). A PSRAM that does not answer leaves the JS heap
   in SRAM, with a message. The same heap runs on the PC with `QJSX_JS_HEAP_MB=<size>` (the
   whole test suite passes on it).
-- *What newlib lacks.* `ports/rp2350/compat/`: `pthread` on FreeRTOS semaphores for the
+- *What newlib lacks.* `ports/freertos/compat/` (moved from `ports/rp2350/compat/`, shared
+  with the Teensy 4.0): `pthread` on FreeRTOS semaphores for the
   engine (class id lock, `Atomics.wait`), `clock_gettime` from the boot timer, directory and
   file calls failing with ENOSYS (no file system yet). The engine is a library of its own:
   its `list.h` and FreeRTOS's have the same name.
 - *Flashing.* `tools/pico.ps1 flash` (picotool reboots a board running qjsx into BOOTSEL
   through the USB, loads and starts the firmware); the first time, the board is put in
   BOOTSEL by hand (BOOT held, RESET pressed).
+- *Hang after a few uploads* (fixed 2026-11-17, [history.md](history.md)): the pico_sync
+  interop of the FreeRTOS port (one event group, releases from interrupts deferred to the
+  timer task) blocked the USB reader. It is now woken by a task notification, and
+  `configSUPPORT_PICO_SYNC_INTEROP` is 0: our RP2350 code never uses pico_sync objects. A
+  `HELLO` also forgets the answers the agent kept (a USB link comes back after a reset).
+  Measure option `QJSX_FLASH_TRACE` (CMake, off).
+
+**The i.MX RT1062 port** (`ports/imxrt1062/`, board `boards/teensy40/`, 2026-11-16; built by
+`tools/teensy.ps1` with NXP's MCUXpresso SDK 26.06 LTS, FreeRTOS-Kernel and the Arm GNU
+Toolchain of `C:\tools\pico`):
+
+- *Memory.* The factory FlexRAM split: ITCM 128 KB (hot engine functions copied at boot, the
+  flash write code), DTCM 128 KB (data, interrupt stack, USB buffers), OCRAM 768 KB (JS heap
+  512 KB in a `RegionHeap`, then the C heap); caches on. JS task stack 48 KB.
+- *Link.* The native USB port as a CDC serial port (NXP's USB stack in bare-metal mode, our
+  own small OSA), VID/PID of PJRC's Teensy serial (16C0:0483); the port goes away at each
+  reset.
+- *Packages.* Two slots of 256 KB in the 2 MB QSPI flash, read in place; writes through the
+  ROM API from ITCM, one sector at a time. The last 64 KB, kept by PJRC, are never touched.
+- *Flashing* without the button (`tools/teensy.ps1 flash`): the PC sets the board's serial
+  port to 134 bauds, the firmware jumps into PJRC's HalfKay loader, then `teensy_loader_cli`
+  writes. The very first flash needs the button.
+- *Modules.* `device/gpio` (the pins as printed on the board, 0 to 39; LED on 13),
+  `device/board` (id from the OCOTP fuses), `device/pwm`; random numbers from the TRNG;
+  `process.platform` is `"imxrt1062"`. Not yet: `/data`.
+- *Speed* (2026-11-16, against the client's ESP32-S3 at 240 MHz): 2.3 to 6.7 times faster;
+  an `await null` 41 µs (ESP32-S3: 195 µs). A native profiler (`QJSX_NATIVE_PROFILER`,
+  `native_profiler_imxrt1062.cpp`, 2026-11-17) found that the speed of an `await` depended on
+  the layout of the code in the 32 KB instruction cache ([known-bugs.md](known-bugs.md),
+  "Speed of the Teensy 4.0").
 
 **Long computation and watchdog** (decided, coded and verified on the YD board on 2026-11-11:
 during the endless loop of `tests/fixtures/debuggee`, no "task_wdt" message in 17 s
@@ -1602,7 +1918,8 @@ of listening to the console, against one every 5 s before).
   `board::jsStackSize()` gives QuickJS a limit below the stack of the task (an overflow
   becomes a `RangeError`).
 - **Partitions** (16 MB): two 3 MB firmware slots reserved for OTA (still to be
-  decided), packages 2 MB, data 7.9 MB for a future `fs`. On 4 MB: no OTA.
+  decided), packages 2 MB, data 7.9 MB (LittleFS, mounted on `/data`, 2026-11-13). On
+  4 MB: no OTA.
 - **Packages**: two slots, each one half of the partition. An upload goes into the one that is
   not installed; its header (size, sequence, build id) is written last. An interrupted upload
   therefore leaves the installed package intact, and the running program, mapped from its slot by
@@ -1618,8 +1935,11 @@ of listening to the console, against one every 5 s before).
 - **Libraries**: a program that imports `stdlib/path` and a test library
   (`tests/fixtures/uselib`) gives on the board the same output as on the PC (2026-11-11);
   the modules come from its package (section 4.5).
-- **Limits**: no file system yet (`fs` fails with `ENOSYS`, `cwd()` is `"/"`), no `net`,
-  no hardware module.
+- **Limits**: no `net` (no WiFi yet). The file system (`/data`) and the hardware modules
+  came later (5.4).
+- **Other ESP32 boards**: an ESP32-S3-DevKitC-1 N8R8 (`esp32-s3-devkitc-n8r8`) and a client
+  board without PSRAM (JS heap in an internal RAM region, 32 KB JS stack, flash in QIO;
+  5.4).
 
 How to add a board, or a new chip, is described step by step in
 [new-device.md](new-device.md).
@@ -1640,8 +1960,15 @@ How to add a board, or a new chip, is described step by step in
 > - `qjsx mklib [directory] [--output <file>]`: compiles a library project into a `.qjslib`
 >   (4.5);
 > - `qjsx deploy [package] --target T [--token X] [--no-run] [--ram | --reset] [--monitor [--until-exit]]`,
->   `qjsx monitor`, `qjsx device info|run|stop|reset`, `qjsx targets`; the status messages
->   go to stderr, stdout only carries the program's output;
+>   `qjsx monitor`, `qjsx device info|run|stop|reset`, `qjsx device ls|read|write|rm|mkdir|mv`
+>   (files of the data folder, 2026-11-13; `deploy --data` too), `qjsx targets`; the status
+>   messages go to stderr, stdout only carries the program's output;
+> - `qjsx debug [--target T] [--port P] [--host A] [--restart] [--no-upload]`: the CDP server
+>   for VS Code (3.9);
+> - `qjsx profile [--duration s] [--interval ms] [--top n]` (2026-11-16): samples the JS
+>   thread of a device and prints the functions that take its time, named from the
+>   package's debug files (`host/js/profile.js`; device side `common/agent/profiler.*`,
+>   compiled with `QJSX_PROFILER`: on for the PC, off by default on the boards);
 > - `qjsx agent [--host] [--port 5555] [--storage build/agent] [--token]`: the
 >   device agent on the desktop (`host/agent_command.cpp`), which stands in for a board to
 >   develop and test; same agent code as the firmware; installed program started at
@@ -1654,14 +1981,15 @@ How to add a board, or a new chip, is described step by step in
 > The commands other than `run` and `--version` are written in JS (`host/js/`), embedded
 > in the executable as modules `qjsx:<name>` by a premake rule
 > (`tools/embed-js.lua`). Native module `sys/compiler` (host): `compile(source, name, { module,
-> strip: "none" | "source" | "all", debug, dynamicImport })` → `{ bytecode, debug, imports,
-> warnings }`, plus `quickjsVersion`, `qjsxVersion` and `bytecodeVersion`.
+> strip: "none" | "source" | "all", debug, dynamicImport, outline })` → `{ bytecode, debug,
+> imports, warnings, outline }`, `link(modules)` (4.1), plus `engineNames`,
+> `quickjsVersion`, `qjsxVersion` and `bytecodeVersion`.
 > Tests: `tests/run-tests.sh [Release|Debug]` (binding, runtime, tool modules, package
 > run exactly like the sources, zip readable by an external tool, reproducible build,
 > syntax error with its location). Build: `premake5 gmake --cc=gcc --shell=posix` then
 > `make -C build config=release`; in `bin/Release/`: `qjsx`, `stdlib.qjslib`, `qjsx-tests`
 > (which adds the test modules) and `qjsx-target` (the tool linked with the engine without
-> compiler). Not implemented: `qjsx debug` and `qjsx trace`. The old program (`legacy/`) is
+> compiler). Not implemented: `qjsx trace`. The old program (`legacy/`) is
 > no longer built; it stays on the author's disk and is not in the repository.
 
 ### 6.1 Composition
@@ -1678,17 +2006,17 @@ A single executable:
 | Command | Role |
 |---|---|
 | `run` | runs a script on the PC, or a package from its bytecode like a device does; it reaches only what is granted (6.7) |
-| `build` | compiles the project and produces the `.qjspkg` (planned: the `.d.ts` of the native modules) |
+| `build` | compiles the project and produces the `.qjspkg`; writes the `.d.ts` typings for VS Code (6.5) |
 | `mklib` | compiles a library project, produces the `.qjslib` (section 4.5) |
 | `deploy` | sends a package to the device through the agent and starts it; `--monitor` then shows the program's output |
 | `monitor` | shows the output of the program running on a device |
-| `device info` / `run` / `stop` / `reset` | installed package and state, start, stop, restart of the device |
+| `device info` / `run` / `stop` / `reset` | installed package and state (memory, load, data folder), start, stop, restart of the device |
+| `device ls` / `read` / `write` / `rm` / `mkdir` / `mv` | the files of the data folder of the device (5.4) |
 | `targets` | lists the serial ports of the PC |
-| `agent` | the device agent on the desktop, which stands in for a board; `--board`: the digital twin of a board (6.6) |
-| `debug` | planned: starts the proxy, a CDP server for VS Code |
+| `agent` | the device agent on the desktop, which stands in for a board; `--board` or `-p`: the digital twin of a board (6.6) |
+| `debug` | starts the proxy, a CDP server for VS Code (3.9) |
+| `profile` | samples the JS thread of a device, prints the functions that take its time |
 | `trace` | planned; its behaviour is not designed yet |
-
-Planned too, not done: `device ls`, to list the files of a device.
 
 ### 6.3 Targets
 
@@ -1713,9 +2041,13 @@ key or one of the wrong type is an error:
 | `exclude` | `[]` | patterns removed from `sources` |
 | `output` | `"build/packages"` | folder of the packages |
 | `keep` | `10` | number of packages kept for the project |
-| `target` | — | default device of `deploy`, `monitor` and `device` when `--target` is not given |
+| `target` | — | default device of `deploy`, `monitor`, `device`, `debug` and `profile` when `--target` is not given; `"twin"`: the twin of the project (6.6) |
+| `debugPort` | `9339` | port of the CDP server of `qjsx debug` |
 | `env` | — | `process.env` of the program on a device (strings only) |
+| `desktop` | — | root folder and permissions of the program on the PC (6.7) |
 | `libraries` | `[]` | paths of the `.qjslib` files the program may import, in addition to `stdlib` |
+| `data` | — | folder of the project whose files `qjsx deploy --data` writes to the device |
+| `twin` | — | the digital twin of the project: board, parts, ports, `uarts`, `randomSeed` (6.6) |
 
 A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with:
 
@@ -1774,7 +2106,10 @@ A library project (`qjsx mklib`, section 4.5) replaces `main` and `sources` with
 > BME280, potentiometer, and the project's own), I2C buses with a trace, analog inputs,
 > UARTs and USB device over TCP, an analyzer of the pins, a page in x4js. Tested in Debug by `tests/twin.test.js`,
 > `tests/twinparts.test.js`, `tests/usb.test.js`, `tests/i2c.test.js`,
-> `tests/serial.test.js`, `tests/twintcp.test.js`, and tried in the browser pane.**
+> `tests/serial.test.js`, `tests/twintcp.test.js`, `tests/twinwire.test.js`,
+> `tests/pwm.test.js`, and tried in the browser pane. 2026-11-17: the WT32-SC01 (an original
+> ESP32) with its screen, the part `st7796-320x480`, drawn by `stdlib/display` and `sys/draw`
+> as on the board (`tests/display.test.js`, tried in the browser pane with `temp/wt32twin`).**
 
 ![The page of the twin](images/twin.jpg)
 
@@ -1817,12 +2152,24 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
   outputs, timers, clock (Hz), maxBits }`: 8, 4, 80000000, 14 for the S3), `natives`
   (the native modules of the board's firmware), `parts` (the parts soldered on the board,
   as the project's: `{ id, model, label, ... }`; the YD-ESP32-S3: BOOT, a `button` on
-  GPIO0, and RGB, a `ws2812` on GPIO48).
+  GPIO0, RESET, a `button` with `"reset": true` and no pin (released, it restarts the
+  device as `qjsx device reset` does; 2026-11-16), and RGB, a `ws2812` on GPIO48), `dac` (`{
+  pins, bits, fullScale }`), `spi` (`{ ports, reserved }`). Boards described today: the
+  YD-ESP32-S3, a client board, an ESP32-DevKitC (original ESP32, for the DAC) and the
+  WT32-SC01 (`wt32-sc01.json`, 2026-11-17: original ESP32, its natives those of its
+  firmware built with `QJSX_DRAW`, `sys/draw` included; parts: RESET, a `button` with
+  `"reset": true`, and its screen, an `st7796-320x480` on SPI2, chip select 15, DC 21,
+  reset 22, backlight 23; its FT6336 touch on I2C, SDA 18, SCL 19, 0x38, is not simulated
+  yet; no BOOT button described: not checked on the board).
 - **What the program sees**: only the board's native modules (`rt::setDeviceNativeModules`:
   the loader refuses the others in a device run, the agent lists only them in HELLO, so
   `qjsx deploy` refuses a program importing `sys/net` or `sys/compiler`); the board's
   `process.platform`; the agent calls itself "qjsx twin" and gives the board's chip and
-  name as identity.
+  name as identity. With `"randomSeed"` in the `twin` section, the random numbers of each
+  run of the program are the same sequence (5.4, "Random numbers"). `device/dac` is
+  registered only for a board with a `"dac"` section, `sys/draw` (`common/draw`, built into
+  the `qjsx` executable) only for a board whose `natives` list it: never for `qjsx run` nor
+  the desktop agent.
 - **Simulated hardware** (`host/twin/sim/`), behind the interfaces of `common/hal`, so that
   the modules of `common/device/` run unchanged:
   - `twin.cpp`, `hal::gpio`: the level of a pin comes from what drives it, in this order:
@@ -1853,6 +2200,17 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
     number the program chose), a NACK (`ENXIO`) when none; a probe is a transfer of
     nothing. Every transfer is kept in a trace (the last 256, every bus together: time,
     bus, address, frequency of the device, the first 32 bytes written and read, status);
+  - `twin_spi.cpp`, `hal::spi`: the controllers of the board's `"spi"` (`reserved` ones
+    refused as busy), on any pins; a transaction goes to the part on its chip select
+    (through the bridge; the program waits for its answer, 1 s at most), 0xFF read when
+    none; nothing is timed. A MADE segment (`hal_spi.h`: the pixels of a display, made by
+    `sys/draw` a band of rows at a time) is run as the ESP32 runs it: piece by piece, each
+    piece of at most its `pieceSize` bytes made by its `make` just before it goes out (a
+    `pieceSize` of 0 or above the bus's `maxTransfer` fails, as on the ESP32); its bytes
+    are gathered into one write segment of the whole size, in order, at the segment's DC
+    level, which is what the part and the trace get. Every transaction is kept in a trace
+    (the last 256: device, segments, the first 16 bytes of each: a whole screen of 307,200
+    bytes keeps 16);
   - `twin_adc.cpp`, `hal::adc`: the analog inputs the description lists; a read converts
     the voltage on the pin (what a part sets, else its level times vref) over the span
     chosen for the range, saturating above it, as the ESP32-S3 does;
@@ -1914,12 +2272,17 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
     exception stops the twin). `Part`: `id`, `label`, `config`, `publish(state)` (to the
     pages; the last one is given to a page that connects later), `onAction(action, args)`
     (from the page), `log(...)` (the console of the page), `static controls` (below).
-    `board.pin(n)`: `level`, `mode`, `voltage` (read and set, volts), `drive(0 | 1 |
+    `board.pin(n)`: `level`, `mode`, `voltage` (read and set, volts), `pwm` (`{ frequency,
+    duty, invert }` of the program's PWM output on it, or null; 2026-11-17), `drive(0 | 1 |
     null)`, `pull("up" | "down" | null)`, `onChange(fn)`; a pin taken by two parts is
     refused. `board.i2c({ sda, scl })`: `attach(address, { onTransfer(written,
     readLength) })` (bytes, or null for a NACK; synchronous only: a promise fails the
-    transfer), `detach(address)`; an address taken twice is refused. `board.rmt(pin)`:
-    `onBytes(fn)`, `onPulses(fn)`. `board.now()`, `board.supply` (vref). Helpers:
+    transfer), `detach(address)`; an address taken twice is refused. `board.spi({ port
+    })`: `attach(cs, { onTransaction(segments, device) })` (segments `{ kind, size, dc,
+    bytes, delayUs }`; returns the bytes of its read segments, or null), `detach(cs)`.
+    `board.rmt(pin)`:
+    `onBytes(fn)`, `onPulses(fn)`. `board.now()`, `board.supply` (vref), `board.restart()`
+    (the reset button of the board). Helpers:
     `Registers` (the registers of a chip: a pointer that moves at each byte, writes
     "increment" or "pairs", `set`, `get`, `onWrite`, `onRead`), `parseAddress`,
     `parsePin`. Everything of a model runs on the twin's thread, one call at a time;
@@ -1928,7 +2291,41 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
     `ws2812` (pin, count, order), `bme280` (i2c, address 0x76 / 0x77, initial; the
     registers, calibration and compensation of the datasheet: a driver written for the
     real chip reads it; the raw values found by bisection of the compensation formulas),
-    `potentiometer` (pin, position: the voltage on the pin, read by `device/adc`);
+    `potentiometer` (pin, position: the voltage on the pin, read by `device/adc`),
+    `st7796-320x480` (2026-11-17; named after the controller and the size of the screen,
+    never after a board, user: spi `{ port, cs }`, dc, reset, backlight, all but spi
+    optional), below;
+  - `st7796-320x480`, a color display of 320 x 480 driven by an ST7796 on SPI (the screen
+    of the WT32-SC01). The model understands SWRESET, SLPIN / SLPOUT, INVOFF / INVON,
+    DISPOFF / DISPON, CASET, RASET, RAMWR, RAMWRC, MADCTL and COLMOD (16 or 18 bits a
+    pixel), the DC level read from each segment: RAMWR fills the window row by row from
+    its top left, and starts again there after its last pixel. Its memory is the glass as
+    seen with the board held USB connector at the bottom (320 wide, 480 high); MADCTL maps
+    the program's (column, row) to it: MV exchanges them, MX mirrors the glass's columns
+    the other way (this panel's columns are reversed: MX alone, 0x48, is rotation 0 of
+    `stdlib/display`, origin top left), MY mirrors the rows, BGR set keeps the colors as
+    sent (clear: red and blue exchanged): 0x48, 0x28, 0x88, 0xe8 give the image turned 0,
+    90, 180, 270 degrees clockwise. The reset pin going to 0 and SWRESET clear the memory
+    and put the controller back asleep, off, 18 bits a pixel (the reset value of COLMOD: to
+    check against the datasheet). The backlight's brightness is the duty cycle of the PWM
+    on its pin (`pin.pwm`), else its level. For speed (the user saw a twin take most of a
+    core): the pixels of a memory write are taken a row of the window at a time (a straight
+    line on the glass, one loop), a pixel that does not change marks nothing, a changed one
+    marks its tile of 16 x 16; every 66 ms at most the dirty tiles go to the page as a few
+    rectangles (the runs of tiles of a row of tiles, merged with the same runs of the row
+    above), their pixels in base64, 16 bits high byte first (the memory is kept in that
+    byte order: rows are copied whole), with the look of the screen: `{ width, height,
+    awake, on, inverted, brightness, turn, rects: [{ x, y, width, height, pixels }] }`;
+    nothing when nothing changed. The action `"refresh"` sends the whole glass (a page that
+    opens asks for it, and again once a second until a whole glass came). Measured with
+    the WT32-SC01's text demo (`temp/wt32twin`: two areas shown 10 times a second, 1.1 MB
+    of pixels a second; 2026-11-17): Debug, the model's JS 684 -> 178 ms a second, the
+    base64 sent 1957 -> 511 KB a second, the process 78 % -> 34 % of a core; Release, the
+    model 72 ms a second, the process 21 % (before the fix of the trace below) -> 10 % of a
+    core with no page open (11 % with one), the page 1.2 ms an update. Found on the way: `TraceRing::visit` (twin.h) turned
+    the largest `after` (the page's server asks for it to skip every record when no page
+    is open) into 0 and built all the records kept, every 50 ms: 8 to 12 % of a core once
+    the SPI trace was full; `after + 1` is now computed on 64 bits;
   - a part of the project: `"model": "./folder"`, `model.js` (it imports `qjsx:twin`)
     and, if it wants, `view.js` (below);
   - `host/twin/js/parts.js` (`qjsx:twin/parts`) builds them when the twin starts: the
@@ -1981,7 +2378,10 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
     when a link is on or failed, a refused choice shown by a Notification (`notify.ts`);
     `controls/section.ts` takes such tools at the right of its title line); each I2C bus
     (the same settings icon: "Clear the transfers" in its menu) the program opened with no part on it (`i2cpanel.ts`:
-    its pins and frequencies, the trace of its transfers);
+    its pins and frequencies, the trace of its transfers); each SPI bus the program
+    opened with no part on it (`spipanel.ts`, the trace of its transactions; user,
+    2026-11-17: a bus with a part, a screen, is not shown, the part shows itself; its
+    trace is still recorded, few bytes a transaction);
   - `partview.ts`, the view of a part, three levels: no view and no controls, its state
     as name / value; controls declared by the model (`static controls = [{ name, type:
     "slider" | "knob" | "switch" | "select" | "button" | "value" | "led", label, min,
@@ -1989,7 +2389,17 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
     value }`; consecutive knobs side by side, a fixed width each); a view of its own
     (`export function createView(x4, part)` in the project's `view.js`, loaded with
     `import()`, given x4js and `part = { id, label, model, onState(fn), send(action,
-    args) }`);
+    args) }`), or, for a part of qjsx, a view built into the page (`BUILT_IN_VIEWS` of
+    `partview.ts`, by model: a part of qjsx has no `view.js`);
+  - `screenview.ts`, the built-in view of `st7796-320x480`: the pixels, one canvas pixel
+    per pixel of the screen (not smoothed), and a line under them (its size; asleep, off,
+    or the backlight in %; where the USB connector of the board is). The rectangles are
+    copied into an ImageData of the whole glass kept between updates, then by one
+    `putImageData` (the box of the update) into a canvas of the glass off the page; the
+    canvas shown draws it turned back by the image's turn, so that the program's image is
+    upright, as the board is held to read it (rotation 90 of `stdlib/display`: shown
+    landscape, "USB connector at the right"), as bright as the backlight over black;
+    black while asleep or off. It asks the model for the whole glass when it is built;
   - `pintable.ts`: one row per pin built once and updated in place: level, mode ("adc
     1.65 V", "pwm 1 kHz 25 %", "i2c", "rmt", or the gpio mode), pull, parts, force buttons on / off / free
     in one segmented control (a tooltip says what "free" means); a pin a part drives is
@@ -2044,7 +2454,9 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
     Drawn in an x4js `Canvas` (whose inner canvas is absolute: its component gets
     `position: relative`); the traces' types in `scopetrace.ts`;
   - `controls/`: our own components (`Led`: a bezel and a lens with a highlight, a glow
-    when lit; `HoldButton`; `Section`); `model.ts`: the only `fetch` of the page;
+    when lit; a strip of several LEDs is drawn as small flat squares instead, user; the
+    color of a lit LED is computed from the light of the WS2812's three LEDs, cube root of
+    each channel then a matrix to sRGB, 2026-11-16; `HoldButton`; `Section`); `model.ts`: the only `fetch` of the page;
     `texts.ts`: the texts (`addTranslation`, English); `messages.ts`: the messages.
 
   One font size everywhere, 12px (user: x4's `--font-size` on `:root`); the page paints its
@@ -2058,11 +2470,12 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
   files of `dist/` become a zip archive with stored entries, written as a byte array
   (`twin::uiArchive()`). To work on the page without linking qjsx again: `npm run build`
   in `host/twin/ui`, and the hidden option `qjsx agent ... --ui-dir host/twin/ui/dist`.
-- **Not done**: other parts (a display: SSD1306), SPI and UART devices played by models,
+- **Not done**: other parts (other displays: SSD1306; the touch of the WT32-SC01, an
+  FT6336 on I2C), UART devices played by models,
   in the analyzer the Auto mode, an adjustable holdoff and position of the trigger,
   decoders; `pin.pwm` for the models of the parts; the speed of the board simulated, test
-  scenarios, signals (values that change over time, scripted in the page), other boards
-  than the YD-ESP32-S3 (TODO.md).
+  scenarios, signals (values that change over time, scripted in the page), more boards
+  (TODO.md).
 
 ### 6.7 Permissions of a program of the PC
 
@@ -2077,8 +2490,9 @@ disk. Model: Deno's — nothing is allowed unless granted.
   permissions** (user): its working folder is the board's data folder (`process.cwd()`,
   base of relative `fs` paths) and everything is allowed; but the desktop agent and the
   twin, which run on the PC's own disk, **simulate the partition of a board**: their
-  programs reach no file outside `<storage>/data` (`board::confineFiles()`, true only on the
-  desktop board; network, serial ports and environment stay free). The tool's own commands
+  programs reach no file outside `<storage>/data` (`board::confineFiles()`, true on the
+  desktop board, and on the ESP32 since 2026-11-13, where `fs` is confined to `/data`;
+  network, serial ports and environment stay free). The tool's own commands
   (`qjsx build`, `deploy`...) have no permissions either.
 - **Kinds**: `read` and `write` (folders; `sys/fs`), `net` (`host` or `host:port`;
   `listen` and `connect` of `sys/net`), `env` (variable names; the others are left out of
@@ -2140,10 +2554,11 @@ disk. Model: Deno's — nothing is allowed unless granted.
 
 ### 7.1 To verify (flagged as such in the sources)
 
-- Running the bytecode straight from flash with `JS_READ_OBJ_ROM_DATA`. Reading the package
-  in place through `esp_partition_mmap` works; the engine still copies the bytecode it loads
-  (section 4.1).
-- js-debug target type for the "attach" configuration: node or chrome.
+- Running the bytecode straight from flash with `JS_READ_OBJ_ROM_DATA`: done since
+  2026-11-16 (change S, 4.1 "Executed in place"); still open from that work: tables of
+  variables in place (its step 3), the fingerprint of the names checked at the upload,
+  the RP2350.
+- js-debug target type for the "attach" configuration: settled, `node` (3.9, 6.5).
 - The explanation of the microbench differences (inlining of `static` functions by gcc) is an
   unverified hypothesis.
 
@@ -2162,10 +2577,11 @@ Most of the points this list held were settled when the code was written (framin
 keys of `qjsx.json` and of the manifest, commands, position kinds: see sections 4 and 6).
 Still open:
 
-- Writing back the variables modified by an evaluated expression (the wrapper function
-  receives the variables as parameters; only `SET_SLOT` is described for changing a variable).
+- Writing back the variables modified by an evaluated expression: the wrapper function
+  receives the variables as parameters, so an assignment in an evaluated expression does
+  not reach the program (decided 2026-11-11: a variable is changed with `SET_SLOT`,
+  `Debugger.setVariableValue`); whether to do more is open.
 - Behaviour of the `trace` command.
-- The style of the JS API of the hardware modules.
 
 ### 7.4 Inconsistencies between sources
 
@@ -2203,12 +2619,15 @@ The inconsistencies noticed when this document was written have been fixed in th
 | `common/jsbind/` | the C++ ↔ JS binding library (5.3) |
 | `common/runtime/` | event loop, platform interface, memory, files, package reader, SHA-256, modules shared with the devices (5.1, 5.4) |
 | `common/board/` | `board.h`: what the common code needs from a board (5.5) |
-| `common/agent/` | the device agent: protocol, deployment, debugger stub, runner of the installed package (4.3) |
-| `host/` | the `qjsx` tool: C++ entry points, host-only modules, commands written in JS (`host/js/`), desktop platform and board (6) |
+| `common/agent/` | the device agent: protocol, deployment, files of the data folder, debugger stub, profiler, runner of the installed package (4.3) |
+| `common/hal/` | interfaces of the hardware (5.4) |
+| `common/device/` | the `device/...` modules, written once over `common/hal/` (5.4) |
+| `host/` | the `qjsx` tool: C++ entry points, host-only modules, commands written in JS (`host/js/`), desktop platform and board, the digital twin (`host/twin/`) (6) |
+| `boards/` | descriptions of the boards for the twin (6.6) |
 | `lib/stdlib/` | sources of the standard library (4.5) |
-| `ports/` | device firmwares: `cmake/` (common build), `freertos/` (shared by the FreeRTOS ports), `esp32/` (5.5) |
+| `ports/` | device firmwares: `cmake/` (common build), `freertos/` (shared by the FreeRTOS ports), `esp32/`, `rp2350/`, `imxrt1062/` (5.5) |
 | `tests/` | `run-tests.sh`, the test scripts and their fixtures |
-| `tools/` | `quickjs-split/` (generator of the split engine, its test build and microbench), `embed-js.lua`, `idf.ps1`, style and documentation checks |
+| `tools/` | `quickjs-split/` (generator of the split engine, its test build and microbench), `rom-atoms/`, `profile/`, `embed-js.lua`, `embed-types.lua`, `embed-twin-ui.lua`, `idf.ps1`, `pico.ps1`, `teensy.ps1`, style and documentation checks |
 | `doc/` | documentation |
 | `premake5.lua` | build of the desktop tool (2.8) |
 
@@ -2218,7 +2637,7 @@ The inconsistencies noticed when this document was written have been fixed in th
 |---|---|
 | Device agent | software embedded on the device that contains the debug stub and handles deployment |
 | Debug sidecar | one JSON file per script holding the debug info, kept on the host |
-| Build id | id of a script (SHA-256 of its bytecode, first 32 hexadecimal digits) or of a package (same, over the ids of its scripts, its main module and its `env`) |
+| Build id | id of a script (SHA-256 of its bytecode, first 32 hexadecimal digits) or of a package (same, over the ids of its scripts, its main module, its `env` and its `desktop` section) |
 | CDP | Chrome DevTools Protocol, spoken by js-debug |
 | COBS | Consistent Overhead Byte Stuffing: an encoding that removes the `0x00` bytes from a frame |
 | Proxy | CDP adapter on the host, between VS Code and the agent |

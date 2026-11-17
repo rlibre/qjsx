@@ -73,6 +73,21 @@ const twin_en = {
         i2c_clear:      "Clear the transfers",  // menu of a bus: empties its trace
         i2c_menu_tooltip: "This bus: its trace",
         i2c_probe:      "probe",                // a transfer of nothing
+        dac:            "DAC",                  // title of the section of the analog outputs
+        screen_asleep:  "asleep",               // a display part (screenview.ts): not out of sleep yet
+        screen_off:     "display off",          // out of sleep, display not on
+        screen_backlight: "backlight",          // "backlight 50 %"
+        screen_usb:     "USB connector",        // where the board's USB connector is, the image upright: "USB connector at the right"
+        screen_sides:   ["at the bottom", "at the right", "at the top", "at the left"],   // the image turned 0, 90, 180, 270 degrees
+        spi:            "SPI",                  // title of an SPI bus section: "SPI 2"
+        spi_closed:     "closed",
+        spi_clear:      "Clear the transactions",   // menu of a bus: empties its trace
+        spi_menu_tooltip: "This bus: its trace",
+        spi_device:     "device",               // "1 device" on the title line of a bus
+        spi_devices:    "devices",              // "2 devices"
+        spi_cs_program: "cs by the program",    // a device without chip select (the program drives it)
+        spi_wait:       "wait",                 // a delay segment: "wait 10 µs"
+        spi_no_part:    "no part: 0xFF read",   // nothing answered the transaction
         uart:           "UART",                 // title of the section of a UART: "UART 1"
         uart_links_tooltip: "This UART: its TCP port, a serial port of the PC, how its traffic is shown",
         uart_link_tcp:  "TCP",                  // the sub menu of the TCP link of a UART

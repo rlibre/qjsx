@@ -13,17 +13,23 @@
 //   - each UART but the agent's link, when the firmware has device/serial
 //     (uartpanel.ts);
 //   - each I2C bus the program opened with no part on it, when the firmware
-//     has device/i2c (i2cpanel.ts: the trace of the transfers).
+//     has device/i2c (i2cpanel.ts: the trace of the transfers);
+//   - each SPI bus the program opened with no part on it, when the firmware
+//     has device/spi (spipanel.ts: the trace of the transactions);
+//   - the analog outputs, when the board has a DAC and its firmware
+//     device/dac (dacpanel.ts: a needle meter per output).
 // The sections can be moved: a section dragged by its title line drops
 // before or after another (a line shows where); the order is kept by the
 // browser by the keys of the sections, a section it does not know at the
 // end.
 import { BoxProps, Component, dragManager, DropInfo, HBox, Label, VBox } from "x4js";
 import { Section } from "./controls/section";
+import { DacPanel, dacSummary } from "./dacpanel";
 import { I2cPanel, i2cSummary } from "./i2cpanel";
-import { BoardInfo, I2cBusState, I2cRecord, PartInfo, PartState, PinState, UartRecord, UartState, UsbState } from "./messages";
+import { BoardInfo, DacInfo, I2cBusState, I2cRecord, PartInfo, PartState, PinState, SpiBusState, SpiRecord, UartRecord, UartState, UsbState } from "./messages";
 import { pinMode } from "./pintable";
 import { PartView } from "./partview";
+import { SpiPanel, spiSummary } from "./spipanel";
 import { tx } from "./texts";
 import { UartPanel, uartSummary } from "./uartpanel";
 import { usbSummary, UsbView } from "./usbview";
@@ -89,6 +95,8 @@ export class BoardView extends VBox {
     private _usb: Shown<UsbView> = null;                         // null: the firmware has no device/usb
     private _uarts = new Map<number, Shown<UartPanel>>();        // by UART number
     private _i2c = new Map<number, Shown<I2cPanel>>();           // by bus number
+    private _spi = new Map<number, Shown<SpiPanel>>();           // by controller number
+    private _dac: Shown<DacPanel> & { info: DacInfo } = null;    // null: the board has no DAC
 
     /**
      * An empty board, until setBoard().
@@ -175,9 +183,38 @@ export class BoardView extends VBox {
             sections.push(section);
         }
 
-        // shown among the parts, in the order kept
+        // the SPI buses, hidden until the program opens one
+        this._spi.clear();
+        const hasSpi = board.natives.includes("device/spi");
+        const spiPorts = hasSpi ? board.spi?.ports ?? [] : [];
+
+        for (const port of spiPorts) {
+            const view = new SpiPanel({});
+            const section = new Section({
+                title: `${tx.twin.spi} ${port}`,
+                persist: `spi${port}`,
+                content: view,
+                tools: [view.menuButton],
+            });
+            section.hide();
+            this._spi.set(port, { section, view });
+            sections.push(section);
+        }
+
+        // the analog outputs: a meter each
+        this._dac = null;
+        const hasDac = board.natives.includes("device/dac") && board.dac !== undefined;
+        if (hasDac) {
+            const view = new DacPanel({}, board.dac);
+            const section = new Section({ title: tx.twin.dac, persist: "dac", content: view });
+            this._dac = { section, view, info: board.dac };
+            sections.push(section);
+        }
+
+        // shown among the parts, in the order kept, with their pins
         this._deviceList = sections;
         this._arrange();
+        this.setPins(this._pins);
     }
 
     /**
@@ -201,6 +238,32 @@ export class BoardView extends VBox {
         // each bus gets its own transfers, if any
         for (const [bus, shown] of this._i2c) {
             const own = records.filter(record => record.bus === bus);
+            if (own.length > 0) {
+                shown.view.addRecords(own);
+            }
+        }
+    }
+
+    /**
+     * Shows the SPI buses: the section of a bus only while the program has
+     * it open and no part is on it (a part shows itself: a screen, user
+     * 2026-11-17), as the I2C buses.
+     */
+    setSpi(buses: SpiBusState[]) {
+        for (const state of buses) {
+            const shown = this._spi.get(state.port);
+            shown?.section.show(state.open && state.parts.length === 0);
+            shown?.section.setSummary(spiSummary(state));
+        }
+    }
+
+    /**
+     * Adds transactions to the trace of their bus.
+     */
+    addSpiRecords(records: SpiRecord[]) {
+        // each bus gets its own transactions, if any
+        for (const [port, shown] of this._spi) {
+            const own = records.filter(record => record.port === port);
             if (own.length > 0) {
                 shown.view.addRecords(own);
             }
@@ -394,6 +457,12 @@ export class BoardView extends VBox {
             const onPins = this._buttonSection.parts.filter(part => part.pins.length > 0);
             const summaries = onPins.map(part => `${part.label}: ${partSummary(part, pins)}`);
             this._buttonSection.section.setSummary(summaries.join(", "));
+        }
+
+        // the analog outputs: the meters and the voltages on the title line
+        if (this._dac !== null) {
+            this._dac.view.setPins(pins);
+            this._dac.section.setSummary(dacSummary(this._dac.info, pins));
         }
     }
 

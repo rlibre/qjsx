@@ -1,0 +1,19 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
+# Wireless-Tag WT32-SC01 v3.2: ESP32-WROVER-B module, an ORIGINAL ESP32
+# (ESP32-D0WD, chip revision v1.0 as esptool reports), 4 MB of flash (XMC,
+# 3.3 V), PSRAM of the module on SPI (quad), 3.5" display on SPI, capacitive
+# touch on I2C; host link on UART0 through a CP210x bridge.
+
+CONFIG_IDF_TARGET="esp32"
+
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/4MB.csv"
+
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_USE_CAPS_ALLOC=y

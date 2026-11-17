@@ -1,7 +1,10 @@
 # Split QuickJS: performance and compilation
 
 Comparison between `engine/qjs-bellard/quickjs.c` (QuickJS 2026-06-04, a single file)
-and `engine/qjsx/` (same code split into 55 files), measured on 2026-11-10.
+and `engine/qjsx/` (same code split into 55 files), measured on 2026-11-10. The engine
+changes made since then modify some of these files and add others (list in
+[quickjs-map.md](quickjs-map.md), "Files"); their own measures are in
+[engine-changes.md](engine-changes.md), "Performance".
 
 Conditions: Windows, gcc 13.1.0 mingw64, `-O2 -fwrapv`, without LTO, 20 threads.
 Both `qjs.exe` are built with the same `qjs.c`, `quickjs-libc.c` and `repl.c`

@@ -12,7 +12,8 @@
 #   idf.py -B build-yd-esp32-s3-n16r8 -D QJSX_BOARD=yd-esp32-s3-n16r8 -p COM11 flash
 # The sources shared by every device port are listed in ports/cmake/qjsx.cmake;
 # main/ is the ESP32 code shared by every ESP32 board; boards/<board>/ holds what
-# differs (sdkconfig.board: chip, flash, partitions, PSRAM; board_config.h).
+# differs (sdkconfig.board: chip, flash, partitions, PSRAM; board_config.h;
+# board.cmake, optional: what the firmware adds for the board, e.g. sys/draw).
 cmake_minimum_required(VERSION 3.16)
 
 # the board

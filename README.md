@@ -96,9 +96,14 @@ the board does not have.
 ## What is inside
 
 - **`qjsx`, a command-line tool**: a single executable to build, send, start, stop and watch a
-  program.
-- **Firmwares for the boards**: ESP32-S3 (over its serial port), Teensy 4.0 and RP2350 (over
-  their own USB port). Each one receives programs and runs them.
+  program, read and write the files of the board, and see which functions take its time
+  (`qjsx profile`).
+- **Firmwares for the boards**: ESP32-S3 and the original ESP32 (over their serial port),
+  Teensy 4.0 and RP2350 (over their own USB port). Each one receives programs and runs them.
+- **Color displays**: `stdlib/display` draws rectangles, lines, arcs, rounded rectangles and
+  smoothed text on an SPI display (today the ST7796 of the WT32-SC01), about 15 images a
+  second for two animated gauges. It keeps no copy of the screen: the image is rendered a
+  few rows at a time while it goes out, and the fonts stay in flash.
 - **Libraries**: the standard library (`stdlib`) comes with the tool, and you can make your
   own with `qjsx mklib`. Only the modules a program really imports go to the board (see
   below), and inside them only what it uses: `qjsx build` leaves out the functions, classes
@@ -135,7 +140,8 @@ A web page shows the board and lets you act on it:
 ![The page of the digital twin](doc/images/twin.jpg)
 
 - **the parts of the board**: its BOOT button (hold it down), its RGB LED (it lights as the
-  program drives it);
+  program drives it); its screen (it shows what the program draws, at the speed
+  of the real board's SPI bus); the needle meters of its analog outputs;
 - **the parts you wire on it**, declared in the `qjsx.json` of your project: a BME280
   sensor whose temperature, humidity and pressure you turn with knobs, a potentiometer, a
   strip of LEDs... Your program reads the BME280 over I2C with the same driver as on the
@@ -179,7 +185,7 @@ The twin runs at the speed of the PC, not of the board.
 | Libraries (`.qjslib`) | works |
 | Debugger on the board | works |
 | Debugger in VS Code (`qjsx debug`) | works (conditional breakpoints and logpoints to do) |
-| Hardware modules | `device/gpio`, `device/rmt` and RGB LEDs (`stdlib/rgbled`), `device/usb`, `device/pwm` on the ESP32; `device/gpio` and `device/pwm` on the Teensy 4.0; `device/i2c` and `device/adc` written (not tried with a real component yet); SPI, WiFi to do |
+| Hardware modules | `device/gpio`, `device/rmt` and RGB LEDs (`stdlib/rgbled`), `device/usb`, `device/pwm` on the ESP32; `device/gpio` and `device/pwm` on the Teensy 4.0; `device/gpio` on the RP2350; `device/i2c`, `device/adc` and the UARTs of `device/serial` written for the ESP32 (not tried with a real component yet); SPI, WiFi to do |
 | Files on the board | works on the ESP32 (LittleFS on `/data`); to do on the others |
 | Native USB link | works on the Teensy 4.0 and the RP2350; to do on the ESP32 |
 | WiFi link | to do |

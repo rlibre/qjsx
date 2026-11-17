@@ -48,7 +48,7 @@ the `desktop` section of `qjsx.json`, copied into it by the build:
   written. A root at the root of a disk is refused.
 - Variables: `${executableFolder}` (the folder of the package file),
   `${userAppDataFolder}` (`%APPDATA%/<name>`, `~/Library/Application Support/<name>`,
-  `~/.local/share/<name>`), `${currentFolder}`, `${rootFolder}`.
+  `$XDG_DATA_HOME/<name>` or `~/.local/share/<name>`), `${currentFolder}`, `${rootFolder}`.
 - `process.cwd()` is the root folder: relative paths of `sys/fs` start there.
 - `--qjsx-root-folder=<folder>` (or the variable `QJSX_ROOT_FOLDER`) replaces the root
   folder: two copies of a program can work on two folders.

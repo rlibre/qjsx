@@ -56,6 +56,26 @@ PRUNE_PACKAGE=$(ls tests/fixtures/prune/build/packages/*.qjspkg 2>/dev/null | he
 "$BIN/qjsx-target" run "$PRUNE_PACKAGE" > build/prune-target.txt 2>&1
 check "a package with declarations left out runs like its sources" diff build/prune-source.txt build/prune-package.txt
 check "the same, without compiler" diff build/prune-source.txt build/prune-target.txt
+check "files imported as bytes (package entries, manifest, errors, build id)" "$BIN/qjsx" run -A tests/bytes.test.js
+# the program of that fixture reads the files it imports as bytes: from the
+# disk when run from its sources, where they lie in its package otherwise
+BYTES_PACKAGE=$(ls tests/fixtures/bytes/build/packages/*.qjspkg 2>/dev/null | head -1)
+check "files imported as bytes, read by the program run from its sources" \
+    bash -c "'$BIN/qjsx' run tests/fixtures/bytes/src/main.js | diff --strip-trailing-cr tests/fixtures/bytes/expected.txt -"
+check "the same from its package" \
+    bash -c "'$BIN/qjsx' run '$BYTES_PACKAGE' | diff --strip-trailing-cr tests/fixtures/bytes/expected.txt -"
+check "the same without compiler" \
+    bash -c "'$BIN/qjsx-target' run '$BYTES_PACKAGE' | diff --strip-trailing-cr tests/fixtures/bytes/expected.txt -"
+# a font of the standard library (a file imported as bytes by a library
+# module): from the tool's embedded copy when run from its sources, from the
+# package (built by tests/bytes.test.js, which checks it holds that font only)
+FONTS_PACKAGE=$(ls tests/fixtures/fonts/build/packages/*.qjspkg 2>/dev/null | head -1)
+check "a font of the standard library, read by the program run from its sources" \
+    bash -c "'$BIN/qjsx' run tests/fixtures/fonts/src/main.js | diff --strip-trailing-cr tests/fixtures/fonts/expected.txt -"
+check "the same from its package" \
+    bash -c "'$BIN/qjsx' run '$FONTS_PACKAGE' | diff --strip-trailing-cr tests/fixtures/fonts/expected.txt -"
+check "the same without compiler" \
+    bash -c "'$BIN/qjsx-target' run '$FONTS_PACKAGE' | diff --strip-trailing-cr tests/fixtures/fonts/expected.txt -"
 check "tool modules" "$BIN/qjsx" run -A tests/tools.test.js
 check "protocol (CBOR, COBS, frames)" "$BIN/qjsx" run -A tests/protocol.test.js
 check "debug info (lines, breakpoints, scopes)" "$BIN/qjsx" run -A tests/debuginfo.test.js
@@ -321,7 +341,8 @@ done
 
 # --- the digital twin of a board: the agent with --board, its page driven
 # over HTTP and WebSocket (tests/twin.test.js), its USB device over TCP
-# (tests/usb.test.js), its I2C buses (tests/i2c.test.js), its PWM outputs
+# (tests/usb.test.js), its I2C buses (tests/i2c.test.js), its SPI buses
+# (tests/spi.test.js), its PWM outputs
 # (tests/pwm.test.js), its UARTs over TCP and on the page (tests/serial.test.js)
 TWIN_PORT=45679
 TWIN_UI_PORT=45680
@@ -342,6 +363,8 @@ check "USB device of the twin (device/usb, stdlib/usb, host over TCP)" \
     "$BIN/qjsx" run -A tests/usb.test.js "tcp:127.0.0.1:$TWIN_PORT" "$TWIN_USB_PORT"
 check "I2C buses of the twin (device/i2c, nothing answers)" \
     "$BIN/qjsx" run -A tests/i2c.test.js "tcp:127.0.0.1:$TWIN_PORT"
+check "SPI buses of the twin (device/spi, nothing answers, the trace of the page)" \
+    "$BIN/qjsx" run -A tests/spi.test.js "tcp:127.0.0.1:$TWIN_PORT" "$TWIN_UI_PORT"
 check "PWM outputs of the twin (device/pwm, the limits of the ESP32-S3)" \
     "$BIN/qjsx" run -A tests/pwm.test.js "tcp:127.0.0.1:$TWIN_PORT" "$TWIN_UI_PORT"
 check "UARTs of the twin (device/serial, TCP and the page)" \
@@ -352,7 +375,7 @@ check "the files of the data folder from the PC (qjsx device ls / read / write..
     "$BIN/qjsx" run -A tests/datafiles.test.js "tcp:127.0.0.1:$TWIN_PORT" build/test-twin
 kill "$TWIN_PID" 2> /dev/null
 wait "$TWIN_PID" 2> /dev/null
-rm -rf tests/fixtures/twin/build tests/fixtures/twinusb/build tests/fixtures/twini2c/build \
+rm -rf tests/fixtures/twin/build tests/fixtures/twinusb/build tests/fixtures/twini2c/build tests/fixtures/twinspi/build \
     tests/fixtures/twinserial/build tests/fixtures/twinpwm/build
 
 # --- random numbers: crypto.getRandomValues / randomUUID, randomBytes; the
@@ -424,7 +447,8 @@ rm -rf build/test-twin-wire
 
 # --- the twin of a project: "qjsx agent -p" reads the "twin" section of its
 # qjsx.json (board, parts, ports); the program reads a BME280 (a model of
-# qjsx) and an echo device (a model of the project) over I2C; "target":
+# qjsx) and an echo device (a model of the project) over I2C, an echo
+# device (a model of the project) over SPI; "target":
 # "twin" of the project reaches it
 TWINPARTS=tests/fixtures/twinparts
 TWINPARTS_PORT=45694       # "twin.ports" of its qjsx.json
@@ -438,7 +462,7 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
 done
 check "twin of a project: its board, ports and storage from qjsx.json" \
     grep -q "listening on 127.0.0.1:$TWINPARTS_PORT, storage $TWINPARTS/build/agent" build/twinparts-out.txt
-check "parts of a project on the twin (bme280, a model of the project, I2C, the page)" \
+check "parts of a project on the twin (bme280, models of the project, I2C, SPI, the page)" \
     "$BIN/qjsx" run -A tests/twinparts.test.js "tcp:127.0.0.1:$TWINPARTS_PORT" "$TWINPARTS_UI_PORT"
 check '"target": "twin" reaches the twin of the project' \
     bash -c "cd '$TWINPARTS' && '$BIN/qjsx' device info 2>&1 | grep -q 'connected to qjsx twin'"
@@ -460,6 +484,45 @@ check "twin of the project of the current folder: the models of its parts are fo
 kill "$TWIN_PID" 2> /dev/null
 wait "$TWIN_PID" 2> /dev/null
 rm -rf "$TWINPARTS/build"
+
+# --- the DAC outputs of a twin of an original ESP32 (board
+# esp32-devkitc-wroom32: device/dac on GPIO25 / GPIO26): codes, voltages,
+# errors, the voltages the page reads (its meters), the outputs
+# stopped by close() and at the end of the program (tests/dac.test.js)
+TWINDAC=tests/fixtures/twindac
+TWINDAC_PORT=45732         # "twin.ports" of its qjsx.json
+TWINDAC_UI_PORT=45733
+rm -rf "$TWINDAC/build"
+"$BIN/qjsx" agent -p "$TWINDAC" > build/twindac-out.txt 2>&1 &
+TWIN_PID=$!
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    grep -q listening build/twindac-out.txt 2>/dev/null && break
+    sleep 0.2
+done
+check "DAC outputs of the twin (device/dac of an original ESP32, the page)"     "$BIN/qjsx" run -A tests/dac.test.js "tcp:127.0.0.1:$TWINDAC_PORT" "$TWINDAC_UI_PORT"
+kill "$TWIN_PID" 2> /dev/null
+wait "$TWIN_PID" 2> /dev/null
+rm -rf "$TWINDAC/build"
+
+# --- the screen of a twin of the WT32-SC01 (board wt32-sc01: sys/draw, the
+# part st7796-320x480 on SPI2): stdlib/display draws rectangles, a line, a
+# text; the pixels the part publishes to the page, an area shown alone, the
+# four rotations, the backlight (tests/display.test.js)
+TWINDISPLAY=tests/fixtures/twindisplay
+TWINDISPLAY_PORT=45786     # "twin.ports" of its qjsx.json
+TWINDISPLAY_UI_PORT=45787
+rm -rf "$TWINDISPLAY/build"
+"$BIN/qjsx" agent -p "$TWINDISPLAY" > build/twindisplay-out.txt 2>&1 &
+TWIN_PID=$!
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    grep -q listening build/twindisplay-out.txt 2>/dev/null && break
+    sleep 0.2
+done
+check "the screen of the twin (stdlib/display, sys/draw, the st7796-320x480 part, the page)" \
+    "$BIN/qjsx" run -A tests/display.test.js "tcp:127.0.0.1:$TWINDISPLAY_PORT" "$TWINDISPLAY_UI_PORT"
+kill "$TWIN_PID" 2> /dev/null
+wait "$TWIN_PID" 2> /dev/null
+rm -rf "$TWINDISPLAY/build"
 
 check "a twin whose parts are wrong does not start" \
     bash -c "! '$BIN/qjsx' agent -p tests/fixtures/twinbad --port 0 --ui-port 0 > /dev/null 2> build/twinbad.txt && grep -q 'another part has this id' build/twinbad.txt"

@@ -15,10 +15,10 @@ What exists today:
 
 | Target | Where | State |
 |---|---|---|
-| ESP32-S3, ESP-IDF 6.1 | `ports/esp32/` | works on real boards: VCC-GND YD-ESP32-S3, WROOM-1 N16R8 module (16 MB flash, 8 MB octal PSRAM), and Espressif ESP32-S3-DevKitC-1, WROOM-1 N8R8 (8 MB flash, 8 MB octal PSRAM; folder `esp32-s3-devkitc-n8r8`, made in a few minutes as section 3 says), both wired by their UART0 / COM port |
+| ESP32-S3, ESP-IDF 6.1 | `ports/esp32/` | works on real boards: VCC-GND YD-ESP32-S3, WROOM-1 N16R8 module (16 MB flash, 8 MB octal PSRAM), Espressif ESP32-S3-DevKitC-1, WROOM-1 N8R8 (8 MB flash, 8 MB octal PSRAM; folder `esp32-s3-devkitc-n8r8`, made in a few minutes as section 3 says), and a client board without PSRAM (8 MB flash, JS heap in a region of internal RAM), all wired by their UART0 / COM port; files on `/data` (LittleFS), the hardware modules of `common/device/` |
 | i.MX RT1062 (PJRC Teensy 4.0, FreeRTOS + NXP MCUXpresso SDK) | `ports/imxrt1062/` | works on the board (2026-11-16): USB CDC link, packages in flash (the boot ROM's flash API), JS heap in OCRAM, debugger tests pass, `device/gpio`, `device/pwm`, `device/board` |
 | Desktop "board" (`qjsx agent`) | `host/platform/board_host.cpp`, `host/platform/platform_host.cpp` | works; a stand-in for a board, and a second implementation of the same interfaces |
-| RP2350 (Olimex PICO2-XXL, FreeRTOS SMP + pico-sdk) | `ports/rp2350/` | works on the board (2026-11-12): USB CDC link, packages in flash, JS heap in PSRAM, debugger tests pass |
+| RP2350 (Olimex PICO2-XXL, FreeRTOS SMP + pico-sdk) | `ports/rp2350/` | works on the board (2026-11-12, hang after a few uploads fixed 2026-11-17): USB CDC link, packages in flash, JS heap in PSRAM, debugger tests pass, `device/gpio` |
 
 Two cases:
 
@@ -46,8 +46,9 @@ contains no JavaScript at all.
 | QuickJS engine, without its compiler (no `eval` on a device) | `engine/qjsx/` except `compiler/`, built with `QJSX_NO_COMPILER` | no |
 | Runtime: event loop, globals (`console`, timers, `process`), modules `sys/fs` and `sys/crypto`, package reader | `common/runtime/` | no |
 | Device agent, debugger stub, runner of the installed package | `common/agent/` | no |
-| System services: clock, fatal stop, threads, mutex, signal | implementation of `common/runtime/platform.h` | yes (shared between FreeRTOS ports: `ports/freertos/`) |
-| The chip and its wiring: memory, package storage, links, console | implementation of `common/board/board.h` | yes |
+| System services: clock, fatal stop, random bytes, threads, mutex, signal | implementation of `common/runtime/platform.h` | yes (shared between FreeRTOS ports: `ports/freertos/`) |
+| The chip and its wiring: identity, memory, package storage, data folder, links, console | implementation of `common/board/board.h` | yes |
+| Hardware modules (`device/board`, `device/gpio`, `device/pwm`...) | `common/device/`, over the interfaces `common/hal/hal_*.h` | the `hal_*.h` the port offers (`device/board` needs only `board.h`) |
 | Entry point: creates the JS task, which calls `agent::runDevice()` | e.g. `ports/esp32/main/main.cpp` | yes |
 
 Threads on a device:
@@ -78,13 +79,14 @@ Two rules follow from this design:
 | Path | Content |
 |---|---|
 | `ports/esp32/CMakeLists.txt` | picks the board, stacks the two configuration files |
-| `ports/esp32/sdkconfig.defaults` | what does not depend on the board: custom partition table, console on UART0 at 921600 baud in "custom" mode, no secondary console, 240 MHz, `CONFIG_FREERTOS_HZ=1000`, no C++ exceptions, no RTTI |
+| `ports/esp32/sdkconfig.defaults` | what does not depend on the board: custom partition table, console on UART0 at 921600 baud in "custom" mode, no secondary console, 240 MHz, optimization for speed, `CONFIG_FREERTOS_HZ=1000`, two TinyUSB serial functions (`device/usb`), no C++ exceptions, no RTTI |
 | `ports/esp32/partitions/4MB.csv`, `8MB.csv`, `16MB.csv` | partition tables, by flash size, not by board |
-| `ports/esp32/main/` | the code shared by every ESP32 board (`main.cpp`, `board_esp32.cpp`, `board_esp32.h`, `platform_esp32.cpp`) |
-| `ports/esp32/boards/<board>/sdkconfig.board` | what differs: chip, flash size, partition table, PSRAM |
-| `ports/esp32/boards/<board>/board_config.h` | data for the shared code: today only `BOARD_NAME` |
+| `ports/esp32/main/` | the code shared by every ESP32 board (`main.cpp`, `board_esp32.cpp`, `board_esp32.h`, `platform_esp32.cpp`, the `hal_*_esp32.cpp` of the hardware modules, `idf_component.yml`) |
+| `ports/esp32/boards/<board>/sdkconfig.board` | what differs: chip, flash size and mode, partition table, PSRAM |
+| `ports/esp32/boards/<board>/board_config.h` | data for the shared code: `BOARD_NAME` and `JS_TASK_STACK` |
 
-The only board today is `ports/esp32/boards/yd-esp32-s3-n16r8/`. Use it as the model.
+Boards today: `yd-esp32-s3-n16r8/` (the default), `esp32-s3-devkitc-n8r8/`, and the client
+board (no PSRAM). Use `yd-esp32-s3-n16r8/` as the model.
 
 ### 3.2 Steps
 
@@ -112,8 +114,10 @@ The file of the test board, complete:
 ```
 CONFIG_IDF_TARGET="esp32s3"
 
-# flash and partitions
+# flash and partitions; the flash in QIO (4 data lines; DIO, the default, uses
+# 2): the code runs from flash through a 16 KB cache (user, 2026-11-16)
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/16MB.csv"
 
 # PSRAM: octal, only through heap_caps_malloc(MALLOC_CAP_SPIRAM), for the JS heap
@@ -125,7 +129,8 @@ CONFIG_SPIRAM_USE_CAPS_ALLOC=y
 | Option | Meaning | Notes |
 |---|---|---|
 | `CONFIG_IDF_TARGET` | the chip | only `"esp32s3"` has been built |
-| `CONFIG_ESPTOOLPY_FLASHSIZE_16MB` | flash size | ESP-IDF has one option per size (`..._4MB`, `..._8MB`...); only 16 MB has been tried |
+| `CONFIG_ESPTOOLPY_FLASHSIZE_16MB` | flash size | ESP-IDF has one option per size (`..._4MB`, `..._8MB`...); 16 MB and 8 MB have been tried |
+| `CONFIG_ESPTOOLPY_FLASHMODE_QIO` | flash read on 4 data lines | about 1.6 times faster JS than DIO on the client board; the flash chip must support it |
 | `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME` | the table, a file of `ports/esp32/partitions/` | must match the flash size; `CONFIG_PARTITION_TABLE_CUSTOM=y` is already in `sdkconfig.defaults` |
 | `CONFIG_SPIRAM` | the board has PSRAM | `board_esp32.cpp` tests it (`#if CONFIG_SPIRAM`) to put the JS heap in PSRAM |
 | `CONFIG_SPIRAM_MODE_OCT` | octal PSRAM | depends on the module. The wrong mode fails at boot. The quad option of ESP-IDF is `CONFIG_SPIRAM_MODE_QUAD`: not tried |
@@ -134,28 +139,39 @@ CONFIG_SPIRAM_USE_CAPS_ALLOC=y
 The file is read after `sdkconfig.defaults` (`SDKCONFIG_DEFAULTS` in
 `ports/esp32/CMakeLists.txt`), so the board wins when both set an option.
 
-A board **without PSRAM**: leave the three `CONFIG_SPIRAM...` lines out. `board::jsAllocator()`
-then returns `nullptr` and QuickJS uses its default allocator, in internal RAM. This path is
-written, **not tried**: how much JavaScript fits in the internal RAM of an ESP32 is not known,
-and with that allocator the engine cannot ask the C library for the real size of a block
-(`js_def_malloc_usable_size` returns 0, see [engine-changes.md](engine-changes.md), section I).
+A board **without PSRAM**: leave the three `CONFIG_SPIRAM...` lines out. The JS task then
+reserves, at its first runtime, one region of internal RAM for the JS heap (the largest free
+block less 16 KB, `JS_HEAP_RESERVE` in `board_esp32.cpp`), managed by `memory::RegionHeap`;
+the engine is built with `QJSX_SMALL_HEAP_DEFINES` (smaller arenas, a stock of async states:
+[engine-changes.md](engine-changes.md) Q and X), `board::jsHeapLimit()` gives the region's
+size to QuickJS as its memory limit (cycles collected before it is full, change T), and the
+agent's messages are 8 KB at most (`SMALL_MAX_MESSAGE`). Tried on the client board: a
+region of about 232 to 248 KB, depending on its `JS_TASK_STACK`. `idf.py
+-DQJSX_JS_HEAP_SHARED=ON` gives back the JS heap shared with the firmware (to compare).
 
 ### 3.4 `board_config.h`
 
 ```cpp
 #pragma once
 
+#include <stddef.h>
+
 namespace board {
 
 const char *const BOARD_NAME = "YD-ESP32-S3 (WROOM-1 N16R8)";   // in the identity of the device
+const size_t      JS_TASK_STACK = 48 * 1024;                    // stack of the JS task, bytes: about 110 nested JS calls
 
 } // namespace board
 ```
 
-Data only. `board_esp32.cpp` includes it by its bare name: the build adds the folder of the
-chosen board to the include path (`QJSX_BOARD_INCLUDE` in `ports/esp32/main/CMakeLists.txt`).
-`BOARD_NAME` is the only value read today. Pins and links are meant to go there later; they
-are not there yet.
+Data only (after the file header of the project). `board_esp32.h` includes it by its bare
+name: the build adds the folder of the chosen board to the include path
+(`QJSX_BOARD_INCLUDE` in `ports/esp32/main/CMakeLists.txt`). `BOARD_NAME` and
+`JS_TASK_STACK` are the values read today: the JS task's stack, in internal RAM (a nested
+JS call takes about 366 bytes of it on an ESP32-S3); QuickJS may use it less 8 KB
+(`JS_NATIVE_STACK_MARGIN`, `board_esp32.h`). On a board without PSRAM what the stack does
+not use is lost to the JS heap: the client board takes 32 KB. Pins and links are meant to
+go there later; they are not there yet.
 
 ### 3.5 Build and flash
 
@@ -207,14 +223,17 @@ Tables go by flash size. Each one has a `packages` partition (type `data`, subty
 which `board_esp32.cpp` finds by that type, subtype and name, and cuts into two slots of half
 its size.
 
-| Table | Firmware | `packages` | Largest package | `data` (future `fs`) | State |
+| Table | Firmware | `packages` | Largest package | `data` (`fs`, `/data`) | State |
 |---|---|---|---|---|---|
 | `4MB.csv` | one `factory` slot of 2.5 MB, no OTA | 1 MB (2 x 512 KB) | 512 KB - 4 KB | 448 KB | written, not tried on a board |
-| `8MB.csv` | `ota_0` + `ota_1`, 2.5 MB each | 1 MB (2 x 512 KB) | 512 KB - 4 KB | 1.875 MB | written, not tried on a board |
-| `16MB.csv` | `ota_0` + `ota_1`, 3 MB each | 2 MB (2 x 1 MB) | 1 MB - 4 KB | 7.875 MB | used on the test board |
+| `8MB.csv` | `ota_0` + `ota_1`, 2.5 MB each | 1 MB (2 x 512 KB) | 512 KB - 4 KB | 1.875 MB | used on the DevKitC and the client board |
+| `16MB.csv` | `ota_0` + `ota_1`, 3 MB each | 2 MB (2 x 1 MB) | 1 MB - 4 KB | 7.875 MB | used on the YD board |
 
 The firmware takes about 0.7 MB. The OTA slots are reserved; OTA itself is not written. The
-`data` partition is reserved for a file system that is not written either.
+`data` partition (subtype `spiffs`, label `data`) holds the programs' files: `app_main`
+mounts it as LittleFS on `/data` (`board::mountData()`, component `joltwallet/littlefs`),
+formatting it when it cannot be mounted. Without it the firmware prints why, and `fs`
+fails with `ENOSYS`.
 
 For another flash size, add a table to `ports/esp32/partitions/` and name it in
 `sdkconfig.board`. Keep a partition named `packages`, type `data`, subtype `0x40`: without it
@@ -233,17 +252,22 @@ These are in the shared code, the same for every ESP32 board:
   the programs'. A new port gives `device/serial` its UARTs with a driver
   (`common/hal/hal_serial.h`: `hal::serial::boardDriver()`, a table of functions, not free
   functions) and calls `setSerialDriver` before registering the module.
-- The JS task: 48 KB of stack, priority 5, pinned to core 1 (`JS_TASK_STACK`,
-  `JS_TASK_PRIORITY`, `JS_TASK_CORE` in `ports/esp32/main/board_esp32.h`). A single-core chip
-  has no core 1: not tried, this constant would have to move to the board.
-- No pins: there is no hardware module (GPIO, I2C...) yet, so nothing reads a pin table.
+- The JS task: priority 5, pinned to core 1 (`JS_TASK_PRIORITY`, `JS_TASK_CORE` in
+  `ports/esp32/main/board_esp32.h`; its stack is the board's `JS_TASK_STACK`). The other
+  tasks (agent link, I2C, serial, RMT events) go to core 0 on a dual-core chip
+  (`IO_TASK_CORE`, `platform_esp32.cpp`). A single-core chip has no core 1: not tried, this
+  constant would have to move to the board.
+- Pins: the hardware modules take GPIO numbers, with no check and no table of the board's
+  pins (the program is responsible). The pins of the digital twin are described apart, in
+  `boards/<board>.json` at the root.
 - Other ESP32 families: not tried. Only `esp32s3` has been built and run.
 
 ## 4. Case 2: a new chip (a new port)
 
-No port has been written by following this section yet: the ESP32 port came first and the
-RP2350 port is planned. What follows describes what the code requires, with the ESP32 port and
-the desktop board as examples.
+The ESP32 port came first; the RP2350 port (`ports/rp2350/`) and the i.MX RT1062 port
+(`ports/imxrt1062/`) were written after it, on this model. What follows describes what the
+code requires, with the ESP32 port and the desktop board as examples; for a Cortex-M chip
+whose SDK brings no runtime, `ports/imxrt1062/` is the closest model.
 
 ### 4.1 What you write
 
@@ -265,8 +289,8 @@ engine without compiler. `tests/run-tests.sh` uses both.
 
 ### 4.2 The common build file
 
-`ports/cmake/qjsx.cmake` lists what every device port builds. It is plain CMake, meant to be
-included by the ESP-IDF build and, later, by a pico-sdk build. It sets:
+`ports/cmake/qjsx.cmake` lists what every device port builds. It is plain CMake, included
+by the ESP-IDF build, the pico-sdk build (RP2350) and the i.MX RT1062 build. It sets:
 
 | Variable | Content |
 |---|---|
@@ -275,15 +299,31 @@ included by the ESP-IDF build and, later, by a pico-sdk build. It sets:
 | `QJSX_ENGINE_SOURCES` | the engine in C: `engine/qjsx/core/*.c`, `bytecode/*.c`, `builtins/*.c`, plus `cutils.c`, `dtoa.c`, `libregexp.c`, `libunicode.c`. No `compiler/` |
 | `QJSX_COMMON_SOURCES` | our C++: `common/runtime/*.cpp`, `common/runtime/modules/*.cpp`, `common/agent/*.cpp` |
 | `QJSX_FREERTOS_SOURCES` | `ports/freertos/platform_freertos.cpp`; add it only on a FreeRTOS port |
+| `QJSX_NEWLIB_COMPAT_DIR`, `QJSX_NEWLIB_COMPAT_SOURCES` | `ports/freertos/compat/`: the POSIX headers and functions the newlib of the Arm toolchain lacks (`pthread.h`, `dirent.h`, `posix_compat.cpp`); the folder goes before the system headers (RP2350, i.MX RT1062) |
+| `QJSX_FREERTOS_GPIO_SOURCES` | `ports/freertos/gpio_watch.cpp`: debounce and event task of `hal::gpio::watch`, for a FreeRTOS port that implements `hal_gpio.h` |
+| `QJSX_DEVICE_BOARD_SOURCES`, `QJSX_DEVICE_GPIO_SOURCES`, `..._RMT_`, `..._USB_`, `..._I2C_`, `..._ADC_`, `..._PWM_`, `..._SERIAL_SOURCES` | one hardware module of `common/device/` each: add the ones whose `common/hal/hal_*.h` the port implements (`device/board` needs only `board.h`), and register them |
 | `QJSX_INCLUDE_DIRS` | every source folder: headers are included by their bare name, so no two headers may share a name |
-| `QJSX_DEFINES` | for every source: `CONFIG_VERSION="<QuickJS version>"` and `QJSX_NO_COMPILER` |
+| `QJSX_DEFINES` | for every source: `CONFIG_VERSION="<QuickJS version>"` and `QJSX_NO_COMPILER`, plus the measure options below when set |
+| `QJSX_SMALL_HEAP_DEFINES` | engine settings for a board whose JS heap is small (no PSRAM): arenas of 1 KB for blocks up to 128 bytes, 4 empty arenas kept, a stock of 8 async function states ([engine-changes.md](engine-changes.md) Q and X). Unset: QuickJS's own values |
 | `QJSX_ENGINE_OPTIONS` | compile options for the engine sources only |
 
+CMake options read by the file (`-D...=ON`, kept in the CMake cache until set back OFF), each
+adding a define: `QJSX_PROFILER` (the sampling profiler of the agent, `qjsx profile`; off on
+the boards), `QJSX_NATIVE_PROFILER` (samples of the native instruction address; only the
+i.MX RT1062 implements `platform::nativeProfileStart/Stop`), and the temporary measures
+`QJSX_ALLOC_HISTOGRAM` and `QJSX_MEMORY_MAP`. A port may have options of its own, e.g.
+`QJSX_FLASH_TRACE` (RP2350: watchdog and trace of the flash operations of a hung board) and
+`QJSX_JS_HEAP_IN_SRAM` (RP2350), `QJSX_JS_HEAP_SHARED` (ESP32).
+
 How the ESP32 port uses it (`ports/esp32/main/CMakeLists.txt`): it includes the file, registers
-one component with `QJSX_ENGINE_SOURCES`, `QJSX_COMMON_SOURCES`, `QJSX_FREERTOS_SOURCES` and
-its own three files, adds `QJSX_INCLUDE_DIRS` and the folder of the chosen board to the include
-path, applies `QJSX_DEFINES` to the whole component, and applies `QJSX_ENGINE_OPTIONS` to the
-engine sources with `set_source_files_properties(... COMPILE_OPTIONS ...)`.
+one component with `QJSX_ENGINE_SOURCES`, `QJSX_COMMON_SOURCES`, `QJSX_FREERTOS_SOURCES`,
+`QJSX_FREERTOS_GPIO_SOURCES`, the `QJSX_DEVICE_*_SOURCES` of its modules and its own files,
+adds `QJSX_INCLUDE_DIRS` and the folder of the chosen board to the include path, applies
+`QJSX_DEFINES` to the whole component (and `QJSX_SMALL_HEAP_DEFINES` when the board has no
+PSRAM), and applies `QJSX_ENGINE_OPTIONS` to the engine sources with
+`set_source_files_properties(... COMPILE_OPTIONS ...)`. The RP2350 and i.MX RT1062 ports
+build the engine as a static library of its own (`qjsx-engine-target`): QuickJS's `list.h`
+clashes with FreeRTOS's.
 
 Do the same in your build. Our C++ code needs C++17 or later and is written without exceptions
 and without RTTI. The ESP32 port states the last two in `sdkconfig.defaults`
@@ -332,18 +372,22 @@ debugger stub need from the operating system. Everything is in namespace `platfo
 |---|---|---|---|---|
 | `int64_t monotonicMs()` | Milliseconds from an arbitrary origin, never going backwards. Use a 64-bit source: never the 32-bit FreeRTOS tick count, which wraps after 49 days at 1 kHz. Signed on purpose | the JS thread (timers of the loop); keep it safe from any thread | `esp_timer_get_time() / 1000` (`platform_esp32.cpp`) | `GetTickCount64`, `CLOCK_MONOTONIC` |
 | `[[noreturn]] void fatal(const char *message)` | Print the message on the console, then stop for good. On a device: restart the chip. Must not return | any thread (out of memory in `memory::allocate`, a lock that cannot be created) | prints `qjsx: fatal: <message>`, then `esp_system_abort(message)`: the IDF panic handler prints the backtrace and restarts the chip | prints, then `abort()` |
-| `void sleepMs(int64_t milliseconds)` | Block the calling thread. Never used on the JS thread while JS code waits (the loop waits on its mailbox instead) | producer threads. No caller in `common/` today | `vTaskDelay`, rounded up to ticks (`ports/freertos/`) | `Sleep`, `nanosleep` |
+| `void sleepMs(int64_t milliseconds)` | Block the calling thread. Never used on the JS thread while JS code waits (the loop waits on its mailbox instead) | producer threads; in `common/`, the sampling thread of the profiler (`QJSX_PROFILER`) | `vTaskDelay`, rounded up to ticks (`ports/freertos/`) | `Sleep`, `nanosleep` |
+| `void randomBytes(void *buffer, size_t size)` | Fill the buffer with random bytes of cryptographic quality. Must not fail: a source that cannot answer is fatal | any thread, through `rt::randomBytes` (`common/runtime/random.h`): `crypto.getRandomValues`, `sys/crypto`, the seed of `Math.random` | PSA `psa_generate_random`, seeded at boot while the ADC's entropy source is on (`platform::startRandom()`, before any JS), XOR `esp_fill_random` | `BCryptGenRandom`, `getrandom`, `arc4random_buf` |
 | `void yieldIfDue()` | From time to time, block the JS task for one tick so that lower-priority tasks of its core run; return at once the rest of the time. See below | the JS thread only, from the interrupt handler of the runtime (`Runner::interrupt`, `common/agent/runner.cpp`), so often while JS code runs | every 100 ms (`YIELD_PERIOD_MS`), `vTaskDelay(1)` (`ports/freertos/`) | empty |
 | `bool startThread(ThreadFunction *run, void *argument, ThreadOptions options)` | Start a detached thread that runs `run(argument)` and ends when `run` returns. Return false on failure | the entry point (JS task), the board (reader threads) | `xTaskCreatePinnedToCore`; the task deletes itself when `run` returns (a FreeRTOS task must never return) | `CreateThread`, `pthread_create` + detach |
 | `Mutex` | A lock, **recursive**: its owner may lock it again and unlocks as many times. The constructor creates it unlocked | any thread | FreeRTOS recursive mutex (`ports/freertos/`); creation failure is fatal | critical section, `PTHREAD_MUTEX_RECURSIVE` |
 | `Signal` | A lock plus a wake-up: `lock()`, `unlock()`, `wait(timeoutMs)`, `notify()`. See below | producers call `notify()`; the JS thread waits | a mutex + a binary semaphore (`ports/freertos/`) | critical section or mutex + condition variable |
 | `atomicIncrement`, `atomicDecrement` | Atomic reference counting | any thread | nothing to write: inline, GCC / Clang `__atomic_*` builtins | same |
+| `nativeProfileStart`, `nativeProfileStop` | Only with `QJSX_NATIVE_PROFILER`: sample the instruction address of the JS thread | the JS thread | not written (i.MX RT1062 only) | not written |
 
 **`ThreadOptions`.** `{ name, stackSize, priority, core }`, passed by value. `stackSize` is in
 bytes; `DEFAULT_STACK` (0), `DEFAULT_PRIORITY` (0) and `ANY_CORE` (-1) leave the choice to the
 platform, and `defaultThreadOptions(name)` sets all three. Higher priority numbers are more
 urgent. On an RTOS every field counts. The ESP32 port maps the defaults to a 4096-byte stack,
-priority 5 and no core affinity. Check the unit your RTOS expects for a stack size.
+priority 5 and, for `ANY_CORE`, core 0 on a dual-core chip (`IO_TASK_CORE`: core 1 runs the
+JS task only); the RP2350 and i.MX RT1062 ports use the same 4096 bytes and priority 5.
+Check the unit your RTOS expects for a stack size.
 
 **Ownership in `startThread`.** On success the new thread owns `argument`. On failure the
 caller still owns it. The ESP32 port passes a small heap record (`ThreadStart`) to the task,
@@ -378,7 +422,8 @@ before the entry point. Make sure your system allows creating a lock that early.
 **Interrupt handlers.** The header mentions interrupts as event producers. With the present
 code a producer must be a thread: `Mailbox::post` allocates memory and takes a lock, and the
 FreeRTOS `Signal` uses the task-level semaphore calls. Posting from an interrupt handler is
-not done.
+not done: an interrupt goes through a FreeRTOS queue to a task, which posts to the loop
+(`gpiowatch::postFromInterrupt`, `ports/freertos/gpio_watch.cpp`).
 
 ### 4.5 What FreeRTOS ports share
 
@@ -388,13 +433,40 @@ and writes only what differs between chips, as `ports/esp32/main/platform_esp32.
 
 - `monotonicMs()`: a 64-bit clock of the SDK;
 - `fatal()`: the SDK's way to print and restart;
+- `randomBytes()`: the chip's random source;
 - `startThread()`: task creation and core pinning.
 
-The file already looks for the FreeRTOS headers in both layouts (`freertos/FreeRTOS.h` as in
-ESP-IDF, `FreeRTOS.h` otherwise). It has only been compiled with ESP-IDF.
+The file looks for the FreeRTOS headers in both layouts (`freertos/FreeRTOS.h` as in
+ESP-IDF, `FreeRTOS.h` otherwise). It is compiled by the ESP32, RP2350 and i.MX RT1062 ports.
 
 `yieldIfDue()` there assumes a tick short enough for "one tick every 100 ms" to be cheap; the
 ESP32 port sets `CONFIG_FREERTOS_HZ=1000`.
+
+Also shared in `ports/freertos/`:
+
+- `gpio_watch.{h,cpp}`: the debounce and event task of `hal::gpio::watch`; the port keeps
+  its registers and its interrupt and calls `gpiowatch::postFromInterrupt` (at most 64 pins,
+  `MAX_PINS`).
+- `slot_storage.{h,cpp}`: `slots::SlotStorage`, the two package slots of [4.9](#49-package-storage)
+  for a flash read in place and written sector by sector, page by page; the port gives a
+  `slots::Flash` (area, sector and page sizes, erase / program functions, XIP address). Used
+  by the i.MX RT1062 port; the RP2350 still has its own copy in `board_rp2350.cpp`.
+- `compat/`: `pthread.h`, `dirent.h`, `posix_compat.cpp` for a newlib without them (the Arm
+  toolchain's): mutexes and conditions on FreeRTOS semaphores, directory calls failing with
+  `ENOSYS`, `clock_gettime` from `platform::monotonicMs()`.
+
+A chip SDK that brings no runtime (the MCUXpresso SDK of the i.MX RT1062) also leaves to the
+port newlib's system calls (`_sbrk`, `_write`, `__malloc_lock`...: `syscalls_imxrt1062.cpp`),
+the blocks of `thread_local` variables, one per task made by `startThread`
+(`tls_imxrt1062.*`), and the 64-bit atomics (`atomics64_imxrt1062.c`).
+
+**RP2350 (FreeRTOS SMP + pico-sdk): never use pico_sync objects** (the SDK's `mutex_t`,
+`semaphore_t`...) in our code. With
+`configSUPPORT_PICO_SYNC_INTEROP` the FreeRTOS port shares one event group between them all
+and defers a release from an interrupt to the timer task: the board hung after a few
+uploads (2026-11-17, [history.md](history.md)). The port sets it to 0, and the USB reader
+is woken by a FreeRTOS task notification. Use FreeRTOS primitives (or `platform::Signal`)
+everywhere, interrupt handlers included.
 
 A port on another system implements all of `platform.h`. `host/platform/platform_host.cpp`
 (Win32 and POSIX) is the complete example.
@@ -409,10 +481,17 @@ ESP32 implementation is `ports/esp32/main/board_esp32.cpp`; the desktop one is
 |---|---|---|---|---|---|
 | `void identity(Identity *identity)` | Fill `chip`, `board`, `flashSize` and `psramSize` (bytes, 0 if unknown or none) | **no caller in `common/` today**: both boards implement it, the agent does not send it yet | the strings are static | `CONFIG_IDF_TARGET`, `BOARD_NAME`, `esp_flash_get_size`, `esp_psram_get_size` | `"desktop"`, `"qjsx agent"`, 0, 0 |
 | `const char *platformName()` | The value of `process.platform` | the JS thread, when the globals of a run are installed | a static string | `"esp32"` | `"win32"`, `"darwin"`, `"linux"` |
-| `const char *dataDirectory()` | Root of the program's files: `process.cwd()`, and what `fs` resolves relative paths against. Absolute, `/` separators. `nullptr` if the board has no file system | the JS thread, once, at the start of `agent::runDevice()` | the runtime keeps the pointer: static, or owned by the board for good | `nullptr`: `process.cwd()` is `"/"`, `fs` fails with `ENOSYS` | absolute `<storage>/data` |
-| `bool restart()` | Restart the chip; does not return on a device. Return false if the board cannot restart: the runner then runs the program again | a transport thread, on a `RESET` request, after the agent has sent its answer | | `esp_restart()` | returns false |
-| `const JSMallocFunctions *jsAllocator()` | The allocator of the JS heap, or `nullptr` for QuickJS's default one (the C heap) | the JS thread, at the start of each run (`createRuntime`, `common/runtime/program.cpp`) | a static structure | PSRAM through `heap_caps_malloc` / `heap_caps_realloc` / `heap_caps_free` / `heap_caps_get_allocated_size`; `nullptr` without `CONFIG_SPIRAM` | `nullptr` |
-| `size_t jsStackSize()` | Bytes of stack the JS code may use, given to `JS_SetMaxStackSize`. A bit less than the stack of the JS task. 0: QuickJS's default | the JS thread, at the start of each run | | `JS_STACK_LIMIT`, 40 KB of the 48 KB task stack | 0 |
+| `const char *dataDirectory()` | Root of the program's files: `process.cwd()`, and what `fs` resolves relative paths against. Absolute, `/` separators. `nullptr` if the board has no file system | the JS thread, once, at the start of `agent::runDevice()` (the runner and the agent's `FILE_*` requests) | the runtime keeps the pointer: static, or owned by the board for good | `"/data"` once `board::mountData()` mounted the `data` partition (LittleFS), else `nullptr`: `process.cwd()` is `"/"`, `fs` fails with `ENOSYS` | absolute `<storage>/data` |
+| `bool confineFiles()` | True if the programs must reach no file outside `dataDirectory()` (absolute paths and `..` refused) | once, at the start of `agent::runDevice()` | | true (the VFS also holds `/dev/uart/0`, the agent's link) | true (desktop agent and twin) |
+| `uint64_t dataCapacity()` | Bytes of the storage of `dataDirectory()`, reported by `INFO`; 0 when unknown or without file system | once, at the start of `agent::runDevice()` | | `esp_littlefs_info` | 0 |
+| `bool restart()` | Restart the chip; does not return on a device. First send the pending output (the agent's link, open UARTs, USB serial functions) for at most `RESTART_FLUSH_MS` (500 ms) in all. Return false if the board cannot restart: the runner then drops the package in RAM and runs the installed one again | a transport thread, on a `RESET` request, after the agent has sent its answer; the JS thread for `board.restart()` of `device/board` | | `uart_wait_tx_done`, `hal::serial::drainUntil`, `hal::usb::drainUntil`, then `esp_restart()` | returns false |
+| `size_t chipId(uint8_t *out)` | The unique id of the chip, `MAX_CHIP_ID` (16) bytes at most; returns how many | the JS thread (`board.id()` of `device/board`) | | the base MAC, 6 bytes (`esp_read_mac`) | 6 bytes kept in `<storage>/board-id`, drawn at random the first time |
+| `bool macAddress(MacKind kind, uint8_t *out)` | The 6-byte MAC of `kind` (`base`, `wifi`, `ap`, `bluetooth`, `ethernet`); false if the chip has none of that kind | the JS thread (`board.mac()`) | | `esp_read_mac`, derived by ESP-IDF | from the base, as the ESP32: WiFi = base, AP +1, Bluetooth +2, Ethernet +3 |
+| `const JSMallocFunctions *jsAllocator()` | The allocator of the JS heap, or `nullptr` for QuickJS's default one (the C heap). It counts its blocks (`malloc_count`, `malloc_size`) and keeps QuickJS's memory limit, as QuickJS's own allocator does | the JS thread, once, at the first run (`boardAllocator`, `common/runtime/program.cpp`) | a static structure | with PSRAM, `heap_caps_*` on the PSRAM; without, `memory::jsAllocator()` over a `RegionHeap` in internal RAM (3.3) | the C heap, counted (`systemAllocator`), or a `RegionHeap` with `QJSX_JS_HEAP_MB` |
+| `size_t jsHeapLimit()` | The most the JS heap can hold (a region of a fixed size), given to `JS_SetMemoryLimit` so that cycles are collected before it is full; 0: no fixed size | the JS thread, at the start of each run | | the region's size; 0 with PSRAM | 0, or the region of `QJSX_JS_HEAP_MB` |
+| `size_t agentMaxMessage()` | Largest message of the agent's link, both ways, at least `agent::MIN_MAX_MESSAGE` (4096); sizes the receive buffer, told to the host in `HELLO` | once, when `agent::runDevice()` builds the agent | | `DEFAULT_MAX_MESSAGE` (64 KB) with PSRAM, `SMALL_MAX_MESSAGE` (8 KB) without | 64 KB (hidden option `--max-message`) |
+| `bool memoryStatus(MemoryStatus *out)` | Free internal RAM (now, largest block, lowest since boot), free PSRAM, the JS heap's region; false if the board cannot tell | a transport thread (`INFO`), the JS thread (`board.memory()`) | | `heap_caps_get_*` | false |
+| `size_t jsStackSize()` | Bytes of stack the JS code may use, given to `JS_SetMaxStackSize`. A bit less than the stack of the JS task. 0: QuickJS's default | the JS thread, at the start of each run | | `JS_STACK_LIMIT` = the board's `JS_TASK_STACK` less 8 KB (40 KB of 48 on the YD board) | 0 |
 | `agent::Storage *packageStorage()` | Where uploaded packages are written ([4.9](#49-package-storage)) | the JS thread: twice in `agent::runDevice()`, then at each run | the board owns the object; return the same one at every call, valid for good | a static `FlashStorage`, opened at the first call | a static `FileStorage` |
 | `const uint8_t *openPackage(size_t *size)` | The installed package, readable in place until `closePackage()`. `nullptr` if none | the JS thread, at the start of each run | the board owns the bytes; one package open at a time | `esp_partition_mmap` of the installed slot | reads the file into memory |
 | `void closePackage(const uint8_t *package)` | Release what `openPackage()` returned | the JS thread, when the run is over (`rt::runPackage` has returned) | | `esp_partition_munmap` | frees the copy |
@@ -427,16 +506,19 @@ Notes:
   `name` and `engine` are what the host sees in the answer to `HELLO`
   ([4.7](#47-entry-point)).
 - **`restart()` and the answer to `RESET`.** The agent hands its answer to `Link::send` before
-  it calls `restart()`. Nothing waits for the bytes to leave the wire: the ESP32 port does not
-  flush before `esp_restart()`.
+  it calls `restart()`, which only queues it in the driver: `restart()` must let it leave the
+  wire first (the ESP32 port waits with `uart_wait_tx_done`, at most `RESTART_FLUSH_MS`).
+- **`device/board`** (`common/device/board_module.cpp`, `QJSX_DEVICE_BOARD_SOURCES`) needs
+  only `board.h`: register it in the entry point (`rt::registerNativeModule("device/board",
+  &jsNewModule_board)`) and list it in the natives of the board.
 - **The JS allocator.** Four functions, as in `board_esp32.cpp`: allocate, free (a null block
   does nothing), resize (size 0 frees), and the real size of a block, which QuickJS uses to
   count its memory. Running out of JS heap is not fatal: QuickJS turns it into a JS exception.
 - **`jsStackSize()`.** QuickJS turns going past the limit into a `RangeError` instead of a
   crash. The limit is measured from the point where the runtime is created, on the JS thread,
   so leave room for the C code that runs under the JS code (8 KB on the ESP32).
-- **A board without file system** returns `nullptr` from `dataDirectory()`. That is every
-  device today.
+- **A board without file system** returns `nullptr` from `dataDirectory()`, false from
+  `confineFiles()` and 0 from `dataCapacity()`: the RP2350 and the i.MX RT1062 today.
 
 ### 4.7 Entry point
 
@@ -446,7 +528,7 @@ The entry point starts one task with a large stack; that task becomes the JS thr
 ```cpp
 void jsTask(void *) {
     // the agent's identity in HELLO; no token on a serial link
-    agent::Identity identity = { "qjsx " CONFIG_IDF_TARGET, CONFIG_VERSION, nullptr, JS_GetBytecodeVersion() };
+    agent::Identity identity = { "qjsx " CONFIG_IDF_TARGET, CONFIG_VERSION, nullptr, JS_GetBytecodeVersion(), QJSX_VERSION };
     agent::runDevice(identity);
 
     // runDevice returns only if the links could not start
@@ -454,6 +536,23 @@ void jsTask(void *) {
 }
 
 extern "C" void app_main(void) {
+    // the random generator, seeded while nothing uses the ADC yet
+    platform::startRandom();
+
+    // the files of the programs: the "data" partition on /data
+    board::mountData();
+
+    // the hardware modules of this port, before any program runs
+    rt::registerNativeModule("device/board", &jsNewModule_board);
+    rt::registerNativeModule("device/gpio", &jsNewModule_gpio);
+    // ... device/rmt, device/i2c, device/adc, device/pwm
+    setSerialDriver(hal::serial::boardDriver());
+    rt::registerNativeModule("device/serial", &jsNewModule_serial);
+#if QJSX_HAS_USB
+    rt::registerNativeModule("device/usb", &jsNewModule_usb);
+#endif
+
+    // the JS task
     platform::ThreadOptions options = { "js", board::JS_TASK_STACK, board::JS_TASK_PRIORITY, board::JS_TASK_CORE };
     if (!platform::startThread(&jsTask, nullptr, options)) {
         printf("qjsx: cannot start the JS task\n");
@@ -469,29 +568,37 @@ extern "C" void app_main(void) {
 | `engine` | QuickJS version | `CONFIG_VERSION`, from `engine/qjsx/VERSION` |
 | `token` | required in `HELLO` if not null; for network links | `nullptr` (serial link) |
 | `bytecode` | version of the bytecode the engine reads | `JS_GetBytecodeVersion()` |
+| `version` | qjsx version of the firmware, shown by `qjsx device info`; `qjsx deploy` warns when it differs from the tool's | `QJSX_VERSION` (`common/runtime/version.h`) |
 
 The strings must outlive the agent: use literals.
 
-If the board needs preparing before the common code runs (clocks, PSRAM, flash, a storage
-directory), do it before `agent::runDevice()`. ESP-IDF does it before `app_main`; the desktop
-calls `board::configureHost()` first (`host/agent_command.cpp`).
+If the board needs preparing before the common code runs (clocks, PSRAM, flash, the JS heap
+region, the random source, the data file system), do it before `agent::runDevice()`.
+ESP-IDF does the chip's part before `app_main`, which then calls `platform::startRandom()`
+and `board::mountData()`; the RP2350 and i.MX RT1062 entry points call
+`board::startMemory()`; the desktop calls `board::configureHost()` first
+(`host/agent_command.cpp`). Register the hardware modules there too, before the JS task
+starts.
 
 What `agent::runDevice()` then does, in this order, on the calling thread:
 
-1. Builds the runner, the agent (with `board::packageStorage()`) and the debugger stub. They
+1. Builds the runner, the package store in RAM (`qjsx deploy --ram`), the agent (with
+   `board::packageStorage()` and `board::agentMaxMessage()`) and the debugger stub. They
    live on the stack of the JS task, for good.
 2. Routes the program's output: to the host as `LOG` events during a session, else to
-   `board::writeConsole()`.
-3. Calls `rt::setDataDirectory(board::dataDirectory())`.
+   `board::writeConsole()`; routes `board.restart()` of a program to the runner's reset.
+3. Gives `board::dataDirectory()` to the runner (with `board::confineFiles()`) and to the
+   agent (with `board::dataCapacity()`, for `qjsx device ls | read | write...`).
 4. Calls `board::startLinks()`. If it fails, `runDevice()` returns.
 5. If a package is installed (`packageStorage()->installed(...)`), asks for a run: a device
    starts its program at boot.
 6. Runs the packages the host asks for (`RUN`, `RESET`), forever.
 
-Each run: `board::openPackage()`, a `STARTED` event, a new runtime (`board::jsAllocator()`,
-`board::jsStackSize()`), the program, `board::closePackage()`, an `EXITED` event with the exit
-code. At boot without an installed package the device just waits; a `RUN` request then prints
-`qjsx agent: no package installed`.
+Each run: the package in RAM if there is one, else `board::openPackage()`; a `STARTED`
+event; a new runtime (`board::jsAllocator()`, read once at the first run,
+`board::jsHeapLimit()`, `board::jsStackSize()`); the program; `board::closePackage()`; an
+`EXITED` event with the exit code. At boot without an installed package the device just
+waits; a `RUN` request then prints `qjsx agent: no package installed`.
 
 You do not implement `agent::Controller` (`run`, `stop`, `reset`, `running`): the common
 runner does.
@@ -538,11 +645,21 @@ the same driver as the console.
 During a session, the output of the JS program does not go to the console: it travels as `LOG`
 events on the link. Text printed by C code still goes out as raw text between frames.
 
-A known defect on a permanent link is listed in [known-bugs.md](known-bugs.md): the agent only
-forgets its last answers in `attach()`, which a serial link calls once.
+On a permanent link (serial, USB) the agent forgets the answers it keeps for repeated
+requests at each `HELLO`, not only in `attach()`, which such a link calls once (fixed
+2026-11-17, [history.md](history.md)).
 
-Not written on any device: native USB, TCP over WiFi. The desktop board shows a TCP link
-(one host at a time, a new host replaces the previous one).
+The message size of the link is the board's: `board::agentMaxMessage()` sizes the agent's
+receive buffer and is told to the host in `HELLO`, which splits what it sends accordingly.
+
+**Native USB link** (RP2350, i.MX RT1062): a USB CDC serial function of the chip is the
+agent's link (`board_rp2350.cpp`, `usb_serial_imxrt1062.cpp`). The COM port goes away at
+each chip restart ([known-bugs.md](known-bugs.md), "USB link and chip reset"): `qjsx deploy
+--reset` opens it again, other commands do not.
+
+Not written on any device: TCP over WiFi, the native USB of the ESP32 as the agent's link.
+The desktop board shows a TCP link (one host at a time, a new host replaces the previous
+one).
 
 ### 4.9 Package storage
 
@@ -595,31 +712,45 @@ slot. It is refused until the program is stopped or run again.
 **Read in place.** `openPackage()` must return a pointer to the whole package, valid until
 `closePackage()`. A package is a zip whose entries are stored without compression, so the
 reader (`common/runtime/package.*`) uses it without copying it to RAM. On a chip whose flash
-is memory-mapped, return the mapped address. The engine still copies the bytecode of each
-module into the JS heap when it loads it (`JS_ReadObject` without `JS_READ_OBJ_ROM_DATA`):
-running the bytecode itself from flash is not done.
+is memory-mapped, return the mapped address. The engine runs the bytecode of the modules in
+place too (engine change S, 2026-11-16: `JS_READ_OBJ_ROM_DATA | JS_READ_OBJ_FIXED_ATOMS`,
+`common/runtime/program.cpp`): the package is read for the whole run, not only while the
+modules load. Its entry `names.bin` is 8-byte aligned in the zip, so return an address
+aligned to 8 bytes at least (the ESP32 maps it right after a 4096-byte header).
 
 The desktop board is the other example: an upload is kept in memory, then written to
 `<storage>/app.qjspkg` with its build id in `app.buildid`, through temporary files and
 renames; `openPackage()` reads the file into memory.
 
-Not tried: a flash API that only writes whole pages, or that cannot write while code runs from
-the same flash. The ESP32 API accepts the chunks as they come.
+Flash APIs that write whole pages, or that cannot write while code runs from the same
+flash, are handled by the other ports: the RP2350 writes through `flash_safe_execute` (the
+other core stopped, the code in SRAM, the data copied to SRAM first), the i.MX RT1062
+through the boot ROM's API with the calling code in ITCM, interrupts off per sector or
+page, then the caches invalidated. `slots::SlotStorage` (`ports/freertos/slot_storage.*`,
+[4.5](#45-what-freertos-ports-share)) is the same design as `FlashStorage` for such a flash:
+it programs through a page buffer, and refuses a firmware that does not end before the
+package area. The ESP32 API accepts the chunks as they come.
+
+A package sent with `qjsx deploy --ram` (`VOLATILE`) goes to the common `RamStorage`
+(`common/agent/ram_storage.*`, the C heap): nothing to write in the port.
 
 ### 4.10 Memory budget
 
-- **JS heap.** Where `board::jsAllocator()` puts it: the 8 MB PSRAM on the test board.
-- **JS stack.** The stack of the JS task, in internal RAM: 48 KB on the ESP32, of which
-  `board::jsStackSize()` lets JS code use 40 KB. The runner, the agent and the debugger stub
-  also live on that stack.
+- **JS heap.** Where `board::jsAllocator()` puts it: the 8 MB PSRAM on the YD board; a
+  region of internal RAM of about 232-248 KB on the client board (ESP32-S3 without PSRAM);
+  512 KB of OCRAM on the Teensy 4.0. A heap of a fixed size gives that size to
+  `board::jsHeapLimit()` and builds the engine with `QJSX_SMALL_HEAP_DEFINES`.
+- **JS stack.** The stack of the JS task, in internal RAM: the board's `JS_TASK_STACK` on the
+  ESP32 (48 KB on the YD board, 32 KB on the client board), of which `board::jsStackSize()`
+  lets JS code use all but 8 KB. The runner, the agent and the debugger stub also live on
+  that stack.
 - **C heap** (`malloc`): everything our C++ code allocates. The largest block is fixed: the
-  frame parser of the agent allocates twice the maximum message size when the agent is built,
-  2 x 65536 bytes (`DEFAULT_MAX_MESSAGE`, `common/agent/protocol.h`). On the ESP32 this is
-  internal RAM.
+  frame parser of the agent allocates a buffer of a little more than the maximum message
+  size when the agent is built (`frames::maxSegmentSize`): 64 KB with PSRAM
+  (`DEFAULT_MAX_MESSAGE`), 8 KB without (`SMALL_MAX_MESSAGE`, `common/agent/protocol.h`), as
+  `board::agentMaxMessage()` says. On the ESP32 this is internal RAM.
 - **Reader task**: 4096 bytes of stack, a 256-byte read buffer, and the 4096-byte receive and
   transmit buffers of the UART driver, on the ESP32.
-
-A chip without PSRAM, with the JS heap in internal RAM: not tried.
 
 ### 4.11 Checklist for a new port
 
@@ -634,6 +765,7 @@ Build:
 
 - [ ] `monotonicMs()` uses a 64-bit clock.
 - [ ] `fatal()` prints, restarts the chip and never returns.
+- [ ] `randomBytes()` draws from a real source of the chip (other values after each restart).
 - [ ] `startThread()` honours the stack size, priority and core; a thread whose function
       returns ends cleanly.
 - [ ] `Mutex` is recursive.
@@ -651,7 +783,7 @@ Build:
 - [ ] An upload cut in the middle (unplug the board) leaves the previous package installed.
 - [ ] The installed package starts at boot.
 - [ ] A package larger than the storage is refused, and the installed one stays.
-- [ ] `restart()` restarts the chip.
+- [ ] `restart()` restarts the chip, after the answer to `RESET` has left the wire.
 
 Then the checks of [section 5](#5-checks-on-the-board).
 
@@ -680,14 +812,17 @@ and the ESP32 firmware talks at 921600.
    Expected, on a board with nothing installed:
 
    ```
-   qjsx: connected to qjsx esp32s3 (QuickJS <version>) on serial:COMx@921600
+   qjsx: connected to qjsx esp32s3 (qjsx <version>, QuickJS <version>) on serial:COMx@921600
+   firmware: qjsx <version>
    running:  false
    package:  (none) (0 bytes)
+   data:     ...
    ```
 
-   The first line (on stderr) shows `agent::Identity`: the name and the engine version. The
-   flash and PSRAM sizes of `board::identity()` are not shown: the agent does not send them
-   yet.
+   followed, when the firmware reports them, by the JS heap, the JS load, the free RAM and
+   PSRAM (`board::memoryStatus()`) and the largest message of the link. The first line (on
+   stderr) shows `agent::Identity`: the name, the firmware and the engine version. The flash
+   and PSRAM sizes of `board::identity()` are not shown: the agent does not send them yet.
 
 4. **A package deploys and runs.** Build a small program, for example the fixture
    `tests/fixtures/nocompiler` (language features only, it ends by itself), then send it:
@@ -715,7 +850,9 @@ and the ESP32 firmware talks at 921600.
    The test builds `tests/fixtures/debuggee`, installs it on the board (it replaces the
    installed package) and debugs it through the agent: breakpoints, stepping, pause of a
    running loop, change of a variable, exception, `debugger;`. Expected last line:
-   `debugger: 52/52 checks passed`.
+   `debugger: 72/72 checks passed`. The proxy core and the CDP server run on the same
+   target: `qjsx run tests/proxy.test.js serial:COMx@921600` (33 checks) and
+   `tests/cdp.test.js` (53).
 
 Worth trying once more on a new port: `qjsx device stop` and `qjsx device reset`; a deploy
 while a program loops; a package built by another version of the tool, which the device must
@@ -735,19 +872,22 @@ Symptoms met so far:
 
 ## 6. Not done yet on any device
 
-- **File system.** `fs` fails with `ENOSYS` and `process.cwd()` is `"/"`. The `data` partition
-  of the ESP32 tables is reserved for it.
-- **Hardware modules** (GPIO, PWM, I2C, SPI, UART, ADC, WiFi...). A program can compute, print
-  and use timers; it cannot drive a pin.
-- **WiFi links, native USB on the ESP32.** The ESP32 talks over UART0; the RP2350 over its
-  native USB (CDC).
+- **File system on the RP2350 and the i.MX RT1062.** `fs` fails with `ENOSYS` and
+  `process.cwd()` is `"/"` there. The ESP32 has its LittleFS on `/data`.
+- **Hardware modules on the RP2350 and the i.MX RT1062** beyond `device/gpio` (both) and
+  `device/board`, `device/pwm` (i.MX RT1062). The ESP32 has `device/board`, `gpio`, `pwm`,
+  `adc`, `i2c`, `rmt`, `serial` and `usb`. SPI and WiFi: on no device.
+- **WiFi links, native USB as the ESP32's agent link.** The ESP32 talks over UART0; the
+  RP2350 and the i.MX RT1062 over their native USB (CDC).
 - **OTA** (firmware update over the link). The 8 MB and 16 MB tables reserve two firmware
   slots; nothing uses them.
 - **The device identity in the protocol.** `board::identity()` is implemented and not
   transmitted.
 - **Several links on one board**, and events posted from interrupt handlers.
-- **The speed of the RP2350 port.** JS runs well below the ESP32-S3 there; not measured
-  nor explained yet.
+- **The speed of the RP2350 port.** JS runs below the ESP32-S3 there: the interpreter
+  (25 KB) does not fit the 16 KB XIP cache; with the hot engine functions moved to SRAM it is
+  close to the ESP32-S3 per clock ([known-bugs.md](known-bugs.md), "RP2350 port"). The
+  i.MX RT1062 does the same with ITCM.
 
 ## 7. Files to read
 
@@ -759,10 +899,13 @@ Symptoms met so far:
 | `common/agent/runner.h`, `common/agent/runner.cpp` | `agent::runDevice()` and the runner |
 | `ports/cmake/qjsx.cmake` | what every port builds |
 | `ports/freertos/platform_freertos.cpp` | `platform.h` on FreeRTOS: sleep, yield, mutex, signal |
-| `ports/esp32/main/` | the ESP32 port: entry point, board, platform |
+| `ports/freertos/gpio_watch.*`, `slot_storage.*`, `compat/` | the rest of what FreeRTOS ports share |
+| `common/hal/hal_*.h`, `common/device/` | the hardware interfaces a port implements, and the modules over them |
+| `ports/esp32/main/` | the ESP32 port: entry point, board, platform, hal |
+| `ports/rp2350/`, `ports/imxrt1062/` | the two other ports (pico-sdk; MCUXpresso SDK without runtime: linker script, boot header, system calls, TLS, flash through the ROM) |
 | `ports/esp32/CMakeLists.txt`, `ports/esp32/sdkconfig.defaults`, `ports/esp32/boards/`, `ports/esp32/partitions/` | the per-board build |
 | `host/platform/board_host.cpp`, `host/platform/platform_host.cpp` | the desktop implementation of the same interfaces |
-| `tools/idf.ps1` | how the ESP-IDF build is launched on the author's machine |
+| `tools/idf.ps1`, `tools/pico.ps1`, `tools/teensy.ps1` | how the ESP-IDF, RP2350 and i.MX RT1062 builds are launched (and flashed) on the author's machine |
 | [architecture.md](architecture.md), 5.5 | the design and the decisions |
-| [engine-changes.md](engine-changes.md), H and I | the engine without compiler; the changes for newlib |
+| [engine-changes.md](engine-changes.md), H, I, Q, S, T, X | the engine without compiler; the changes for newlib; a small JS heap (arenas, GC threshold, async states); the package executed in place |
 | [known-bugs.md](known-bugs.md) | defects found and not fixed |

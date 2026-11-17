@@ -8,7 +8,7 @@
 // Module "qjsx:twinboard": what the twin's runtime reads of the simulated
 // board and does to it (see twin.h): the server of the page
 // (host/twin/js/server.js) and the models of the parts (qjsx:twin,
-// host/twin/js/twin.js: pins driven and pulled, I2C answers, the bridge of
+// host/twin/js/twin.js: pins driven and pulled, I2C and SPI answers, the bridge of
 // the hardware events). Registered by "qjsx agent --board" only, for the
 // twin's runtime (its own thread), never offered to the device program.
 #include "jsbind.h"
@@ -70,11 +70,13 @@ js::Str board() {
 
 /**
  * JS pins(): one object per pin, { configured, mode, pull, level, forced,
- * partDrive, partPull, conflict, rmt, i2c, adc, voltage, pwm } (forced, partDrive: 0, 1 or null;
+ * partDrive, partPull, conflict, rmt, i2c, spi, adc, dac, voltage, pwm } (forced, partDrive: 0, 1 or null;
  * partPull: "none", "up", "down"; conflict: the program and a component
  * drive different levels; rmt: a channel of device/rmt drives it; i2c: a
- * bus of device/i2c is open on it; adc: the program has its analog input
- * open; voltage: the voltage on it, in volts; pwm: an output of device/pwm
+ * bus of device/i2c is open on it; spi: a bus or a device of device/spi
+ * uses it; adc: the program has its analog input
+ * open; dac: an output of device/dac drives it; voltage: the voltage on it,
+ * in volts; pwm: an output of device/pwm
  * drives it, { frequency (Hz), duty (0 to 1 active), invert }, else null).
  */
 js::Value pins() {
@@ -104,7 +106,9 @@ js::Value pins() {
         JS_SetPropertyStr(ctx, pin, "conflict", JS_NewBool(ctx, state->conflict));
         JS_SetPropertyStr(ctx, pin, "rmt", JS_NewBool(ctx, state->rmt));
         JS_SetPropertyStr(ctx, pin, "i2c", JS_NewBool(ctx, state->i2c));
+        JS_SetPropertyStr(ctx, pin, "spi", JS_NewBool(ctx, state->spi));
         JS_SetPropertyStr(ctx, pin, "adc", JS_NewBool(ctx, state->adc));
+        JS_SetPropertyStr(ctx, pin, "dac", JS_NewBool(ctx, state->dac));
         JS_SetPropertyStr(ctx, pin, "voltage", JS_NewFloat64(ctx, twin::pinVoltage(i) / 1000.0));
 
         // the PWM output on it
@@ -203,6 +207,22 @@ void i2cAnswer(double request, js::Str status, js::Optional<js::Bytes> bytes) {
 }
 
 /**
+ * JS spiAttach(port, cs, attached): a component sits on chip select pin
+ * 'cs' of controller 'port', or not any more.
+ */
+void spiAttach(js::Range<int, 0, 255> port, js::Range<int, 0, 63> cs, bool attached) {
+    twin::spiAttach((int)port, (int)cs, attached);
+}
+
+/**
+ * JS spiAnswer(request, bytes): the answer to a transaction (event "spi"):
+ * the bytes of its read and transfer segments, one after the other.
+ */
+void spiAnswer(double request, js::Bytes bytes) {
+    twin::spiAnswer((uint32_t)request, bytes.data(), bytes.size());
+}
+
+/**
  * JS ready(error): the parts are built (no argument), or not: why. The agent
  * waits for it before running the program.
  */
@@ -229,12 +249,68 @@ uint32_t readU32(const uint8_t *bytes) {
     return low | high;
 }
 
+// The names of twin::SpiKind, as the models of qjsx:twin read them.
+const char *const SPI_KIND_NAMES[] = { "write", "read", "transfer", "delay" };
+
+/**
+ * Fills the event of an SPI transaction from its message (see
+ * twin::spiTransaction): its device, then its segments, each { kind, size,
+ * dc, bytes (write, transfer: a Uint8Array), delayUs (delay) }.
+ */
+void spiEvent(JSContext *ctx, JSValue event, const rt::Message *message) {
+    // the device
+    const uint8_t *data = message->data;
+    uint32_t count = readU32(data + 8);
+    JS_SetPropertyStr(ctx, event, "type", JS_NewString(ctx, "spi"));
+    JS_SetPropertyStr(ctx, event, "request", JS_NewFloat64(ctx, (double)message->value));
+    JS_SetPropertyStr(ctx, event, "port", JS_NewInt32(ctx, data[0]));
+    JS_SetPropertyStr(ctx, event, "cs", JS_NewInt32(ctx, data[1]));
+    JS_SetPropertyStr(ctx, event, "mode", JS_NewInt32(ctx, data[2]));
+    JS_SetPropertyStr(ctx, event, "bitOrder", JS_NewString(ctx, data[3] != 0 ? "lsb" : "msb"));
+    JS_SetPropertyStr(ctx, event, "frequency", JS_NewUint32(ctx, readU32(data + 4)));
+
+    // the segments: their descriptors, the bytes written after them
+    const uint8_t *descriptors = data + twin::SPI_MESSAGE_HEADER;
+    const uint8_t *written = descriptors + count * twin::SPI_MESSAGE_SEGMENT;
+    JSValue segments = JS_NewArray(ctx);
+
+    for (uint32_t i = 0; i < count; i++) {
+        // its kind, size, DC level
+        const uint8_t *entry = descriptors + i * twin::SPI_MESSAGE_SEGMENT;
+        twin::SpiKind kind = (twin::SpiKind)entry[0];
+        uint32_t size = readU32(entry + 4);
+        JSValue segment = JS_NewObject(ctx);
+        // (the kind masked: never outside the table of names)
+        JS_SetPropertyStr(ctx, segment, "kind", JS_NewString(ctx, SPI_KIND_NAMES[entry[0] & 3]));
+        JS_SetPropertyStr(ctx, segment, "size", JS_NewUint32(ctx, size));
+        JS_SetPropertyStr(ctx, segment, "dc", JS_NewInt32(ctx, entry[1]));
+
+        // what it sends, or how long it waits
+        bool sends = kind == twin::SpiKind::write || kind == twin::SpiKind::transfer;
+        if (sends) {
+            js::Buffer bytes = js::Buffer::copy(written, size);
+            JS_SetPropertyStr(ctx, segment, "bytes", bytes.value().dup());
+            written += size;
+        }
+
+        if (kind == twin::SpiKind::delay) {
+            JS_SetPropertyStr(ctx, segment, "delayUs", JS_NewUint32(ctx, readU32(entry + 8)));
+        }
+
+        JS_SetPropertyUint32(ctx, segments, i, segment);
+    }
+
+    JS_SetPropertyStr(ctx, event, "segments", segments);
+}
+
 /**
  * The JS event of a message of the bridge (see twin.h, BridgeEvent):
  *   { type: "pin", pin, level }
  *   { type: "rmtBytes", pin, bytes }
  *   { type: "rmtPulses", pin, pulses: [ticks, level, ...] }
  *   { type: "i2c", request, sda, scl, address, written, readLength }
+ *   { type: "spi", request, port, cs, frequency, mode, bitOrder, segments }
+ *     (see spiEvent)
  */
 JSValue bridgeEvent(JSContext *ctx, const rt::Message *message) {
     JSValue event = JS_NewObject(ctx);
@@ -284,6 +360,10 @@ JSValue bridgeEvent(JSContext *ctx, const rt::Message *message) {
             JS_SetPropertyStr(ctx, event, "address", JS_NewInt32(ctx, data[2]));
             JS_SetPropertyStr(ctx, event, "written", written.value().dup());
             JS_SetPropertyStr(ctx, event, "readLength", JS_NewUint32(ctx, readU32(data + 4)));
+            break;
+        }
+        case twin::BridgeEvent::spiTransaction: {
+            spiEvent(ctx, event, message);
             break;
         }
     }
@@ -466,11 +546,31 @@ js::Value uarts() {
     return js::Value(ctx, array);
 }
 
-// The JS array uartTraffic() fills.
+// The JS array of records a trace fills (uartTraffic, i2cTrace, spiTrace).
 struct TrafficList {
-    JSValue  array;                 // owned by uartTraffic()
+    JSValue  array;                 // owned by the function that fills it
     uint32_t count;                 // records in it
 };
+
+/**
+ * A record number the page gives (a uint32_t); anything else: 0, from the
+ * first record.
+ */
+uint32_t recordNumber(double after) {
+    bool valid = after >= 0 && after <= 4294967295.0;
+    return valid ? (uint32_t)after : 0;
+}
+
+/**
+ * The answer of a trace: { sequence, records } ('newest': the number of the
+ * newest record; the array of 'list' goes into it).
+ */
+js::Value traceAnswer(JSContext *ctx, uint32_t newest, const TrafficList *list) {
+    JSValue result = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, result, "sequence", JS_NewUint32(ctx, newest));
+    JS_SetPropertyStr(ctx, result, "records", list->array);
+    return js::Value(ctx, result);
+}
 
 /**
  * Appends a record of the traffic to the TrafficList 'context'.
@@ -506,19 +606,10 @@ void addRecord(void *context, uint32_t sequence, twin::UartSource source, const 
 js::Value uartTraffic(js::Range<int, 0, twin::MAX_UARTS - 1> uart, double after) {
     JSContext *ctx = js::context();
 
-    // a record number (a uint32_t); anything else: from the first record
-    bool valid = after >= 0 && after <= 4294967295.0;
-    uint32_t from = valid ? (uint32_t)after : 0;
-
     // the records
     TrafficList list = { JS_NewArray(ctx), 0 };
-    uint32_t newest = twin::uartTraffic((int)uart, from, &addRecord, &list);
-
-    // { sequence, records }
-    JSValue result = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, result, "sequence", JS_NewUint32(ctx, newest));
-    JS_SetPropertyStr(ctx, result, "records", list.array);
-    return js::Value(ctx, result);
+    uint32_t newest = twin::uartTraffic((int)uart, recordNumber(after), &addRecord, &list);
+    return traceAnswer(ctx, newest, &list);
 }
 
 /**
@@ -622,19 +713,161 @@ void addI2cRecord(void *context, const twin::I2cRecord *record) {
 js::Value i2cTrace(double after) {
     JSContext *ctx = js::context();
 
-    // a record number (a uint32_t); anything else: from the first record
-    bool valid = after >= 0 && after <= 4294967295.0;
-    uint32_t from = valid ? (uint32_t)after : 0;
+    // the records
+    TrafficList list = { JS_NewArray(ctx), 0 };
+    uint32_t newest = twin::i2cTrace(recordNumber(after), &addI2cRecord, &list);
+    return traceAnswer(ctx, newest, &list);
+}
+
+/**
+ * A pin of an SPI bus or device for the page: its number, or null when
+ * there is none.
+ */
+JSValue spiPinValue(JSContext *ctx, int pin) {
+    return pin < 0 ? JS_NULL : JS_NewInt32(ctx, pin);
+}
+
+/**
+ * JS spiBuses(): one object per controller of the board, { port, open,
+ * sclk, mosi, miso, devices: [{ cs, dc, frequency, mode, bitOrder }] }
+ * (pins null when closed or not wired; frequency: what the hardware makes,
+ * in Hz).
+ */
+js::Value spiBuses() {
+    JSContext *ctx = js::context();
+
+    // the states, copied under the lock of the buses
+    twin::SpiBusState states[twin::SPI_MAX_PORTS];
+    int count = twin::spiBusStates(states);
+
+    // one object each
+    JSValue array = JS_NewArray(ctx);
+
+    for (int i = 0; i < count; i++) {
+        // the bus, its pins when open
+        const twin::SpiBusState *state = &states[i];
+        JSValue bus = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, bus, "port", JS_NewInt32(ctx, state->port));
+        JS_SetPropertyStr(ctx, bus, "open", JS_NewBool(ctx, state->open));
+        JS_SetPropertyStr(ctx, bus, "sclk", spiPinValue(ctx, state->open ? state->sclk : -1));
+        JS_SetPropertyStr(ctx, bus, "mosi", spiPinValue(ctx, state->open ? state->mosi : -1));
+        JS_SetPropertyStr(ctx, bus, "miso", spiPinValue(ctx, state->open ? state->miso : -1));
+
+        // its devices
+        JSValue devices = JS_NewArray(ctx);
+
+        for (int k = 0; k < state->deviceCount; k++) {
+            const twin::SpiDeviceState *shown = &state->devices[k];
+            JSValue device = JS_NewObject(ctx);
+            JS_SetPropertyStr(ctx, device, "cs", spiPinValue(ctx, shown->cs));
+            JS_SetPropertyStr(ctx, device, "dc", spiPinValue(ctx, shown->dc));
+            JS_SetPropertyStr(ctx, device, "frequency", JS_NewUint32(ctx, shown->frequencyHz));
+            JS_SetPropertyStr(ctx, device, "mode", JS_NewInt32(ctx, shown->mode));
+            JS_SetPropertyStr(ctx, device, "bitOrder", JS_NewString(ctx, shown->lsbFirst ? "lsb" : "msb"));
+            JS_SetPropertyUint32(ctx, devices, (uint32_t)k, device);
+        }
+
+        JS_SetPropertyStr(ctx, bus, "devices", devices);
+
+        // into the array
+        JS_SetPropertyUint32(ctx, array, (uint32_t)i, bus);
+    }
+
+    return js::Value(ctx, array);
+}
+
+/**
+ * The name of a twin::SpiOutcome as a number, for the page.
+ */
+const char *spiOutcomeName(int outcome) {
+    switch ((twin::SpiOutcome)outcome) {
+        case twin::SpiOutcome::answered: {
+            return "answered";
+        }
+        case twin::SpiOutcome::nobody: {
+            return "nobody";
+        }
+        case twin::SpiOutcome::timeout: {
+            return "timeout";
+        }
+    }
+
+    return "nobody";
+}
+
+/**
+ * A segment of the SPI trace for the page: { kind, dc, size, delayUs,
+ * written, read } (the first bytes; written for write and transfer, read for
+ * read and transfer, empty otherwise).
+ */
+JSValue spiSegmentValue(JSContext *ctx, const twin::SpiSegmentRecord *segment) {
+    // the bytes kept, of what it does
+    twin::SpiKind kind = (twin::SpiKind)segment->kind;
+    size_t kept = segment->size < twin::SPI_TRACE_BYTES ? segment->size : twin::SPI_TRACE_BYTES;
+    bool sends = kind == twin::SpiKind::write || kind == twin::SpiKind::transfer;
+    bool receives = kind == twin::SpiKind::read || kind == twin::SpiKind::transfer;
+    js::Buffer written = js::Buffer::copy(segment->written, sends ? kept : 0);
+    js::Buffer read = js::Buffer::copy(segment->read, receives ? kept : 0);
+
+    // the object
+    JSValue item = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, item, "kind", JS_NewString(ctx, SPI_KIND_NAMES[segment->kind & 3]));
+    JS_SetPropertyStr(ctx, item, "dc", JS_NewInt32(ctx, segment->dc));
+    JS_SetPropertyStr(ctx, item, "size", JS_NewUint32(ctx, segment->size));
+    JS_SetPropertyStr(ctx, item, "delayUs", JS_NewUint32(ctx, segment->delayUs));
+    JS_SetPropertyStr(ctx, item, "written", written.value().dup());
+    JS_SetPropertyStr(ctx, item, "read", read.value().dup());
+    return item;
+}
+
+/**
+ * Adds a record of the SPI trace to the array of a TrafficList (lock of the
+ * trace held: no JS but building values).
+ */
+void addSpiRecord(void *context, const twin::SpiRecord *record) {
+    TrafficList *list = (TrafficList *)context;
+    JSContext *ctx = js::context();
+
+    // the first segments
+    JSValue segments = JS_NewArray(ctx);
+    uint32_t keptMax = (uint32_t)twin::SPI_TRACE_SEGMENTS;
+    uint32_t kept = record->segmentCount < keptMax ? record->segmentCount : keptMax;
+
+    for (uint32_t i = 0; i < kept; i++) {
+        JS_SetPropertyUint32(ctx, segments, i, spiSegmentValue(ctx, &record->segments[i]));
+    }
+
+    // { sequence, time, port, cs, dc, frequency, mode, bitOrder, outcome, segmentCount, segments }
+    JSValue item = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, item, "sequence", JS_NewUint32(ctx, record->sequence));
+    JS_SetPropertyStr(ctx, item, "time", JS_NewFloat64(ctx, (double)record->timeUs / 1000.0));
+    JS_SetPropertyStr(ctx, item, "port", JS_NewInt32(ctx, record->port));
+    JS_SetPropertyStr(ctx, item, "cs", spiPinValue(ctx, record->cs));
+    JS_SetPropertyStr(ctx, item, "dc", spiPinValue(ctx, record->dc));
+    JS_SetPropertyStr(ctx, item, "frequency", JS_NewUint32(ctx, record->frequencyHz));
+    JS_SetPropertyStr(ctx, item, "mode", JS_NewInt32(ctx, record->mode));
+    JS_SetPropertyStr(ctx, item, "bitOrder", JS_NewString(ctx, record->lsbFirst ? "lsb" : "msb"));
+    JS_SetPropertyStr(ctx, item, "outcome", JS_NewString(ctx, spiOutcomeName(record->outcome)));
+    JS_SetPropertyStr(ctx, item, "segmentCount", JS_NewUint32(ctx, record->segmentCount));
+    JS_SetPropertyStr(ctx, item, "segments", segments);
+    JS_SetPropertyUint32(ctx, list->array, list->count++, item);
+}
+
+/**
+ * JS spiTrace(after): { sequence, records } — the transactions numbered
+ * after 'after' (every bus), each { sequence, time (ms), port, cs, dc (null:
+ * none), frequency (Hz), mode, bitOrder, outcome: "answered" | "nobody" |
+ * "timeout", segmentCount, segments: [{ kind, dc, size, delayUs, written,
+ * read }] (the first 8, their first 16 bytes) }; sequence is the number of
+ * the newest.
+ */
+js::Value spiTrace(double after) {
+    JSContext *ctx = js::context();
 
     // the records
     TrafficList list = { JS_NewArray(ctx), 0 };
-    uint32_t newest = twin::i2cTrace(from, &addI2cRecord, &list);
-
-    // { sequence, records }
-    JSValue result = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, result, "sequence", JS_NewUint32(ctx, newest));
-    JS_SetPropertyStr(ctx, result, "records", list.array);
-    return js::Value(ctx, result);
+    uint32_t newest = twin::spiTrace(recordNumber(after), &addSpiRecord, &list);
+    return traceAnswer(ctx, newest, &list);
 }
 
 // What scope() builds while scopeRead visits the pins.
@@ -942,6 +1175,8 @@ JS_MODULE(twinboard, module) {
     JS_FUNCTION(module, pinVoltage);
     JS_FUNCTION(module, i2cAttach);
     JS_FUNCTION(module, i2cAnswer);
+    JS_FUNCTION(module, spiAttach);
+    JS_FUNCTION(module, spiAnswer);
     JS_FUNCTION(module, ready);
     JS_FUNCTION(module, uarts);
     JS_FUNCTION(module, uartTraffic);
@@ -950,6 +1185,8 @@ JS_MODULE(twinboard, module) {
     JS_FUNCTION(module, serialPorts);
     JS_FUNCTION(module, i2cBuses);
     JS_FUNCTION(module, i2cTrace);
+    JS_FUNCTION(module, spiBuses);
+    JS_FUNCTION(module, spiTrace);
     JS_FUNCTION(module, scope);
     JS_FUNCTION(module, usb);
     JS_FUNCTION(module, tcpListen);

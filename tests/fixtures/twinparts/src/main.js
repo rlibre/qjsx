@@ -9,11 +9,15 @@
 // (tests/twinparts.test.js): a BME280 at 0x76 read as on a real board (its
 // calibration, a forced measurement, the compensation of its datasheet),
 // the echo part of the project at 0x50, a second I2C bus with nothing on it,
-// a potentiometer read by device/adc, and a comet on the strip of 5 WS2812
+// a potentiometer read by device/adc, the SPI echo part of the project on
+// chip select 10 of controller 2 (by the hardware's chip select, then by one
+// the program drives with device/gpio), and a comet on the strip of 5 WS2812
 // LEDs. It prints a line for each result, then the weather and the voltage
 // of the potentiometer each time they change.
 import { Adc } from "device/adc";
+import { Gpio } from "device/gpio";
 import { I2c } from "device/i2c";
+import { Spi } from "device/spi";
 import { RgbLed } from "stdlib/rgbled";
 
 // --- the potentiometer on GPIO6, through device/adc
@@ -48,6 +52,27 @@ try {
 } catch (error) {
     console.log(`empty bus: write ${error.code}`);
 }
+
+// --- the SPI echo part on chip select 10: a read gives the bytes last
+// written, a transfer gives them then keeps what it sent
+const spi = new Spi(2, { sclk: 12, mosi: 11, miso: 13 });
+const display = spi.device({ cs: 10, dc: 14 });
+const [echoed] = display.transactionSync([{ write: [0x2a], dc: 0 }, { write: [1, 2, 3] }, { delay: 10 }, { read: 3 }]);
+console.log(`spi echo ${Array.from(echoed).join(",")}`);
+const [swapped] = await display.transaction([{ transfer: [7, 8, 9] }]);
+console.log(`spi transfer ${Array.from(swapped).join(",")}`);
+console.log(`spi read 5 ${Array.from(display.readSync(5)).join(",")}`);
+display.close();
+
+// --- the same part reached by a device without chip select: the program
+// drives GPIO10 itself; the part hears only while it is low
+const select = new Gpio(10, { mode: "output" });
+select.write(1);
+const manual = spi.device({});
+console.log(`spi cs high ${Array.from(manual.readSync(2)).join(",")}`);
+select.write(0);
+console.log(`spi cs low ${Array.from(manual.readSync(3)).join(",")}`);
+select.write(1);
 
 // --- a comet going to and fro along the strip: a bright head, a trail
 // that fades, a hue that slowly drifts

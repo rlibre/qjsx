@@ -591,7 +591,7 @@ const char *platformName() {
  * A real board: its programs see only its own file system.
  */
 bool confineFiles() {
-    return false;
+    return true;
 }
 
 /**

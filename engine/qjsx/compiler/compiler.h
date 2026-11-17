@@ -526,6 +526,8 @@ void js_outline_statement_begin(JSParseState *s);
 int js_outline_statement_end(JSParseState *s);
 void js_outline_name_used(JSParseState *s, JSAtom name);
 int js_outline_import_position(JSParseState *s, int import_index, const uint8_t *ptr);
+/* qjsx: engine change Y */
+int js_outline_request_position(JSParseState *s, int request_index, const uint8_t *ptr);
 int js_outline_export_range(JSParseState *s, int export_index, const uint8_t *start, const uint8_t *end);
 void js_outline_eval_seen(JSParseState *s);
 void js_outline_report(JSParseState *s, JSModuleDef *m);

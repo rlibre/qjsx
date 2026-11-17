@@ -806,11 +806,14 @@ uint8_t *readAll(const char *path, size_t *size) {
         return nullptr;
     }
 
-    // get the size (64 bits) by seeking to the end and back
+    // get the size (64 bits) by seeking to the end and back; on failure, the
+    // errno of the seek, kept across fclose (EIO if it set none)
+    errno = 0;
     int64_t length = measureFile(file);
     if (length < 0) {
+        int error = errno != 0 ? errno : EIO;
         fclose(file);
-        errno = EIO;
+        errno = error;
         return nullptr;
     }
 

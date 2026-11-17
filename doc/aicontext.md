@@ -7,7 +7,8 @@ engine itself). It is short on purpose: the exact API is in the typings.
 
 - A JavaScript runtime built on QuickJS (modern ECMAScript: modules, classes, async /
   await, generators, BigInt, typed arrays). One executable, `qjsx`, on the PC; a firmware per
-  board on the devices (ESP32 boards, RP2350); a digital twin that plays a board on the PC.
+  board on the devices (ESP32 boards, RP2350, i.MX RT1062 / Teensy 4.0); a digital twin
+  that plays a board on the PC.
 - A device has no compiler: `qjsx build` compiles the program on the PC into a package
   (`.qjspkg`, bytecode), `qjsx deploy` sends it to the device, which runs it.
 - One JS thread and one event loop per program. Hardware events call callbacks;
@@ -62,19 +63,22 @@ Imported by full name only; a bare name (`fs`, `path`) is an error.
 
 | Name | Module | Where |
 |---|---|---|
-| `sys/fs` | files, synchronous only (`readFileSync`, `writeFileSync`, `existsSync`, `statSync`, `readdirSync`, `mkdirSync`, `rmSync`, `renameSync`, `unlinkSync`) | everywhere; a device: confined to `/data` |
+| `sys/fs` | files, synchronous only (`readFileSync`, `writeFileSync`, `existsSync`, `statSync`, `readdirSync`, `mkdirSync`, `rmSync`, `renameSync`, `unlinkSync`) | everywhere; an ESP32: confined to `/data`; RP2350, i.MX RT1062: no file system yet (`ENOSYS`) |
 | `sys/crypto` | `sha256`, `sha1`, `randomBytes` | everywhere |
 | `sys/net` | TCP: `listen`, `connect`, `Connection` | PC only |
-| `device/board` | `id`, `mac`, `restart`, `memory`, `load` | ESP32, twin |
-| `device/gpio` | `Gpio`: `read`, `write`, `toggle`, `onChange`, `waitFor`, `close` | ESP32, RP2350, twin |
-| `device/pwm` | `Pwm`: `setDuty`, `setFrequency`, `setPulseWidth` | ESP32, twin |
+| `device/board` | `id`, `mac`, `restart`, `memory`, `load` | ESP32, i.MX RT1062, twin |
+| `device/gpio` | `Gpio`: `read`, `write`, `toggle`, `onChange`, `waitFor`, `close` | ESP32, RP2350, i.MX RT1062, twin |
+| `device/pwm` | `Pwm`: `setDuty`, `setFrequency`, `setPulseWidth` | ESP32, i.MX RT1062, twin |
 | `device/adc` | `Adc`: `read`, `readVoltage` | ESP32, twin |
 | `device/i2c` | `I2c`, `bus.device(address)` -> `I2cDevice`: `write`, `read`, `writeRead` (promises) and `...Sync` | ESP32, twin |
 | `device/rmt` | `Rmt`: `send`, `sendBytes` | ESP32, twin |
 | `device/serial` | `Serial`: `onData`, `onClose`, `write`, `close` (a UART number + pins on a board, a port name on the PC) | ESP32, PC, twin |
+| `device/spi` | `Spi`, `bus.device(options)` -> `SpiDevice`: `transaction`, `write`, `read`, `transfer`, `writeRead`, `command` (promises) and `...Sync` | ESP32, twin |
+| `device/dac` | `Dac`: `write`, `writeVoltage` | original ESP32, ESP32-S2, twin |
 | `device/usb` | `Usb`, `UsbCdc` (the board as a USB device) | ESP32-S2/S3/P4, twin |
 | `stdlib/tasks` | `task`, `Task` (`stopped`, `stop`, `join`, `sleep`, `every`, `mailbox`), `Mutex.withLock` | everywhere |
 | `stdlib/rgbled` | `RgbLed` (WS2812): `set`, `fill`, `setHsv`, `fillHsv`, `show` | ESP32, twin |
+| `stdlib/display` | `Display` (SPI color display, ST7796): `fillRect`, `line`, `pixel`, `rect`, `arc`, `circle`, `disc`, `fillRoundRect`, `roundRect`, `font`, `text`, `textWidth`, then `await show()`; nothing is drawn before `show()`, and the area shown is drawn again entirely (the rest takes `background`) | boards with a display (WT32-SC01), their twin |
 | `stdlib/usb` | `UsbSerial` (one USB serial function) | ESP32-S2/S3/P4, twin |
 | `stdlib/path` | as Node's `path` | everywhere |
 | `<library>/<module>` | a module of a `.qjslib` declared in `libraries` | |
@@ -84,6 +88,10 @@ Globals: `console` (`log`, `info`, `debug`, `warn`, `error`), `setTimeout`,
 (`getRandomValues`, `randomUUID`), `process` (`platform`, `versions`, `argv`, `env`,
 `exit`, `cwd`, `stdout.write`, `stderr.write`), `import.meta.url` / `import.meta.main`.
 Bytes are `Uint8Array` (`toHex()`, `toBase64()`, `Uint8Array.fromBase64()` are there).
+A file of the project can be imported as bytes, read in place (in flash on a board):
+`import font from "./fonts/inter16.bin" with { type: "bytes" };` gives a `Uint8Array`
+(read only; never write into it). Fonts for `stdlib/display` are such files (LVGL binary
+format, made with `lv_font_conv --no-compress`).
 
 **The exact API** (every option, error and default) is in the typings: after `qjsx
 build`, `<project>/.qjsx/types/index.d.ts`. Read them before using a module; never guess
@@ -117,7 +125,8 @@ of JS heap.
    `self.sleep()`; catch the errors of a step that may fail (an error leaving the body
    ends the task); share a bus between tasks through one `Mutex` (`withLock`), never
    nested on the same mutex.
-6. Errors: an error in a callback is printed and the program goes on; a rejection
+6. Errors: on a device, an error in a callback is printed and the program goes on (on
+   the PC, `qjsx run` ends the program with exit code 1); a rejection
    nobody handles is printed as `Uncaught (in promise)`.
 7. Stack: about 360 bytes per JS call (66 nested calls with a 32 KB stack): avoid deep
    recursion.

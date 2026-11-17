@@ -672,6 +672,90 @@ html:not(.x4theme-dark) {
 	}
 }
 
+// ### The analog outputs (dacpanel.ts) #######################################
+
+// the meters side by side, on as many rows as needed
+.board .dac-outputs {
+	flex-wrap: wrap;
+	gap: 12px;
+	padding: 4px 0 8px;
+
+	// a meter keeps its size; dimmed when the program does not drive its
+	// output
+	.twinmeter {
+		flex-shrink: 0;
+
+		&.idle {
+			opacity: 0.45;
+		}
+	}
+}
+
+// a meter (controls/meter.ts): a flat dial in a frame, its graduations,
+// numbers and name in the colors of the text, a band of segments lit in
+// green, a red needle, the voltage in digits of one width (they do not move
+// when the value changes)
+.twinmeter {
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	background: var(--background-ternary);
+	line-height: 0;
+
+	.scale {
+		fill: none;
+		stroke: var(--text-primary);
+		stroke-width: 1;
+	}
+
+	.number {
+		fill: var(--text-primary);
+	}
+
+	.segment {
+		stroke: color-mix(in srgb, var(--text-primary) 14%, transparent);
+
+		&.lit {
+			stroke: #2e9e5b;
+		}
+	}
+
+	.needle {
+		stroke: #d8453a;
+		stroke-width: 1.5;
+		stroke-linecap: round;
+	}
+
+	.name {
+		fill: var(--text-secondary);
+	}
+
+	.digits {
+		fill: var(--text-primary);
+		font-weight: bold;
+		font-variant-numeric: tabular-nums;
+	}
+}
+
+// ### A display part (screenview.ts) ##########################################
+
+// one pixel of the canvas per pixel of the screen, never smoothed, in a thin
+// frame; the line under it in the secondary color of the text
+.board .screen-view {
+	align-items: flex-start;
+	gap: 4px;
+	padding: 4px 0 8px;
+
+	.screen {
+		border: 1px solid var(--border);
+		background: #000;
+		image-rendering: pixelated;
+	}
+
+	.screen-caption {
+		color: var(--text-secondary);
+	}
+}
+
 // ### The knobs of a part (partview.ts) #######################################
 
 .board .part {
@@ -701,13 +785,13 @@ html:not(.x4theme-dark) {
 	gap: 12px;
 }
 
-// ### The I2C buses (i2cpanel.ts) #############################################
+// ### The traces of the I2C and SPI buses (tracepanel.ts) #####################
 
-.i2c-panel {
+.trace-panel {
 	gap: 6px;
 
 	// a fixed height, as the log of a UART: it scrolls, it does not grow
-	.i2c-log {
+	.trace-log {
 		height: 160px;
 		flex-shrink: 0;
 		overflow: auto;
@@ -721,10 +805,10 @@ html:not(.x4theme-dark) {
 		}
 	}
 
-	.i2c-line {
+	.trace-line {
 		white-space: pre;
 
-		// a transfer that did not go through
+		// a transfer that did not go through, a transaction not answered in time
 		&.nack, &.timeout, &.failed {
 			color: var(--alert-background);
 		}

@@ -8,7 +8,8 @@
 // The analyzer of the pins, a panel of the docking view (at the bottom): the
 // level of the chosen pins over time, from the changes the twin records
 // with their time (twin.scope.data, every 50 ms). A pin with an analog input
-// that the program reads, or with a part on it, is drawn as its voltage.
+// that the program reads, a pin a DAC of the program drives, or one of
+// those with a part on it, is drawn as its voltage.
 // A pin that changed faster than the twin reports is drawn as a band
 // between its two levels ("busy"). A PWM output comes as its changes
 // (frequency, duty cycle, from a time), an RMT send as it was sent (pulses,
@@ -1195,13 +1196,18 @@ export class ScopeView extends VBox {
 
     /**
      * Whether a pin is drawn as its voltage: it has an analog input, and the
-     * program reads it or a part is on it.
+     * program reads it or a part is on it; or it has a DAC, and the program
+     * drives it or a part is on it.
      */
     private _isAnalog(pin: number): boolean {
         const analogInput = this._board?.adc?.pins.includes(pin) ?? false;
+        const analogOutput = this._board?.dac?.pins.includes(pin) ?? false;
         const readByProgram = this._pins[pin]?.adc ?? false;
+        const drivenByProgram = this._pins[pin]?.dac ?? false;
         const partOnIt = this._parts.some(part => part.pins.includes(pin));
-        return analogInput && (readByProgram || partOnIt);
+        const readInput = analogInput && (readByProgram || partOnIt);
+        const drivenOutput = analogOutput && (drivenByProgram || partOnIt);
+        return readInput || drivenOutput;
     }
 
     /**

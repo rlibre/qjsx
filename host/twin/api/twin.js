@@ -21,16 +21,18 @@
 //       onAction(action, args) { ... }       // from the page
 //   }
 //
-//   board.pin(n)            level, mode, voltage (volts, read and set), drive(0 | 1 | null),
+//   board.pin(n)            level, mode, voltage (volts, read and set), pwm, drive(0 | 1 | null),
 //                           pull("up" | "down" | null), onChange(level => ...)
 //   board.i2c({ sda, scl }) attach(address, { onTransfer(written, readLength) }), detach(address)
+//   board.spi({ port })     attach(cs, { onTransaction(segments, device) }), detach(cs)
 //   board.rmt(pin)          onBytes(bytes => ...), onPulses(pulses => ...)
 //   board.now()             ms since the twin started
 //   board.restart()         restarts the device (its reset button)
 //
 // Threads: everything here runs on the twin's thread, one call at a time.
-// onTransfer is synchronous: the program waits for its answer, so it must
-// be short and must never wait for the program (a promise is refused).
+// onTransfer and onTransaction are synchronous: the program waits for their
+// answer, so they must be short and must never wait for the program (a
+// promise is refused).
 import * as twinboard from "qjsx:twinboard";
 
 // The pulls of pin.pull(), as twinboard.pinPull numbers them.
@@ -60,6 +62,27 @@ export function parsePin(value, name = "pin") {
     const isBadPin = !Number.isInteger(value) || value < 0 || value >= count;
     if (isBadPin) {
         throw new Error(`"${name}" must be a pin of the board (0 to ${count - 1}), not ${JSON.stringify(value)}`);
+    }
+
+    return value;
+}
+
+/**
+ * An SPI controller from the config of a part: one of the "ports" of the
+ * "spi" section of the board description. Throws a TypeError if it is not
+ * an integer, a RangeError if the board has no such controller.
+ */
+export function parseSpiPort(value) {
+    // an integer
+    if (!Number.isInteger(value)) {
+        throw new TypeError(`"port" must be the number of an SPI controller, not ${JSON.stringify(value)}`);
+    }
+
+    // a controller the program may open
+    const ports = JSON.parse(twinboard.board()).spi?.ports ?? [];
+    if (!ports.includes(value)) {
+        const known = ports.length > 0 ? ports.join(", ") : "none";
+        throw new RangeError(`"port" ${value} is not an SPI controller of the board (${known})`);
     }
 
     return value;
@@ -134,17 +157,27 @@ class Pin {
     }
 
     /**
-     * The voltage on the line now, in volts: what a component set, else its
-     * level times the supply of the board.
+     * The voltage on the line now, in volts: what the program's DAC drives
+     * (device/dac), else what a component set, else its level times the
+     * supply of the board.
      */
     get voltage() {
         return twinboard.pins()[this.number].voltage;
     }
 
     /**
+     * The PWM output of the program on the line (device/pwm): { frequency
+     * (Hz), duty (0 to 1, the share of a period it is active), invert (true:
+     * active low) }, or null when none drives it.
+     */
+    get pwm() {
+        return twinboard.pins()[this.number].pwm;
+    }
+
+    /**
      * Sets the voltage on the line in volts, as a potentiometer does (an
-     * analog input reads it; kept within 0 and the supply of the board);
-     * null: not any more.
+     * analog input reads it; kept within 0 and the supply of the board; a
+     * DAC of the program on the pin wins over it); null: not any more.
      */
     set voltage(volts) {
         // !(volts >= 0) also refuses NaN
@@ -246,6 +279,110 @@ class I2cBus {
     }
 }
 
+// ### SPI #####################################################################
+
+// The kinds of segment that read: the model gives their bytes.
+const READING_KINDS = ["read", "transfer"];
+
+class SpiBus {
+    /**
+     * The SPI controller 'port', no component on it yet ('_board' is set by
+     * Board.spi()).
+     */
+    constructor(port) {
+        this.port = port;             // controller number
+        this._handlers = new Map();   // chip select pin -> { onTransaction }
+        this._parts = new Map();      // chip select pin -> id of the part that attached it
+    }
+
+    /**
+     * Answers the transactions on chip select pin 'cs' (a device whose chip
+     * select the hardware drives on that pin, or a device without chip
+     * select while the program holds that pin low with device/gpio) with
+     * handler.onTransaction(segments, device):
+     *   segments  [{ kind: "write" | "read" | "transfer" | "delay", size,
+     *             dc (the level of the DC pin: 0 command, 1 data), bytes
+     *             (write, transfer: a Uint8Array), delayUs (delay) }]
+     *   device    { port, cs, frequency (Hz), mode (0..3), bitOrder ("msb" | "lsb") }
+     * It returns the bytes of the read and transfer segments, in their
+     * order: an array with one entry per such segment (a Uint8Array, an
+     * array of numbers, or null), or null for none. Missing bytes read 0xFF,
+     * bytes beyond the size of their segment are dropped. Throws if a part
+     * already sits on that chip select.
+     */
+    attach(cs, handler) {
+        // a free chip select, a handler with onTransaction()
+        const pin = parsePin(cs, "cs");
+        if (this._handlers.has(pin)) {
+            const owner = this._parts.get(pin);
+            throw new Error(`SPI chip select ${pin} of controller ${this.port} is already taken by part "${owner}"`);
+        }
+
+        if (typeof handler?.onTransaction !== "function") {
+            throw new TypeError("spi.attach: the handler needs onTransaction(segments, device)");
+        }
+
+        // kept with the part being built, noted on its pin, then the twin
+        // gives it the transactions on that chip select
+        const part = this._board._currentPart ?? "?";
+        this._handlers.set(pin, handler);
+        this._parts.set(pin, part);
+        this._board._noteUse(pin, part);
+        twinboard.spiAttach(this.port, pin, true);
+    }
+
+    /**
+     * Nothing sits on chip select pin 'cs' any more.
+     */
+    detach(cs) {
+        const pin = parsePin(cs, "cs");
+        this._handlers.delete(pin);
+        this._parts.delete(pin);
+        twinboard.spiAttach(this.port, pin, false);
+    }
+}
+
+/**
+ * The bytes a model gives for the reading segments of a transaction, one
+ * after the other, each padded with 0xFF to the size of its segment (all
+ * 0xFF for 'given' null). Throws a TypeError when 'given' is not what
+ * onTransaction must return.
+ */
+function readBytes(reading, given) {
+    // all 0xFF to start with
+    const total = reading.reduce((sum, segment) => sum + segment.size, 0);
+    const bytes = new Uint8Array(total).fill(0xff);
+    const isNothing = given === null || given === undefined;
+    if (isNothing) {
+        return bytes;
+    }
+
+    // an array, one entry per reading segment
+    if (!Array.isArray(given)) {
+        throw new TypeError("onTransaction must return an array (one entry per read or transfer segment) or null, not a promise");
+    }
+
+    // each entry at the place of its segment, cut to its size
+    let offset = 0;
+
+    reading.forEach((segment, index) => {
+        const entry = given[index];
+        const isBytes = entry instanceof Uint8Array || Array.isArray(entry);
+        const isEmpty = entry === null || entry === undefined;
+        if (!isBytes && !isEmpty) {
+            throw new TypeError(`onTransaction: entry ${index} must be bytes (a Uint8Array or an array of numbers) or null`);
+        }
+
+        if (isBytes) {
+            bytes.set(entry.slice(0, segment.size), offset);
+        }
+
+        offset += segment.size;
+    });
+
+    return bytes;
+}
+
 // ### RMT #####################################################################
 
 class RmtLine {
@@ -290,6 +427,7 @@ export class Board {
         this._pinOwners = new Map();    // number -> id of the part that took it
         this._pinUsers = new Map();     // number -> Set of ids of the parts on it (taken, or a shared bus)
         this._buses = new Map();        // "sda/scl" -> I2cBus
+        this._spiBuses = new Map();     // port -> SpiBus
         this._rmt = new Map();          // pin -> RmtLine
         this._currentPart = undefined;  // id of the part being built (pins taken)
     }
@@ -370,6 +508,22 @@ export class Board {
         }
 
         return this._buses.get(key);
+    }
+
+    /**
+     * The SPI controller 'port' (one of the "ports" of the board's "spi"),
+     * shared by the parts on it.
+     */
+    spi({ port } = {}) {
+        // one bus per controller, made at the first request
+        const checked = parseSpiPort(port);
+        if (!this._spiBuses.has(checked)) {
+            const bus = new SpiBus(checked);
+            bus._board = this;
+            this._spiBuses.set(checked, bus);
+        }
+
+        return this._spiBuses.get(checked);
     }
 
     /**
@@ -470,6 +624,11 @@ export class Board {
                 this._answerTransfer(event);
                 break;
             }
+            case "spi": {
+                // a transaction: answered at once
+                this._answerTransaction(event);
+                break;
+            }
             default: {
                 break;
             }
@@ -523,6 +682,36 @@ export class Board {
             this._hooks.failed(part, new TypeError("onTransfer must return bytes or null (not a promise)"));
             twinboard.i2cAnswer(event.request, "failed");
         }
+    }
+
+    /**
+     * An SPI transaction of the program: asks the handler on its chip
+     * select, then gives the bytes read back at once (the program waits for
+     * them). A handler that throws or answers wrong: its error goes to the
+     * console of the page and the program reads 0xFF (an SPI bus has no way
+     * to fail).
+     */
+    _answerTransaction(event) {
+        // the segments that read, and the handler on that chip select
+        const reading = event.segments.filter(segment => READING_KINDS.includes(segment.kind));
+        const bus = this._spiBuses.get(event.port);
+        const handler = bus?._handlers.get(event.cs);
+        if (handler === undefined) {
+            twinboard.spiAnswer(event.request, readBytes(reading, null));
+            return;
+        }
+
+        // the handler's answer, as bytes; its error: 0xFF read
+        const device = { port: event.port, cs: event.cs, frequency: event.frequency, mode: event.mode, bitOrder: event.bitOrder };
+        let bytes;
+        try {
+            bytes = readBytes(reading, handler.onTransaction(event.segments, device));
+        } catch (error) {
+            this._hooks.failed(bus._parts.get(event.cs), error);
+            bytes = readBytes(reading, null);
+        }
+
+        twinboard.spiAnswer(event.request, bytes);
     }
 }
 
@@ -591,7 +780,7 @@ export class Registers {
     onTransfer(written, readLength) {
         // the writes: the pointer, then the values
         if (written.length > 0) {
-            this.pointer = written[0];
+            this.pointer = written[0] % this.bytes.length;
             if (this._writes === "pairs") {
                 this._writePairs(written);
             } else {
@@ -633,13 +822,16 @@ export class Registers {
     }
 
     /**
-     * One register written by the program, then its handlers.
+     * One register written by the program, then its handlers. The register
+     * wraps around at the end, as for reads (a part with fewer than 256
+     * registers in "pairs" mode).
      */
     _write(register, value) {
-        this.bytes[register] = value;
+        const wrapped = register % this.bytes.length;
+        this.bytes[wrapped] = value;
 
-        for (const handler of this._writeHandlers.get(register) ?? []) {
-            handler(value, register);
+        for (const handler of this._writeHandlers.get(wrapped) ?? []) {
+            handler(value, wrapped);
         }
     }
 }

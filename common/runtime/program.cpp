@@ -44,20 +44,140 @@ void notifyModuleLoaded(const RunHooks *hooks, const char *name) {
 }
 
 /**
- * Bytecode entry of a module in the package ("bytecode/<name>.qbc"), or
- * nullptr.
+ * The entry "<prefix><name><suffix>" of the package, or nullptr.
  */
-const package::Entry *findBytecode(const package::Reader *reader, const char *name) {
-    // build the entry name: 16 bytes cover the prefix, the suffix and the
-    // terminator
-    size_t size = strlen(name) + 16;
+const package::Entry *findModuleEntry(const package::Reader *reader, const char *prefix, const char *name,
+                                      const char *suffix) {
+    // build the entry name
+    size_t size = strlen(prefix) + strlen(name) + strlen(suffix) + 1;
     char *entryName = (char *)memory::allocate(size);
-    snprintf(entryName, size, "bytecode/%s.qbc", name);
+    snprintf(entryName, size, "%s%s%s", prefix, name, suffix);
 
     // look it up
     const package::Entry *entry = reader->find(entryName);
     memory::release(entryName);
     return entry;
+}
+
+/**
+ * Bytecode entry of a module in the package ("bytecode/<name>.qbc"), or
+ * nullptr.
+ */
+const package::Entry *findBytecode(const package::Reader *reader, const char *name) {
+    return findModuleEntry(reader, "bytecode/", name, ".qbc");
+}
+
+// ### Imports of bytes ########################################################
+// import font from "./font.bin" with { type: "bytes" }: the file is an entry
+// of the package, "bytes/<module name>", written by "qjsx build"
+// (host/js/bytes.js); the module exports a Uint8Array over it.
+
+// Prefix of the entries of the files imported as bytes, and the value of the
+// import attribute 'type' that asks for them.
+const char *const BYTES_PREFIX = "bytes/";
+const char *const BYTES_TYPE = "bytes";
+
+// What an import asks for (its import attribute 'type').
+enum class ImportType {
+    Module,        // no type: a JS module, or a native one
+    Bytes,         // type "bytes": the bytes of a file
+    Unsupported,   // any other type: an exception is pending
+};
+
+/**
+ * What the import attributes of the module 'name' ask for ('attributes':
+ * JS_UNDEFINED without a 'with' clause, else an object of strings). Another
+ * type than "bytes" is a TypeError ('qjsx build' refuses it where it is
+ * written; the sources run by 'qjsx run' reach this one).
+ */
+ImportType importType(JSContext *ctx, JSValueConst attributes, const char *name) {
+    // no 'with' clause: a module
+    if (!JS_IsObject(attributes)) {
+        return ImportType::Module;
+    }
+
+    // no type: a module too (other attributes are left to the build); the
+    // read only fails out of memory (pending)
+    JSValue type = JS_GetPropertyStr(ctx, attributes, "type");
+    if (JS_IsException(type)) {
+        return ImportType::Unsupported;
+    }
+
+    if (JS_IsUndefined(type)) {
+        return ImportType::Module;
+    }
+
+    // its text (nullptr: out of memory, pending)
+    const char *text = JS_ToCString(ctx, type);
+    JS_FreeValue(ctx, type);
+    if (text == nullptr) {
+        return ImportType::Unsupported;
+    }
+
+    // "bytes", or a type this runtime does not have
+    bool isBytes = strcmp(text, BYTES_TYPE) == 0;
+    if (!isBytes) {
+        JS_ThrowTypeError(ctx, "module '%s': unsupported import type '%s' (the only one is \"%s\")", name, text,
+                          BYTES_TYPE);
+    }
+
+    JS_FreeCString(ctx, text);
+    return isBytes ? ImportType::Bytes : ImportType::Unsupported;
+}
+
+/**
+ * Free function of an ArrayBuffer over bytes that nobody frees (those of the
+ * package, which outlives the run). Never nullptr: the engine calls the free
+ * function of the buffer without testing it when transfer() moves the bytes
+ * into a buffer of another length.
+ */
+void keepBytes(JSRuntime *, void *, void *) {
+    // nothing to free
+}
+
+/**
+ * Init function of a module of bytes (JS_NewCModule), run when it is
+ * evaluated: its private value, the array, becomes its 'default' export.
+ */
+int initBytesModule(JSContext *ctx, JSModuleDef *module) {
+    JSValue array = JS_GetModulePrivateValue(ctx, module);
+    return JS_SetModuleExport(ctx, module, "default", array);
+}
+
+/**
+ * A module imported as bytes: the entry "bytes/<name>" of the package, made
+ * into an array where it lies (on a device, in flash: nothing copied into
+ * RAM), else a file embedded in the executable (the desktop tool's standard
+ * library), else the hooks' loader (host: the file on disk). nullptr with a
+ * pending ReferenceError when found nowhere.
+ */
+JSModuleDef *loadBytesModule(JSContext *ctx, const Session *session, const char *name) {
+    // the file in the package; the array is not a script: the debugger is
+    // not told
+    if (session->package != nullptr) {
+        const package::Entry *entry = findModuleEntry(session->package, BYTES_PREFIX, name, "");
+        if (entry != nullptr) {
+            // the engine takes the bytes of a buffer as writable: they are
+            // read-only all the same (see newBytesModule), hence the cast
+            return newBytesModule(ctx, name, (uint8_t *)entry->data, entry->size, nullptr);
+        }
+    }
+
+    // then a file embedded in the executable, where it lies (same cast)
+    const EmbeddedBytes *embedded = findEmbeddedBytes(name);
+    if (embedded != nullptr) {
+        return newBytesModule(ctx, name, (uint8_t *)embedded->data, embedded->size, nullptr);
+    }
+
+    // then the extra loader of the hooks
+    bool hasExtraLoader = session->hooks != nullptr && session->hooks->loadBytes != nullptr;
+    if (hasExtraLoader) {
+        return session->hooks->loadBytes(ctx, name, session->hooks->opaque);
+    }
+
+    // found nowhere
+    JS_ThrowReferenceError(ctx, "could not load bytes '%s'", name);
+    return nullptr;
 }
 
 // Entry of a package that holds its names (the image JS_SetPackageAtoms()
@@ -103,11 +223,22 @@ JSModuleDef *readPackageModule(JSContext *ctx, const Session *session, const pac
 }
 
 /**
- * Module loader of the runtime. Returns nullptr with a pending exception if
- * the module is found nowhere.
+ * Module loader of the runtime ('attributes': the 'with { ... }' of the
+ * import, JS_UNDEFINED without one). Returns nullptr with a pending exception
+ * if the module is found nowhere.
  */
-JSModuleDef *loadModule(JSContext *ctx, const char *name, void *opaque, JSValueConst) {
+JSModuleDef *loadModule(JSContext *ctx, const char *name, void *opaque, JSValueConst attributes) {
     Session *session = (Session *)opaque;
+
+    // an import of bytes is a file, never code; another type: refused
+    ImportType type = importType(ctx, attributes, name);
+    if (type == ImportType::Unsupported) {
+        return nullptr;
+    }
+
+    if (type == ImportType::Bytes) {
+        return loadBytesModule(ctx, session, name);
+    }
 
     // a native module (C++) first; a device program only gets those of its
     // device (the digital twin of a board on the desktop has more)
@@ -628,6 +759,44 @@ JSModuleDef *compileModule(JSContext *ctx, const char *name, const char *source,
     JSModuleDef *module = (JSModuleDef *)JS_VALUE_GET_PTR(compiled);
     setImportMeta(ctx, module, name, false);
     JS_FreeValue(ctx, compiled);
+    return module;
+}
+
+/**
+ * Creates the module of an import of bytes: 'default' is a Uint8Array over
+ * 'data', not copied. 'release' frees 'data' (nullptr: never freed).
+ */
+JSModuleDef *newBytesModule(JSContext *ctx, const char *name, uint8_t *data, size_t size,
+                            JSFreeArrayBufferDataFunc *release) {
+    // an ArrayBuffer over the bytes; when it cannot be made, the engine has
+    // not taken them: freed here
+    JSFreeArrayBufferDataFunc *freeBytes = release != nullptr ? release : &keepBytes;
+    JSValue buffer = JS_NewArrayBuffer(ctx, data, size, freeBytes, nullptr, false);
+    if (JS_IsException(buffer)) {
+        freeBytes(JS_GetRuntime(ctx), nullptr, data);
+        return nullptr;
+    }
+
+    // a Uint8Array over all of it (JS_NewTypedArray reads its three
+    // arguments, whatever the count given)
+    JSValueConst arguments[3] = { buffer, JS_NewInt32(ctx, 0), JS_NewInt64(ctx, (int64_t)size) };
+    JSValue array = JS_NewTypedArray(ctx, 3, arguments, JS_TYPED_ARRAY_UINT8);
+    JS_FreeValue(ctx, buffer);
+    if (JS_IsException(array)) {
+        return nullptr;
+    }
+
+    // the module: 'default' is its only export, set from the array kept as
+    // its private value when it is evaluated (initBytesModule)
+    JSModuleDef *module = JS_NewCModule(ctx, name, &initBytesModule);
+    bool made = module != nullptr && JS_AddModuleExport(ctx, module, "default") == 0;
+    if (!made) {
+        JS_FreeValue(ctx, array);
+        return nullptr;
+    }
+
+    // the module keeps the array (and through it, the bytes)
+    JS_SetModulePrivateValue(ctx, module, array);
     return module;
 }
 

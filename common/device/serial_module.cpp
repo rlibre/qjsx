@@ -436,12 +436,17 @@ private:
             return true;
         }
 
-        // a board: the number of a UART
+        // a board: the number of a UART (only a number is converted: no
+        // valueOf of an object may run)
         int32_t number = -1;
-        bool isInteger = JS_IsNumber(port.get()) && JS_ToInt32(ctx, &number, port.get()) == 0;
-        double exact = 0;
-        JS_ToFloat64(ctx, &exact, port.get());
-        bool isUartNumber = isInteger && number >= 0 && (double)number == exact;
+        double exact = -1;
+        bool isNumber = JS_IsNumber(port.get());
+        if (isNumber) {
+            JS_ToInt32(ctx, &number, port.get());
+            JS_ToFloat64(ctx, &exact, port.get());
+        }
+
+        bool isUartNumber = isNumber && number >= 0 && (double)number == exact;
         if (!isUartNumber) {
             js::fail<js::TypeError>("Serial: the port must be the number of a UART, such as 1");
             return false;

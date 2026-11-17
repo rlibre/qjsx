@@ -181,7 +181,11 @@ uint64_t dataCapacity() {
  * the USB port go away and come back.
  */
 bool restart() {
+    // the pending output to the USB first
     usbserial::flush(RESTART_FLUSH_MS);
+
+    // then the reset; no return statement: NVIC_SystemReset() is declared
+    // __NO_RETURN by CMSIS (it waits for the reset in a loop itself)
     NVIC_SystemReset();
 }
 

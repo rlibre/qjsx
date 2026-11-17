@@ -20,7 +20,8 @@
 // UTF-16 columns.
 import { compile, quickjsVersion, qjsxVersion, bytecodeVersion } from "sys/compiler";
 import { sha256 } from "sys/crypto";
-import { hex } from "qjsx:util";
+import { hex, encodeText, placeOf } from "qjsx:util";
+import { importsBytes } from "qjsx:bytes";
 
 export const SIDECAR_FORMAT = 2;   // 2: with 'functions'
 
@@ -96,9 +97,10 @@ export function normalizeImport(importer, specifier) {
  * on a device; the debug info goes into the sidecar. 'import()' is refused:
  * every module of a program must be known when it is built.
  * Returns { buildId, sourceHash, bytecode, sidecar, imports, warnings, outline }:
- *   - 'imports' has one { specifier, name } per module it imports, each
- *     module once: the text written in the source and the name of the module
- *     it means;
+ *   - 'imports' has one { specifier, name, bytes, place } per module it
+ *     imports, each module once: the text written in the source, the name of
+ *     the module it means, true for an import of bytes ('with { type:
+ *     "bytes" }', qjsx:bytes), and "file:line:column" of the text;
  *   - 'warnings' has one { kind, line, column } per use of eval() or of the
  *     Function constructor (see warningText);
  *   - 'outline': its top-level statements, imports and exports, which 'qjsx
@@ -121,24 +123,48 @@ export function compileModule(name, source) {
         functions: debug,
     };
 
-    // the compiler gives one specifier per import statement: keep each
-    // imported module once, with the first text that names it
-    const imported = new Map();
-
-    for (const specifier of imports) {
-        const importedName = normalizeImport(name, specifier);
-        if (!imported.has(importedName)) {
-            imported.set(importedName, { specifier, name: importedName });
-        }
-    }
-
     return {
         buildId,
         sourceHash,
         bytecode,
         sidecar,
-        imports: [...imported.values()],
+        imports: importedModules(name, source, imports, outline),
         warnings,
         outline,
     };
+}
+
+/**
+ * The modules a compiled module imports (see compileModule), each once,
+ * with the first text that names it. 'imports' are the specifiers the
+ * compiler gives, one per import statement; the requests of the outline,
+ * in the same order, add their attributes and positions (none without
+ * outline). Throws when an import has attributes other than { type:
+ * "bytes" }, or when a module is imported both as bytes and as a module.
+ */
+function importedModules(name, source, imports, outline) {
+    const sourceBytes = encodeText(source);
+    const requests = outline?.requests;
+    const imported = new Map();
+
+    imports.forEach((specifier, index) => {
+        // where it is written, and whether it asks for bytes
+        const request = requests?.[index];
+        const place = request !== undefined ? placeOf(name, sourceBytes, request.position) : name;
+        const bytes = request !== undefined && importsBytes(request.attributes, place);
+        const importedName = normalizeImport(name, specifier);
+
+        // already imported: the same way
+        const earlier = imported.get(importedName);
+        if (earlier !== undefined) {
+            if (earlier.bytes !== bytes) {
+                throw new Error(`${place}: '${importedName}' is imported both as bytes and as a module`);
+            }
+            return;
+        }
+
+        imported.set(importedName, { specifier, name: importedName, bytes, place });
+    });
+
+    return [...imported.values()];
 }

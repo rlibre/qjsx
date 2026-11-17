@@ -76,9 +76,24 @@ extern "C" void *qjsxThreadPointer(void) {
         }
     }
 
-    // the default one
+    // the default one, once it exists
+    if (defaultBlock != nullptr) {
+        return defaultBlock;
+    }
+
+    // else made once, the scheduler held: two tasks without a block of their
+    // own (idle, timer) cannot both make it; before the scheduler starts, only
+    // main() runs (memory::allocate's malloc lock suspends it again: nested)
+    if (schedulerStarted) {
+        vTaskSuspendAll();
+    }
+
     if (defaultBlock == nullptr) {
         defaultBlock = tls::create();
+    }
+
+    if (schedulerStarted) {
+        xTaskResumeAll();
     }
 
     return defaultBlock;

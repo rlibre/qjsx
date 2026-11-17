@@ -53,14 +53,44 @@ JSModuleDef *loadFileModule(JSContext *ctx, const char *name, void *) {
 }
 
 /**
+ * Frees the bytes of a file imported as bytes (read by loadFileBytes), once
+ * its array is collected.
+ */
+void releaseFileBytes(JSRuntime *, void *, void *data) {
+    memory::release(data);
+}
+
+/**
+ * Loader of the imports of bytes on the host (rt::RunHooks::loadBytes), for
+ * the sources run by 'qjsx run': the file on disk, read into memory; its
+ * array owns that copy. Like code, it is read whatever the permissions of
+ * the program (a package holds it). nullptr with a pending ReferenceError if
+ * unreadable.
+ */
+JSModuleDef *loadFileBytes(JSContext *ctx, const char *name, void *) {
+    // read the file; the module name is its path
+    size_t size = 0;
+    uint8_t *data = files::readAll(name, &size);
+    if (data == nullptr) {
+        JS_ThrowReferenceError(ctx, "could not load bytes '%s': %s", name, strerror(errno));
+        return nullptr;
+    }
+
+    // the module of its bytes, which it frees
+    return rt::newBytesModule(ctx, name, data, size, &releaseFileBytes);
+}
+
+/**
  * Hooks of a run of the host tool: modules may also come from files, and an
  * uncaught exception stops the program.
  */
 rt::RunHooks fileHooks() {
     // the defaults, plus: stop on an uncaught exception, files as modules
+    // and as bytes
     rt::RunHooks hooks = {};
     hooks.exitOnUncaught = true;
     hooks.loadModule = &loadFileModule;
+    hooks.loadBytes = &loadFileBytes;
     return hooks;
 }
 

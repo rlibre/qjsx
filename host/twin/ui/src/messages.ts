@@ -24,6 +24,7 @@
 //   twin.part.action page -> twin  { id, action, args }: to a part
 //   twin.log        twin -> page   { id, text }: a line of a part, or an error of its model
 //   twin.i2c.data   twin -> page   { records }: the I2C transfers of the program (I2cRecord)
+//   twin.spi.data   twin -> page   { records }: the SPI transactions of the program (SpiRecord)
 //   twin.scope.data twin -> page   what the pins did since the last message (ScopeData),
 //                                  every 50 ms, for the analyzer
 import { Application } from "x4js";
@@ -41,6 +42,7 @@ export const MSG = {
     partAction: "twin.part.action",
     log:        "twin.log",
     i2cData:    "twin.i2c.data",
+    spiData:    "twin.spi.data",
     scopeData:  "twin.scope.data",
 };
 
@@ -76,6 +78,21 @@ export interface BoardInfo {
     uarts?:       number;       // UARTs of the board (device/serial)
     linkUart?:    number;       // the UART of the agent's link on the real board: never opened
     adc?:         AdcInfo;      // its analog inputs
+    dac?:         DacInfo;      // its analog outputs
+    spi?:         SpiInfo;      // its SPI controllers
+}
+
+// The SPI controllers of a board ("spi" of boards/<name>.json).
+export interface SpiInfo {
+    ports:     number[];        // those the program may open
+    reserved?: number[];        // those kept for the flash
+}
+
+// The analog outputs of a board ("dac" of boards/<name>.json).
+export interface DacInfo {
+    pins:       number[];       // the pins with a DAC
+    bits?:      number;         // resolution: codes 0 to 2^bits - 1
+    fullScale?: number;         // volts of the highest code
 }
 
 // The analog inputs of a board ("adc" of boards/<name>.json).
@@ -98,7 +115,9 @@ export interface PinState {
     conflict:   boolean;        // the program and a part drive different levels
     rmt:        boolean;        // a channel of device/rmt drives it
     i2c:        boolean;        // a bus of device/i2c is open on it
+    spi:        boolean;        // a bus or a device of device/spi uses it
     adc:        boolean;        // the program has its analog input open (device/adc)
+    dac:        boolean;        // an output of device/dac drives it
     voltage:    number;         // the voltage on it, in volts
     pwm:        PwmState | null;   // an output of device/pwm drives it; null: none
 }
@@ -170,6 +189,7 @@ export interface TwinState {
     serialPorts: string[];      // the names of the PC's serial ports
     usb:   UsbState;
     i2c:   I2cBusState[];
+    spi:   SpiBusState[];
 }
 
 // An I2C bus now, with the parts wired on its pins.
@@ -194,6 +214,57 @@ export interface I2cRecord {
     readSize:  number;          // bytes asked (the first 32 of the answer in read)
     written:   number[];
     read:      number[];
+}
+
+// A device of an SPI bus.
+export interface SpiDeviceState {
+    cs:        number | null;   // chip select pin; null: driven by the program
+    dc:        number | null;   // data / command pin; null: none
+    frequency: number;          // the clock the hardware makes, in Hz
+    mode:      number;          // 0..3
+    bitOrder:  "msb" | "lsb";
+}
+
+// An SPI bus now (one per controller of the board), with the parts on its
+// chip selects.
+export interface SpiBusState {
+    port:    number;
+    open:    boolean;           // the program has it open
+    sclk:    number | null;     // its pins (open); null: not wired
+    mosi:    number | null;
+    miso:    number | null;
+    devices: SpiDeviceState[];
+    parts:   { cs: number; id: string }[];
+}
+
+// A segment of an SPI transaction, as the trace keeps it.
+export interface SpiSegment {
+    kind:    "write" | "read" | "transfer" | "delay";
+    dc:      number;            // the level of the DC pin during it
+    size:    number;            // its bytes (the first 16 in written / read)
+    delayUs: number;            // a delay: microseconds
+    written: number[];          // write, transfer
+    read:    number[];          // read, transfer
+}
+
+// A transaction of the program on an SPI bus.
+export interface SpiRecord {
+    sequence:     number;       // its number, every bus together
+    time:         number;       // ms since the twin started
+    port:         number;
+    cs:           number | null;   // chip select pin of the device; null: driven by the program
+    dc:           number | null;   // DC pin of the device; null: none
+    frequency:    number;       // of the device, in Hz
+    mode:         number;
+    bitOrder:     "msb" | "lsb";
+    outcome:      "answered" | "nobody" | "timeout";   // nobody: no part there, 0xFF read
+    segmentCount: number;       // its segments (the first 8 in segments)
+    segments:     SpiSegment[];
+}
+
+// The SPI transactions (twin.spi.data).
+export interface SpiData {
+    records: SpiRecord[];
 }
 
 // What a pin did since the last twin.scope.data.

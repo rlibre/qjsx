@@ -34,10 +34,12 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "hal_i2c.h"
 #include "hal_rmt.h"
 #include "hal_serial.h"
+#include "hal_spi.h"
 #include "hal_usb.h"
 #include "loop.h"
 #include "quickjs.h"
@@ -57,7 +59,9 @@ struct PinState {
     bool    conflict;    // the program drives a level and a component the other
     bool    rmt;         // a channel of hal::rmt drives it (open)
     bool    i2c;         // a bus of hal::i2c is open on it (sda or scl)
+    bool    spi;         // a bus or a device of hal::spi uses it (clock, data, chip select, DC)
     bool    adc;         // the program has its analog input open (hal::adc)
+    bool    dac;         // a DAC output of hal::dac drives it (open): its voltage wins
     int16_t voltageMv;   // the voltage a component sets on it, in mV; -1: none (its level gives it)
     bool    pwm;         // an output of hal::pwm drives it (open)
     bool    pwmInvert;   // that output is active low (pwm)
@@ -112,6 +116,14 @@ const char *const *natives();
  */
 int nativeCount();
 
+/**
+ * Reads the integers of the array property 'name' of 'object' (a part of the
+ * board description) into 'out', at most 'capacity'; the count read, -1 if
+ * an item is not an integer from 'low' to 'high'. A missing property reads
+ * 0 items. In load().
+ */
+int readIntegers(JSContext *ctx, JSValueConst object, const char *name, int low, int high, int *out, int capacity);
+
 // ### Choices of the page (twin_choices.cpp) ##################################
 //
 // What the page chooses for a link (the TCP port of a UART, the PC serial
@@ -162,12 +174,18 @@ void setRmt(int pin, bool driven);
  */
 void setI2c(int pin, bool used);
 
+/**
+ * A bus or a device of hal::spi uses 'pin', or not any more (twin_spi.cpp).
+ */
+void setSpi(int pin, bool used);
+
 // ### Analog inputs (twin_adc.cpp) ############################################
 //
 // The board description says which pins have an analog input ("adc": {
 // "pins", "bits", "spans" (the ranges its converter can read, in mV, from
 // the smallest), "vref" (volts: the level 1 of a pin) }). The voltage on a
-// pin is what a component sets (a potentiometer), else its level times vref.
+// pin is what the program's DAC drives (below), else what a component sets
+// (a potentiometer), else its level times vref.
 
 /**
  * Whether 'pin' has an analog input.
@@ -201,6 +219,40 @@ void setAdc(int pin, bool open);
  */
 void partVoltage(int pin, int millivolts);
 
+// ### Analog outputs (twin_dac.cpp) ###########################################
+//
+// The board description says which pins have a DAC ("dac": { "pins",
+// "bits", "fullScale" (volts of the highest code) }, the original ESP32:
+// [25, 26], 8, 3.3). Without the section, the board has no DAC (and the
+// twin does not offer device/dac). A pin a DAC drives has the voltage of its
+// code: the program's output wins over what a component sets, as for the
+// levels; its level is 1 from half of vref ("adc.vref") up. The parts read
+// that voltage (pin.voltage of qjsx:twin), the page and the analyzer show
+// it.
+
+/**
+ * Reads "dac" of the description (optional); false after printing what is
+ * wrong (load(), twin.cpp).
+ */
+bool dacRead(JSContext *ctx, JSValueConst description, const char *path);
+
+/**
+ * Whether the board has a DAC ("dac" of the description).
+ */
+bool dacPresent();
+
+/**
+ * A DAC output of hal::dac drives 'pin' at 'millivolts' (opened, or a new
+ * code) (twin_dac.cpp, JS thread).
+ */
+void dacDrive(int pin, int millivolts);
+
+/**
+ * The DAC output on 'pin' stopped: the pin is given back, as a pin nobody
+ * configured (hal::gpio::reset).
+ */
+void dacStop(int pin);
+
 // ### PWM outputs (twin_pwm.cpp) ##############################################
 //
 // The board description says what its PWM has ("pwm": { "outputs",
@@ -230,6 +282,58 @@ void pwmDrive(int pin, bool invert, double frequency, double duty);
  * level (0, or 1 inverted), as on the board.
  */
 void pwmStop(int pin, bool invert);
+
+// ### Traces for the page #####################################################
+//
+// The transfers of a bus are kept as numbered records (from 1) in a ring:
+// the newest TraceRing::CAPACITY of them, the oldest dropped. The page reads
+// the records after the last one it got. The ring has no lock of its own:
+// its owner holds one around each call.
+
+template <typename Record, int Capacity>
+class TraceRing {
+public:
+    // Called by visit() for each record.
+    typedef void Visitor(void *context, const Record *record);
+
+    /**
+     * The slot of a new record, zeroed, its 'sequence' set; it overwrites
+     * the oldest record when the ring is full.
+     */
+    Record   *add() {
+        _newest++;
+        Record *entry = &_records[_newest % Capacity];
+        memset(entry, 0, sizeof(*entry));
+        entry->sequence = _newest;
+        return entry;
+    }
+
+    /**
+     * Calls 'visit' for each record numbered after 'after' still in the
+     * ring, oldest first. Returns the number of the newest record (0: none
+     * yet).
+     */
+    uint32_t  visit(uint32_t after, Visitor *visit, void *context) const {
+        // the oldest record still in the ring, and the first one asked (on 64
+        // bits: the largest 'after', which the page's server gives to skip
+        // every record, must not wrap to 0 and give them all)
+        bool ringFull = _newest > (uint32_t)Capacity;
+        uint64_t oldest = ringFull ? _newest - Capacity + 1 : 1;
+        uint64_t next = (uint64_t)after + 1;
+        uint64_t first = next > oldest ? next : oldest;
+
+        // each one, oldest first
+        for (uint64_t sequence = first; sequence <= _newest; sequence++) {
+            visit(context, &_records[sequence % Capacity]);
+        }
+
+        return _newest;
+    }
+
+private:
+    Record   _records[Capacity];   // the ring, indexed by sequence % Capacity
+    uint32_t _newest = 0;          // number of the newest record; 0: none
+};
 
 // ### I2C buses (twin_i2c.cpp) ################################################
 //
@@ -278,6 +382,121 @@ void i2cBusStates(I2cBusState *states);
  * Returns the number of the newest record (0: none yet).
  */
 uint32_t i2cTrace(uint32_t after, I2cTraceVisitor *visit, void *context);
+
+// ### SPI buses (twin_spi.cpp) ################################################
+//
+// The controllers of the board description ("spi": { "ports": [2, 3],
+// "reserved": [0, 1] }: the ports the program may open, and those kept for
+// the flash, refused as busy, as on the ESP32-S3); without the section the
+// board has no SPI. The buses the program opens, their devices, and the trace
+// of its transactions for the page: the last SPI_TRACE_RECORDS of them,
+// every bus together, numbered.
+
+const int SPI_MAX_PORTS = 4;             // controllers a board may list ("ports" and "reserved" each)
+const int SPI_MAX_DEVICES = 6;           // devices on one bus (chip selects of a controller, SPI2 of the ESP32-S3)
+const int SPI_TRACE_RECORDS = 256;       // transactions kept
+const int SPI_TRACE_SEGMENTS = 8;        // segments kept of a transaction
+const size_t SPI_TRACE_BYTES = 16;       // bytes kept of what a segment writes, and of what it reads
+
+// What a segment of a transaction does (hal::spi::Segment has no field for
+// it: its pointers say it).
+enum class SpiKind {
+    write,                               // bytes sent
+    read,                                // bytes received, the fill byte sent
+    transfer,                            // bytes sent and received at the same time
+    delay,                               // a wait, the chip select held
+};
+
+/**
+ * The kind of a segment, from which of its pointers are set.
+ */
+inline SpiKind spiKindOf(const hal::spi::Segment *segment) {
+    // both: a transfer; only one: a write or a read; none: a delay
+    bool writes = segment->write != nullptr;
+    bool reads = segment->read != nullptr;
+    if (writes && reads) {
+        return SpiKind::transfer;
+    }
+
+    if (writes) {
+        return SpiKind::write;
+    }
+
+    return reads ? SpiKind::read : SpiKind::delay;
+}
+
+// How a transaction went for the components.
+enum class SpiOutcome {
+    answered,                            // a component on its chip select answered it
+    nobody,                              // no component there: every byte read is 0xFF
+    timeout,                             // the component did not answer in time: 0xFF read
+};
+
+// A device on a bus, as the page sees it.
+struct SpiDeviceState {
+    int      cs;                         // chip select pin; -1: driven by the program
+    int      dc;                         // data / command pin; -1: none
+    uint32_t frequencyHz;                // the clock the hardware makes
+    uint8_t  mode;                       // 0..3: bit 1 CPOL, bit 0 CPHA
+    bool     lsbFirst;                   // bit order
+};
+
+// What the page reads of a bus.
+struct SpiBusState {
+    int            port;                 // the controller's number ("ports" of the description)
+    bool           open;                 // the program has it open
+    int            sclk;                 // its clock pin (open)
+    int            mosi;                 // its data out pin (open); -1: not wired
+    int            miso;                 // its data in pin (open); -1: not wired
+    int            deviceCount;          // entries of devices
+    SpiDeviceState devices[SPI_MAX_DEVICES];   // its devices, in the order of their making
+};
+
+// A segment of a transaction, as the trace keeps it.
+struct SpiSegmentRecord {
+    uint8_t  kind;                       // SpiKind as a number
+    uint8_t  dc;                         // the level of the DC pin during it
+    uint32_t size;                       // its bytes (the first SPI_TRACE_BYTES kept)
+    uint32_t delayUs;                    // a delay: microseconds
+    uint8_t  written[SPI_TRACE_BYTES];   // the first bytes sent (write, transfer)
+    uint8_t  read[SPI_TRACE_BYTES];      // the first bytes received (read, transfer)
+};
+
+// A transaction of the program.
+struct SpiRecord {
+    uint32_t         sequence;           // its number, from 1
+    int64_t          timeUs;             // when, in µs since the twin started (scopeNowUs)
+    int              port;               // the controller
+    int              cs;                 // chip select pin of the device; -1: driven by the program
+    int              dc;                 // DC pin of the device; -1: none
+    uint32_t         frequencyHz;        // the clock of the device
+    uint8_t          mode;               // 0..3
+    bool             lsbFirst;           // bit order
+    uint8_t          outcome;            // SpiOutcome as a number
+    uint32_t         segmentCount;       // its segments (the first SPI_TRACE_SEGMENTS kept)
+    SpiSegmentRecord segments[SPI_TRACE_SEGMENTS];   // the first segments
+};
+
+// Called by spiTrace() for each record, with the lock held.
+typedef void SpiTraceVisitor(void *context, const SpiRecord *record);
+
+/**
+ * Reads "spi" of the description (optional); false after printing what is
+ * wrong (load(), twin.cpp).
+ */
+bool spiRead(JSContext *ctx, JSValueConst description, const char *path);
+
+/**
+ * Copies the state of the board's buses ("ports" of the description, in
+ * their order) into 'states' (SPI_MAX_PORTS at most); returns how many.
+ */
+int spiBusStates(SpiBusState *states);
+
+/**
+ * Calls 'visit' for each record numbered after 'after', oldest first.
+ * Returns the number of the newest record (0: none yet).
+ */
+uint32_t spiTrace(uint32_t after, SpiTraceVisitor *visit, void *context);
 
 // ### Analyzer of the pins (twin_scope.cpp) ###################################
 //
@@ -426,6 +645,7 @@ enum class BridgeEvent {
     rmtBytes,                       // value: pin; data: the bytes of sendBytes
     rmtPulses,                      // value: pin; data: [ticks u32 LE, level u8] per pulse
     i2cTransfer,                    // value: request; data: [sda, scl, address, 0, readSize u32 LE, written...]
+    spiTransaction,                 // value: request; data: see spiTransaction()
 };
 
 /**
@@ -466,6 +686,54 @@ hal::i2c::Status i2cTransfer(int sda, int scl, int address, const uint8_t *writt
  * thread; an answer that comes too late is dropped.
  */
 void i2cAnswer(uint32_t request, int status, const uint8_t *bytes, size_t size);
+
+const size_t SPI_MESSAGE_HEADER = 16;    // bytes of the header of a spiTransaction message
+const size_t SPI_MESSAGE_SEGMENT = 12;   // bytes of the descriptor of a segment in it
+
+// An SPI transaction, as the component on its chip select hears it.
+struct SpiTransfer {
+    int      port;                  // the controller of the program
+    int      cs;                    // the chip select pin of the component
+    uint32_t frequencyHz;           // the clock of the device
+    int      mode;                  // 0..3
+    bool     lsbFirst;              // bit order
+};
+
+/**
+ * A component sits on chip select pin 'cs' of controller 'port', or not any
+ * more (twin's thread).
+ */
+void spiAttach(int port, int cs, bool attached);
+
+/**
+ * The chip select of the component that hears a transaction of a device on
+ * 'port' whose chip select is 'cs': the component on 'cs'; for a device
+ * without one (-1: the program drives it with device/gpio), the first
+ * component of the controller whose chip select pin is low now. -1: none.
+ * Program's thread.
+ */
+int spiListener(int port, int cs);
+
+/**
+ * The program's transaction: posted to the bridge, then waits for the
+ * component's answer at most 'timeoutMs'. The bytes it reads are written
+ * into the read buffers of the segments; 0xFF where the component gives
+ * none, or when it did not answer in time (timeout). nobody when there is
+ * no bridge. Program's thread (or the "twin spi" thread).
+ *
+ * The data of the message: [port u8, cs u8, mode u8, lsbFirst u8, frequency
+ * u32 LE, segment count u32 LE, bytes read u32 LE], then per segment [kind
+ * u8 (SpiKind), dc u8, 0, 0, size u32 LE, delayUs u32 LE], then the bytes
+ * of the write and transfer segments, one after the other.
+ */
+SpiOutcome spiTransaction(const SpiTransfer *transfer, const hal::spi::Segment *segments, size_t count, int timeoutMs);
+
+/**
+ * The answer of a component to the transaction 'request': the bytes of its
+ * read and transfer segments, one after the other (copied; 0xFF after them
+ * up to what was asked). Twin's thread; a late answer is dropped.
+ */
+void spiAnswer(uint32_t request, const uint8_t *bytes, size_t size);
 
 /**
  * The twin's runtime says whether its parts are built: 'error' nullptr when
