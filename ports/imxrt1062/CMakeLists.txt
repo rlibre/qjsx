@@ -127,7 +127,12 @@ set(QJSX_ITCM_FUNCTIONS
     js_alloc_string_rt js_new_string8_len
     # the engine's allocation functions, the garbage collector's trigger
     js_malloc js_malloc_rt js_realloc js_realloc_rt js_realloc_array js_free js_free_rt
-    js_trigger_gc gc_decref)
+    js_trigger_gc gc_decref
+    # EXPERIMENT 2026-11-17 (await on the Teensy): the path of an await
+    __js_malloc __js_free js_malloc_large async_func_init async_func_resume
+    js_async_function_resume js_async_function_call async_func_free_frame __async_func_free
+    async_func_free js_async_function_settle js_async_function_await_job
+    js_async_function_await_enqueue JS_ExecutePendingJob close_var_refs)
 set(QJSX_RENAMES "")
 foreach(function ${QJSX_ITCM_FUNCTIONS})
     list(APPEND QJSX_RENAMES "--rename-section" ".text.${function}=.ramfunc.${function}")
@@ -163,7 +168,8 @@ add_executable(qjsx.elf
     "${MAIN_DIR}/tls_read_tp_imxrt1062.S"
     "${MAIN_DIR}/atomics64_imxrt1062.c"
     "${MAIN_DIR}/hal_gpio_imxrt1062.cpp"
-    "${MAIN_DIR}/hal_pwm_imxrt1062.cpp")
+    "${MAIN_DIR}/hal_pwm_imxrt1062.cpp"
+    "${MAIN_DIR}/native_profiler_imxrt1062.cpp")
 
 # FreeRTOS's headers first (its list.h, not QuickJS's: our code never
 # includes the engine's internal headers), then ours: main/ holds

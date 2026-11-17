@@ -109,10 +109,13 @@ const CONTENT_TYPES = {
     ttf: "font/ttf",
 };
 
-// The I2C buses now, each with the parts wired on its pins: [{ bus, open,
-// sda, scl, parts: [{ address, id }] }] ('board': the board of the parts).
+/**
+ * The I2C buses now, each with the parts wired on its pins: [{ bus, open,
+ * sda, scl, parts: [{ address, id }] }] ('board': the board of the parts).
+ */
 function readI2c(board) {
     return twinboard.i2cBuses().map(bus => {
+        // an open bus: the parts attached on its pins, as { address, id }
         const wired = bus.open ? board._buses.get(`${bus.sda}/${bus.scl}`) : undefined;
         const parts = [...(wired?._parts ?? [])].map(([address, id]) => ({ address, id }));
         return { ...bus, parts };
@@ -120,21 +123,28 @@ function readI2c(board) {
 }
 
 // The PC's serial ports, read again every PORTS_MS.
-let serialPorts = [];
-let serialPortsRead = -Infinity;
+let serialPorts = [];                   // names, from the last look
+let serialPortsRead = -Infinity;        // ms, Date.now() of the last look
 
-// The names of the PC's serial ports, from the last look (a new look every
-// PORTS_MS).
+/**
+ * The names of the PC's serial ports, from the last look (a new look every
+ * PORTS_MS).
+ */
 function pcSerialPorts() {
+    // the last look is too old: a new one
     const now = Date.now();
-    if (now - serialPortsRead >= PORTS_MS) {
+    const isTooOld = now - serialPortsRead >= PORTS_MS;
+    if (isTooOld) {
         serialPorts = twinboard.serialPorts();
         serialPortsRead = now;
     }
+
     return serialPorts;
 }
 
-// The state of the board now (see the top of the file).
+/**
+ * The state of the board now (see the top of the file).
+ */
 function readState(board) {
     return {
         pins: twinboard.pins(),
@@ -145,8 +155,10 @@ function readState(board) {
     };
 }
 
-// The twin.i2c.data message of records of the I2C trace (bytes as arrays of
-// numbers).
+/**
+ * The twin.i2c.data message of records of the I2C trace (bytes as arrays of
+ * numbers).
+ */
 function i2cMessage(records) {
     const params = {
         records: records.map(record => ({ ...record, written: Array.from(record.written), read: Array.from(record.read) })),
@@ -154,24 +166,33 @@ function i2cMessage(records) {
     return JSON.stringify({ msg: "twin.i2c.data", params });
 }
 
-// The parts the project wires on the board: the "parts" of the "twin"
-// section of its qjsx.json (none without a project).
+/**
+ * The parts the project wires on the board: the "parts" of the "twin"
+ * section of its qjsx.json (none without a project).
+ */
 function projectParts(projectDir) {
+    // no project: no part
     if (projectDir === undefined) {
         return [];
     }
+
+    // the "twin.parts" of its qjsx.json, an array
     const settings = JSON.parse(fs.readFileSync(`${projectDir}/qjsx.json`, "utf8"));
     const parts = settings.twin?.parts ?? [];
     if (!Array.isArray(parts)) {
         throw new Error('qjsx.json: "twin.parts" must be an array');
     }
+
     return parts;
 }
 
 // The largest record number: asking for the records after it gives none.
 const LAST_RECORD = 4294967295;
 
-// The twin.uart.data message of records of a UART (bytes as arrays of numbers).
+/**
+ * The twin.uart.data message of records of a UART (bytes as arrays of
+ * numbers).
+ */
 function trafficMessage(uart, records) {
     const params = {
         uart,
@@ -184,41 +205,58 @@ function trafficMessage(uart, records) {
     return JSON.stringify({ msg: "twin.uart.data", params });
 }
 
-// twin.tcp.listen: the port and the listening of a TCP link.
+/**
+ * twin.tcp.listen: the port and the listening of a TCP link.
+ */
 function setTcpLink(params) {
+    // a valid message only: the page is not trusted
     const { kind, index, port, listen } = params ?? {};
     const validKind = kind === "uart" || kind === "usb";
     const validPort = Number.isInteger(port) && port >= 0 && port <= 65535;
-    if (validKind && Number.isInteger(index) && validPort && typeof listen === "boolean") {
+    const validMessage = validKind && Number.isInteger(index) && validPort && typeof listen === "boolean";
+    if (validMessage) {
         twinboard.tcpListen(`${kind}${index}`, port, listen);
     }
 }
 
-// True if 'bytes' is an array of numbers 0..255.
+/**
+ * True if 'bytes' is an array of numbers 0..255.
+ */
 function isByteArray(bytes) {
     return Array.isArray(bytes) && bytes.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255);
 }
 
-// twin.uart.send: bytes for the program on a UART (dropped if it is closed).
+/**
+ * twin.uart.send: bytes for the program on a UART (dropped if it is closed).
+ */
 function sendToUart(params) {
+    // a valid message only: the page is not trusted
     const { uart, bytes } = params ?? {};
-    if (Number.isInteger(uart) && uart >= 0 && uart < twinboard.uarts().length && isByteArray(bytes)) {
+    const validUart = Number.isInteger(uart) && uart >= 0 && uart < twinboard.uarts().length;
+    if (validUart && isByteArray(bytes)) {
         twinboard.uartSend(uart, new Uint8Array(bytes));
     }
 }
 
-// twin.uart.serial: a UART wired to a PC serial port, or not.
+/**
+ * twin.uart.serial: a UART wired to a PC serial port, or not.
+ */
 function wireUart(params) {
+    // a valid message only: the page is not trusted
     const { uart, port, connect, realSpeed } = params ?? {};
     const validUart = Number.isInteger(uart) && uart >= 0 && uart < twinboard.uarts().length;
     const validPort = typeof port === "string" && port.length < 64;
-    if (validUart && validPort && typeof connect === "boolean" && typeof realSpeed === "boolean") {
+    const validMessage = validUart && validPort && typeof connect === "boolean" && typeof realSpeed === "boolean";
+    if (validMessage) {
         twinboard.uartSerial(uart, port, connect, realSpeed);
     }
 }
 
-// twin.pin.force: a pin forced to 0 or 1, or let go.
+/**
+ * twin.pin.force: a pin forced to 0 or 1, or let go.
+ */
 function forcePin(params) {
+    // a valid message only: the page is not trusted
     const { pin, level } = params ?? {};
     const validLevel = level === 0 || level === 1 || level === -1;
     if (Number.isInteger(pin) && validLevel) {
@@ -226,9 +264,11 @@ function forcePin(params) {
     }
 }
 
-// A message of a page, to the twin or to a part ('actOnPart(params)' for
-// twin.part.action). Others are ignored (the page sends every global message
-// it fires).
+/**
+ * A message of a page, to the twin or to a part ('actOnPart(params)' for
+ * twin.part.action). Others are ignored (the page sends every global message
+ * it fires).
+ */
 function onPageMessage(text, actOnPart) {
     // a JSON message { msg, params }
     let message;
@@ -238,38 +278,41 @@ function onPageMessage(text, actOnPart) {
         return;
     }
 
+    // to the handler of its name
     switch (message?.msg) {
-    case "twin.uart.send": {
-        sendToUart(message.params);
-        break;
-    }
-    case "twin.tcp.listen": {
-        setTcpLink(message.params);
-        break;
-    }
-    case "twin.uart.serial": {
-        wireUart(message.params);
-        break;
-    }
-    case "twin.pin.force": {
-        forcePin(message.params);
-        break;
-    }
-    case "twin.part.action": {
-        actOnPart(message.params ?? {});
-        break;
-    }
-    default: {
-        break;
-    }
+        case "twin.uart.send": {
+            sendToUart(message.params);
+            break;
+        }
+        case "twin.tcp.listen": {
+            setTcpLink(message.params);
+            break;
+        }
+        case "twin.uart.serial": {
+            wireUart(message.params);
+            break;
+        }
+        case "twin.pin.force": {
+            forcePin(message.params);
+            break;
+        }
+        case "twin.part.action": {
+            actOnPart(message.params ?? {});
+            break;
+        }
+        default: {
+            break;
+        }
     }
 }
 
-// The files of the page: name (without the leading "/") -> Uint8Array, or
-// undefined. From the embedded zip, or read from 'uiDir' at each request
-// (to work on the page without building qjsx again).
+/**
+ * The files of the page: name (without the leading "/") -> Uint8Array, or
+ * undefined. From the embedded zip, or read from 'uiDir' at each request
+ * (to work on the page without building qjsx again).
+ */
 function pageFiles(uiDir) {
-    // the folder of the page, read at each request
+    // the folder of the page, read at each request (never above it: "..")
     if (uiDir !== undefined) {
         return name => {
             const file = `${uiDir}/${name}`;
@@ -283,9 +326,11 @@ function pageFiles(uiDir) {
     return name => entries.get(name);
 }
 
-// The answer to GET 'path' for a file of the page, or undefined. The view of
-// its own of a project's part ('viewFiles': id -> file) is read at each
-// request.
+/**
+ * The answer to GET 'path' for a file of the page, or undefined. The view of
+ * its own of a project's part ('viewFiles': id -> file) is read at each
+ * request.
+ */
 function pageAnswer(files, viewFiles, path) {
     // a view of a part: /parts/<id>/view.js
     const view = /^\/parts\/([a-z0-9_-]+)\/view\.js$/.exec(path);
@@ -301,12 +346,15 @@ function pageAnswer(files, viewFiles, path) {
         return undefined;
     }
 
+    // its content type, from its extension
     const extension = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
     const contentType = CONTENT_TYPES[extension] ?? "application/octet-stream";
     return { contentType, body };
 }
 
-// The text of an error of a model, for the console of the page.
+/**
+ * The text of an error of a model, for the console of the page.
+ */
 function errorText(error) {
     return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
@@ -320,13 +368,17 @@ function errorText(error) {
  * 3. pushes the traffic of the UARTs and the state to the pages.
  */
 export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir }) {
+    // the board description, the files of the page, the open pages
     const board = JSON.parse(twinboard.board());
     const files = pageFiles(uiDir);
     const sockets = new Set();
 
-    // to every open page
+    /**
+     * Sends a message to every open page.
+     */
     function broadcast(msg, params) {
         const text = JSON.stringify({ msg, params });
+
         for (const entry of sockets) {
             entry.socket.send(text);
         }
@@ -336,13 +388,19 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
     // pages to come) and sent
     const lastStates = new Map();   // id -> state
     const keptLines = [];           // the last KEPT_LINES of twin.log
+
+    /**
+     * A line of a part (twin.log): kept, the oldest dropped, and sent.
+     */
     function addLine(line) {
         keptLines.push(line);
         if (keptLines.length > KEPT_LINES) {
             keptLines.shift();
         }
+
         broadcast("twin.log", line);
     }
+
     const hooks = {
         published: (part, state) => {
             lastStates.set(part.id, state);
@@ -352,6 +410,7 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
         failed: (id, error) => addLine({ id: id ?? null, text: errorText(error) }),
     };
 
+    // build the parts; the first error: the agent is told why, and stops
     let parts;
     try {
         parts = await loadParts({ boardParts: board.parts, projectParts: projectParts(projectDir), projectDir, hooks });
@@ -360,17 +419,25 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
         return;
     }
 
+    // the parts by id, their own views, their descriptions for the pages;
+    // then the bridge gives them the hardware events
     const partsById = new Map(parts.parts.map(entry => [entry.part.id, entry]));
     const viewFiles = new Map(parts.parts.filter(entry => entry.viewFile).map(entry => [entry.part.id, entry.viewFile]));
     const descriptions = parts.parts.map(entry => entry.description);
     new twinboard.Bridge(event => parts.board._dispatch(event));
 
-    // twin.part.action: to the part (an exception goes to the console)
+    /**
+     * twin.part.action: to the part (an exception goes to the console).
+     */
     function actOnPart({ id, action, args }) {
+        // a known part, an action named by a text
         const entry = partsById.get(id);
-        if (entry === undefined || typeof action !== "string") {
+        const isRefused = entry === undefined || typeof action !== "string";
+        if (isRefused) {
             return;
         }
+
+        // its exception goes to the console of the page
         try {
             entry.part.onAction(action, args);
         } catch (error) {
@@ -385,6 +452,7 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
     // the number of the last record of the I2C trace sent to the pages
     let sentI2c = 0;
 
+    // start the server; it cannot listen: the agent is told why, and stops
     try {
         startServer({
             host,
@@ -394,9 +462,11 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
                 if (path === "/board.json") {
                     return board;
                 }
+
                 if (path === "/state") {
                     return readState(parts.board);
                 }
+
                 return undefined;
             },
             protocols: ["messaging"],
@@ -408,12 +478,16 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
                 sockets.add(entry);
                 socket.send(JSON.stringify({ msg: "twin.board", params: board }));
                 socket.send(JSON.stringify({ msg: "twin.parts", params: descriptions }));
+
                 for (const [id, state] of lastStates) {
                     socket.send(JSON.stringify({ msg: "twin.part.state", params: { id, state } }));
                 }
+
                 for (const line of keptLines) {
                     socket.send(JSON.stringify({ msg: "twin.log", params: line }));
                 }
+
+                // the traffic kept, then its messages and its end
                 sendKeptTraffic(socket);
                 sendKeptI2c(socket);
                 socket.onMessage(text => onPageMessage(text, actOnPart));
@@ -425,10 +499,13 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
         return;
     }
 
+    // the twin is ready: the agent goes on
     twinboard.ready();
 
-    // a new page: the records kept of each UART, up to those the other pages
-    // got (the newer ones come with the next poll, to every page)
+    /**
+     * A new page: the records kept of each UART, up to those the other pages
+     * got (the newer ones come with the next poll, to every page).
+     */
     function sendKeptTraffic(socket) {
         for (let uart = 0; uart < uartCount; uart++) {
             const { records } = twinboard.uartTraffic(uart, 0);
@@ -439,26 +516,36 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
         }
     }
 
-    // the new records of each UART, to every page (none open: only skipped)
+    /**
+     * The new records of each UART, to every page (none open: only skipped).
+     */
     function pushTraffic() {
         for (let uart = 0; uart < uartCount; uart++) {
+            // no page: the records so far are skipped
             if (sockets.size === 0) {
                 sentRecords[uart] = twinboard.uartTraffic(uart, LAST_RECORD).sequence;
                 continue;
             }
+
+            // the records after the last one sent
             const { sequence, records } = twinboard.uartTraffic(uart, sentRecords[uart]);
             sentRecords[uart] = sequence;
             if (records.length === 0) {
                 continue;
             }
+
+            // to every page
             const text = trafficMessage(uart, records);
+
             for (const entry of sockets) {
                 entry.socket.send(text);
             }
         }
     }
 
-    // a new page: the I2C trace up to what the other pages got
+    /**
+     * A new page: the I2C trace up to what the other pages got.
+     */
     function sendKeptI2c(socket) {
         const kept = twinboard.i2cTrace(0).records.filter(record => record.sequence <= sentI2c);
         if (kept.length > 0) {
@@ -466,21 +553,31 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
         }
     }
 
-    // the new records of the I2C trace, to every page (none open: only skipped)
+    /**
+     * The new records of the I2C trace, to every page (none open: only
+     * skipped).
+     */
     function pushI2c() {
-        const { sequence, records } = twinboard.i2cTrace(sockets.size === 0 ? LAST_RECORD : sentI2c);
+        // the records after the last one sent; no page: all skipped
+        const after = sockets.size === 0 ? LAST_RECORD : sentI2c;
+        const { sequence, records } = twinboard.i2cTrace(after);
         sentI2c = sequence;
         if (records.length === 0) {
             return;
         }
+
+        // to every page
         const text = i2cMessage(records);
+
         for (const entry of sockets) {
             entry.socket.send(text);
         }
     }
 
-    // what the pins did since the last turn, to every page (none open: read
-    // all the same, so that a page that connects starts from now)
+    /**
+     * What the pins did since the last turn, to every page (none open: read
+     * all the same, so that a page that connects starts from now).
+     */
     function pushScope() {
         const scope = twinboard.scope();
         if (sockets.size > 0) {
@@ -497,7 +594,10 @@ export async function serveTwin({ host = "127.0.0.1", port, projectDir, uiDir })
         if (sockets.size === 0) {
             return;
         }
+
+        // the state, to each page that does not have it yet
         const text = JSON.stringify({ msg: "twin.state", params: readState(parts.board) });
+
         for (const entry of sockets) {
             if (entry.last !== text) {
                 entry.last = text;

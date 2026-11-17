@@ -25,11 +25,16 @@
 //                            build whose compiler is the one that made it
 //                            (same compiler id and same bytecode version)
 //   debug/<module>.json      its debug sidecar (same condition)
+//   outline/<module>.json    its outline: what 'qjsx build' reads to leave
+//                            out of a package what nothing uses (qjsx:prune;
+//                            same condition)
 //   src/<module>.js          its source: what a build with another compiler
 //                            compiles again, and what the debugger shows
 //
 // manifest.modules[]: { name ("sensors/bme280"), buildId, sourceHash,
-// bytecode, debug, source (entry names), imports (module names) }.
+// bytecode, debug, outline, source (entry names), imports (module names) }.
+// A library made before the outlines has no 'outline': its modules are
+// compiled again from their sources when a program uses them.
 // manifest.natives[]: the native modules the library imports ("sys/fs",
 // "device/gpio"...): see isNativeModule.
 import * as fs from "sys/fs";
@@ -45,14 +50,18 @@ export const STANDARD_LIBRARY = "stdlib";
 
 const decoder = new TextDecoder();
 
-// Where the standard library is: next to the executable (process.argv[0] is
-// its full path).
+/**
+ * Where the standard library is: next to the executable (process.argv[0] is
+ * its full path).
+ */
 export function standardLibraryFile() {
     return join(dirname(process.argv[0]), `${STANDARD_LIBRARY}${LIBRARY_EXTENSION}`);
 }
 
-// Library a module name belongs to ("stdlib/path" -> "stdlib"); undefined
-// for a name without '/'.
+/**
+ * Library a module name belongs to ("stdlib/path" -> "stdlib"); undefined
+ * for a name without '/'.
+ */
 export function libraryOf(moduleName) {
     const slash = moduleName.indexOf("/");
     return slash < 0 ? undefined : moduleName.slice(0, slash);
@@ -63,31 +72,41 @@ export function libraryOf(moduleName) {
 // take one of these names.
 export const NATIVE_PREFIXES = ["sys", "device"];
 
-// True if a module name is the one of a native module (sys/..., device/...).
+/**
+ * True if a module name is the one of a native module (sys/..., device/...).
+ */
 export function isNativeModule(moduleName) {
     return NATIVE_PREFIXES.includes(libraryOf(moduleName));
 }
 
-// The error of an import of a name without '/' that no module has: native
-// modules are named with a prefix now ("fs" became "sys/fs").
+/**
+ * The error of an import of a name without '/' that no module has: native
+ * modules are named with a prefix now ("fs" became "sys/fs").
+ */
 export function bareNameError(where, name) {
     return new Error(`${where}: no module '${name}' (native modules are named sys/<name> or device/<name>, e.g. 'sys/fs')`);
 }
 
-// Compiles the modules of a library project (qjsx.json with 'modules') and
-// writes its .qjslib file: 'outputFile', or <output>/<name>.qjslib in the
-// project. Returns { file, name, version, moduleCount, size, warnings };
-// 'warnings' has one { file, kind, line, column } per use of eval() or of the
-// Function constructor in the sources (qjsx:compile, warningText).
+/**
+ * Compiles the modules of a library project (qjsx.json with 'modules') and
+ * writes its .qjslib file: 'outputFile', or <output>/<name>.qjslib in the
+ * project. Returns { file, name, version, moduleCount, size, warnings };
+ * 'warnings' has one { file, kind, line, column } per use of eval() or of the
+ * Function constructor in the sources (qjsx:compile, warningText).
+ */
 export function makeLibrary(directory, outputFile) {
+    // a library project: modules, a version, a name that is not a native prefix
     const project = loadProject(directory);
     const projectFile = join(directory, PROJECT_FILE);
-    if (project.modules === undefined || Object.keys(project.modules).length === 0) {
+    const lacksModules = project.modules === undefined || Object.keys(project.modules).length === 0;
+    if (lacksModules) {
         throw new Error(`${projectFile}: a library needs 'modules' (module name -> source file)`);
     }
+
     if (project.version === undefined) {
         throw new Error(`${projectFile}: a library needs a 'version'`);
     }
+
     if (NATIVE_PREFIXES.includes(project.name)) {
         throw new Error(`${projectFile}: a library cannot be named '${project.name}', the prefix of the native modules`);
     }
@@ -96,23 +115,30 @@ export function makeLibrary(directory, outputFile) {
     const modules = [];
     const entries = [];
     const warnings = [];
+
     for (const [key, sourcePath] of Object.entries(project.modules)) {
         const name = `${project.name}/${key}`;
         const source = fs.readFileSync(join(directory, sourcePath), "utf8");
         const compiled = compileModule(name, source);
         warnings.push(...compiled.warnings.map(warning => ({ file: sourcePath, ...warning })));
+
+        // its record of the manifest
         const module = {
             name,
             buildId: compiled.buildId,
             sourceHash: compiled.sourceHash,
             bytecode: `bytecode/${key}.qbc`,
             debug: `debug/${key}.json`,
+            outline: `outline/${key}.json`,
             source: `src/${key}.js`,
             imports: compiled.imports.map(imported => imported.name),
         };
         modules.push(module);
+
+        // its entries: bytecode, sidecar, outline and source
         entries.push({ name: module.bytecode, data: compiled.bytecode });
         entries.push({ name: module.debug, data: encodeText(JSON.stringify(compiled.sidecar, null, 1)) });
+        entries.push({ name: module.outline, data: encodeText(JSON.stringify(compiled.outline)) });
         entries.push({ name: module.source, data: encodeText(source) });
     }
 
@@ -122,21 +148,26 @@ export function makeLibrary(directory, outputFile) {
     // declare
     const names = new Set(modules.map(module => module.name));
     const natives = new Set();
+
     for (const module of modules) {
         for (const imported of module.imports) {
             const libraryName = libraryOf(imported);
-            if (libraryName === project.name && !names.has(imported)) {
+            const isMissingNeighbour = libraryName === project.name && !names.has(imported);
+            if (isMissingNeighbour) {
                 throw new Error(`${module.name} imports '${imported}', which is not among the 'modules' of ${projectFile}`);
             }
+
             if (isNativeModule(imported)) {
                 natives.add(imported);
             }
+
             if (libraryName === undefined) {
                 throw bareNameError(`${module.name} imports '${imported}'`, imported);
             }
         }
     }
 
+    // the manifest, first entry of the archive
     const manifest = {
         format: LIBRARY_FORMAT,
         kind: "library",
@@ -150,10 +181,12 @@ export function makeLibrary(directory, outputFile) {
     };
     entries.unshift({ name: "manifest.json", data: encodeText(JSON.stringify(manifest, null, 1)) });
 
+    // write the archive
     const file = outputFile ?? join(directory, project.output, `${project.name}${LIBRARY_EXTENSION}`);
     fs.mkdirSync(dirname(file), { recursive: true });
     const archive = writeZip(entries);
     fs.writeFileSync(file, archive);
+
     return {
         file,
         name: project.name,
@@ -164,23 +197,30 @@ export function makeLibrary(directory, outputFile) {
     };
 }
 
-// Opens a .qjslib file. Returns { file, name, version, compiler, bytecode,
-// modules, entries }: 'modules' is a Map(module name -> its record of the
-// manifest), 'entries' the content of the archive (Map(entry name -> bytes)).
+/**
+ * Opens a .qjslib file. Returns { file, name, version, compiler, bytecode,
+ * modules, entries }: 'modules' is a Map(module name -> its record of the
+ * manifest), 'entries' the content of the archive (Map(entry name -> bytes)).
+ */
 export function readLibrary(file) {
+    // its manifest
     const entries = readZip(fs.readFileSync(file));
     const manifestBytes = entries.get("manifest.json");
     if (manifestBytes === undefined) {
         throw new Error(`${file}: not a library (no manifest.json)`);
     }
+
+    // a library, of a format this tool reads
     const manifest = JSON.parse(decoder.decode(manifestBytes));
     if (manifest.kind !== "library") {
         throw new Error(`${file}: not a library (its manifest is not of kind "library")`);
     }
+
     if (manifest.format !== LIBRARY_FORMAT) {
         throw new Error(`${file}: library format ${manifest.format} is not supported (this qjsx reads format ${LIBRARY_FORMAT})`);
     }
 
+    // its modules by name
     const modules = new Map(manifest.modules.map(module => [module.name, module]));
     return {
         file,
@@ -193,34 +233,47 @@ export function readLibrary(file) {
     };
 }
 
+/**
+ * The bytes of the entry 'entryName' of an open library; throws when missing.
+ */
 function entryOf(library, entryName) {
     const bytes = library.entries.get(entryName);
     if (bytes === undefined) {
         throw new Error(`${library.file}: entry '${entryName}' is missing`);
     }
+
     return bytes;
 }
 
-// True if the bytecode and the sidecars stored in the library can be used as
-// they are: they were made by this compiler (same compiler id, same bytecode
-// version). Else its modules are compiled again from their sources.
+/**
+ * True if the bytecode and the sidecars stored in the library can be used as
+ * they are: they were made by this compiler (same compiler id, same bytecode
+ * version). Else its modules are compiled again from their sources.
+ */
 export function madeByThisCompiler(library) {
     return library.compiler === compilerId() && library.bytecode === BYTECODE_VERSION;
 }
 
-// A module of a library, ready to go into a package: { source, buildId,
-// sourceHash, bytecode, sidecar, imports, warnings }, like compileModule()
-// plus the source text. The bytecode and the sidecar stored in the library
-// are only valid for the compiler that made them (madeByThisCompiler): with
-// another one, the module is compiled again from its source. A stored module
-// gives no warning: 'qjsx mklib' gave them when the library was made.
+/**
+ * A module of a library, ready to go into a package: { source, buildId,
+ * sourceHash, bytecode, sidecar, imports, warnings, outline }, like
+ * compileModule() plus the source text. The bytecode, the sidecar and the
+ * outline stored in the library are only valid for the compiler that made
+ * them (madeByThisCompiler), and a library made before the outlines has
+ * none: else the module is compiled again from its source. A stored module
+ * gives no warning: 'qjsx mklib' gave them when the library was made.
+ */
 export function libraryModule(library, name) {
     const record = library.modules.get(name);
     const source = decoder.decode(entryOf(library, record.source));
-    if (!madeByThisCompiler(library)) {
+
+    // stored bytecode of another compiler, or no outline: compiled again
+    const mustCompile = !madeByThisCompiler(library) || record.outline === undefined;
+    if (mustCompile) {
         return { source, ...compileModule(name, source) };
     }
 
+    // else what the library holds
     return {
         source,
         buildId: record.buildId,
@@ -229,5 +282,6 @@ export function libraryModule(library, name) {
         sidecar: JSON.parse(decoder.decode(entryOf(library, record.debug))),
         imports: record.imports.map(imported => ({ specifier: imported, name: imported })),
         warnings: [],
+        outline: JSON.parse(decoder.decode(entryOf(library, record.outline))),
     };
 }

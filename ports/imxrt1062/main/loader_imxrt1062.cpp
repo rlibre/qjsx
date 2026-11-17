@@ -14,7 +14,7 @@
 namespace {
 
 const uint32_t PIT_HZ = 24000000;                      // PERCLK: the crystal (clock_imxrt1062.c)
-const uint32_t PIT_TICKS_PER_MS = PIT_HZ / 1000;
+const uint32_t PIT_TICKS_PER_MS = PIT_HZ / 1000;        // PIT ticks in a millisecond
 const uint32_t LOADER_INTERRUPT_PRIORITY = 2;          // above everything FreeRTOS masks
 
 } // namespace
@@ -45,6 +45,7 @@ void enterSoon() {
  * halts the core for the loader chip. Does not return.
  */
 extern "C" void PIT_IRQHandler(void) {
+    // acknowledged, then the breakpoint the loader chip waits for, forever
     PIT_ClearStatusFlags(PIT, kPIT_Chnl_2, kPIT_TimerFlag);
 
     for (;;) {

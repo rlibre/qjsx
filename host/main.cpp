@@ -59,6 +59,7 @@ int runScript(int argc, char **argv) {
     rt::Permissions permissions;
     host::Launch launch = { &permissions, nullptr };
     int pathIndex = 2;
+
     while (pathIndex < argc && argv[pathIndex][0] == '-') {
         bool known = false;
         if (!host::readRunOption(argv[pathIndex], &permissions, &launch.rootFolder, &known)) {
@@ -72,6 +73,7 @@ int runScript(int argc, char **argv) {
         pathIndex++;
     }
 
+    // a path is required
     if (pathIndex >= argc) {
         fprintf(stderr, "usage: qjsx run [options] <file.js | package.qjspkg> [arguments]\n");
         return 2;
@@ -132,18 +134,21 @@ int main(int argc, char **argv) {
 #endif
 
     // commands written in C++: --version
-    if (argc >= 2 && strcmp(argv[1], "--version") == 0) {
+    bool isVersion = argc >= 2 && strcmp(argv[1], "--version") == 0;
+    if (isVersion) {
         printf("qjsx %s (QuickJS %s)\n", QJSX_VERSION, CONFIG_VERSION);
         return 0;
     }
 
     // run
-    if (argc >= 3 && strcmp(argv[1], "run") == 0) {
+    bool isRun = argc >= 3 && strcmp(argv[1], "run") == 0;
+    if (isRun) {
         return runScript(argc, argv);
     }
 
     // agent: the desktop device agent runs JS runtimes itself
-    if (argc >= 2 && strcmp(argv[1], "agent") == 0) {
+    bool isAgent = argc >= 2 && strcmp(argv[1], "agent") == 0;
+    if (isAgent) {
         return runAgentCommand(argc, argv);
     }
 

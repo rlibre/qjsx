@@ -226,12 +226,13 @@ bool RegionHeap::init(void *start, size_t size) {
  *    back to the lists.
  */
 void *RegionHeap::allocate(size_t size) {
-    // the class to take from
+    // the block size needed
     size_t needed = blockSizeFor(size);
     if (needed == 0) {
         return nullptr;
     }
 
+    // the first block of the class to take from
     RegionBlock *block = nullptr;
     int sizeClass = firstNonEmpty(searchClass(needed));
     if (sizeClass >= 0) {
@@ -241,6 +242,7 @@ void *RegionHeap::allocate(size_t size) {
     // else the class of the size itself, walked
     if (block == nullptr) {
         RegionBlock *candidate = _lists[classOf(needed)];
+
         while (candidate != nullptr && sizeOf(candidate) < needed) {
             candidate = linksOf(candidate)->next;
         }
@@ -248,6 +250,7 @@ void *RegionHeap::allocate(size_t size) {
         block = candidate;
     }
 
+    // none at all: out of memory
     if (block == nullptr) {
         return nullptr;
     }
@@ -279,6 +282,7 @@ void *RegionHeap::reallocate(void *payload, size_t size) {
         return nullptr;
     }
 
+    // the block (ours, else fatal) and the size it needs now
     RegionBlock *block = ownedBlock(payload);
     size_t needed = blockSizeFor(size);
     if (needed == 0) {
@@ -370,6 +374,7 @@ size_t RegionHeap::usableSize(const void *payload) {
 void RegionHeap::stats(HeapStats *out) const {
     // the highest non-empty class
     int highest = -1;
+
     for (int word = BITMAP_WORDS - 1; word >= 0 && highest < 0; word--) {
         if (_bitmap[word] != 0) {
             highest = word * 32 + 31 - __builtin_clz(_bitmap[word]);
@@ -385,7 +390,9 @@ void RegionHeap::stats(HeapStats *out) const {
         }
     }
 
-    *out = HeapStats{ _total, _used, _peak, largest > 0 ? largest - sizeof(RegionBlock) : 0, _usedBlocks, _freeBlocks };
+    // the counters, and that block's payload
+    size_t largestFree = largest > 0 ? largest - sizeof(RegionBlock) : 0;
+    *out = HeapStats{ _total, _used, _peak, largestFree, _usedBlocks, _freeBlocks };
 }
 
 /**
@@ -407,7 +414,8 @@ const char *RegionHeap::check() const {
         size_t size = sizeOf(block);
         bool used = (block->sizeAndFlags & USED) != 0;
         bool flaggedPreviousFree = (block->sizeAndFlags & PREVIOUS_FREE) != 0;
-        if (size < MINIMUM_BLOCK || (uintptr_t)block + size > (uintptr_t)_end) {
+        bool pastEnd = (uintptr_t)block + size > (uintptr_t)_end;
+        if (size < MINIMUM_BLOCK || pastEnd) {
             return "a block has a wrong size";
         }
 
@@ -442,6 +450,7 @@ const char *RegionHeap::check() const {
         block = nextOf(block);
     }
 
+    // the end marker knows whether the last block is free
     bool endFlagged = (_end->sizeAndFlags & PREVIOUS_FREE) != 0;
     if (endFlagged != previousFree) {
         return "the PREVIOUS_FREE flag of the end marker is wrong";
@@ -449,15 +458,22 @@ const char *RegionHeap::check() const {
 
     // the lists
     size_t listed = 0;
+
     for (int sizeClass = 0; sizeClass < CLASS_COUNT; sizeClass++) {
+        // its bitmap bit set exactly when the list is not empty
         bool bit = (_bitmap[sizeClass / 32] & (1u << (sizeClass % 32))) != 0;
-        if (bit != (_lists[sizeClass] != nullptr)) {
+        bool listNotEmpty = _lists[sizeClass] != nullptr;
+        if (bit != listNotEmpty) {
             return "a bitmap bit does not match its list";
         }
 
+        // each listed block free, of this class, linked back
         RegionBlock *previous = nullptr;
+
         for (RegionBlock *entry = _lists[sizeClass]; entry != nullptr; entry = linksOf(entry)->next) {
-            if ((entry->sizeAndFlags & USED) != 0 || classOf(sizeOf(entry)) != sizeClass) {
+            bool entryUsed = (entry->sizeAndFlags & USED) != 0;
+            bool wrongClass = classOf(sizeOf(entry)) != sizeClass;
+            if (entryUsed || wrongClass) {
                 return "a listed block is allocated or in the wrong class";
             }
 
@@ -747,6 +763,7 @@ size_t jsUsableSize(const void *payload) {
     return RegionHeap::usableSize(payload);
 }
 
+// The functions jsAllocator() returns.
 const JSMallocFunctions regionFunctions = { &jsMalloc, &jsFree, &jsRealloc, &jsUsableSize };
 
 } // namespace

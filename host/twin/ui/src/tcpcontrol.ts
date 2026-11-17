@@ -29,6 +29,8 @@ export class TcpControl extends HBox {
         this._kind = kind;
         this._index = index;
 
+        // the port (applied when the field loses the focus), listen, then
+        // what is going on
         this.setContent([
             this.refs.port = new TextEdit({
                 cls: "link-field",
@@ -61,9 +63,13 @@ export class TcpControl extends HBox {
      */
     setState(tcp: TcpState) {
         // the port, not while it is being typed
-        if (!this.refs.port.getInput().hasFocus() && tcp.port !== this._shownPort) {
+        const isTyping = this.refs.port.getInput().hasFocus();
+        const portChanged = tcp.port !== this._shownPort;
+        if (!isTyping && portChanged) {
             this.refs.port.setValue(tcp.port > 0 ? String(tcp.port) : "");
         }
+
+        // the port and the listening the twin has
         this._shownPort = tcp.port;
         this.refs.listen.setCheck(tcp.listen);
 
@@ -76,6 +82,7 @@ export class TcpControl extends HBox {
         } else if (tcp.listen) {
             status = tx.twin.tcp_when_started;
         }
+
         this.refs.status.setText(status);
         this.refs.status.setClass("error", tcp.error !== "");
         this.refs.status.setClass("client", tcp.client);
@@ -85,7 +92,8 @@ export class TcpControl extends HBox {
      * The port typed, applied if it changed (with the listening as it is).
      */
     private _commitPort() {
-        if (this._typedPort() !== this._shownPort) {
+        const portChanged = this._typedPort() !== this._shownPort;
+        if (portChanged) {
             this._request(this.refs.listen.getCheck());
         }
     }
@@ -104,12 +112,16 @@ export class TcpControl extends HBox {
      * without a port is refused here, with a warning.
      */
     private _request(listen: boolean) {
+        // listen without a port: unchecked, the user warned
         const port = this._typedPort();
-        if (listen && port === 0) {
+        const isRefused = listen && port === 0;
+        if (isRefused) {
             this.refs.listen.setCheck(false);
             warn(tx.twin.tcp_port, tx.twin.tcp_no_port);
             return;
         }
+
+        // asked to the twin
         setTcpLink(this._kind, this._index, port, listen);
     }
 }

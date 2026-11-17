@@ -47,10 +47,12 @@ platform::Mutex tableLock;             // buses, devices (not held during a tran
  * The handle of device 'device'; nullptr if it is not one.
  */
 i2c_master_dev_handle_t deviceHandle(int device) {
+    // not an entry of the table
     if (device < 0 || device >= DEVICES) {
         return nullptr;
     }
 
+    // read under the lock
     tableLock.lock();
     i2c_master_dev_handle_t handle = devices[device].handle;
     tableLock.unlock();
@@ -61,10 +63,12 @@ i2c_master_dev_handle_t deviceHandle(int device) {
  * The handle of bus 'bus'; nullptr if it is closed or not one.
  */
 i2c_master_bus_handle_t busHandle(int bus) {
+    // not a controller of the chip
     if (bus < 0 || bus >= BUSES) {
         return nullptr;
     }
 
+    // read under the lock
     tableLock.lock();
     i2c_master_bus_handle_t handle = buses[bus];
     tableLock.unlock();
@@ -84,7 +88,9 @@ int busCount() {
  * A master bus on the controller 'bus'.
  */
 bool openBus(int bus, int sda, int scl, bool pullUp) {
-    if (bus < 0 || bus >= BUSES || busHandle(bus) != nullptr) {
+    // a controller of the chip, not open yet
+    bool isBus = bus >= 0 && bus < BUSES;
+    if (!isBus || busHandle(bus) != nullptr) {
         return false;
     }
 
@@ -103,6 +109,7 @@ bool openBus(int bus, int sda, int scl, bool pullUp) {
         return false;
     }
 
+    // recorded
     tableLock.lock();
     buses[bus] = handle;
     tableLock.unlock();
@@ -113,11 +120,13 @@ bool openBus(int bus, int sda, int scl, bool pullUp) {
  * Frees the bus (its devices were removed).
  */
 void closeBus(int bus) {
+    // an open bus
     i2c_master_bus_handle_t handle = busHandle(bus);
     if (handle == nullptr) {
         return;
     }
 
+    // freed by the driver, then forgotten
     i2c_del_master_bus(handle);
     tableLock.lock();
     buses[bus] = nullptr;
@@ -129,6 +138,7 @@ void closeBus(int bus) {
  * entry of the table.
  */
 int addDevice(int bus, int address, uint32_t frequencyHz) {
+    // an open bus
     i2c_master_bus_handle_t handle = busHandle(bus);
     if (handle == nullptr) {
         return -1;
@@ -137,14 +147,17 @@ int addDevice(int bus, int address, uint32_t frequencyHz) {
     // a free entry, reserved while the driver adds the device
     tableLock.lock();
     int found = -1;
+
     for (int i = 0; i < DEVICES && found < 0; i++) {
         if (!devices[i].taken) {
             found = i;
         }
     }
+
     if (found >= 0) {
         devices[found] = Device{ true, nullptr, bus };
     }
+
     tableLock.unlock();
     if (found < 0) {
         return -1;
@@ -160,6 +173,7 @@ int addDevice(int bus, int address, uint32_t frequencyHz) {
     i2c_master_dev_handle_t device = nullptr;
     bool added = i2c_master_bus_add_device(handle, &config, &device) == ESP_OK;
 
+    // the entry: the device, or free again
     tableLock.lock();
     devices[found] = added ? Device{ true, device, bus } : Device{ false, nullptr, 0 };
     tableLock.unlock();
@@ -170,11 +184,13 @@ int addDevice(int bus, int address, uint32_t frequencyHz) {
  * Frees a device handle.
  */
 void removeDevice(int device) {
+    // a device added
     i2c_master_dev_handle_t handle = deviceHandle(device);
     if (handle == nullptr) {
         return;
     }
 
+    // removed from the driver, then its entry freed
     i2c_master_bus_rm_device(handle);
     tableLock.lock();
     devices[device] = Device{ false, nullptr, 0 };
@@ -186,8 +202,10 @@ void removeDevice(int device) {
  */
 Status transfer(int device, const uint8_t *writeData, size_t writeSize, uint8_t *readData, size_t readSize,
                 int timeoutMs) {
+    // a device added, something to transfer
     i2c_master_dev_handle_t handle = deviceHandle(device);
-    if (handle == nullptr || (writeSize == 0 && readSize == 0)) {
+    bool nothingToDo = writeSize == 0 && readSize == 0;
+    if (handle == nullptr || nothingToDo) {
         return Status::failed;
     }
 
@@ -222,12 +240,15 @@ Status transfer(int device, const uint8_t *writeData, size_t writeSize, uint8_t 
  * Whether a device answers at 'address'.
  */
 Status probe(int bus, int address, int timeoutMs) {
+    // an open bus
     i2c_master_bus_handle_t handle = busHandle(bus);
     if (handle == nullptr) {
         return Status::failed;
     }
 
-    switch (i2c_master_probe(handle, (uint16_t)address, timeoutMs)) {
+    // the probe, and its result
+    esp_err_t result = i2c_master_probe(handle, (uint16_t)address, timeoutMs);
+    switch (result) {
         case ESP_OK: {
             return Status::ok;
         }

@@ -241,6 +241,9 @@ MCUXSDK_PATH:UNINITIALIZED=C:/tools/nxp/mcuxsdk-26.06.00-LTS/mcuxsdk
 //board folder in ports/imxrt1062/boards
 QJSX_BOARD:STRING=teensy40
 
+//No help, variable specified on the command line.
+QJSX_NATIVE_PROFILER:UNINITIALIZED=ON
+
 //Value Computed by CMake
 qjsx_BINARY_DIR:STATIC=C:/Sandbox/espjs/ports/imxrt1062/build-teensy40
 

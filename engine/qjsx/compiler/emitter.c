@@ -84,6 +84,9 @@ void emit_op(JSParseState *s, uint8_t val)
 void emit_atom(JSParseState *s, JSAtom name)
 {
     DynBuf *bc = &s->cur_func->byte_code;
+    /* qjsx: a variable access is a use for the outline of the module */
+    if (s->outline)
+        js_outline_name_used(s, name);
     if (dbuf_claim(bc, 4))
         return; /* not enough memory : don't duplicate the atom */
     put_u32(bc->buf + bc->size, JS_DupAtom(s->ctx, name));

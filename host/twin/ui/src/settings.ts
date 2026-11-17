@@ -50,6 +50,7 @@ class SettingsPage extends SettingsView {
             { id: "dark", text: tx.twin.theme_dark },
         ];
 
+        // the sections: the display (theme), the pins (used pins only)
         this.setSections([
             { id: "display", title: tx.twin.display, content: [
                 new SettingItem({ title: tx.twin.theme, description: tx.twin.theme_description, content: [
@@ -80,6 +81,7 @@ class SettingsPage extends SettingsView {
  * Opens the settings page in a dialog; the changes apply at once.
  */
 export async function openSettings(settings: StateProxy<TwinSettings>) {
+    // the page in a dialog, until it is closed
     const page = new SettingsPage({ cls: "settings-page" }, settings);
     const dialog = new Dialog({
         title: tx.twin.settings,

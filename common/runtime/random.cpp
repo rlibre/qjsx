@@ -22,8 +22,8 @@ struct Sequence {
     uint64_t state[4];   // xoshiro256** state; never all zero
 };
 
-Sequence sequence;          // lock
-platform::Mutex lock;       // sequence
+Sequence        sequence;   // under 'lock'
+platform::Mutex lock;       // guards 'sequence'
 
 /**
  * splitmix64: the next value of '*value' (the state of xoshiro256** is made
@@ -48,10 +48,12 @@ uint64_t rotateLeft(uint64_t value, int count) {
  * xoshiro256**: the next 64 bits of the sequence (under 'lock').
  */
 uint64_t nextOfSequence() {
+    // the output, from the state before the step
     uint64_t *state = sequence.state;
     uint64_t result = rotateLeft(state[1] * 5, 7) * 9;
     uint64_t shifted = state[1] << 17;
 
+    // the step of the state (xoshiro256** as published)
     state[2] ^= state[0];
     state[3] ^= state[1];
     state[1] ^= state[2];
@@ -66,6 +68,7 @@ uint64_t nextOfSequence() {
  */
 void startSequence() {
     uint64_t value = sequence.seed;
+
     for (int index = 0; index < 4; index++) {
         sequence.state[index] = splitmix64(&value);
     }
@@ -90,6 +93,7 @@ void randomBytes(void *buffer, size_t size) {
 
     // the sequence, the last piece cut
     uint8_t *next = (uint8_t *)buffer;
+
     while (size > 0) {
         uint64_t bits = nextOfSequence();
         size_t piece = size < sizeof(bits) ? size : sizeof(bits);
@@ -97,6 +101,7 @@ void randomBytes(void *buffer, size_t size) {
         next += piece;
         size -= piece;
     }
+
     lock.unlock();
 }
 
@@ -128,6 +133,7 @@ void restartRandom() {
     if (sequence.seeded) {
         startSequence();
     }
+
     lock.unlock();
 }
 

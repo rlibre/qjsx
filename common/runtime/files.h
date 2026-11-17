@@ -28,6 +28,7 @@ uint8_t *readAll(const char *path, size_t *size);
  */
 bool writeAll(const char *path, const void *data, size_t size);
 
+// What stat() and linkStatus() report.
 struct Status {
     bool    exists;       // false: nothing at the path (other fields 0)
     bool    isFile;       // regular file
@@ -112,7 +113,6 @@ void useSlashes(char *path);
  * counts as absolute: it cannot be joined to another directory).
  */
 bool isAbsolute(const char *path);
-
 
 /**
  * The real path of 'path' (malloc'd, freed by the caller; absolute, '/'

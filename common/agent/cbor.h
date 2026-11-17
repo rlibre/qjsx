@@ -35,52 +35,52 @@ public:
     /**
      * Head of an array of 'count' items (the items follow).
      */
-    void     array(uint64_t count);
+    void           array(uint64_t count);
 
     /**
      * Head of a map of 'count' key/value pairs (the pairs follow).
      */
-    void     map(uint64_t count);
+    void           map(uint64_t count);
 
     /**
      * Integer, unsigned or negative major type depending on its sign.
      */
-    void     integer(int64_t value);
+    void           integer(int64_t value);
 
     /**
      * Null-terminated UTF-8 text string.
      */
-    void     text(const char *text);
+    void           text(const char *text);
 
     /**
      * UTF-8 text string of 'length' bytes.
      */
-    void     text(const char *text, size_t length);
+    void           text(const char *text, size_t length);
 
     /**
      * Byte string.
      */
-    void     bytes(const uint8_t *data, size_t size);
+    void           bytes(const uint8_t *data, size_t size);
 
     /**
      * true or false.
      */
-    void     boolean(bool value);
+    void           boolean(bool value);
 
     /**
      * null.
      */
-    void     null();
+    void           null();
 
     /**
      * undefined.
      */
-    void     undefined();
+    void           undefined();
 
     /**
      * Float, always on 64 bits.
      */
-    void     floating(double value);
+    void           floating(double value);
 
     /**
      * Appends values already encoded by another writer.
@@ -115,16 +115,16 @@ private:
     /**
      * Writes the initial byte and argument of an item.
      */
-    void     head(int major, uint64_t value);
+    void           head(int major, uint64_t value);
 
     /**
      * Appends raw bytes, growing the buffer.
      */
-    void     append(const uint8_t *data, size_t size);
+    void           append(const uint8_t *data, size_t size);
 
-    uint8_t *_data;       // malloc'd buffer; nullptr until the first write
-    size_t   _size;       // bytes written
-    size_t   _capacity;   // bytes allocated
+    uint8_t       *_data;       // malloc'd buffer; nullptr until the first write
+    size_t         _size;       // bytes written
+    size_t         _capacity;   // bytes allocated
 };
 
 enum class Type { Unsigned, Negative, Bytes, Text, Array, Map, False, True, Null, Undefined, Float, Invalid };
@@ -143,79 +143,79 @@ public:
      * Type of the next item, without reading it (Invalid at the end or for
      * an unsupported item).
      */
-    Type           peek() const;
+    Type             peek() const;
 
     /**
-     * Unsigned or negative integer (above INT64_MAX: wrong value).
+     * Unsigned or negative integer (outside the int64_t range: false).
      */
-    bool           integer(int64_t *value);
+    bool             integer(int64_t *value);
 
     /**
      * Text string; points into the buffer (not null terminated).
      */
-    bool           text(const char **text, size_t *length);
+    bool             text(const char **text, size_t *length);
 
     /**
      * Byte string; points into the buffer.
      */
-    bool           bytes(const uint8_t **data, size_t *size);
+    bool             bytes(const uint8_t **data, size_t *size);
 
     /**
      * Head of an array: its item count (the items follow).
      */
-    bool           array(uint64_t *count);
+    bool             array(uint64_t *count);
 
     /**
      * Head of a map: its pair count (the pairs follow).
      */
-    bool           map(uint64_t *count);
+    bool             map(uint64_t *count);
 
     /**
      * null.
      */
-    bool           null();
+    bool             null();
 
     /**
      * undefined.
      */
-    bool           undefined();
+    bool             undefined();
 
     /**
      * true or false.
      */
-    bool           boolean(bool *value);
+    bool             boolean(bool *value);
 
     /**
      * Float on 16, 32 or 64 bits.
      */
-    bool           floating(double *value);
+    bool             floating(double *value);
 
     /**
      * Skips any value, nested ones included (at most MAX_DEPTH levels: deeper data is
      * refused, it would exhaust the stack of a small RTOS task).
      */
-    bool           skip();
+    bool             skip();
 
     static const int MAX_DEPTH = 16;   // deepest nesting skip() accepts
 
     /**
      * True when the whole buffer has been read.
      */
-    bool           atEnd() const {
+    bool             atEnd() const {
         return _position == _size;
     }
 
     /**
      * Current position: the next value starts at data() + position().
      */
-    size_t         position() const {
+    size_t           position() const {
         return _position;
     }
 
     /**
      * The buffer being read.
      */
-    const uint8_t *data() const {
+    const uint8_t   *data() const {
         return _data;
     }
 
@@ -224,24 +224,24 @@ private:
      * Reads the initial byte and argument (count, length or value) of an item. False at the
      * end of data, on a truncated argument or an indefinite length; the position moves anyway.
      */
-    bool           head(int *major, uint64_t *argument);
+    bool             head(int *major, uint64_t *argument);
 
     /**
      * True if 'size' bytes remain after the position. Never overflows, whatever 'size'
      * (a length read from the wire can be anything).
      */
-    bool           fits(uint64_t size) const {
+    bool             fits(uint64_t size) const {
         return size <= _size - _position;
     }
 
     /**
      * skip() at a nesting depth.
      */
-    bool           skipAt(int depth);
+    bool             skipAt(int depth);
 
-    const uint8_t *_data;       // borrowed
-    size_t         _size;       // bytes of _data
-    size_t         _position;   // offset of the next item
+    const uint8_t   *_data;       // borrowed
+    size_t           _size;       // bytes of _data
+    size_t           _position;   // offset of the next item
 };
 
 } // namespace cbor

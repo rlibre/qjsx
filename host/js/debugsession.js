@@ -54,11 +54,16 @@ const EVALUATION_NAME = "<debugger>";
 // Bytes of a SET_STOPS message besides its module name and its DATA.
 const SET_STOPS_OVERHEAD = 32;
 
+/**
+ * A debugging session with a device (see the top of the file).
+ */
 export class DebugSession {
-    // device: an opened qjsx:device Device, with a session (hello) done;
-    // index: a qjsx:debuginfo PackageIndex;
-    // handlers: onPaused(pause), onResumed(), onScriptLoaded(module, script),
-    // onStarted(pkg, buildId), onExited(code), onError(error)
+    /**
+     * device: an opened qjsx:device Device, with a session (hello) done;
+     * index: a qjsx:debuginfo PackageIndex;
+     * handlers: onPaused(pause), onResumed(), onScriptLoaded(module, script),
+     * onStarted(pkg, buildId), onExited(code), onError(error)
+     */
     constructor(device, index, handlers = {}) {
         this.device = device;
         this.index = index;
@@ -81,23 +86,31 @@ export class DebugSession {
 
     // ### Session #############################################################
 
-    // Turns debugging on and takes the package installed on the device. A
-    // program already running has loaded some modules: their stops are set
-    // now. Returns { running, buildId, package }.
+    /**
+     * Turns debugging on and takes the package installed on the device. A
+     * program already running has loaded some modules: their stops are set
+     * now. Returns { running, buildId, package }.
+     */
     async attach() {
+        // debugging on
         await this.device.request(KIND.DEBUG_ATTACH);
 
         // the installed package: the one running, or the next one to run
         const info = await this.device.request(KIND.INFO);
         const installed = info.get(KEY.BUILD_ID);
-        if (installed !== null && installed !== undefined) {
+        const hasPackage = installed !== null && installed !== undefined;
+        if (hasPackage) {
             this.usePackage(installed);
         }
 
         // the modules already loaded by a running program (none without a
         // program: the device refuses LIST_SCRIPTS then)
         const running = info.get(KEY.RUNNING);
-        const scripts = running ? await this.listScripts() : [];
+        let scripts = [];
+        if (running) {
+            scripts = await this.listScripts();
+        }
+
         for (const module of scripts) {
             this.loadedModules.add(module);
             await this.setModuleStops(module);
@@ -106,30 +119,39 @@ export class DebugSession {
         return { running, buildId: this.buildId, package: this.package };
     }
 
-    // The modules loaded by the running program; [] if it ended meanwhile.
+    /**
+     * The modules loaded by the running program; [] if it ended meanwhile.
+     */
     async listScripts() {
         try {
             return (await this.device.request(KIND.LIST_SCRIPTS)).get(KEY.SCRIPTS);
         } catch (error) {
+            // the device refuses when no program runs
             if (error instanceof DeviceError) {
                 return [];
             }
+
             throw error;
         }
     }
 
-    // Turns debugging off (stops removed, a paused program resumes) and gives
-    // the device its event handler back.
+    /**
+     * Turns debugging off (stops removed, a paused program resumes) and gives
+     * the device its event handler back.
+     */
     async detach() {
         await this.device.request(KIND.DEBUG_DETACH);
         this.device.handlers = this.previousHandlers;
         this.paused = null;
     }
 
-    // Takes the package of 'buildId' and resolves the breakpoints again in it.
+    /**
+     * Takes the package of 'buildId' and resolves the breakpoints again in it.
+     */
     usePackage(buildId) {
         this.buildId = buildId;
         this.package = this.index.find(buildId);
+
         for (const breakpoint of this.breakpoints.values()) {
             this.resolveBreakpoint(breakpoint);
         }
@@ -137,12 +159,15 @@ export class DebugSession {
 
     // ### Breakpoints #########################################################
 
-    // A breakpoint at (line, column) of a module, kept by the session and set
-    // again in every run. Returns { id, location }: 'location' is where it
-    // really is (a line without statement slides to the next one), null
-    // while the module is not in the package known yet. Returns null if the
-    // module has no statement from there on.
+    /**
+     * A breakpoint at (line, column) of a module, kept by the session and set
+     * again in every run. Returns { id, location }: 'location' is where it
+     * really is (a line without statement slides to the next one), null
+     * while the module is not in the package known yet. Returns null if the
+     * module has no statement from there on.
+     */
     async setBreakpoint(module, line, column = 0) {
+        // where it goes; a known module without statement from there: none
         const breakpoint = { id: this.nextBreakpointId++, module, line, column, location: null, number: 0, pcs: [] };
         const isResolved = this.resolveBreakpoint(breakpoint);
         const scriptKnown = this.package?.script(module) !== undefined;
@@ -150,12 +175,15 @@ export class DebugSession {
             return null;
         }
 
+        // kept, and sent to the device if the module is loaded
         this.breakpoints.set(breakpoint.id, breakpoint);
         await this.applyBreakpoints(module);
         return { id: breakpoint.id, location: breakpoint.location };
     }
 
-    // Removes a breakpoint (no-op for an unknown id).
+    /**
+     * Removes a breakpoint (no-op for an unknown id).
+     */
     async removeBreakpoint(id) {
         const breakpoint = this.breakpoints.get(id);
         if (breakpoint === undefined) {
@@ -166,35 +194,45 @@ export class DebugSession {
         await this.applyBreakpoints(breakpoint.module);
     }
 
-    // { module, location } of a kept breakpoint ('location' null while it is
-    // not resolved), or undefined for an unknown id.
+    /**
+     * { module, location } of a kept breakpoint ('location' null while it is
+     * not resolved), or undefined for an unknown id.
+     */
     breakpointLocation(id) {
         const breakpoint = this.breakpoints.get(id);
         if (breakpoint === undefined) {
             return undefined;
         }
+
         return { module: breakpoint.module, location: breakpoint.location };
     }
 
-    // Finds where a breakpoint goes in the current package. False if its
-    // module is unknown or has no statement from its line on.
+    /**
+     * Finds where a breakpoint goes in the current package. False if its
+     * module is unknown or has no statement from its line on.
+     */
     resolveBreakpoint(breakpoint) {
+        // no package, no such module, or no statement from there
         const found = this.package?.script(breakpoint.module)?.breakpointAt(breakpoint.line, breakpoint.column);
-        if (found === undefined || found === null) {
+        const isNotFound = found === undefined || found === null;
+        if (isNotFound) {
             breakpoint.location = null;
             breakpoint.pcs = [];
             return false;
         }
 
+        // found: its position and its offsets
         breakpoint.location = { line: found.line, column: found.column };
         breakpoint.number = found.number;
         breakpoint.pcs = found.pcs;
         return true;
     }
 
-    // Sends the breakpoints of a loaded module to the device. SET_STOPS
-    // replaces the breakpoints of the functions it lists: the functions that
-    // had some and have none now are listed too, with no offset.
+    /**
+     * Sends the breakpoints of a loaded module to the device. SET_STOPS
+     * replaces the breakpoints of the functions it lists: the functions that
+     * had some and have none now are listed too, with no offset.
+     */
     async applyBreakpoints(module) {
         if (!this.loadedModules.has(module)) {
             return;
@@ -202,10 +240,13 @@ export class DebugSession {
 
         // the offsets per function, from the kept breakpoints of the module
         const offsetsByFunction = new Map();
+
         for (const breakpoint of this.breakpoints.values()) {
-            if (breakpoint.module !== module || breakpoint.location === null) {
+            const isElsewhere = breakpoint.module !== module || breakpoint.location === null;
+            if (isElsewhere) {
                 continue;
             }
+
             const offsets = offsetsByFunction.get(breakpoint.number) ?? new Set();
             breakpoint.pcs.forEach(pc => offsets.add(pc));
             offsetsByFunction.set(breakpoint.number, offsets);
@@ -218,16 +259,21 @@ export class DebugSession {
             return;
         }
 
+        // sent, then remembered
         const functions = [...numbers].map(number => ({ number, offsets: [...(offsetsByFunction.get(number) ?? [])] }));
         await this.sendStops(module, STOP_KIND.BREAKPOINTS, functions);
         this.appliedStops.set(module, new Set(offsetsByFunction.keys()));
     }
 
-    // Sends SET_STOPS of 'kind' for 'functions' of 'module', in as many
-    // messages as the device's largest message needs (splitStops).
+    /**
+     * Sends SET_STOPS of 'kind' for 'functions' of 'module', in as many
+     * messages as the device's largest message needs (splitStops).
+     */
     async sendStops(module, kind, functions) {
+        // room left for DATA in one message
         const moduleBytes = new TextEncoder().encode(module).length;
         const maxData = (this.device.maxMessage ?? DEFAULT_MAX_MESSAGE) - SET_STOPS_OVERHEAD - moduleBytes;
+
         for (const group of splitStops(functions, maxData)) {
             await this.device.request(KIND.SET_STOPS, {
                 [KEY.MODULE]: module, [KEY.STOP_KIND]: kind, [KEY.DATA]: encodeStops(group),
@@ -235,8 +281,10 @@ export class DebugSession {
         }
     }
 
-    // Statement stops (pause and steps) and breakpoints of a loaded module.
-    // Nothing for a module the package does not know.
+    /**
+     * Statement stops (pause and steps) and breakpoints of a loaded module.
+     * Nothing for a module the package does not know.
+     */
     async setModuleStops(module) {
         const script = this.package?.script(module);
         if (script === undefined) {
@@ -249,38 +297,58 @@ export class DebugSession {
 
     // ### Execution ###########################################################
 
-    // When to pause on a thrown value: "none", "uncaught" or "all".
+    /**
+     * When to pause on a thrown value: "none", "uncaught" or "all".
+     */
     async setPauseOnExceptions(mode) {
         const modes = { none: EXCEPTION_MODE.NONE, uncaught: EXCEPTION_MODE.UNCAUGHT, all: EXCEPTION_MODE.ALL };
         if (modes[mode] === undefined) {
             throw new Error(`pause on exceptions: unknown mode '${mode}'`);
         }
+
         await this.device.request(KIND.SET_EXCEPTIONS, { [KEY.MODE]: modes[mode] });
     }
 
+    /**
+     * Pauses the program at its next statement (PAUSED follows).
+     */
     async pause() {
         await this.device.request(KIND.PAUSE);
     }
 
+    /**
+     * Resumes a paused program.
+     */
     async resume() {
         await this.device.request(KIND.RESUME);
     }
 
+    /**
+     * Resumes until the next statement, entering the functions called.
+     */
     async stepInto() {
         await this.device.request(KIND.STEP, { [KEY.STEP]: STEP_KIND.INTO });
     }
 
+    /**
+     * Resumes until the next statement of this frame or of a caller.
+     */
     async stepOver() {
         await this.device.request(KIND.STEP, { [KEY.STEP]: STEP_KIND.OVER });
     }
 
+    /**
+     * Resumes until the next statement of a caller.
+     */
     async stepOut() {
         await this.device.request(KIND.STEP, { [KEY.STEP]: STEP_KIND.OUT });
     }
 
     // ### Device events #######################################################
 
-    // Passes the event on to the previous handler, and queues it here.
+    /**
+     * Passes the event on to the previous handler, and queues it here.
+     */
     queueEvent(kind, payload) {
         this.previousHandlers.onEvent?.(kind, payload);
         this.events = this.events
@@ -288,74 +356,84 @@ export class DebugSession {
             .catch(error => this.handlers.onError?.(error));
     }
 
-    // One device event. The handlers of the user are called, not awaited: they
-    // may step or resume, which brings the next events.
+    /**
+     * One device event. The handlers of the user are called, not awaited: they
+     * may step or resume, which brings the next events.
+     */
     async handleEvent(kind, payload) {
         switch (kind) {
-        case KIND.SCRIPT_LOADED: {
-            // the module waits for RESUME: set its stops first (RESUME even
-            // if that fails, else the program would wait for ever)
-            const module = payload.get(KEY.MODULE);
-            this.loadedModules.add(module);
-            try {
-                await this.setModuleStops(module);
-            } finally {
-                await this.device.request(KIND.RESUME);
-            }
-            this.handlers.onScriptLoaded?.(module, this.package?.script(module));
-            break;
-        }
-        case KIND.STARTED: {
-            // a new run: nothing loaded yet, maybe another package
-            this.loadedModules.clear();
-            this.appliedStops.clear();
-            this.loadedFunctions.clear();
-            this.usePackage(payload.get(KEY.BUILD_ID));
-            this.handlers.onStarted?.(this.package, this.buildId);
-            break;
-        }
-        case KIND.EXITED: {
-            this.loadedModules.clear();
-            this.appliedStops.clear();
-            this.loadedFunctions.clear();
-            this.paused = null;
-            this.handlers.onExited?.(payload.get(KEY.CODE));
-            break;
-        }
-        case KIND.PAUSED: {
-            // the stack, resolved, then the user
-            const frames = await this.readStack();
-            const reasonName = Object.keys(PAUSE_REASON).find(name => PAUSE_REASON[name] === payload.get(KEY.REASON));
-            const reason = reasonName?.toLowerCase() ?? "unknown";
-            this.paused = { reason, frames };
+            case KIND.SCRIPT_LOADED: {
+                // the module waits for RESUME: set its stops first (RESUME even
+                // if that fails, else the program would wait for ever)
+                const module = payload.get(KEY.MODULE);
+                this.loadedModules.add(module);
+                try {
+                    await this.setModuleStops(module);
+                } finally {
+                    await this.device.request(KIND.RESUME);
+                }
 
-            const pause = { reason, frames };
-            if (payload.has(KEY.EXCEPTION)) {
-                pause.exception = decodeValue(payload.get(KEY.EXCEPTION));
-                pause.uncaught = payload.get(KEY.UNCAUGHT) === true;
+                this.handlers.onScriptLoaded?.(module, this.package?.script(module));
+                break;
             }
-            if (payload.has(KEY.RETURN_VALUE)) {
-                pause.returnValue = decodeValue(payload.get(KEY.RETURN_VALUE));
+            case KIND.STARTED: {
+                // a new run: nothing loaded yet, maybe another package
+                this.loadedModules.clear();
+                this.appliedStops.clear();
+                this.loadedFunctions.clear();
+                this.usePackage(payload.get(KEY.BUILD_ID));
+                this.handlers.onStarted?.(this.package, this.buildId);
+                break;
             }
-            this.handlers.onPaused?.(pause);
-            break;
-        }
-        case KIND.RESUMED: {
-            this.paused = null;
-            this.handlers.onResumed?.();
-            break;
-        }
-        default: {
-            break;
-        }
+            case KIND.EXITED: {
+                // the run ended: nothing loaded, not paused any more
+                this.loadedModules.clear();
+                this.appliedStops.clear();
+                this.loadedFunctions.clear();
+                this.paused = null;
+                this.handlers.onExited?.(payload.get(KEY.CODE));
+                break;
+            }
+            case KIND.PAUSED: {
+                // the stack, resolved, then the user
+                const frames = await this.readStack();
+                const reasonName = Object.keys(PAUSE_REASON).find(name => PAUSE_REASON[name] === payload.get(KEY.REASON));
+                const reason = reasonName?.toLowerCase() ?? "unknown";
+                this.paused = { reason, frames };
+
+                // the exception or the return value, when the pause has one
+                const pause = { reason, frames };
+                if (payload.has(KEY.EXCEPTION)) {
+                    pause.exception = decodeValue(payload.get(KEY.EXCEPTION));
+                    pause.uncaught = payload.get(KEY.UNCAUGHT) === true;
+                }
+
+                if (payload.has(KEY.RETURN_VALUE)) {
+                    pause.returnValue = decodeValue(payload.get(KEY.RETURN_VALUE));
+                }
+
+                this.handlers.onPaused?.(pause);
+                break;
+            }
+            case KIND.RESUMED: {
+                this.paused = null;
+                this.handlers.onResumed?.();
+                break;
+            }
+            default: {
+                break;
+            }
         }
     }
 
-    // The stack of the pause, level 0 first:
-    //   { level, id, native, module, number, pc, functionName, line, column, script }
-    // A native frame has native true and no position; a frame of a module
-    // the package does not know has no line.
+    /**
+     * The stack of the pause, level 0 first:
+     *   { level, id, native, module, number, pc, functionName, line, column, script }
+     * A native frame has native true and no position; a frame of a module
+     * the package does not know has no line.
+     */
     async readStack() {
+        // the frames of the device, then each one resolved
         const frames = (await this.device.request(KIND.GET_STACK)).get(KEY.FRAMES);
         return frames.map(([id, module, number, pc], level) => {
             if (module === null) {
@@ -377,8 +455,10 @@ export class DebugSession {
 
     // ### Variables ###########################################################
 
-    // The frame at 'level' of the pause; throws if the program is not paused
-    // or the frame has no debug info.
+    /**
+     * The frame at 'level' of the pause; throws if the program is not paused
+     * or the frame has no debug info.
+     */
     pausedFrame(level) {
         if (this.paused === null) {
             throw new Error("the program is not paused");
@@ -388,33 +468,45 @@ export class DebugSession {
         if (frame === undefined) {
             throw new Error(`no frame at level ${level}`);
         }
-        if (frame.native || frame.script === undefined) {
+
+        const hasNoDebugInfo = frame.native || frame.script === undefined;
+        if (hasNoDebugInfo) {
             throw new Error(`no debug info for the frame at level ${level}`);
         }
+
         return frame;
     }
 
-    // The scopes of the variables visible in a frame (see
-    // ScriptInfo.scopesAt), with the descriptions of the slots.
+    /**
+     * The scopes of the variables visible in a frame (see
+     * ScriptInfo.scopesAt), with the descriptions of the slots.
+     */
     scopesOf(frame) {
         return frame.script.scopesAt(frame.number, frame.pc, { exact: frame.level === 0 });
     }
 
-    // The values of the slots of a frame, as sent by the device (not
-    // decoded): { [slotKind]: [value] } for the kinds asked.
+    /**
+     * The values of the slots of a frame, as sent by the device (not
+     * decoded): { [slotKind]: [value] } for the kinds asked.
+     */
     async readSlots(level, slotKinds) {
         const values = {};
+
         for (const slotKind of slotKinds) {
             const answer = await this.device.request(KIND.GET_SLOTS, {
                 [KEY.LEVEL]: level, [KEY.SLOT_KIND]: slotKind, [KEY.GROUP]: GROUP.PAUSE,
             });
+
             values[slotKind] = answer.get(KEY.VALUES);
         }
+
         return values;
     }
 
-    // The variables of a frame of the pause, by scope, innermost first:
-    //   [{ kind: "block" | "local" | "closure", variables: [{ name, value }] }]
+    /**
+     * The variables of a frame of the pause, by scope, innermost first:
+     *   [{ kind: "block" | "local" | "closure", variables: [{ name, value }] }]
+     */
     async scopes(level) {
         const frame = this.pausedFrame(level);
         const scopes = this.scopesOf(frame);
@@ -425,21 +517,29 @@ export class DebugSession {
         const slotKinds = new Set(inSlots.map(variable => variable.slotKind));
         const values = await this.readSlots(level, slotKinds);
 
+        /**
+         * The value of a variable: its slot, or the debug info for a constant.
+         */
         const valueOf = variable => {
             if (isConstant(variable)) {
                 return { type: typeof variable.constant, value: variable.constant };
             }
+
             return decodeValue(values[variable.slotKind][variable.index]);
         };
+
+        // the scopes with the values of their variables
         return scopes.map(scope => ({
             kind: scope.kind,
             variables: scope.variables.map(variable => ({ name: variable.name, value: valueOf(variable) })),
         }));
     }
 
-    // The value of 'this' in a frame of the pause, or undefined when the
-    // function has no 'this' slot (QuickJS makes one only when the function
-    // uses 'this').
+    /**
+     * The value of 'this' in a frame of the pause, or undefined when the
+     * function has no 'this' slot (QuickJS makes one only when the function
+     * uses 'this').
+     */
     async thisOf(level) {
         const frame = this.pausedFrame(level);
         const slot = frame.script.thisSlot(frame.number);
@@ -451,7 +551,9 @@ export class DebugSession {
         return decodeValue(values[slot.slotKind][slot.index]);
     }
 
-    // The visible variable 'name' of a frame (the innermost one), or undefined.
+    /**
+     * The visible variable 'name' of a frame (the innermost one), or undefined.
+     */
     findVariable(frame, name) {
         for (const scope of this.scopesOf(frame)) {
             const variable = scope.variables.find(candidate => candidate.name === name);
@@ -459,34 +561,45 @@ export class DebugSession {
                 return variable;
             }
         }
+
         return undefined;
     }
 
-    // Changes a variable of a frame of the pause. 'value': a primitive, or a
-    // value given by the session (an object by its handle).
+    /**
+     * Changes a variable of a frame of the pause. 'value': a primitive, or a
+     * value given by the session (an object by its handle).
+     */
     async setVariable(level, name, value) {
+        // a visible variable that is not a constant
         const frame = this.pausedFrame(level);
         const variable = this.findVariable(frame, name);
         if (variable === undefined) {
             throw new Error(`no variable '${name}' here`);
         }
-        if (variable.flags & VARIABLE_FLAG.CONST) {
+
+        const isConst = variable.flags & VARIABLE_FLAG.CONST;
+        if (isConst) {
             throw new Error(`'${name}' is a constant`);
         }
 
+        // its slot on the device
         await this.device.request(KIND.SET_SLOT, {
             [KEY.LEVEL]: level, [KEY.SLOT_KIND]: variable.slotKind, [KEY.INDEX]: variable.index, [KEY.VALUE]: encodeValue(value),
         });
     }
 
-    // Own properties of an object of the device:
-    //   { properties: [{ name, writable, enumerable, configurable, accessor,
-    //     value, getter, setter }], internals: [{ name, value }] }
-    // 'name' is a text, or a symbol value. Getters are never called.
+    /**
+     * Own properties of an object of the device:
+     *   { properties: [{ name, writable, enumerable, configurable, accessor,
+     *     value, getter, setter }], internals: [{ name, value }] }
+     * 'name' is a text, or a symbol value. Getters are never called.
+     */
     async properties(handle) {
+        // the handles of the values go to the group of the pause, or of the console
         const group = this.paused !== null ? GROUP.PAUSE : GROUP.CONSOLE;
         const answer = await this.device.request(KIND.GET_PROPERTIES, { [KEY.HANDLE]: handle, [KEY.GROUP]: group });
 
+        // the properties, their flags decoded; the internals ([[PrototypeOf]]...)
         const properties = answer.get(KEY.PROPERTIES).map(([name, flags, value, getter, setter]) => {
             const isAccessor = (flags & PROPERTY.ACCESSOR) !== 0;
             return {
@@ -500,27 +613,32 @@ export class DebugSession {
                 setter: isAccessor ? decodeValue(setter) : undefined,
             };
         });
+
         const internals = answer.get(KEY.INTERNALS).map(([name, value]) => ({ name, value: decodeValue(value) }));
         return { properties, internals };
     }
 
-    // Frees an object of the device kept by its handle (no-op for an unknown
-    // one).
+    /**
+     * Frees an object of the device kept by its handle (no-op for an unknown
+     * one).
+     */
     async release(handle) {
         await this.device.request(KIND.RELEASE, { [KEY.HANDLE]: handle });
     }
 
     // ### Evaluation ##########################################################
 
-    // Evaluates an expression on the device: { value } or { exception }.
-    // Paused: in the frame at 'level', which sees the variables of that
-    // frame. Wrapped in a function whose parameters are these variables (the
-    // innermost of a name), compiled here, loaded and called on the device
-    // with their values and 'this'. The parameters are copies: an assignment
-    // does not change the variable of the program (setVariable does).
-    // Not paused: in the global scope.
-    // 'returnByValue': the result comes back as a plain JS value (through
-    // JSON on the device: { type, value }), not as a handle.
+    /**
+     * Evaluates an expression on the device: { value } or { exception }.
+     * Paused: in the frame at 'level', which sees the variables of that
+     * frame. Wrapped in a function whose parameters are these variables (the
+     * innermost of a name), compiled here, loaded and called on the device
+     * with their values and 'this'. The parameters are copies: an assignment
+     * does not change the variable of the program (setVariable does).
+     * Not paused: in the global scope.
+     * 'returnByValue': the result comes back as a plain JS value (through
+     * JSON on the device: { type, value }), not as a handle.
+     */
     async evaluate(expression, { level = 0, returnByValue = false } = {}) {
         const isPaused = this.paused !== null;
         const group = isPaused ? GROUP.PAUSE : GROUP.CONSOLE;
@@ -534,11 +652,13 @@ export class DebugSession {
             const parameters = this.parametersOf(frame);
             const thisSlot = frame.script.thisSlot(frame.number);
 
+            // read the slots of the variables, and of 'this' if the function has one
             const inSlots = parameters.filter(variable => !isConstant(variable));
             const slotKinds = new Set(inSlots.map(variable => variable.slotKind));
             if (thisSlot !== null) {
                 slotKinds.add(thisSlot.slotKind);
             }
+
             const values = await this.readSlots(level, slotKinds);
 
             // a variable in its temporal dead zone cannot be passed
@@ -550,6 +670,8 @@ export class DebugSession {
             const constants = parameters.filter(isConstant);
             names.push(...constants.map(variable => variable.name));
             argumentValues.push(...constants.map(variable => encodeValue(variable.constant)));
+
+            // 'this'
             if (thisSlot !== null) {
                 thisValue = toDevice(values[thisSlot.slotKind][thisSlot.index]);
             }
@@ -572,12 +694,14 @@ export class DebugSession {
         return returnByValue ? byValue(answer) : answer;
     }
 
-    // Calls a function given by its source text (a function expression, as
-    // in CDP's Runtime.callFunctionOn) on the device: { value } or
-    // { exception }. 'thisValue' and 'args': values given by the session, or
-    // primitives. The function is compiled and loaded once per source text,
-    // and kept (persistent group) until the run ends. 'returnByValue': as in
-    // evaluate().
+    /**
+     * Calls a function given by its source text (a function expression, as
+     * in CDP's Runtime.callFunctionOn) on the device: { value } or
+     * { exception }. 'thisValue' and 'args': values given by the session, or
+     * primitives. The function is compiled and loaded once per source text,
+     * and kept (persistent group) until the run ends. 'returnByValue': as in
+     * evaluate().
+     */
     async callFunction(declaration, { thisValue, args = [], returnByValue = false } = {}) {
         // the function on the device: loaded before, or compiled and loaded now
         const cacheKey = `${returnByValue ? "json" : "value"}:${declaration}`;
@@ -592,6 +716,7 @@ export class DebugSession {
                 return { exception: localError(error) };
             }
 
+            // loaded for the rest of the run, and remembered
             const loaded = await this.device.request(KIND.LOAD_FUNCTION, { [KEY.DATA]: bytecode, [KEY.GROUP]: GROUP.PERSISTENT });
             handle = loaded.get(KEY.VALUE)[1];
             this.loadedFunctions.set(cacheKey, handle);
@@ -603,9 +728,12 @@ export class DebugSession {
         return returnByValue ? byValue(answer) : answer;
     }
 
-    // CALL of a function loaded on the device: { value } or { exception },
-    // decoded.
+    /**
+     * CALL of a function loaded on the device: { value } or { exception },
+     * decoded.
+     */
     async callLoaded(handle, thisValue, argumentValues, group) {
+        // the call, by the handle of the function
         const answer = await this.device.request(KIND.CALL, {
             [KEY.FUNCTION]: [VALUE.HANDLE, handle],
             [KEY.THIS]: thisValue,
@@ -613,16 +741,21 @@ export class DebugSession {
             [KEY.GROUP]: group,
         });
 
+        // what it threw, or what it returned
         if (answer.has(KEY.EXCEPTION)) {
             return { exception: decodeValue(answer.get(KEY.EXCEPTION)) };
         }
+
         return { value: decodeValue(answer.get(KEY.VALUE)) };
     }
 
-    // The variables visible in a frame, one per name (the innermost scope
-    // wins), as parameters of an evaluation.
+    /**
+     * The variables visible in a frame, one per name (the innermost scope
+     * wins), as parameters of an evaluation.
+     */
     parametersOf(frame) {
         const byName = new Map();
+
         for (const scope of this.scopesOf(frame)) {
             for (const variable of scope.variables) {
                 if (!byName.has(variable.name)) {
@@ -630,21 +763,27 @@ export class DebugSession {
                 }
             }
         }
+
         return [...byName.values()];
     }
 }
 
-// True for a constant of the module that has no slot on the device (the
-// compiler replaced it by its value, see ScriptInfo.constants).
+/**
+ * True for a constant of the module that has no slot on the device (the
+ * compiler replaced it by its value, see ScriptInfo.constants).
+ */
 function isConstant(variable) {
     return variable.constant !== undefined;
 }
 
 // ### Values ##################################################################
 
-// A value sent by the device (protocol encoding, see qjsx:protocol) as a JS
-// record (see the top of this file).
+/**
+ * A value sent by the device (protocol encoding, see qjsx:protocol) as a JS
+ * record (see the top of this file).
+ */
 export function decodeValue(raw) {
+    // null, then the other primitives: plain CBOR values
     if (raw === null) {
         return { type: "null", value: null };
     }
@@ -653,43 +792,48 @@ export function decodeValue(raw) {
         return { type: typeof raw, value: raw };
     }
 
+    // the others: an array starting with a tag
     const tag = raw[0];
     switch (tag) {
-    case VALUE.OBJECT: {
-        const [, handle, kind, className, description, size, location] = raw;
-        return {
-            type: "object",
-            handle,
-            kind: objectKindName(kind),
-            className,
-            description,
-            size: size >= 0 ? size : undefined,
-            location: Array.isArray(location) ? { module: location[0], number: location[1] } : null,
-        };
-    }
-    case VALUE.SYMBOL: {
-        return { type: "symbol", handle: raw[1], description: raw[2] };
-    }
-    case VALUE.BIGINT: {
-        return { type: "bigint", value: raw[1] };
-    }
-    case VALUE.UNINITIALIZED: {
-        return { type: "uninitialized" };
-    }
-    default: {
-        return { type: "unknown", value: raw };
-    }
+        case VALUE.OBJECT: {
+            const [, handle, kind, className, description, size, location] = raw;
+            return {
+                type: "object",
+                handle,
+                kind: objectKindName(kind),
+                className,
+                description,
+                size: size >= 0 ? size : undefined,
+                location: Array.isArray(location) ? { module: location[0], number: location[1] } : null,
+            };
+        }
+        case VALUE.SYMBOL: {
+            return { type: "symbol", handle: raw[1], description: raw[2] };
+        }
+        case VALUE.BIGINT: {
+            return { type: "bigint", value: raw[1] };
+        }
+        case VALUE.UNINITIALIZED: {
+            return { type: "uninitialized" };
+        }
+        default: {
+            return { type: "unknown", value: raw };
+        }
     }
 }
 
-// Name of an OBJECT_KIND number: "plain", "function", "array"...
+/**
+ * Name of an OBJECT_KIND number: "plain", "function", "array"...
+ */
 function objectKindName(kind) {
     const name = Object.keys(OBJECT_KIND).find(key => OBJECT_KIND[key] === kind);
     return name?.toLowerCase() ?? "unknown";
 }
 
-// The answer of a call made with JSON.stringify around the result, back to
-// a plain value: { value: { type, value } }. An exception stays as it is.
+/**
+ * The answer of a call made with JSON.stringify around the result, back to
+ * a plain value: { value: { type, value } }. An exception stays as it is.
+ */
 function byValue(answer) {
     if (answer.exception !== undefined) {
         return answer;
@@ -701,53 +845,66 @@ function byValue(answer) {
         return { value: { type: "undefined", value: undefined } };
     }
 
+    // the JSON text, back to a value
     const parsed = JSON.parse(text);
     const type = parsed === null ? "null" : typeof parsed;
     return { value: { type, value: parsed } };
 }
 
+/**
+ * True for a raw value of a variable in its temporal dead zone.
+ */
 function isUninitialized(raw) {
     return Array.isArray(raw) && raw[0] === VALUE.UNINITIALIZED;
 }
 
-// A value sent by the device, ready to be sent back: an object or a symbol
-// by its handle, the rest as it came.
+/**
+ * A value sent by the device, ready to be sent back: an object or a symbol
+ * by its handle, the rest as it came.
+ */
 function toDevice(raw) {
     const isKept = Array.isArray(raw) && (raw[0] === VALUE.OBJECT || raw[0] === VALUE.SYMBOL);
     return isKept ? [VALUE.HANDLE, raw[1]] : raw;
 }
 
-// A value given by the user of the session, in the protocol encoding: a
-// decoded value (from this session) or a plain primitive.
+/**
+ * A value given by the user of the session, in the protocol encoding: a
+ * decoded value (from this session) or a plain primitive.
+ */
 function encodeValue(value) {
+    // a bigint as its decimal text
     if (typeof value === "bigint") {
         return [VALUE.BIGINT, String(value)];
     }
 
+    // a plain primitive as it is
     const isDecoded = value !== null && typeof value === "object" && typeof value.type === "string";
     if (!isDecoded) {
         return value;
     }
 
+    // a decoded value: an object or a symbol by its handle
     switch (value.type) {
-    case "object":
-    case "symbol": {
-        return [VALUE.HANDLE, value.handle];
-    }
-    case "bigint": {
-        return [VALUE.BIGINT, value.value];
-    }
-    case "uninitialized": {
-        throw new Error("an uninitialized value cannot be sent");
-    }
-    default: {
-        return value.value;
-    }
+        case "object":
+        case "symbol": {
+            return [VALUE.HANDLE, value.handle];
+        }
+        case "bigint": {
+            return [VALUE.BIGINT, value.value];
+        }
+        case "uninitialized": {
+            throw new Error("an uninitialized value cannot be sent");
+        }
+        default: {
+            return value.value;
+        }
     }
 }
 
-// An error raised here (syntax error of an evaluated expression), shaped like
-// an error object of the device, without handle.
+/**
+ * An error raised here (syntax error of an evaluated expression), shaped like
+ * an error object of the device, without handle.
+ */
 function localError(error) {
     const className = error.name ?? "Error";
     return {

@@ -43,6 +43,9 @@ void js_compile_warning(JSParseState *s, JSCompileWarningKind kind,
     JSRuntime *rt = s->ctx->rt;
     int line_num, col_num;
 
+    /* a direct eval may use any name of the module (engine change W) */
+    if (kind == JS_COMPILE_WARNING_EVAL)
+        js_outline_eval_seen(s);
     if (!rt->debug.warning_handler)
         return;
     line_num = get_line_col(&col_num, s->buf_start, ptr - s->buf_start);

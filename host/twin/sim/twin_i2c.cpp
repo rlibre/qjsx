@@ -27,8 +27,8 @@ const int DEVICES = 32;                  // devices of every bus together
 // A bus (under lock).
 struct Bus {
     bool open;                           // openBus() took it
-    int  sda;                            // its pins (open)
-    int  scl;
+    int  sda;                            // its data pin (open)
+    int  scl;                            // its clock pin (open)
 };
 
 // A device added on a bus (under lock).
@@ -74,6 +74,7 @@ void record(int bus, int address, uint32_t frequencyHz, const uint8_t *written, 
     if (writeKept > 0) {
         memcpy(entry->written, written, writeKept);
     }
+
     if (status == hal::i2c::Status::ok && readKept > 0) {
         memcpy(entry->read, read, readKept);
     }
@@ -90,7 +91,9 @@ namespace twin {
  */
 void i2cBusStates(I2cBusState *states) {
     lock.lock();
+
     for (int i = 0; i < I2C_BUSES; i++) {
+        // the bus and its pins
         I2cBusState *state = &states[i];
         *state = I2cBusState{};
         state->open = buses[i].open;
@@ -101,10 +104,13 @@ void i2cBusStates(I2cBusState *states) {
         for (const Device &device : devices) {
             bool onBus = device.used && device.bus == i;
             bool known = false;
+
             for (int k = 0; k < state->frequencyCount; k++) {
                 known = known || state->frequencies[k] == device.frequencyHz;
             }
-            if (onBus && !known && state->frequencyCount < I2C_MAX_FREQUENCIES) {
+
+            bool hasRoom = state->frequencyCount < I2C_MAX_FREQUENCIES;
+            if (onBus && !known && hasRoom) {
                 state->frequencies[state->frequencyCount++] = device.frequencyHz;
             }
         }
@@ -119,13 +125,17 @@ void i2cBusStates(I2cBusState *states) {
 uint32_t i2cTrace(uint32_t after, I2cTraceVisitor *visit, void *context) {
     lock.lock();
 
-    // the oldest record still in the ring
-    uint32_t oldest = traceSequence > (uint32_t)I2C_TRACE_RECORDS ? traceSequence - I2C_TRACE_RECORDS + 1 : 1;
+    // the oldest record still in the ring, and the first one asked
+    bool ringFull = traceSequence > (uint32_t)I2C_TRACE_RECORDS;
+    uint32_t oldest = ringFull ? traceSequence - I2C_TRACE_RECORDS + 1 : 1;
     uint32_t first = after + 1 > oldest ? after + 1 : oldest;
+
+    // each one, oldest first
     for (uint32_t sequence = first; sequence <= traceSequence; sequence++) {
         visit(context, &trace[sequence % I2C_TRACE_RECORDS]);
     }
 
+    // the newest number, for the next call
     uint32_t newest = traceSequence;
     lock.unlock();
     return newest;
@@ -147,25 +157,35 @@ int busCount() {
  * Takes a bus on two pins of the board; the page sees them as I2C pins.
  */
 bool openBus(int bus, int sda, int scl, bool) {
-    bool pinsValid = sda >= 0 && sda < twin::pinCount() && scl >= 0 && scl < twin::pinCount() && sda != scl;
-    if (bus < 0 || bus >= twin::I2C_BUSES || !pinsValid) {
+    // a bus of the twin, two distinct pins of the board
+    bool sdaValid = sda >= 0 && sda < twin::pinCount();
+    bool sclValid = scl >= 0 && scl < twin::pinCount();
+    bool pinsValid = sdaValid && sclValid && sda != scl;
+    bool busValid = bus >= 0 && bus < twin::I2C_BUSES;
+    if (!busValid || !pinsValid) {
         return false;
     }
 
+    // taken if free
     lock.lock();
     bool free = !buses[bus].open;
     if (free) {
         buses[bus] = Bus{ true, sda, scl };
     }
+
+    // the time 0 of the trace, at the first open
     if (traceStartMs < 0) {
         traceStartMs = platform::monotonicMs();
     }
+
     lock.unlock();
 
+    // the page sees its pins as I2C pins
     if (free) {
         twin::setI2c(sda, true);
         twin::setI2c(scl, true);
     }
+
     return free;
 }
 
@@ -173,15 +193,19 @@ bool openBus(int bus, int sda, int scl, bool) {
  * Frees a bus and its pins.
  */
 void closeBus(int bus) {
-    if (bus < 0 || bus >= twin::I2C_BUSES) {
+    // a bus of the twin
+    bool busValid = bus >= 0 && bus < twin::I2C_BUSES;
+    if (!busValid) {
         return;
     }
 
+    // freed
     lock.lock();
     Bus closed = buses[bus];
     buses[bus].open = false;
     lock.unlock();
 
+    // its pins are not I2C pins any more
     if (closed.open) {
         twin::setI2c(closed.sda, false);
         twin::setI2c(closed.scl, false);
@@ -192,20 +216,27 @@ void closeBus(int bus) {
  * A device on an open bus: the first free entry.
  */
 int addDevice(int bus, int address, uint32_t frequencyHz) {
-    if (bus < 0 || bus >= twin::I2C_BUSES) {
+    // a bus of the twin
+    bool busValid = bus >= 0 && bus < twin::I2C_BUSES;
+    if (!busValid) {
         return -1;
     }
 
+    // the first free entry, when the bus is open
     lock.lock();
     int found = -1;
+
     for (int i = 0; i < DEVICES && found < 0 && buses[bus].open; i++) {
         if (!devices[i].used) {
             found = i;
         }
     }
+
+    // taken
     if (found >= 0) {
         devices[found] = Device{ true, bus, address, frequencyHz };
     }
+
     lock.unlock();
     return found;
 }
@@ -214,10 +245,13 @@ int addDevice(int bus, int address, uint32_t frequencyHz) {
  * Frees a device.
  */
 void removeDevice(int device) {
-    if (device < 0 || device >= DEVICES) {
+    // an entry of the table
+    bool deviceValid = device >= 0 && device < DEVICES;
+    if (!deviceValid) {
         return;
     }
 
+    // freed
     lock.lock();
     devices[device].used = false;
     lock.unlock();
@@ -242,6 +276,8 @@ Status transfer(int device, const uint8_t *writeData, size_t writeSize, uint8_t 
     // the component there answers it
     Status status = twin::i2cTransfer(bus.sda, bus.scl, target.address, writeData, writeSize, readData, readSize,
                                       timeoutMs);
+
+    // kept in the trace
     record(target.bus, target.address, target.frequencyHz, writeData, writeSize, readData, readSize, status);
     return status;
 }
@@ -251,6 +287,7 @@ Status transfer(int device, const uint8_t *writeData, size_t writeSize, uint8_t 
  * the trace.
  */
 Status probe(int bus, int address, int timeoutMs) {
+    // an open bus of the twin, and its pins
     lock.lock();
     bool open = bus >= 0 && bus < twin::I2C_BUSES && buses[bus].open;
     Bus pins = open ? buses[bus] : Bus{};
@@ -259,6 +296,7 @@ Status probe(int bus, int address, int timeoutMs) {
         return Status::failed;
     }
 
+    // a transfer of nothing, kept in the trace (frequency 0: a probe)
     Status status = twin::i2cTransfer(pins.sda, pins.scl, address, nullptr, 0, nullptr, 0, timeoutMs);
     record(bus, address, 0, nullptr, 0, nullptr, 0, status);
     return status;

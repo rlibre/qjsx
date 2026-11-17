@@ -25,7 +25,7 @@ namespace detail {
 // Where a value comes from, for error messages.
 struct Where {
     const char *function;   // "UART.open"
-    int         argument;           // 1-based, 0 if not an argument
+    int         argument;   // 1-based, 0 if not an argument
     const char *field;      // struct field name, or nullptr
 };
 
@@ -36,13 +36,16 @@ struct Where {
 inline void describe(char *out, size_t size, const Where &where) {
     // the function name (or "value"), then the argument number if known and
     // if there is room left
-    int length = snprintf(out, size, "%s", where.function != nullptr ? where.function : "value");
-    if (where.argument > 0 && length >= 0 && (size_t)length < size) {
+    const char *function = where.function != nullptr ? where.function : "value";
+    int length = snprintf(out, size, "%s", function);
+    bool roomLeft = length >= 0 && (size_t)length < size;
+    if (where.argument > 0 && roomLeft) {
         length += snprintf(out + length, size - length, ": argument %d", where.argument);
     }
 
     // then the field name, same conditions
-    if (where.field != nullptr && length >= 0 && (size_t)length < size) {
+    roomLeft = length >= 0 && (size_t)length < size;
+    if (where.field != nullptr && roomLeft) {
         snprintf(out + length, size - length, ", field '%s'", where.field);
     }
 }
@@ -210,7 +213,8 @@ struct IntegerConvert {
     static bool from(JSContext *ctx, JSValueConst value, T &out, const detail::Where &where) {
         // a number: no implicit conversion from strings
         double number = 0;
-        if (!JS_IsNumber(value) || JS_ToFloat64(ctx, &number, value) < 0) {
+        bool isNumber = JS_IsNumber(value) && JS_ToFloat64(ctx, &number, value) >= 0;
+        if (!isNumber) {
             return detail::conversionError(where, "must be an integer");
         }
 
@@ -221,7 +225,8 @@ struct IntegerConvert {
 
         // within the range of T (both bounds exact doubles: the cast below is
         // defined for every number that passes)
-        if (number < detail::lowestOf<T>() || number >= detail::limitOf<T>()) {
+        bool outOfRange = number < detail::lowestOf<T>() || number >= detail::limitOf<T>();
+        if (outOfRange) {
             return detail::conversionError<RangeError>(where, "integer out of range");
         }
 
@@ -264,8 +269,10 @@ struct FloatConvert {
      * Accepts any JS number (NaN and infinities included).
      */
     static bool from(JSContext *ctx, JSValueConst value, T &out, const detail::Where &where) {
+        // a number, kept as it is
         double number = 0;
-        if (!JS_IsNumber(value) || JS_ToFloat64(ctx, &number, value) < 0) {
+        bool isNumber = JS_IsNumber(value) && JS_ToFloat64(ctx, &number, value) >= 0;
+        if (!isNumber) {
             return detail::conversionError(where, "must be a number");
         }
 
@@ -298,7 +305,8 @@ struct Convert<Range<T, Lo, Hi>> {
         }
 
         // then check the bounds
-        if (number < (T)Lo || number > (T)Hi) {
+        bool outOfBounds = number < (T)Lo || number > (T)Hi;
+        if (outOfBounds) {
             char expectation[96];
             snprintf(expectation, sizeof(expectation), "must be between %lld and %lld", Lo, Hi);
             return detail::conversionError<RangeError>(where, expectation);
@@ -632,12 +640,14 @@ Value Function::operator()(const A &...arguments) const {
     return callWith(JS_UNDEFINED, arguments...);
 }
 
-// #############################################################################
+// ### Enums ###################################################################
+
 // Enums: JS_ENUM(Parity, none, odd, even) declares 'enum class Parity' whose
 // values are passed from JS as the strings "none", "odd", "even".
 
 namespace detail {
 
+// The names of the values of an enum declared by JS_ENUM.
 struct EnumNames {
     const char *const *names;  // JS strings, indexed by enum value
     int count;                 // number of values
@@ -695,11 +705,13 @@ struct Convert<E, typename meta::EnableIf<detail::IsEnum<E>::value>::Type> {
     static JSValue to(JSContext *ctx, E value) {
         detail::EnumNames names = jsEnumNames((E *)nullptr);
         int index = (int)value;
-        return index >= 0 && index < names.count ? JS_NewString(ctx, names.names[index]) : JS_UNDEFINED;
+        bool listed = index >= 0 && index < names.count;
+        return listed ? JS_NewString(ctx, names.names[index]) : JS_UNDEFINED;
     }
 };
 
-// #############################################################################
+// ### Structs #################################################################
+
 // Structs: JS_STRUCT(UartOptions, speed, parity) after the struct definition.
 // From JS: a plain object; missing fields keep the C++ default values,
 // unknown fields are rejected (catches typos). To JS: a new object.

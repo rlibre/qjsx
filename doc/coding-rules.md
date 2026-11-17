@@ -1,8 +1,15 @@
-# C / C++ coding rules
+# C / C++ / JS / TS coding rules
 
 Rules established on the qjsx project (November 2026), written to be reused as they are in
-another C or C++ project. They also serve as instructions for a coding assistant: this file
-can be copied into the project and referenced from its `CLAUDE.md`.
+another C, C++, JavaScript or TypeScript project. They also serve as instructions for a
+coding assistant: this file can be copied into the project and referenced from its
+`CLAUDE.md`.
+
+They are written for C and C++ and apply to JavaScript and TypeScript wherever they make
+sense: writing (one idea per line, named conditions, no duplication, no nested ternary),
+braces and blank lines, a `/** */` comment block on every function and method, the flow as
+pseudo-code in the body, section separators, naming. What only exists in C / C++ (casts,
+references, headers, allocations, the stack) does not concern JS and TS.
 
 **Principle: readability and maintainability come first.** Code is read more often than it is
 written. Every rule below serves this goal: seeing at a glance what a function does, what it

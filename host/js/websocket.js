@@ -1,3 +1,4 @@
+
 /*          _
  *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
  * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
@@ -41,42 +42,60 @@ const decoder = new TextDecoder();
 
 // ### Handshake ###############################################################
 
-// Sec-WebSocket-Accept of a Sec-WebSocket-Key: base64(SHA-1(key + GUID)).
+/**
+ * Sec-WebSocket-Accept of a Sec-WebSocket-Key: base64(SHA-1(key + GUID)).
+ */
 export function acceptKey(key) {
     return sha1(key + HANDSHAKE_GUID).toBase64();
 }
 
-// The head of an HTTP request (text up to the blank line):
-// { method, path, headers: Map(lower-case name -> value) }, or null if malformed.
+/**
+ * The head of an HTTP request (text up to the blank line):
+ * { method, path, headers: Map(lower-case name -> value) }, or null if malformed.
+ */
 export function parseRequestHead(text) {
+    // the request line: method, path, version
     const lines = text.split("\r\n");
     const requestLine = /^([A-Z]+) (\S+) HTTP\/1\.[01]$/.exec(lines[0]);
     if (requestLine === null) {
         return null;
     }
 
+    // the headers, "name: value"; lines without a name are skipped
     const headers = new Map();
+
     for (const line of lines.slice(1)) {
         const colon = line.indexOf(":");
         if (colon <= 0) {
             continue;
         }
+
         headers.set(line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim());
     }
+
     return { method: requestLine[1], path: requestLine[2], headers };
 }
 
 // ### Frames ##################################################################
 
-// One frame, FIN set: header, then the payload, masked with 'mask' (4 bytes)
-// when given (a client must mask, a server must not).
+/**
+ * One frame, FIN set: header, then the payload, masked with 'mask' (4 bytes)
+ * when given (a client must mask, a server must not).
+ */
 export function encodeFrame(opcode, payload, mask) {
     // the length on 7 bits, or 126 + 16 bits, or 127 + 64 bits
     const length = payload.length;
-    const extended = length < 126 ? 0 : length < 0x10000 ? 2 : 8;
+    let extended = 8;
+    if (length < 126) {
+        extended = 0;
+    } else if (length < 0x10000) {
+        extended = 2;
+    }
+
     const maskSize = mask === undefined ? 0 : 4;
     const frame = new Uint8Array(2 + extended + maskSize + length);
 
+    // header: FIN and the opcode, then the MASK bit and the length
     frame[0] = 0x80 | opcode;
     const maskBit = mask === undefined ? 0 : 0x80;
     if (extended === 0) {
@@ -100,21 +119,31 @@ export function encodeFrame(opcode, payload, mask) {
     }
 
     frame.set(mask, 2 + extended);
+
     for (let i = 0; i < length; i++) {
         frame[payloadStart + i] = payload[i] ^ mask[i & 3];
     }
+
     return frame;
 }
 
-// Cuts a stream of bytes into frames: feed() the bytes as they come,
-// onFrame({ fin, opcode, payload }) is called for each complete frame (the
-// payload unmasked). Throws on a frame larger than MAX_MESSAGE.
+/**
+ * Cuts a stream of bytes into frames: feed() the bytes as they come,
+ * onFrame({ fin, opcode, payload }) is called for each complete frame (the
+ * payload unmasked). Throws on a frame larger than MAX_MESSAGE.
+ */
 export class FrameParser {
+    /**
+     * onFrame({ fin, opcode, payload }) receives each complete frame.
+     */
     constructor(onFrame) {
         this.onFrame = onFrame;
         this.pending = new Uint8Array(0);
     }
 
+    /**
+     * Gives received bytes; the end of an incomplete frame is kept for the next call.
+     */
     feed(bytes) {
         // append to what is left of the previous calls
         const joined = new Uint8Array(this.pending.length + bytes.length);
@@ -123,20 +152,26 @@ export class FrameParser {
 
         // take every complete frame
         let position = 0;
+
         for (;;) {
             const frame = readFrame(joined, position);
             if (frame === null) {
                 break;
             }
+
             position = frame.end;
             this.onFrame({ fin: frame.fin, opcode: frame.opcode, payload: frame.payload });
         }
+
+        // keep the start of the next frame
         this.pending = joined.slice(position);
     }
 }
 
-// The frame starting at 'start' of 'bytes', or null if it is not complete:
-// { fin, opcode, payload, end }.
+/**
+ * The frame starting at 'start' of 'bytes', or null if it is not complete:
+ * { fin, opcode, payload, end }.
+ */
 function readFrame(bytes, start) {
     if (bytes.length - start < 2) {
         return null;
@@ -155,12 +190,14 @@ function readFrame(bytes, start) {
         if (bytes.length - position < 2) {
             return null;
         }
+
         length = view.getUint16(position);
         position += 2;
     } else if (length === 127) {
         if (bytes.length - position < 8) {
             return null;
         }
+
         length = view.getUint32(position) * 0x100000000 + view.getUint32(position + 4);
         position += 8;
     }
@@ -183,18 +220,24 @@ function readFrame(bytes, start) {
             payload[i] ^= mask[i & 3];
         }
     }
+
     return { fin, opcode, payload, end: position + length };
 }
 
 // ### Connections #############################################################
 
-// One WebSocket over a net connection, either side ('masking': true on the
-// client side, which masks what it sends).
-//   socket.onMessage(text => ...)   a whole text message (fragments joined)
-//   socket.onClose(() => ...)
-//   socket.send(text)
-//   socket.close()
+/**
+ * One WebSocket over a net connection, either side ('masking': true on the
+ * client side, which masks what it sends).
+ *   socket.onMessage(text => ...)   a whole text message (fragments joined)
+ *   socket.onClose(() => ...)
+ *   socket.send(text)
+ *   socket.close()
+ */
 export class WebSocket {
+    /**
+     * Takes the connection over (its data and close handlers).
+     */
     constructor(connection, { masking = false } = {}) {
         this.connection = connection;
         this.masking = masking;
@@ -210,44 +253,60 @@ export class WebSocket {
         connection.onClose(() => this.onConnectionClosed());
     }
 
-    // Sets the handler of the messages; it gets at once those that came
-    // before (a server may send right after the handshake, in the same
-    // packet as its answer).
+    /**
+     * Sets the handler of the messages; it gets at once those that came
+     * before (a server may send right after the handshake, in the same
+     * packet as its answer).
+     */
     onMessage(handler) {
         this.messageHandler = handler;
         const waiting = this.waiting;
         this.waiting = [];
+
         for (const text of waiting) {
             handler(text);
         }
     }
 
+    /**
+     * Sets the handler called once when the connection closes.
+     */
     onClose(handler) {
         this.closeHandler = handler;
     }
 
+    /**
+     * Sends a text message.
+     */
     send(text) {
         this.sendFrame(OPCODE.TEXT, encoder.encode(text));
     }
 
-    // Sends a close frame, then closes the connection.
+    /**
+     * Sends a close frame, then closes the connection.
+     */
     close() {
         if (this.closed) {
             return;
         }
+
         this.sendFrame(OPCODE.CLOSE, new Uint8Array(0));
         this.connection.close();
     }
 
-    // Sends a frame. A write that fails means the peer is gone (a page
-    // reloaded resets its connection): the connection is closed, nothing more
-    // is sent, and the close handler is called as for any close, when the
-    // connection reports it. So sending never throws.
+    /**
+     * Sends a frame. A write that fails means the peer is gone (a page
+     * reloaded resets its connection): the connection is closed, nothing more
+     * is sent, and the close handler is called as for any close, when the
+     * connection reports it. So sending never throws.
+     */
     sendFrame(opcode, payload) {
-        if (this.closed || this.broken || !this.connection.isOpen()) {
+        const cannotSend = this.closed || this.broken || !this.connection.isOpen();
+        if (cannotSend) {
             return;
         }
 
+        // write the frame; a failure closes the connection
         const mask = this.masking ? randomMask() : undefined;
         try {
             this.connection.write(encodeFrame(opcode, payload, mask));
@@ -257,6 +316,9 @@ export class WebSocket {
         }
     }
 
+    /**
+     * Bytes received on the connection.
+     */
     onData(bytes) {
         try {
             this.parser.feed(bytes);
@@ -266,100 +328,123 @@ export class WebSocket {
         }
     }
 
-    // One frame: a piece of a message, or a control frame.
+    /**
+     * One frame: a piece of a message, or a control frame.
+     */
     onFrame({ fin, opcode, payload }) {
         switch (opcode) {
-        case OPCODE.TEXT:
-        case OPCODE.BINARY:
-        case OPCODE.CONTINUATION: {
-            this.fragments.push(payload);
-            if (fin) {
-                const text = decoder.decode(joinBytes(this.fragments));
-                this.fragments = [];
-                if (this.messageHandler !== undefined) {
-                    this.messageHandler(text);
-                } else {
-                    this.waiting.push(text);
+            case OPCODE.TEXT:
+            case OPCODE.BINARY:
+            case OPCODE.CONTINUATION: {
+                // a piece of a message; the last one gives the whole message
+                this.fragments.push(payload);
+                if (fin) {
+                    const text = decoder.decode(joinBytes(this.fragments));
+                    this.fragments = [];
+                    if (this.messageHandler !== undefined) {
+                        this.messageHandler(text);
+                    } else {
+                        this.waiting.push(text);
+                    }
                 }
+
+                break;
             }
-            break;
-        }
-        case OPCODE.PING: {
-            this.sendFrame(OPCODE.PONG, payload);
-            break;
-        }
-        case OPCODE.CLOSE: {
-            // answer the close, then end the connection
-            this.sendFrame(OPCODE.CLOSE, payload.slice(0, 2));
-            this.connection.close();
-            break;
-        }
-        default: {
-            // PONG, and opcodes this server does not know: ignored
-            break;
-        }
+            case OPCODE.PING: {
+                this.sendFrame(OPCODE.PONG, payload);
+                break;
+            }
+            case OPCODE.CLOSE: {
+                // answer the close, then end the connection
+                this.sendFrame(OPCODE.CLOSE, payload.slice(0, 2));
+                this.connection.close();
+                break;
+            }
+            default: {
+                // PONG, and opcodes this server does not know: ignored
+                break;
+            }
         }
     }
 
+    /**
+     * The connection closed: the close handler is called, once.
+     */
     onConnectionClosed() {
         if (this.closed) {
             return;
         }
+
         this.closed = true;
         this.closeHandler?.();
     }
 }
 
+/**
+ * The byte arrays 'parts' joined into one.
+ */
 function joinBytes(parts) {
     const size = parts.reduce((total, part) => total + part.length, 0);
     const joined = new Uint8Array(size);
     let offset = 0;
+
     for (const part of parts) {
         joined.set(part, offset);
         offset += part.length;
     }
+
     return joined;
 }
 
-// A mask for a client frame: RFC 6455 wants it unpredictable for proxies;
-// Math.random is enough between a debugger and its local tool.
+/**
+ * A mask for a client frame: RFC 6455 wants it unpredictable for proxies;
+ * Math.random is enough between a debugger and its local tool.
+ */
 function randomMask() {
     const mask = new Uint8Array(4);
+
     for (let i = 0; i < 4; i++) {
         mask[i] = Math.floor(Math.random() * 256);
     }
+
     return mask;
 }
 
 // ### Server ##################################################################
 
-// Starts the server. Throws if it cannot listen.
-//   host, port      where to listen (port 0: any free port, see server.port())
-//   routes(path)    the JSON answer of a GET request, undefined: 404
-//   pages(path)     optional: { contentType, body } of a GET request that is
-//                   not JSON (the page of the digital twin), undefined: routes;
-//                   body is a string or a Uint8Array
-//   acceptsSocket(path)  true if a WebSocket may open on this path
-//   onSocket(socket)     a WebSocket opened
-//   protocols       optional: the subprotocols the server speaks; the first
-//                   one the client asks for (Sec-WebSocket-Protocol) is
-//                   answered, as a browser refuses a socket whose protocol
-//                   is not (x4js asks for "messaging")
-// Returns { port(), close() }.
+/**
+ * Starts the server. Throws if it cannot listen.
+ *   host, port      where to listen (port 0: any free port, see server.port())
+ *   routes(path)    the JSON answer of a GET request, undefined: 404
+ *   pages(path)     optional: { contentType, body } of a GET request that is
+ *                   not JSON (the page of the digital twin), undefined: routes;
+ *                   body is a string or a Uint8Array
+ *   acceptsSocket(path)  true if a WebSocket may open on this path
+ *   onSocket(socket)     a WebSocket opened
+ *   protocols       optional: the subprotocols the server speaks; the first
+ *                   one the client asks for (Sec-WebSocket-Protocol) is
+ *                   answered, as a browser refuses a socket whose protocol
+ *                   is not (x4js asks for "messaging")
+ * Returns { port(), close() }.
+ */
 export function startServer({ host = "127.0.0.1", port, routes, pages = () => undefined, acceptsSocket, onSocket,
                              protocols = [] }) {
+    // listen; each connection is served on its own
     const handlers = { routes, pages, acceptsSocket, onSocket, protocols };
     const server = listen({ host, port }, connection => {
         serveConnection(connection, handlers);
     });
+
     return {
         port: () => server.port(),
         close: () => server.close(),
     };
 }
 
-// One connection: reads the head of the HTTP request, then answers it with
-// JSON or upgrades it to a WebSocket.
+/**
+ * One connection: reads the head of the HTTP request, then answers it with
+ * JSON or upgrades it to a WebSocket.
+ */
 function serveConnection(connection, handlers) {
     let received = "";
     let answered = false;
@@ -377,21 +462,28 @@ function serveConnection(connection, handlers) {
                 answered = true;
                 connection.close();
             }
+
             return;
         }
 
+        // answer it, once
         answered = true;
         const request = parseRequestHead(received.slice(0, headEnd));
         answerRequest(connection, request, handlers);
     });
+
+    // nothing to do at the close: the answer closes the connection itself
     connection.onClose(() => {});
 }
 
-// Answers one HTTP request: a WebSocket upgrade, a page, a JSON route, or an
-// error.
+/**
+ * Answers one HTTP request: a WebSocket upgrade, a page, a JSON route, or an
+ * error.
+ */
 function answerRequest(connection, request, { routes, pages, acceptsSocket, onSocket, protocols }) {
     // a request too malformed to read
-    if (request === null || request.method !== "GET") {
+    const isBadRequest = request === null || request.method !== "GET";
+    if (isBadRequest) {
         writeResponse(connection, "400 Bad Request", "text/plain", "bad request\n");
         return;
     }
@@ -400,7 +492,8 @@ function answerRequest(connection, request, { routes, pages, acceptsSocket, onSo
     const isUpgrade = request.headers.get("upgrade")?.toLowerCase() === "websocket";
     if (isUpgrade) {
         const key = request.headers.get("sec-websocket-key");
-        if (key === undefined || !acceptsSocket(request.path)) {
+        const isRefused = key === undefined || !acceptsSocket(request.path);
+        if (isRefused) {
             writeResponse(connection, "404 Not Found", "text/plain", "no debugger here\n");
             return;
         }
@@ -409,6 +502,7 @@ function answerRequest(connection, request, { routes, pages, acceptsSocket, onSo
         const asked = (request.headers.get("sec-websocket-protocol") ?? "").split(",").map(name => name.trim());
         const protocol = asked.find(name => protocols.includes(name));
 
+        // the answer of the handshake
         const head = [
             "HTTP/1.1 101 Switching Protocols",
             "Upgrade: websocket",
@@ -418,6 +512,7 @@ function answerRequest(connection, request, { routes, pages, acceptsSocket, onSo
         if (protocol !== undefined) {
             head.push(`Sec-WebSocket-Protocol: ${protocol}`);
         }
+
         head.push("", "");
         connection.write(head.join("\r\n"));
         onSocket(new WebSocket(connection));
@@ -438,11 +533,14 @@ function answerRequest(connection, request, { routes, pages, acceptsSocket, onSo
         writeResponse(connection, "404 Not Found", "text/plain", "not found\n");
         return;
     }
+
     writeResponse(connection, "200 OK", "application/json; charset=UTF-8", JSON.stringify(answer, null, 2));
 }
 
-// Writes a whole HTTP response, then closes the connection. 'body': a string
-// (sent as UTF-8) or a Uint8Array (sent as is).
+/**
+ * Writes a whole HTTP response, then closes the connection. 'body': a string
+ * (sent as UTF-8) or a Uint8Array (sent as is).
+ */
 function writeResponse(connection, status, contentType, body) {
     const bodyBytes = typeof body === "string" ? encoder.encode(body) : body;
     const head = [
@@ -459,16 +557,20 @@ function writeResponse(connection, status, contentType, body) {
 
 // ### Client (tests) ##########################################################
 
-// Opens a WebSocket to ws://host:port/path; resolves with a WebSocket (that
-// masks its frames), rejects if the server refuses the upgrade. 'protocol':
-// optional subprotocol asked for; as a browser, refused if the server does
-// not answer it.
+/**
+ * Opens a WebSocket to ws://host:port/path; resolves with a WebSocket (that
+ * masks its frames), rejects if the server refuses the upgrade. 'protocol':
+ * optional subprotocol asked for; as a browser, refused if the server does
+ * not answer it.
+ */
 export async function connect({ host = "127.0.0.1", port, path, protocol }) {
+    // the connection, and a random key of 16 bytes in base64 (RFC 6455 4.1)
     const connection = await netConnect({ host, port });
     const key = new Uint8Array(16).map(() => Math.floor(Math.random() * 256)).toBase64();
 
     return new Promise((resolve, reject) => {
         let received = new Uint8Array(0);
+
         connection.onData(bytes => {
             // wait for the end of the head of the answer
             received = joinBytes([received, bytes]);
@@ -494,9 +596,11 @@ export async function connect({ host = "127.0.0.1", port, path, protocol }) {
             if (rest.length > 0) {
                 socket.onData(rest);
             }
+
             resolve(socket);
         });
 
+        // the upgrade request
         const request = [
             `GET ${path} HTTP/1.1`,
             `Host: ${host}:${port}`,
@@ -508,6 +612,7 @@ export async function connect({ host = "127.0.0.1", port, path, protocol }) {
         if (protocol !== undefined) {
             request.push(`Sec-WebSocket-Protocol: ${protocol}`);
         }
+
         request.push("", "");
         connection.write(request.join("\r\n"));
     });

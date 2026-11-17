@@ -36,8 +36,8 @@ const uint64_t PIT_TICKS_PER_MS = 24000;
 
 // What startThread() gives to the new task (allocated, freed by the task).
 struct ThreadStart {
-    ThreadFunction *run;   // thread function
-    void *argument;        // passed to run
+    ThreadFunction *run;        // thread function
+    void           *argument;   // passed to run
 };
 
 /**
@@ -62,8 +62,8 @@ void taskEntry(void *parameter) {
 }
 
 // The TRNG, set up on its first use; one caller at a time.
-bool trngStarted = false;
-Mutex trngLock;
+bool  trngStarted = false;   // TRNG_Init done (under trngLock)
+Mutex trngLock;              // held by randomBytes() for a whole call
 
 } // namespace
 
@@ -141,6 +141,7 @@ bool startThread(ThreadFunction *run, void *argument, ThreadOptions options) {
  * on the first call; one caller at a time.
  */
 void randomBytes(void *buffer, size_t size) {
+    // one caller at a time
     trngLock.lock();
 
     // the generator, once
@@ -150,6 +151,7 @@ void randomBytes(void *buffer, size_t size) {
         if (TRNG_Init(TRNG, &config) != kStatus_Success) {
             fatal("the random number generator does not start");
         }
+
         trngStarted = true;
     }
 

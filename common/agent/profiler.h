@@ -53,15 +53,15 @@ struct Stack {
 
 // What stop() hands over; valid until release().
 struct Report {
-    int64_t            durationMs;    // from start() to stop()
-    int                intervalMs;    // asked to start()
-    uint32_t           samples;       // samples taken while the JS thread worked
-    uint32_t           idle;          // samples while it waited in its loop
-    uint32_t           overflow;      // samples whose stack had no room in the table
-    const Stack       *stacks;        // stackCount entries; borrowed
-    int                stackCount;    // distinct stacks
-    const char *const *modules;       // module names, by index; borrowed
-    int                moduleCount;   // modules
+    int64_t      durationMs;      // from start() to stop()
+    int          intervalMs;      // asked to start()
+    uint32_t     samples;         // samples taken while the JS thread worked
+    uint32_t     idle;            // samples while it waited in its loop
+    uint32_t     overflow;        // samples whose stack had no room in the table
+    const Stack *stacks;          // stackCount entries; borrowed
+    int          stackCount;      // distinct stacks
+    const char *const *modules;   // module names, by index; borrowed
+    int          moduleCount;     // modules
 };
 
 /**

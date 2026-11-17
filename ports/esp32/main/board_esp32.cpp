@@ -98,10 +98,12 @@ void *jsHeapMalloc(JSMallocState *state, size_t size) {
  * QuickJS free (nullptr: nothing), counted.
  */
 void jsHeapFree(JSMallocState *state, void *block) {
+    // no block: nothing to free
     if (block == nullptr) {
         return;
     }
 
+    // uncounted, then freed
     state->malloc_count--;
     state->malloc_size -= jsHeapUsableSize(block) + MALLOC_OVERHEAD;
     heap_caps_free(block);
@@ -139,6 +141,7 @@ void *jsHeapRealloc(JSMallocState *state, void *block, size_t size) {
     return resized;
 }
 
+// QuickJS's allocator over the ESP-IDF heap (JS_HEAP_CAPS).
 const JSMallocFunctions jsHeapAllocator = { &jsHeapMalloc, &jsHeapFree, &jsHeapRealloc, &jsHeapUsableSize };
 
 // Without PSRAM the JS heap is one region of internal RAM, taken once and
@@ -189,7 +192,8 @@ bool reserveJsRegion() {
     // the region, then the heap in it
     size_t size = largest - JS_HEAP_RESERVE;
     void *region = heap_caps_malloc(size, JS_HEAP_CAPS);
-    if (region == nullptr || !jsRegion.init(region, size)) {
+    bool reserved = region != nullptr && jsRegion.init(region, size);
+    if (!reserved) {
         heap_caps_free(region);
         printf("qjsx: cannot reserve the JS heap (%u KB): it shares the RAM\n", (unsigned)(size / 1024));
         return false;
@@ -200,6 +204,7 @@ bool reserveJsRegion() {
     printf("qjsx: JS heap of %u KB\n", (unsigned)(size / 1024));
     return true;
 }
+
 #endif
 
 // ### Package storage #########################################################
@@ -217,9 +222,9 @@ const int      NO_SLOT = -1;                 // none (installed, uploaded or map
 
 // Header of a slot, at its start.
 struct SlotHeader {
-    uint32_t magic;                  // PACKAGE_MAGIC when the slot holds a package
-    uint32_t sequence;               // higher: installed later
-    uint32_t size;                   // bytes of the package after the header
+    uint32_t magic;                   // PACKAGE_MAGIC when the slot holds a package
+    uint32_t sequence;                // higher: installed later
+    uint32_t size;                    // bytes of the package after the header
     char     buildId[BUILD_ID_SIZE];  // zero-terminated
 };
 
@@ -232,16 +237,19 @@ public:
      * Finds the partition (once). False if partitions.csv has none.
      */
     bool open() {
+        // found already
         if (_partition != nullptr) {
             return true;
         }
 
+        // the partition, of our own data subtype 0x40 (the tables of partitions/)
         _partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)0x40, "packages");
         if (_partition == nullptr) {
             fprintf(stderr, "qjsx: no \"packages\" partition\n");
             return false;
         }
 
+        // two slots of half
         _slotSize = _partition->size / 2;
         return true;
     }
@@ -283,10 +291,14 @@ public:
      * Writes a chunk after the header of the upload slot.
      */
     bool writeUpload(size_t offset, const uint8_t *data, size_t size) override {
-        if (_uploadSlot == NO_SLOT || offset + size > _uploadSize) {
+        // an upload going on, the chunk within the announced size
+        bool uploading = _uploadSlot != NO_SLOT;
+        bool fits = offset + size <= _uploadSize;
+        if (!uploading || !fits) {
             return false;
         }
 
+        // at its place after the header
         size_t address = slotStart(_uploadSlot) + HEADER_SIZE + offset;
         return esp_partition_write(_partition, address, data, size) == ESP_OK;
     }
@@ -296,6 +308,7 @@ public:
      * package (its sequence is the highest).
      */
     bool finishUpload(const char *buildId) override {
+        // no upload going on
         if (_uploadSlot == NO_SLOT) {
             return false;
         }
@@ -324,6 +337,7 @@ public:
      * Build id and size of the installed package. False if none.
      */
     bool installed(char *buildId, size_t buildIdSize, size_t *packageSize) override {
+        // the installed slot
         SlotHeader header;
         _mutex.lock();
         int slot = findInstalled(&header);
@@ -332,6 +346,7 @@ public:
             return false;
         }
 
+        // what its header says
         snprintf(buildId, buildIdSize, "%s", header.buildId);
         *packageSize = header.size;
         return true;
@@ -344,10 +359,11 @@ public:
     const uint8_t *map(size_t *size) {
         _mutex.lock();
 
-        // the installed slot, if any
+        // the installed slot, if any and if none is mapped already
         SlotHeader header;
         int slot = findInstalled(&header);
-        if (slot == NO_SLOT || _mappedSlot != NO_SLOT) {
+        bool mappedAlready = _mappedSlot != NO_SLOT;
+        if (slot == NO_SLOT || mappedAlready) {
             _mutex.unlock();
             return nullptr;
         }
@@ -361,6 +377,7 @@ public:
             return nullptr;
         }
 
+        // mapped: this slot is never erased until unmap()
         _mappedSlot = slot;
         *size = header.size;
         _mutex.unlock();
@@ -371,6 +388,7 @@ public:
      * Unmaps what map() returned.
      */
     void unmap() {
+        // only if a slot is mapped
         _mutex.lock();
         if (_mappedSlot != NO_SLOT) {
             esp_partition_munmap(_mapHandle);
@@ -392,6 +410,7 @@ private:
      * Reads the header of a slot; true if it holds a package.
      */
     bool readHeader(int slot, SlotHeader *header) {
+        // the header from the flash
         if (esp_partition_read(_partition, slotStart(slot), header, sizeof(SlotHeader)) != ESP_OK) {
             return false;
         }
@@ -408,6 +427,7 @@ private:
      * header, or NO_SLOT. _mutex held.
      */
     int findInstalled(SlotHeader *header) {
+        // no partition: no slot
         if (_partition == nullptr) {
             return NO_SLOT;
         }
@@ -443,9 +463,9 @@ private:
     esp_partition_mmap_handle_t  _mapHandle = 0;          // of that mapping
 };
 
-FlashStorage storage;
+FlashStorage storage;   // the package storage of the board
 
-// ### Files of the programs: LittleFS on the "data" partition ##################
+// ### Files of the programs: LittleFS on the "data" partition #################
 
 const char DATA_FOLDER[] = "/data";        // where the partition is mounted: process.cwd()
 const char DATA_PARTITION[] = "data";      // its label in partitions/*.csv
@@ -454,10 +474,10 @@ bool dataMounted = false;                  // set once by mountData() (app_main,
 // ### Link to the host over UART0 #############################################
 
 const uart_port_t HOST_UART = UART_NUM_0;   // the COM port (CH343) and the IDF console
-const int UART_RX_BUFFER = 4096;            // driver buffers, bytes
-const int UART_TX_BUFFER = 4096;
-const size_t READ_BLOCK = 256;              // bytes read at once by the reader task
-const int READ_TIMEOUT_MS = 20;             // the reader gives what came after that much silence
+const int         UART_RX_BUFFER = 4096;    // receive buffer of the driver, bytes
+const int         UART_TX_BUFFER = 4096;    // transmit buffer of the driver, bytes
+const size_t      READ_BLOCK = 256;         // bytes read at once by the reader task
+const int         READ_TIMEOUT_MS = 20;     // the reader gives what came after that much silence
 
 // agent::Link over UART0. The console (printf, IDF logs) shares the wire:
 // every write goes through the driver, one call at a time, so a frame is
@@ -473,7 +493,7 @@ public:
     }
 };
 
-UartLink uartLink;
+UartLink uartLink;                     // the agent's link
 agent::Agent *linkedAgent = nullptr;   // set by startLinks, before the reader starts
 
 /**
@@ -484,6 +504,7 @@ void uartReader(void *) {
     uint8_t *buffer = (uint8_t *)memory::allocate(READ_BLOCK);
 
     for (;;) {
+        // what came, given after READ_TIMEOUT_MS of silence or a full block
         int received = uart_read_bytes(HOST_UART, buffer, READ_BLOCK, pdMS_TO_TICKS(READ_TIMEOUT_MS));
         if (received > 0) {
             linkedAgent->receive(buffer, (size_t)received);
@@ -540,11 +561,13 @@ const char *dataDirectory() {
  * The size of the LittleFS of the "data" partition; 0 when not mounted.
  */
 uint64_t dataCapacity() {
+    // from LittleFS, if mounted
     size_t total = 0;
     size_t used = 0;
     if (!dataMounted || esp_littlefs_info(DATA_PARTITION, &total, &used) != ESP_OK) {
         return 0;
     }
+
     return total;
 }
 
@@ -554,6 +577,7 @@ uint64_t dataCapacity() {
  * printing why: no partition, or the flash refused.
  */
 bool mountData() {
+    // the partition on DATA_FOLDER, formatted when it cannot be mounted
     esp_vfs_littlefs_conf_t settings = {};
     settings.base_path = DATA_FOLDER;
     settings.partition_label = DATA_PARTITION;
@@ -601,6 +625,7 @@ size_t chipId(uint8_t *out) {
  * chip does not have (esp_read_mac refuses it).
  */
 bool macAddress(MacKind kind, uint8_t *out) {
+    // the ESP-IDF type of the kind (base for any other)
     esp_mac_type_t type = ESP_MAC_BASE;
     if (kind == MacKind::wifi) {
         type = ESP_MAC_WIFI_STA;
@@ -611,6 +636,8 @@ bool macAddress(MacKind kind, uint8_t *out) {
     } else if (kind == MacKind::ethernet) {
         type = ESP_MAC_ETH;
     }
+
+    // derived from the base MAC by ESP-IDF
     return esp_read_mac(out, type) == ESP_OK;
 }
 
@@ -621,11 +648,13 @@ bool macAddress(MacKind kind, uint8_t *out) {
  */
 const JSMallocFunctions *jsAllocator() {
 #if JS_HEAP_REGION
+    // without PSRAM: the region, if it can be reserved
     if (reserveJsRegion()) {
         return memory::jsAllocator(&jsRegion, false);
     }
 #endif
 
+    // else the ESP-IDF heap
     return &jsHeapAllocator;
 }
 
@@ -699,6 +728,7 @@ void printMemoryMap() {
 
     // every task
     TaskIterator_t iterator = {};
+
     while (xTaskGetNext(&iterator) != -1) {
         TaskHandle_t task = iterator.pxTaskHandle;
         uint8_t *stack = pxTaskGetStackStart(task);
@@ -715,6 +745,7 @@ void printMemoryMap() {
         (unsigned)stats.largestFree, (unsigned)stats.usedBlocks, (unsigned)stats.freeBlocks);
 #endif
 }
+
 #endif
 
 /**
@@ -757,7 +788,8 @@ void closePackage(const uint8_t *) {
  */
 bool startLinks(agent::Agent *agent) {
     // the driver, and stdout / stderr through it: one write call at a time
-    if (uart_driver_install(HOST_UART, UART_RX_BUFFER, UART_TX_BUFFER, 0, nullptr, 0) != ESP_OK) {
+    bool installed = uart_driver_install(HOST_UART, UART_RX_BUFFER, UART_TX_BUFFER, 0, nullptr, 0) == ESP_OK;
+    if (!installed) {
         fprintf(stderr, "qjsx: cannot install the UART0 driver\n");
         return false;
     }

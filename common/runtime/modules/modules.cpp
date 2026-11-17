@@ -23,13 +23,14 @@ namespace rt {
 
 namespace {
 
+// The native modules registered: the ones of every platform here; the modules
+// of one platform only (net, serial, compiler...) are added by its main with
+// registerNativeModule().
 NativeModule nativeModules[32] = {
     { "sys/fs", &jsNewModule_fs },
     { "sys/crypto", &jsNewModule_crypto },
 };
-// the modules of one platform only (net, serial, compiler...) are added by its
-// main with registerNativeModule()
-int nativeModuleCount = 2;
+int nativeModuleCount = 2;   // entries used in nativeModules
 
 // The native modules a device program may import (setDeviceNativeModules):
 // every registered one when deviceModuleCount < 0.
@@ -42,7 +43,7 @@ int deviceModuleCount = -1;                        // -1: no restriction
 // the standard library): a device firmware embeds no JS, its table is empty.
 struct EmbeddedTable {
     EmbeddedModule modules[64];  // in registration order
-    int count;                   // entries used in modules
+    int            count;        // entries used in modules
 };
 
 /**
@@ -117,6 +118,7 @@ const char *nativeModuleNameAt(int index) {
  * Embedded JS module registered under this name, or nullptr.
  */
 const EmbeddedModule *findEmbeddedModule(const char *name) {
+    // the table, created on first use
     EmbeddedTable &table = embeddedTable();
 
     // linear search: the table is small; the first module with the name wins

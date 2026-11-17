@@ -16,13 +16,13 @@ namespace package {
 namespace {
 
 // Zip records (little endian), see PKWARE APPNOTE.TXT.
-const uint32_t END_OF_CENTRAL_DIRECTORY = 0x06054b50;
+const uint32_t END_OF_CENTRAL_DIRECTORY = 0x06054b50;  // signatures
 const uint32_t CENTRAL_DIRECTORY_HEADER = 0x02014b50;
 const uint32_t LOCAL_FILE_HEADER = 0x04034b50;
-const size_t END_RECORD_SIZE = 22;
-const size_t CENTRAL_HEADER_SIZE = 46;
-const size_t LOCAL_HEADER_SIZE = 30;
-const uint16_t METHOD_STORED = 0;
+const size_t   END_RECORD_SIZE = 22;                  // fixed sizes of the records, bytes
+const size_t   CENTRAL_HEADER_SIZE = 46;
+const size_t   LOCAL_HEADER_SIZE = 30;
+const uint16_t METHOD_STORED = 0;                     // compression method "stored"
 
 /**
  * Little-endian 16-bit value (any alignment).
@@ -121,12 +121,15 @@ bool Reader::open(const uint8_t *data, size_t size) {
     uint16_t entryCount = read16(end + 10);
     uint32_t directorySize = read32(end + 12);
     uint32_t directoryOffset = read32(end + 16);
-    if (directoryOffset == 0xffffffff || !within(directoryOffset, directorySize, size)) {
+    bool isZip64 = directoryOffset == 0xffffffff;
+    bool directoryInside = within(directoryOffset, directorySize, size);
+    if (isZip64 || !directoryInside) {
         return fail("invalid central directory (zip64 is not supported)");
     }
 
     // allocate the entry table
-    _entries = (Entry *)memory::allocate(sizeof(Entry) * (entryCount > 0 ? entryCount : 1));
+    int tableSlots = entryCount > 0 ? entryCount : 1;
+    _entries = (Entry *)memory::allocate(sizeof(Entry) * tableSlots);
 
     // walk the central directory, one header per entry; positions are offsets
     // in the archive, computed on 64 bits
@@ -153,7 +156,8 @@ bool Reader::open(const uint8_t *data, size_t size) {
         uint16_t extraLength = read16(header + 30);
         uint16_t commentLength = read16(header + 32);
         uint32_t localOffset = read32(header + 42);
-        if (method != METHOD_STORED || compressedSize != uncompressedSize) {
+        bool isStored = method == METHOD_STORED && compressedSize == uncompressedSize;
+        if (!isStored) {
             return fail("compressed entries are not supported (entries must be stored)");
         }
 
@@ -177,7 +181,9 @@ bool Reader::open(const uint8_t *data, size_t size) {
         // the data starts after the local header, its name and its extra
         // field (whose lengths may differ from the central ones), and must
         // be inside the archive
-        uint64_t dataOffset = (uint64_t)localOffset + LOCAL_HEADER_SIZE + read16(local + 26) + read16(local + 28);
+        uint16_t localNameLength = read16(local + 26);
+        uint16_t localExtraLength = read16(local + 28);
+        uint64_t dataOffset = (uint64_t)localOffset + LOCAL_HEADER_SIZE + localNameLength + localExtraLength;
         if (!within(dataOffset, compressedSize, size)) {
             return fail("entry outside of the archive");
         }

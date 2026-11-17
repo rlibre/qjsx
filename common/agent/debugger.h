@@ -47,11 +47,13 @@ public:
      * no exception pause, no run.
      */
     explicit Debugger(Agent *agent);
+
     /**
      * Frees the queued requests and the handle table. finish() must have run
      * before (the JS values of the handles are not freed here).
      */
     ~Debugger();
+
     Debugger(const Debugger &) = delete;
     Debugger &operator=(const Debugger &) = delete;
 
@@ -65,6 +67,7 @@ public:
      * is still queued or running (its answer comes once).
      */
     void             post(const uint8_t *message, size_t size);
+
     /**
      * The host is gone: debugging off, a paused program goes on. Transport
      * thread; the JS thread removes the hook and the stops at its next debug
@@ -80,6 +83,7 @@ public:
      * the run marked as running, so that abortRun() from then on is kept.
      */
     void             prepareRun();
+
     /**
      * The run is being stopped: leaves a pause at once (and the wait for
      * RESUME after a module load). Any thread; kept until the next
@@ -94,16 +98,19 @@ public:
      * debugger as a source of 'loop' and installs the hook if attached.
      */
     void             start(JSContext *ctx, rt::Loop *loop);
+
     /**
      * The run has ended: hook removed, handles and script list freed, the
      * requests still queued are answered with an error.
      */
     void             finish();
+
     /**
      * From the interrupt handler of the runtime: runs the queued light
      * requests, cheap (one atomic read) when the queue is empty.
      */
     void             poll();
+
     /**
      * A module was loaded and is not evaluated yet. Records its name for
      * LIST_SCRIPTS; while debugging, tells the host (SCRIPT_LOADED) and
@@ -126,36 +133,43 @@ private:
      * of it is dropped) until finishRequest().
      */
     Request         *takeRequest(bool lightOnly);
+
     /**
      * A taken request has been answered: removes it from the queue and frees it.
      */
     void             finishRequest(Request *request);
+
     /**
      * True if a request with this id is in the queue, waiting or running
      * (_signal held).
      */
     bool             isKnownRequest(int64_t id);
+
     /**
      * JS thread: runs the queued requests allowed in 'context' (only the
      * light ones while JS code runs). Also removes the hook if the host left.
      */
     void             processRequests(Context context);
+
     /**
      * True for the requests that run no JS code and need no pause, so they
      * can run from the interrupt handler.
      */
     static bool      isLight(int64_t kind);
+
     /**
      * Transport thread, no run, _signal held: applies a request that only
      * changes the debugging state. Returns nullptr if applied, else the
      * error to answer (static text).
      */
     const char      *applyWithoutRuntime(int64_t kind, const Fields *fields);
+
     /**
      * JS thread: true while the host is attached. When it has left
      * (hostGone), first removes the hook and every stop.
      */
     bool             followHost();
+
     /**
      * Loop callback (JS thread, program idle): runs the queued requests.
      */
@@ -168,71 +182,86 @@ private:
      * does not decode is dropped without answer.
      */
     void             handle(Request *request, Context context);
+
     /**
      * Answers DEBUG_ATTACH: debugging on, hook installed.
      */
     void             handleAttach(int64_t id);
+
     /**
      * Answers DEBUG_DETACH: debugging off, hook and stops removed, a pause
      * is left.
      */
     void             handleDetach(int64_t id);
+
     /**
      * Answers PAUSE: the program stops at the next statement start (no-op
      * if already paused).
      */
     void             handlePause(int64_t id);
+
     /**
      * Answers RESUME: leaves the pause (or the wait after a module load);
      * no effect outside of them.
      */
     void             handleResume(int64_t id, Context context);
+
     /**
      * Answers STEP { STEP: into / over / out }: starts the step and leaves
      * the pause. Error if not paused.
      */
     void             handleStep(int64_t id, const Fields *fields, Context context);
+
     /**
      * Answers SET_STOPS { MODULE, STOP_KIND, DATA } with { MISSING }: the
      * number of functions of DATA not found in the module.
      */
     void             handleSetStops(int64_t id, const Fields *fields);
+
     /**
      * Answers SET_EXCEPTIONS { MODE }: none, uncaught or all.
      */
     void             handleSetExceptions(int64_t id, const Fields *fields);
+
     /**
      * Answers LIST_SCRIPTS with { SCRIPTS }: the modules loaded by the run.
      */
     void             handleListScripts(int64_t id);
+
     /**
      * Answers GET_STACK with { FRAMES }, innermost frame first. Paused only.
      */
     void             handleGetStack(int64_t id, Context context);
+
     /**
      * Answers GET_SLOTS { LEVEL, SLOT_KIND, GROUP? } with { VALUES }: every
      * slot of that kind in that frame. Paused only.
      */
     void             handleGetSlots(int64_t id, const Fields *fields, Context context);
+
     /**
      * Answers SET_SLOT { LEVEL, SLOT_KIND, INDEX, VALUE }. Paused only.
      */
     void             handleSetSlot(int64_t id, const Fields *fields, Context context);
+
     /**
      * Answers GET_PROPERTIES { HANDLE, GROUP? } with { PROPERTIES, INTERNALS }
      * of the object. Runs no getter.
      */
     void             handleGetProperties(int64_t id, const Fields *fields);
+
     /**
      * Answers LOAD_FUNCTION { DATA, GROUP? } with { VALUE }: evaluates the
      * compiled bytecode sent by the host, or { EXCEPTION } if it throws.
      */
     void             handleLoadFunction(int64_t id, const Fields *fields);
+
     /**
      * Answers CALL { FUNCTION, THIS?, ARGUMENTS?, GROUP? } with { VALUE }, or
      * { EXCEPTION } if the call throws. Never pauses inside the call.
      */
     void             handleCall(int64_t id, const Fields *fields);
+
     /**
      * Answers RELEASE { GROUP } or { HANDLE }: frees handles.
      */
@@ -244,45 +273,55 @@ private:
      * Debug hook given to the engine: forwards to onHook().
      */
     static int       hook(JSContext *ctx, const JSDebugEvent *event, void *opaque);
+
     /**
      * JS thread, inside the interpreter: decides whether the event pauses
      * the program, and pauses it. Always returns 0 (the program goes on).
      */
     int              onHook(const JSDebugEvent *event);
+
     /**
      * At a statement start while stepping: true if the current step ends here.
      */
     bool             shouldStopStepping();
+
     /**
      * Pauses the program inside the hook: PAUSED event, requests until the
      * program goes on, RESUMED event. 'reason' is a protocol REASON_*.
      */
     void             pause(int reason, const JSDebugEvent *event);
+
     /**
      * Runs the requests (Paused context) until RESUME / STEP / DEBUG_DETACH,
      * the host leaves or the run is stopped.
      */
     void             waitInPauseLoop();
+
     /**
      * Installs the debug hook and the exception reporting of the current mode.
      */
     void             installHook();
+
     /**
      * Removes the hook, stepping and exception reporting. Stops are kept.
      */
     void             removeHook();
+
     /**
      * Starts a step of 'mode' from the current pause (or a pause request).
      */
     void             startStep(StepMode mode);
+
     /**
      * Adds an activation number to the frames where the step may stop.
      */
     void             recordStepFrame(uint64_t frameId);
+
     /**
      * True if the step may stop in the frame of activation number 'frameId'.
      */
     bool             isStepFrame(uint64_t frameId);
+
     /**
      * True if a frame where the step may stop is on the stack, below the
      * frame of the hook (only valid inside the hook).
@@ -296,11 +335,13 @@ private:
      * symbols get a handle in 'group'.
      */
     void             writeValue(cbor::Writer *writer, JSValueConst value, int group);
+
     /**
      * Writes an object value: handle in 'group', kind, class name,
      * description, size and function location.
      */
     void             writeObject(cbor::Writer *writer, JSValueConst object, int group);
+
     /**
      * Writes the own properties of 'object' (at most MAX_PROPERTIES, and
      * while 'writer' stays within 'budget' bytes) and adds their number to
@@ -308,29 +349,35 @@ private:
      */
     void             writeProperties(cbor::Writer *writer, JSValueConst object, int group, size_t budget,
                                      int *propertyCount);
+
     /**
      * Longest string sent in a value: MAX_STRING, or a quarter of the
      * largest message of the link if that is less.
      */
     size_t           maxString() const;
+
     /**
      * Writes the internal properties of 'object' ([[Prototype]]...) and sets
      * *internalCount. The caller writes the array header.
      */
     void             writeInternals(cbor::Writer *writer, JSValueConst object, int group, int *internalCount);
+
     /**
      * Reads a value sent by the host into *value (new reference). False if
      * it is invalid or names an unknown handle.
      */
     bool             readValue(cbor::Reader *reader, JSValue *value);
+
     /**
      * Short description of an object, like Chrome's ("Array(3)"). malloc'd.
      */
     char            *describeObject(JSValueConst object, const JSDebugObjectInfo *info, const char *className);
+
     /**
      * Name shown for the class of an object (constructor name). malloc'd.
      */
     char            *objectClassName(JSValueConst object, const JSDebugObjectInfo *info);
+
     /**
      * The "length" of an array, read without running JS code, or -1.
      */
@@ -342,18 +389,22 @@ private:
      * Keeps a reference on 'value' in 'group'; returns its new handle.
      */
     int64_t          addHandle(JSValueConst value, int group);
+
     /**
      * New reference on the value of 'handle' in *value; false if unknown.
      */
     bool             findHandle(int64_t handle, JSValue *value);
+
     /**
      * Frees every handle of 'group'.
      */
     void             releaseGroup(int group);
+
     /**
      * Frees one handle (no-op if unknown).
      */
     void             releaseHandle(int64_t handle);
+
     /**
      * Frees every handle (end of a run).
      */
@@ -365,18 +416,22 @@ private:
      * Answers request 'id' with a payload map of 'fieldCount' fields.
      */
     void             respond(int64_t id, const cbor::Writer *payload, int fieldCount);
+
     /**
      * Answers request 'id' with an empty payload.
      */
     void             respondEmpty(int64_t id);
+
     /**
      * Answers request 'id' with an error message.
      */
     void             respondError(int64_t id, const char *message);
+
     /**
      * Sends an event of 'kind' with a payload map of 'fieldCount' fields.
      */
     void             sendEvent(int kind, const cbor::Writer *payload, int fieldCount);
+
     /**
      * Answers request 'id' with { EXCEPTION }: the pending JS exception
      * (cleared), its objects in 'group'.

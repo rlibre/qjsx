@@ -19,8 +19,11 @@ class ServerModel {
      * server does not answer within REQUEST_TIMEOUT_MS (gone, network down).
      */
     protected async get(path: string): Promise<Response | null> {
+        // the request aborted when it takes too long
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+        // a failure (aborted, network) is null; the timer stopped in any case
         try {
             return await fetch(path, { signal: controller.signal });
         } catch {

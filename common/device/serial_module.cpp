@@ -63,10 +63,12 @@ struct SerialOptions {
     Parity parity = Parity::none;                                // parity bit
     js::Range<int, 1, 2> stopBits = 1;                           // stop bits
     js::Optional<js::Str> flowControl;                           // PC: "none" or "rts-cts"
-    js::Optional<js::Range<int, 0, 255>> tx;                     // board: pins; absent: not wired
-    js::Optional<js::Range<int, 0, 255>> rx;
-    js::Optional<js::Range<int, 0, 255>> rts;
-    js::Optional<js::Range<int, 0, 255>> cts;
+
+    // board: pins; absent: not wired
+    js::Optional<js::Range<int, 0, 255>> tx;                     // transmitted data
+    js::Optional<js::Range<int, 0, 255>> rx;                     // received data
+    js::Optional<js::Range<int, 0, 255>> rts;                    // request to send
+    js::Optional<js::Range<int, 0, 255>> cts;                    // clear to send
 };
 JS_STRUCT(SerialOptions, baudRate, dataBits, parity, stopBits, flowControl, tx, rx, rts, cts);
 
@@ -85,10 +87,12 @@ struct PortState {
  * the state.
  */
 void releasePortState(PortState *state) {
+    // another owner still holds it
     if (platform::atomicDecrement(&state->references) > 0) {
         return;
     }
 
+    // the last one: the port closed, the state freed
     driver->close(state->port);
     state->mailbox->release();
     memory::release(state);
@@ -100,6 +104,7 @@ void releasePortState(PortState *state) {
  * the PortState.
  */
 void readLoop(void *argument) {
+    // no block yet: allocated at the first read
     PortState *state = (PortState *)argument;
     uint8_t *block = nullptr;
 
@@ -131,6 +136,7 @@ void readLoop(void *argument) {
         }
     }
 
+    // the block of the last, empty, read
     memory::release(block);
 
     // tell the JS thread, then let the state go (the last owner closes the
@@ -156,8 +162,8 @@ bool serialAllowed(const char *name) {
     char what[300];
     const char *hint = permissions->hint();
     const char *target = name != nullptr ? name : "the list of the ports";
-    snprintf(what, sizeof(what), "serial access to \"%s\" is not allowed%s%s", target, hint[0] != 0 ? ": " : "",
-             hint);
+    const char *separator = hint[0] != 0 ? ": " : "";
+    snprintf(what, sizeof(what), "serial access to \"%s\" is not allowed%s%s", target, separator, hint);
     js::failSystem(EACCES, what);
     return false;
 }
@@ -168,11 +174,13 @@ bool serialAllowed(const char *name) {
  * returns false.
  */
 bool readFlowControl(const js::Optional<js::Str> *option, bool *flowControl) {
+    // absent: off
     *flowControl = false;
     if (!option->has()) {
         return true;
     }
 
+    // else by its name
     const char *text = option->value().data();
     if (strcmp(text, "none") == 0) {
         return true;
@@ -217,6 +225,7 @@ bool readPins(const SerialOptions *options, hal::serial::Settings *settings) {
         return false;
     }
 
+    // rts and cts given: flow control on
     settings->flowControl = options->rts.has();
     return true;
 }
@@ -230,9 +239,13 @@ bool readSettings(const SerialOptions *options, hal::serial::Settings *settings)
     // what every driver has
     settings->baudRate = (int)options->baudRate;
     settings->dataBits = (int)options->dataBits;
-    settings->parity = options->parity == Parity::even  ? hal::serial::Parity::even
-                     : options->parity == Parity::odd   ? hal::serial::Parity::odd
-                                                        : hal::serial::Parity::none;
+    settings->parity = hal::serial::Parity::none;
+    if (options->parity == Parity::even) {
+        settings->parity = hal::serial::Parity::even;
+    } else if (options->parity == Parity::odd) {
+        settings->parity = hal::serial::Parity::odd;
+    }
+
     settings->stopBits = (int)options->stopBits;
 
     // a board: the pins
@@ -247,6 +260,7 @@ bool readSettings(const SerialOptions *options, hal::serial::Settings *settings)
         return false;
     }
 
+    // no pin wired
     settings->tx = hal::serial::NO_PIN;
     settings->rx = hal::serial::NO_PIN;
     settings->rts = hal::serial::NO_PIN;
@@ -271,6 +285,7 @@ public:
      * runs, and removes the source.
      */
     ~Serial() {
+        // the reader thread stops; no more messages for this object
         requestClose();
         if (_loop != nullptr) {
             _loop->removeSource(_source);
@@ -305,6 +320,7 @@ public:
             return;
         }
 
+        // open it, and read from it
         start(&settings);
     }
 
@@ -377,7 +393,13 @@ public:
      */
     JS_EXPORT(port) js::Value port() const {
         JSContext *ctx = js::context();
-        JSValue value = driver->namedPorts ? JS_NewString(ctx, _name) : JS_NewInt32(ctx, _number);
+        JSValue value = JS_UNDEFINED;
+        if (driver->namedPorts) {
+            value = JS_NewString(ctx, _name);
+        } else {
+            value = JS_NewInt32(ctx, _number);
+        }
+
         return js::Value(ctx, value);
     }
 
@@ -399,7 +421,11 @@ private:
 
         // the PC: a name
         if (driver->namedPorts) {
-            const char *name = JS_IsString(port.get()) ? JS_ToCString(ctx, port.get()) : nullptr;
+            const char *name = nullptr;
+            if (JS_IsString(port.get())) {
+                name = JS_ToCString(ctx, port.get());
+            }
+
             if (name == nullptr) {
                 js::fail<js::TypeError>("Serial: the port must be a name, such as \"COM3\"");
                 return false;
@@ -415,11 +441,13 @@ private:
         bool isInteger = JS_IsNumber(port.get()) && JS_ToInt32(ctx, &number, port.get()) == 0;
         double exact = 0;
         JS_ToFloat64(ctx, &exact, port.get());
-        if (!isInteger || number < 0 || (double)number != exact) {
+        bool isUartNumber = isInteger && number >= 0 && (double)number == exact;
+        if (!isUartNumber) {
             js::fail<js::TypeError>("Serial: the port must be the number of a UART, such as 1");
             return false;
         }
 
+        // its name, for the messages
         _number = (int)number;
         snprintf(_name, sizeof(_name), "UART %d", _number);
         return true;
@@ -453,7 +481,8 @@ private:
         // start the reader thread, which owns its share of the PortState from
         // then on; if it cannot start, close the port, undo the above (except
         // the source, removed by the destructor) and fail
-        if (!platform::startThread(&readLoop, _state, platform::defaultThreadOptions("serial-read"))) {
+        bool started = platform::startThread(&readLoop, _state, platform::defaultThreadOptions("serial-read"));
+        if (!started) {
             driver->close(opened);
             _state->mailbox->release();
             memory::release(_state);
@@ -473,6 +502,7 @@ private:
      * Does nothing if already done.
      */
     void requestClose() {
+        // this side's share, once
         if (_state != nullptr) {
             __atomic_store_n(&_state->closing, 1, __ATOMIC_RELEASE);
             releasePortState(_state);   // the reader thread closes the port when it stops
@@ -514,14 +544,14 @@ private:
         callback();
     }
 
-    char _name[256] = "";               // PC: the port's name; board: "UART <n>" (messages)
-    int _number = -1;                   // board: the UART's number; PC: -1
-    rt::Loop *_loop = nullptr;          // loop of the JS thread; nullptr before start()
-    rt::SourceId _source = { -1, 0 };   // message source of the reader thread
-    PortState *_state = nullptr;        // shared with the reader thread; nullptr once let go
-    bool _open = false;                 // true from start() until the close message
-    js::Function _dataCallback;         // onData callback; empty: none
-    js::Function _closeCallback;        // onClose callback; empty: none
+    char          _name[256] = "";        // PC: the port's name; board: "UART <n>" (messages)
+    int           _number = -1;           // board: the UART's number; PC: -1
+    rt::Loop     *_loop = nullptr;        // loop of the JS thread; nullptr before start()
+    rt::SourceId  _source = { -1, 0 };    // message source of the reader thread
+    PortState    *_state = nullptr;       // shared with the reader thread; nullptr once let go
+    bool          _open = false;          // true from start() until the close message
+    js::Function  _dataCallback;          // onData callback; empty: none
+    js::Function  _closeCallback;         // onClose callback; empty: none
 };
 
 // The JS array list() fills.
@@ -534,9 +564,17 @@ struct PortList {
  * Appends a port given by the driver's list() to the PortList 'context'.
  */
 void addToList(void *context, const char *name, int number) {
+    // a name on the PC, a number on a board
     PortList *list = (PortList *)context;
     JSContext *ctx = js::context();
-    JSValue value = name != nullptr ? JS_NewString(ctx, name) : JS_NewInt32(ctx, number);
+    JSValue value = JS_UNDEFINED;
+    if (name != nullptr) {
+        value = JS_NewString(ctx, name);
+    } else {
+        value = JS_NewInt32(ctx, number);
+    }
+
+    // appended
     JS_SetPropertyUint32(ctx, list->array, list->count++, value);
 }
 
@@ -546,6 +584,7 @@ void addToList(void *context, const char *name, int number) {
  * functions).
  */
 js::Value serialList() {
+    // a driver must be there (every executable sets one)
     if (driver == nullptr) {
         return js::fail("Serial: no serial ports here");
     }

@@ -8,10 +8,9 @@
 // The main view of the page: the header, then a DockingView with the board
 // in the middle (its parts and devices in folding sections), the table of
 // the pins on the right, the console of the parts and the analyzer of the
-// pins at the bottom. It
-// follows the messages of the twin (messages.ts), keeps the settings (kept
-// by the browser, like the layout of the panels), and offers the panels in a
-// context menu (right click).
+// pins at the bottom. It follows the messages of the twin (messages.ts),
+// keeps the settings (kept by the browser, like the layout of the panels),
+// and offers the panels in a context menu (right click).
 import { BoxProps, DockingView, EvMessage, Menu, StateProxy, VBox } from "x4js";
 import { AppHeader } from "./appheader";
 import { BoardView } from "./boardview";
@@ -51,6 +50,8 @@ export class TwinView extends VBox {
         const console = this.refs.console = new ConsoleView({ cls: "console" });
         const scope = this.refs.scope = new ScopeView({ cls: "scope" }, this._settings);
 
+        // the header, then the docking view: the board in the middle, the
+        // pins on the right, the console and the analyzer at the bottom
         this.setContent([
             this.refs.header = new AppHeader({ settings: () => openSettings(this._settings) }),
             this.refs.dock = new DockingView({
@@ -130,6 +131,7 @@ export class TwinView extends VBox {
      * hidden, then back to the first layout.
      */
     private _showPanelMenu(event: MouseEvent) {
+        // not the menu of the browser
         event.preventDefault();
         const dock = this.refs.dock;
 
@@ -141,6 +143,7 @@ export class TwinView extends VBox {
             click: () => dock.showPanel(id, !dock.isPanelVisible(id)),
         }));
 
+        // the panels, then back to the first layout, at the pointer
         const menu = new Menu({
             items: [
                 ...panelItems,

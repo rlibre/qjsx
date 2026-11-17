@@ -10,9 +10,28 @@
 
 typedef struct JSPromiseReactionData {
     struct list_head link; /* not used in promise_reaction_job */
+    /* qjsx: engine change V1: NULL here (allocated with js_mallocz); not
+       NULL: the entry is a JSAwaitReaction embedded in that async function
+       state, and has none of the fields below */
+    struct JSAsyncFunctionState *awaiter;
     JSValue resolving_funcs[2];
     JSValue handler;
 } JSPromiseReactionData;
+
+/* qjsx: both kinds of entry share their first two fields */
+_Static_assert(offsetof(JSPromiseReactionData, link) == offsetof(JSAwaitReaction, link),
+               "JSAwaitReaction and JSPromiseReactionData share 'link'");
+_Static_assert(offsetof(JSPromiseReactionData, awaiter) == offsetof(JSAwaitReaction, awaiter),
+               "JSAwaitReaction and JSPromiseReactionData share 'awaiter'");
+
+/* qjsx: unlinks an embedded await reaction and drops the reference it
+   held on its async function state */
+static void await_reaction_unlink(JSRuntime *rt, JSPromiseReactionData *rd)
+{
+    JSAsyncFunctionState *awaiter = rd->awaiter;
+    list_del(&rd->link);
+    async_func_free(rt, awaiter);
+}
 
 JSPromiseStateEnum JS_PromiseState(JSContext *ctx, JSValue promise)
 {
@@ -114,6 +133,13 @@ static void fulfill_or_reject_promise(JSContext *ctx, JSValueConst promise,
 
     list_for_each_safe(el, el1, &s->promise_reactions[is_reject]) {
         rd = list_entry(el, JSPromiseReactionData, link);
+        /* qjsx V1: an awaiting async function: its own resume job, at the
+           same place in the queue as the reaction job would be */
+        if (rd->awaiter) {
+            js_async_function_await_enqueue(ctx, rd->awaiter, JS_DupValue(ctx, value), is_reject);
+            await_reaction_unlink(ctx->rt, rd);
+            continue;
+        }
         args[0] = rd->resolving_funcs[0];
         args[1] = rd->resolving_funcs[1];
         args[2] = rd->handler;
@@ -126,9 +152,43 @@ static void fulfill_or_reject_promise(JSContext *ctx, JSValueConst promise,
 
     list_for_each_safe(el, el1, &s->promise_reactions[1 - is_reject]) {
         rd = list_entry(el, JSPromiseReactionData, link);
+        if (rd->awaiter) {   /* qjsx V1: embedded, not freed */
+            await_reaction_unlink(ctx->rt, rd);
+            continue;
+        }
         list_del(&rd->link);
         promise_reaction_data_free(ctx->rt, rd);
     }
+}
+
+/* qjsx: engine change V1. The async function state 's' awaits the native
+   promise 'promise' (whose constructor is %Promise%): as perform_promise_then()
+   with s's resume function as handler, but with the reactions embedded in s
+   and no handler. Pending: both reactions in the promise's lists (each holds
+   a reference on s); settled: s's resume job queued now. */
+void js_promise_await(JSContext *ctx, JSValueConst promise, JSAsyncFunctionState *s)
+{
+    JSPromiseData *pd = JS_GetOpaque(promise, JS_CLASS_PROMISE);
+    int i;
+
+    if (pd->promise_state == JS_PROMISE_PENDING) {
+        for(i = 0; i < 2; i++) {
+            s->await_reactions[i].awaiter = s;
+            js_rc(s)->ref_count++;
+            list_add_tail(&s->await_reactions[i].link, &pd->promise_reactions[i]);
+        }
+    } else {
+        BOOL is_reject = pd->promise_state == JS_PROMISE_REJECTED;
+        if (is_reject && !pd->is_handled) {
+            JSRuntime *rt = ctx->rt;
+            if (rt->host_promise_rejection_tracker) {
+                rt->host_promise_rejection_tracker(ctx, promise, pd->promise_result,
+                                                   TRUE, rt->host_promise_rejection_tracker_opaque);
+            }
+        }
+        js_async_function_await_enqueue(ctx, s, JS_DupValue(ctx, pd->promise_result), is_reject);
+    }
+    pd->is_handled = TRUE;
 }
 
 static void reject_promise(JSContext *ctx, JSValueConst promise,
@@ -300,6 +360,10 @@ static void js_promise_finalizer(JSRuntime *rt, JSValue val)
         list_for_each_safe(el, el1, &s->promise_reactions[i]) {
             JSPromiseReactionData *rd =
                 list_entry(el, JSPromiseReactionData, link);
+            if (rd->awaiter) {   /* qjsx V1: embedded in its state */
+                await_reaction_unlink(rt, rd);
+                continue;
+            }
             promise_reaction_data_free(rt, rd);
         }
     }
@@ -320,6 +384,10 @@ static void js_promise_mark(JSRuntime *rt, JSValueConst val,
         list_for_each(el, &s->promise_reactions[i]) {
             JSPromiseReactionData *rd =
                 list_entry(el, JSPromiseReactionData, link);
+            if (rd->awaiter) {   /* qjsx V1: the awaiting state */
+                mark_func(rt, &rd->awaiter->header);
+                continue;
+            }
             JS_MarkValue(rt, rd->resolving_funcs[0], mark_func);
             JS_MarkValue(rt, rd->resolving_funcs[1], mark_func);
             JS_MarkValue(rt, rd->handler, mark_func);
@@ -445,7 +513,6 @@ JSValue JS_NewPromiseCapability(JSContext *ctx, JSValue *resolving_funcs)
 JSValue js_promise_resolve(JSContext *ctx, JSValueConst this_val,
                                   int argc, JSValueConst *argv, int magic)
 {
-    JSValue result_promise, resolving_funcs[2], ret;
     BOOL is_reject = magic;
 
     if (!JS_IsObject(this_val))
@@ -461,10 +528,21 @@ JSValue js_promise_resolve(JSContext *ctx, JSValueConst this_val,
         if (is_same)
             return JS_DupValue(ctx, argv[0]);
     }
+    return js_promise_resolve_new(ctx, this_val, argv[0], is_reject);
+}
+
+/* qjsx: the end of js_promise_resolve(), apart for engine change V1 (the
+   await of a native promise reads its 'constructor' once, itself): a new
+   promise of 'this_val', resolved (or rejected) with 'value' */
+JSValue js_promise_resolve_new(JSContext *ctx, JSValueConst this_val,
+                               JSValueConst value, BOOL is_reject)
+{
+    JSValue result_promise, resolving_funcs[2], ret;
+
     result_promise = js_new_promise_capability(ctx, resolving_funcs, this_val);
     if (JS_IsException(result_promise))
         return result_promise;
-    ret = JS_Call(ctx, resolving_funcs[is_reject], JS_UNDEFINED, 1, argv);
+    ret = JS_Call(ctx, resolving_funcs[is_reject], JS_UNDEFINED, 1, &value);
     JS_FreeValue(ctx, resolving_funcs[0]);
     JS_FreeValue(ctx, resolving_funcs[1]);
     if (JS_IsException(ret)) {

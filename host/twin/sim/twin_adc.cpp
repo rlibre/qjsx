@@ -25,8 +25,8 @@ const int MAX_INPUTS = 16;           // inputs open at the same time
 // An open input.
 struct Input {
     bool used;                       // open() gave it
-    int pin;                         // its pin
-    int spanMv;                      // what it reads, 0 to spanMv
+    int  pin;                        // its pin
+    int  spanMv;                     // what it reads, 0 to spanMv
 };
 
 Input inputs[MAX_INPUTS];            // JS thread only
@@ -35,9 +35,11 @@ Input inputs[MAX_INPUTS];            // JS thread only
  * An open input by its handle; nullptr if there is none.
  */
 Input *inputOf(int handle) {
-    if (handle < 0 || handle >= MAX_INPUTS || !inputs[handle].used) {
+    bool inTable = handle >= 0 && handle < MAX_INPUTS;
+    if (!inTable || !inputs[handle].used) {
         return nullptr;
     }
+
     return &inputs[handle];
 }
 
@@ -46,7 +48,8 @@ Input *inputOf(int handle) {
  */
 int clampedVoltage(const Input *input) {
     int millivolts = twin::pinVoltage(input->pin);
-    return millivolts > input->spanMv ? input->spanMv : millivolts;
+    bool saturated = millivolts > input->spanMv;
+    return saturated ? input->spanMv : millivolts;
 }
 
 } // namespace
@@ -61,24 +64,29 @@ namespace adc {
 Opened open(int pin, int rangeMv) {
     // a pin with an analog input, a range the converter reads
     int span = twin::adcSpanFor(rangeMv);
-    if (!twin::adcPin(pin) || span == 0) {
+    bool readable = twin::adcPin(pin) && span != 0;
+    if (!readable) {
         return Opened{ -1, EINVAL, 0, 0 };
     }
 
-    // not open yet, a free entry
+    // not open yet; look for a free entry
     int free = -1;
+
     for (int i = 0; i < MAX_INPUTS; i++) {
         if (inputs[i].used && inputs[i].pin == pin) {
             return Opened{ -1, EBUSY, 0, 0 };
         }
+
         if (!inputs[i].used && free < 0) {
             free = i;
         }
     }
+
     if (free < 0) {
         return Opened{ -1, EBUSY, 0, 0 };
     }
 
+    // take it, tell the page
     inputs[free] = Input{ true, pin, span };
     twin::setAdc(pin, true);
     return Opened{ free, 0, twin::adcBits(), span };
@@ -93,6 +101,7 @@ void close(int handle) {
         return;
     }
 
+    // tell the page, free the entry
     twin::setAdc(input->pin, false);
     *input = Input{};
 }
@@ -107,6 +116,7 @@ int readRaw(int handle) {
         return -1;
     }
 
+    // the voltage over the span, scaled to the largest raw value
     int maxRaw = (1 << twin::adcBits()) - 1;
     return (int)((int64_t)clampedVoltage(input) * maxRaw / input->spanMv);
 }
@@ -120,6 +130,7 @@ int readMillivolts(int handle) {
     if (input == nullptr) {
         return -1;
     }
+
     return clampedVoltage(input);
 }
 

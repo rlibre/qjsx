@@ -33,9 +33,9 @@ platform::Mutex bridgeLock;               // bridgeMailbox, bridgeSource
 // An I2C address a component answers at (attachLock).
 struct Attached {
     bool used;                            // the entry is taken
-    int  sda;                             // the bus, by its pins
-    int  scl;
-    int  address;                         // 7-bit address
+    int  sda;                             // the bus, by its data pin
+    int  scl;                             // and its clock pin
+    int  address;                        // 7-bit address
 };
 
 Attached attached[MAX_ATTACHED];          // attachLock
@@ -69,9 +69,11 @@ char *readyError = nullptr;               // why the parts could not be built, o
 bool isAttached(int sda, int scl, int address) {
     attachLock.lock();
     bool found = false;
+
     for (int i = 0; i < MAX_ATTACHED && !found; i++) {
         const Attached *entry = &attached[i];
-        found = entry->used && entry->sda == sda && entry->scl == scl && entry->address == address;
+        bool sameBus = entry->sda == sda && entry->scl == scl;
+        found = entry->used && sameBus && entry->address == address;
     }
 
     attachLock.unlock();
@@ -85,7 +87,9 @@ bool isAttached(int sda, int scl, int address) {
 int takePending(uint32_t *request) {
     requestLock.lock();
     int found = -1;
+
     for (int i = 0; i < MAX_PENDING && found < 0; i++) {
+        // the first free slot, made ready for the next request number
         Pending *slot = &pending[i];
         slot->signal.lock();
         if (!slot->used) {
@@ -120,6 +124,7 @@ void freePending(Pending *slot) {
  * The bridge: keeps the mailbox (retained) and the source.
  */
 void bridgeAttach(rt::Mailbox *mailbox, rt::SourceId source) {
+    // the new mailbox retained and kept
     mailbox->retain();
     bridgeLock.lock();
     rt::Mailbox *previous = bridgeMailbox;
@@ -127,6 +132,7 @@ void bridgeAttach(rt::Mailbox *mailbox, rt::SourceId source) {
     bridgeSource = source;
     bridgeLock.unlock();
 
+    // the previous one released, outside the lock
     if (previous != nullptr) {
         previous->release();
     }
@@ -136,11 +142,13 @@ void bridgeAttach(rt::Mailbox *mailbox, rt::SourceId source) {
  * No bridge any more.
  */
 void bridgeDetach() {
+    // no mailbox any more: events dropped from now on
     bridgeLock.lock();
     rt::Mailbox *previous = bridgeMailbox;
     bridgeMailbox = nullptr;
     bridgeLock.unlock();
 
+    // the previous one released, outside the lock
     if (previous != nullptr) {
         previous->release();
     }
@@ -176,9 +184,11 @@ void i2cAttach(int sda, int scl, int address, bool attach) {
     // the entry of that address, or a free one to take
     int found = -1;
     int free = -1;
+
     for (int i = 0; i < MAX_ATTACHED; i++) {
         const Attached *entry = &attached[i];
-        bool same = entry->used && entry->sda == sda && entry->scl == scl && entry->address == address;
+        bool sameBus = entry->sda == sda && entry->scl == scl;
+        bool same = entry->used && sameBus && entry->address == address;
         if (same) {
             found = i;
         } else if (!entry->used && free < 0) {
@@ -187,7 +197,8 @@ void i2cAttach(int sda, int scl, int address, bool attach) {
     }
 
     // attach: take a free entry if not there yet; detach: let it go
-    if (attach && found < 0 && free >= 0) {
+    bool canTake = found < 0 && free >= 0;
+    if (attach && canTake) {
         attached[free] = Attached{ true, sda, scl, address };
     } else if (!attach && found >= 0) {
         attached[found].used = false;
@@ -224,11 +235,14 @@ hal::i2c::Status i2cTransfer(int sda, int scl, int address, const uint8_t *writt
     message[1] = (uint8_t)scl;
     message[2] = (uint8_t)address;
     message[3] = 0;
+
     for (int i = 0; i < 4; i++) {
         message[4 + i] = (uint8_t)(readSize >> (8 * i));
     }
+
     memcpy(message + TRANSFER_HEADER, written, writeSize);
 
+    // the size to read set before the post (the answer checks it), then posted
     slot->signal.lock();
     slot->readSize = readSize;
     slot->signal.unlock();
@@ -236,13 +250,16 @@ hal::i2c::Status i2cTransfer(int sda, int scl, int address, const uint8_t *writt
     memory::release(message);
 
     // wait for the answer (or the time limit); the answer may already be there
-    int64_t limit = platform::monotonicMs() + (timeoutMs > 0 ? timeoutMs : 0);
+    int64_t waitMs = timeoutMs > 0 ? timeoutMs : 0;
+    int64_t limit = platform::monotonicMs() + waitMs;
     slot->signal.lock();
+
     while (posted && !slot->answered) {
         int64_t left = limit - platform::monotonicMs();
         if (left <= 0) {
             break;
         }
+
         slot->signal.wait(left);
     }
 
@@ -274,12 +291,15 @@ void i2cAnswer(uint32_t request, int status, const uint8_t *bytes, size_t size) 
         if (waiting) {
             // the bytes read: what the component gave, zeros after
             slot->status = status;
-            if (status == (int)hal::i2c::Status::ok && slot->readSize > 0) {
+            bool hasBytes = status == (int)hal::i2c::Status::ok && slot->readSize > 0;
+            if (hasBytes) {
+                size_t given = size < slot->readSize ? size : slot->readSize;
                 slot->read = (uint8_t *)memory::allocate(slot->readSize);
                 memset(slot->read, 0, slot->readSize);
-                memcpy(slot->read, bytes, size < slot->readSize ? size : slot->readSize);
+                memcpy(slot->read, bytes, given);
             }
 
+            // answered: the program's thread woken
             slot->answered = true;
             slot->signal.notify();
         }
@@ -295,7 +315,11 @@ void readyReport(const char *error) {
     readySignal.lock();
     if (!readyDone) {
         readyDone = true;
-        readyError = error != nullptr ? memory::copyText(error, strlen(error)) : nullptr;
+        readyError = nullptr;
+        if (error != nullptr) {
+            readyError = memory::copyText(error, strlen(error));
+        }
+
         readySignal.notify();
     }
 
@@ -306,16 +330,20 @@ void readyReport(const char *error) {
  * Waits for the report; gives its error away.
  */
 bool readyWait(int64_t timeoutMs, char **error) {
+    // wait for the report, at most timeoutMs
     int64_t limit = platform::monotonicMs() + timeoutMs;
     readySignal.lock();
+
     while (!readyDone) {
         int64_t left = limit - platform::monotonicMs();
         if (left <= 0) {
             break;
         }
+
         readySignal.wait(left);
     }
 
+    // the error given to the caller
     bool done = readyDone;
     *error = readyError;
     readyError = nullptr;

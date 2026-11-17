@@ -56,6 +56,27 @@ void randomBytes(void *buffer, size_t size);
  */
 void yieldIfDue();
 
+#ifdef QJSX_NATIVE_PROFILER
+// Measure (temporary, QJSX_NATIVE_PROFILER, i.MX RT1062 only for now): a
+// sample of the native profiler that is not an instruction address.
+const uint32_t NATIVE_SAMPLE_OTHER_TASK = 0xFFFFFFF0;   // another task ran (or the idle task)
+const uint32_t NATIVE_SAMPLE_INTERRUPT = 0xFFFFFFF1;    // an interrupt handler ran
+
+/**
+ * Starts sampling, every 'intervalUs' microseconds, the instruction address
+ * where the calling thread (the JS thread) is, into a new buffer of at most
+ * 'capacity' samples (the previous one is freed). JS thread. False when the
+ * port has no native profiler.
+ */
+bool nativeProfileStart(int intervalUs, int capacity);
+
+/**
+ * Stops sampling. Returns the samples (addresses, or NATIVE_SAMPLE_*), owned
+ * by the port and valid until the next start; '*count' gets their number.
+ */
+const uint32_t *nativeProfileStop(int *count);
+#endif
+
 // How a thread is started. On an RTOS every field counts; the desktop only
 // uses the stack size.
 struct ThreadOptions {

@@ -1057,6 +1057,21 @@ int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
     e = list_entry(rt->job_list.next, JSJobEntry, link);
     list_del(&e->link);
     ctx = e->realm;
+
+    /* qjsx: engine change V: the resume job embedded in an async function
+       state, not allocated */
+    if (e->argc == JS_JOB_ARGC_AWAIT) {
+        ret = js_async_function_await_job(ctx, e);
+        if (pctx) {
+            if (js_rc(ctx)->ref_count > 1)
+                *pctx = ctx;
+            else
+                *pctx = NULL;
+        }
+        JS_FreeContext(ctx);
+        return ret;
+    }
+
     res = e->job_func(ctx, e->argc, (JSValueConst *)e->argv);
     for(i = 0; i < e->argc; i++)
         JS_FreeValue(ctx, e->argv[i]);
@@ -1122,6 +1137,13 @@ void JS_FreeRuntime(JSRuntime *rt)
 
     list_for_each_safe(el, el1, &rt->job_list) {
         JSJobEntry *e = list_entry(el, JSJobEntry, link);
+        /* qjsx: engine change V: embedded in an async function state */
+        if (e->argc == JS_JOB_ARGC_AWAIT) {
+            JSContext *realm = e->realm;
+            js_async_function_await_job_free(rt, e);
+            JS_FreeContext(realm);
+            continue;
+        }
         for(i = 0; i < e->argc; i++)
             JS_FreeValueRT(rt, e->argv[i]);
         JS_FreeContext(e->realm);

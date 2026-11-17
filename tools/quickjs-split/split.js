@@ -24,55 +24,81 @@ const config = require('./split-config.js');
 
 const [, , inputPath, outputDir] = process.argv;
 
-// ---------------------------------------------------------------------------
-// Text helpers
+// ### Text helpers ############################################################
 
-// Replaces comments and string/char literals with spaces, keeping newlines.
+/**
+ * Replaces comments and string/char literals with spaces, keeping newlines.
+ */
 function stripCommentsAndStrings(text) {
     let out = '';
     let i = 0;
+
     while (i < text.length) {
         const c = text[i];
         const next = text[i + 1];
+
+        // a block comment: spaces, its line ends kept
         if (c === '/' && next === '*') {
             const end = text.indexOf('*/', i + 2);
             const stop = end < 0 ? text.length : end + 2;
             out += text.slice(i, stop).replace(/[^\n]/g, ' ');
             i = stop;
         } else if (c === '/' && next === '/') {
+            // a line comment: spaces up to the line end
             const end = text.indexOf('\n', i);
             const stop = end < 0 ? text.length : end;
             out += ' '.repeat(stop - i);
             i = stop;
         } else if (c === '"' || c === "'") {
+            // a string or a character: spaces up to its closing quote (an
+            // escaped character is skipped with its backslash)
             let j = i + 1;
+
             while (j < text.length && text[j] !== c && text[j] !== '\n') {
                 j += text[j] === '\\' ? 2 : 1;
             }
+
             out += ' '.repeat(j + 1 - i);
             i = j + 1;
         } else {
+            // code: copied
             out += c;
             i++;
         }
     }
+
     return out;
 }
 
+/**
+ * 'text' without its GCC attributes (__attribute__((...))).
+ */
 function removeAttributes(text) {
     let result = text;
     let start = result.indexOf('__attribute__');
+
     while (start >= 0) {
+        // find the parenthesis that closes the attribute's list
         let i = result.indexOf('(', start);
         let depth = 0;
+
         do {
-            if (result[i] === '(') depth++;
-            if (result[i] === ')') depth--;
+            if (result[i] === '(') {
+                depth++;
+            }
+
+            if (result[i] === ')') {
+                depth--;
+            }
+
             i++;
         } while (depth > 0 && i < result.length);
+
+        // cut it out, then the next one
         result = result.slice(0, start) + result.slice(i);
         start = result.indexOf('__attribute__');
     }
+
     return result;
 }
 
@@ -80,64 +106,92 @@ const NOT_A_FUNCTION_NAME = new Set([
     'if', 'while', 'for', 'switch', 'return', 'sizeof', 'defined',
 ]);
 
+/**
+ * Name of the function declared by a C declaration header, or null.
+ */
 function functionName(header) {
+    // the first identifier followed by '(' that is not a keyword
     const cleaned = removeAttributes(header);
     const candidates = [...cleaned.matchAll(/([A-Za-z_]\w*)\s*\(/g)];
     const named = candidates.find(m => !NOT_A_FUNCTION_NAME.has(m[1]));
     return named ? named[1] : null;
 }
 
-// True if 'text' contains '=' outside of parentheses and brackets.
+/**
+ * True if 'text' contains '=' outside of parentheses and brackets.
+ */
 function hasTopLevelEquals(text) {
     let depth = 0;
+
     for (let i = 0; i < text.length; i++) {
+        // depth of parentheses and brackets
         const c = text[i];
-        if (c === '(' || c === '[') depth++;
-        if (c === ')' || c === ']') depth--;
+        if (c === '(' || c === '[') {
+            depth++;
+        }
+
+        if (c === ')' || c === ']') {
+            depth--;
+        }
+
+        // '=' but not '==', '!=', '<=', '>='
         const isAssignment = c === '=' && text[i + 1] !== '=' && !'!<>='.includes(text[i - 1]);
         if (depth === 0 && isAssignment) {
             return true;
         }
     }
+
     return false;
 }
 
-// Identifier declared by a data definition/declaration header ("static const T name[N] =").
+/**
+ * Identifier declared by a data definition/declaration header ("static const T name[N] =").
+ */
 function dataName(header) {
+    // the last identifier before the initializer, array sizes skipped
     const beforeInit = removeAttributes(header).split('=')[0].replace(/;\s*$/, '');
     const match = beforeInit.match(/([A-Za-z_]\w*)\s*(\[[^\]]*\]\s*)*$/);
     return match ? match[1] : null;
 }
 
-// Constants declared by an enum definition: first identifier of each item.
+/**
+ * Constants declared by an enum definition: first identifier of each item.
+ */
 function enumeratorsOf(code) {
+    // the body without its preprocessor lines
     const body = code.slice(code.indexOf('{') + 1, code.lastIndexOf('}'));
     const withoutDirectives = body.split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
+    // the first identifier of each item
     return withoutDirectives.split(',')
         .map(item => (item.trim().match(/^([A-Za-z_]\w*)/) || [])[1])
         .filter(Boolean);
 }
 
-// Identifiers used by a piece of code, ignoring struct member accesses.
+/**
+ * Identifiers used by a piece of code, ignoring struct member accesses.
+ */
 function identifiersOf(code) {
     const found = new Set();
+
     for (const m of code.matchAll(/(\.|->)?\s*\b([A-Za-z_]\w*)/g)) {
         const isMemberAccess = m[1] !== undefined;
         if (!isMemberAccess) {
             found.add(m[2]);
         }
     }
+
     return found;
 }
 
-// ---------------------------------------------------------------------------
-// 1. Cutting into units
+// ### 1. Cutting into units ###################################################
 
 const CONDITIONAL_OPEN = new Set(['if', 'ifdef', 'ifndef']);
 const CONDITIONAL_BRANCH = new Set(['elif', 'else', 'elifdef', 'elifndef']);
 
-// A unit: { kind, names, text, code, header, cond, sortKey, lineIndices, ... }
-// kind: func | proto | data | type | macro | undef | pp
+/**
+ * A unit: { kind, names, text, code, header, cond, sortKey, lineIndices, ... }
+ * kind: func | proto | data | type | macro | undef | pp
+ */
 function parseUnits(text, firstLineNumber) {
     const originalLines = text.split('\n');
     const codeLines = stripCommentsAndStrings(text).split('\n');
@@ -146,25 +200,33 @@ function parseUnits(text, firstLineNumber) {
     const condStack = [];
     let pending = [];
 
+    // helpers: a copy of the #if context, the last line of a directive, a range of line indices
     const snapshotCond = () => condStack.map(frame => [...frame]);
     // line splicing happens before comment removal: read the original text
     const directiveEnd = (start) => {
         let end = start;
+
         while (originalLines[end].trimEnd().endsWith('\\') && end + 1 < originalLines.length) {
             end++;
         }
+
         return end;
     };
     const range = (a, b) => Array.from({ length: b - a + 1 }, (_, k) => a + k);
 
     let i = 0;
+
     while (i < codeLines.length) {
+        // an empty line: attached to the next unit
         const trimmed = codeLines[i].trim();
         if (trimmed === '') {
             pending.push(i);
             i++;
             continue;
         }
+
+        // a directive: #if / #elif / #else / #endif change the context, the
+        // others are units
         if (trimmed.startsWith('#')) {
             const end = directiveEnd(i);
             const directiveText = range(i, end).map(k => originalLines[k]).join('\n');
@@ -182,8 +244,10 @@ function parseUnits(text, firstLineNumber) {
                     codeStart: i,
                     cond: snapshotCond(),
                 });
+
                 pending = [];
             }
+
             i = end + 1;
             continue;
         }
@@ -195,7 +259,9 @@ function parseUnits(text, firstLineNumber) {
         let isFunction = false;
         let end = -1;
         let j = i;
+
         for (; j < codeLines.length && end < 0; j++) {
+            // a directive inside it is skipped (a conditional one is reported)
             const line = codeLines[j];
             if (line.trim().startsWith('#')) {
                 const keyword = line.trim().match(/^#\s*(\w+)/)[1];
@@ -203,9 +269,12 @@ function parseUnits(text, firstLineNumber) {
                 if (isConditional && depth === 0) {
                     warnings.push(`conditional directive inside a declaration header at line ${j + firstLineNumber}`);
                 }
+
                 j = directiveEnd(j);
                 continue;
             }
+
+            // the unit ends at the '}' of a function body or at a ';' outside braces
             for (let k = 0; k < line.length; k++) {
                 const c = line[k];
                 if (c === '{') {
@@ -214,6 +283,7 @@ function parseUnits(text, firstLineNumber) {
                         header += line.slice(0, k);
                         isFunction = !hasTopLevelEquals(header) && header.includes('(') && !/^\s*typedef\b/.test(header);
                     }
+
                     depth++;
                 } else if (c === '}') {
                     depth--;
@@ -226,13 +296,18 @@ function parseUnits(text, firstLineNumber) {
                     break;
                 }
             }
+
+            // the header: what comes before the first brace
             if (!sawBrace) {
                 header += line + '\n';
             }
         }
+
         if (end < 0) {
             throw new Error(`unterminated declaration starting at line ${i + firstLineNumber}`);
         }
+
+        // the unit, with the empty lines before it
         units.push({
             kind: sawBrace ? (isFunction ? 'func' : 'braced') : 'statement',
             header,
@@ -240,20 +315,25 @@ function parseUnits(text, firstLineNumber) {
             codeStart: i,
             cond: snapshotCond(),
         });
+
         pending = [];
         i = end + 1;
     }
 
+    // each unit: its text, its line and what it declares and uses
     for (const unit of units) {
         unit.text = unit.lineIndices.map(k => originalLines[k]).join('\n');
         unit.startLine = unit.codeStart + firstLineNumber;
         unit.sortKey = unit.startLine;
         analyzeUnit(unit);
     }
+
     return { units, warnings, trailing: pending.map(k => originalLines[k]).join('\n') };
 }
 
-// Computes kind, names, static/inline flags and references from unit.text.
+/**
+ * Computes kind, names, static/inline flags and references from unit.text.
+ */
 function analyzeUnit(unit) {
     unit.code = stripCommentsAndStrings(unit.text);
     const code = unit.code;
@@ -262,6 +342,7 @@ function analyzeUnit(unit) {
     unit.isInline = false;
 
     if (unit.kind === 'macro' || unit.kind === 'undef') {
+        // a macro: its name; its body uses names, but its parameters
         const m = code.match(/#\s*(?:define|undef)\s+([A-Za-z_]\w*)(\(([^)]*)\))?/);
         unit.names = [m[1]];
         const params = new Set((m[3] || '').split(',').map(s => s.trim()));
@@ -270,12 +351,15 @@ function analyzeUnit(unit) {
     } else if (unit.kind === 'pp') {
         unit.refs = new Set();
     } else {
+        // a C declaration: its header, static / inline
         const firstBrace = code.indexOf('{');
         const header = unit.kind === 'statement' ? code : code.slice(0, firstBrace);
         unit.header = header;
         const headerNoAttr = removeAttributes(header).trim();
         unit.isStatic = /^static\b/.test(headerNoAttr) || /^\S*\s*static\b/.test(headerNoAttr);
         unit.isInline = /\b(inline|force_inline|__inline__|__always_inline__)\b/.test(headerNoAttr);
+
+        // its kind and the names it declares
         if (unit.kind === 'func') {
             unit.names = [functionName(header)];
         } else if (unit.kind === 'braced') {
@@ -307,52 +391,77 @@ function analyzeUnit(unit) {
                 unit.names = [pointerName ? pointerName[1] : dataName(header)];
             }
         }
+
+        // the names it uses, but its own
         const own = new Set(unit.names);
         unit.refs = new Set([...identifiersOf(code)].filter(id => !own.has(id)));
     }
+
     // macros tested by the #if context are references too
     for (const frame of unit.cond) {
         for (const directive of frame) {
             const condition = stripCommentsAndStrings(directive).replace(/^\s*#\s*\w+/, '');
+
             for (const id of identifiersOf(condition)) {
-                if (id !== 'defined') unit.refs.add(id);
+                if (id !== 'defined') {
+                    unit.refs.add(id);
+                }
             }
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Prototype / declaration text generation
+// ### Prototype / declaration text generation #################################
 
+/**
+ * The prototype of a function unit: its header followed by ';', without
+ * 'static' unless 'keepStatic'.
+ */
 function prototypeOf(unit, keepStatic) {
+    // the header without its empty lines, ended by ';'
     const header = unit.header.replace(/\s+$/, '');
     const lines = header.split('\n').map(l => l.replace(/\s+$/, '')).filter(l => l.trim() !== '');
     let text = lines.join('\n') + ';';
     if (!keepStatic) {
         text = text.replace(/\bstatic\s+/, '');
     }
+
     return text;
 }
 
-// Number of items of an array initializer, or null if it cannot be counted
-// (preprocessor directives inside the initializer).
+/**
+ * Number of items of an array initializer, or null if it cannot be counted
+ * (preprocessor directives inside the initializer).
+ */
 function initializerItemCount(unit) {
+    // from the first '{' after the '='
     const code = unit.code;
     const start = code.indexOf('{', code.indexOf('='));
     let depth = 0;
     let items = 0;
     let currentItemHasContent = false;
+
+    // count the commas at depth 1, and a last item without comma
     for (let i = start; i < code.length; i++) {
         const c = code[i];
-        if (c === '#' && depth === 1) return null;
+        if (c === '#' && depth === 1) {
+            return null;
+        }
+
         if (c === '{' || c === '(' || c === '[') {
             depth++;
-            if (depth === 1) continue;
+            if (depth === 1) {
+                continue;
+            }
         }
+
         if (c === '}' || c === ')' || c === ']') {
             depth--;
-            if (depth === 0) break;
+            if (depth === 0) {
+                break;
+            }
         }
+
         if (depth === 1 && c === ',') {
             items++;
             currentItemHasContent = false;
@@ -360,10 +469,16 @@ function initializerItemCount(unit) {
             currentItemHasContent = true;
         }
     }
+
     return currentItemHasContent ? items + 1 : items;
 }
 
+/**
+ * The 'extern' declaration of a data unit, with the size of an array whose
+ * size comes from its initializer.
+ */
 function externDeclarationOf(unit) {
+    // the header without initializer nor ';'
     let header = unit.kind === 'data-decl' ? unit.header : unit.header.split('=')[0];
     header = header.replace(/;\s*$/, '').replace(/\s+$/, '');
     if (/\[\s*\]\s*$/.test(header)) {
@@ -373,63 +488,86 @@ function externDeclarationOf(unit) {
             header = header.replace(/\[\s*\]\s*$/, `[${count}]`);
         }
     }
+
+    // 'extern' instead of 'static'
     const lines = header.split('\n').map(l => l.replace(/\s+$/, '')).filter(l => l.trim() !== '');
     return 'extern ' + lines.join('\n').replace(/\bstatic\s+/, '').replace(/^\s+/, '') + ';';
 }
 
+/**
+ * The declaration of a data unit without its initializer (a forward declaration).
+ */
 function tentativeDeclarationOf(unit) {
     let header = unit.header.split('=')[0].replace(/;\s*$/, '').replace(/\s+$/, '');
     const lines = header.split('\n').map(l => l.replace(/\s+$/, '')).filter(l => l.trim() !== '');
     return lines.join('\n') + ';';
 }
 
+/**
+ * The text of a unit without its first 'static' keyword.
+ */
 function removeStatic(unit) {
     // the first 'static' of the code part (comments before it are untouched)
     const codeOffset = unit.code.search(/\bstatic\b/);
     if (codeOffset < 0) {
         throw new Error(`no 'static' to remove in ${unit.names[0]}`);
     }
+
     return unit.text.slice(0, codeOffset) + unit.text.slice(codeOffset).replace(/^static\s+/, '');
 }
 
-// ---------------------------------------------------------------------------
-// Emission of #if contexts
+// ### Emission of #if contexts ################################################
 
+/**
+ * A key equal for equal #if contexts.
+ */
 function condKey(cond) {
     return JSON.stringify(cond);
 }
 
+/**
+ * The text of 'pieces' in order, each run of pieces of the same #if context
+ * wrapped in that context's directives.
+ */
 function emitWithConditions(pieces) {
     // pieces: [{ text, cond }] in output order
     const out = [];
     let index = 0;
+
     while (index < pieces.length) {
+        // the run of pieces of the same context
         const cond = pieces[index].cond;
         const key = condKey(cond);
         const group = [];
+
         while (index < pieces.length && condKey(pieces[index].cond) === key) {
             group.push(pieces[index].text);
             index++;
         }
+
+        // its directives, the pieces, an #endif per level
         for (const frame of cond) {
             out.push(frame.join('\n'));
         }
+
         out.push(group.join('\n'));
+
         for (let k = 0; k < cond.length; k++) {
             out.push('#endif');
         }
     }
+
     return out.join('\n');
 }
 
-// ---------------------------------------------------------------------------
-// Main
+// ### Main ####################################################################
 
 const source = fs.readFileSync(inputPath, 'utf8').replace(/\r\n/g, '\n');
 const parsed = parseUnits(source, 1);
 if (parsed.warnings.length) {
     console.log('warnings:\n  ' + parsed.warnings.join('\n  '));
 }
+
 const sourceLines = source.split('\n');
 let units = parsed.units;
 
@@ -439,17 +577,31 @@ for (const patch of config.patches) {
         || units.find(u => u.names.includes(name));
     patch.apply({ units, parseUnits, analyzeUnit, findUnit });
 }
+
 units = units.filter(u => !u.removed);
 
 // macros defined inside function bodies: a copy goes to a header if another
 // file uses them (an identical redefinition is allowed in C)
 for (const unit of [...units]) {
-    if (unit.kind !== 'func') continue;
+    if (unit.kind !== 'func') {
+        continue;
+    }
+
     const lines = unit.text.split('\n');
+
     for (let k = 0; k < lines.length; k++) {
-        if (!/^\s*#\s*define\b/.test(lines[k])) continue;
+        if (!/^\s*#\s*define\b/.test(lines[k])) {
+            continue;
+        }
+
+        // the lines of the #define (continued by '\')
         let end = k;
-        while (lines[end].trimEnd().endsWith('\\') && end + 1 < lines.length) end++;
+
+        while (lines[end].trimEnd().endsWith('\\') && end + 1 < lines.length) {
+            end++;
+        }
+
+        // a unit of its own, sorted right after its function
         const macro = {
             kind: 'macro', text: lines.slice(k, end + 1).join('\n'), cond: unit.cond,
             startLine: unit.startLine, sortKey: unit.sortKey + 0.0001,
@@ -459,18 +611,28 @@ for (const unit of [...units]) {
         units.push(macro);
     }
 }
+
 units.sort((a, b) => a.sortKey - b.sortKey);
 
 // 3. locations
+
+/**
+ * The output file of a line of quickjs.c, from config.fileRanges.
+ */
 function fileForLine(line) {
     let file = null;
+
     for (const [first, name] of config.fileRanges) {
-        if (line >= first) file = name;
+        if (line >= first) {
+            file = name;
+        }
     }
+
     return file;
 }
 
 for (const unit of units) {
+    // forced by a patch, the prelude goes to the header, else by line range
     const isPrelude = unit.startLine < config.preludeEnd && !unit.synthetic;
     unit.inPrelude = isPrelude;
     if (unit.forcedFile) {
@@ -480,30 +642,48 @@ for (const unit of units) {
     } else {
         unit.loc = fileForLine(unit.startLine);
     }
+
+    // an override by name wins
     const override = unit.names.map(n => config.overrides[n]).find(Boolean);
     if (override) {
         unit.loc = override;
     }
 }
+
+// a macro copied from a function lives where the function lives
 for (const unit of units) {
-    if (unit.embedded) unit.loc = unit.embeddedIn.loc;
+    if (unit.embedded) {
+        unit.loc = unit.embeddedIn.loc;
+    }
 }
 
 // definitions by name
 const definitions = new Map();
+
+/**
+ * Records 'unit' as a definition of 'name'.
+ */
 function addDefinition(name, unit) {
-    if (!definitions.has(name)) definitions.set(name, []);
+    if (!definitions.has(name)) {
+        definitions.set(name, []);
+    }
+
     definitions.get(name).push(unit);
 }
+
 // a macro that is #undef'd somewhere (even inside a function) is local
 const undefinedMacros = new Set([...source.matchAll(/^\s*#\s*undef\s+([A-Za-z_]\w*)/gm)].map(m => m[1]));
+
 for (const unit of units) {
     const isDefinition = ['func', 'data', 'type'].includes(unit.kind)
         || (unit.kind === 'macro' && !undefinedMacros.has(unit.names[0]));
     if (isDefinition) {
-        for (const name of unit.names) addDefinition(name, unit);
+        for (const name of unit.names) {
+            addDefinition(name, unit);
+        }
     }
 }
+
 // tentative data declarations that have a real definition are forward declarations
 for (const unit of units) {
     if (unit.kind === 'data-decl') {
@@ -516,6 +696,7 @@ for (const unit of units) {
         }
     }
 }
+
 // prototypes of functions defined in quickjs.c are regenerated
 for (const unit of units) {
     if (unit.kind === 'proto' && definitions.has(unit.names[0])) {
@@ -546,7 +727,13 @@ const virtualUnits = [];
 const sharedFunctions = new Set();
 const sharedData = new Set();
 
+/**
+ * Makes a definition visible to the other files: types, macros and inline
+ * functions move to a header, other functions and data get a declaration
+ * there. Returns true when something changed.
+ */
 function share(definition) {
+    // types, macros and inline functions: moved to the header
     const movesToHeader = definition.kind === 'type' || definition.kind === 'macro'
         || (definition.kind === 'func' && definition.isInline);
     if (movesToHeader) {
@@ -554,49 +741,69 @@ function share(definition) {
         definition.loc = 'H';
         return true;
     }
+
+    // other functions: a prototype in the header, unless quickjs.h has it
     if (definition.kind === 'func' && !sharedFunctions.has(definition)) {
         sharedFunctions.add(definition);
         const declaredByPublicHeader = !definition.isStatic && publicFunctions.has(definition.names[0]);
         if (!declaredByPublicHeader) {
             virtualUnits.push(makeVirtual(definition, prototypeOf(definition, false)));
         }
+
         return true;
     }
+
+    // data: an extern declaration in the header
     if (definition.kind === 'data' && !sharedData.has(definition)) {
         sharedData.add(definition);
         virtualUnits.push(makeVirtual(definition, externDeclarationOf(definition)));
         return true;
     }
+
     return false;
 }
 
+/**
+ * A unit of the header that declares 'definition' with 'text'.
+ */
 function makeVirtual(definition, text) {
     const unit = {
         kind: 'decl', names: [], text, cond: definition.cond, sortKey: definition.sortKey,
         loc: 'H', declares: definition,
     };
+    // the names it uses, those of its #if context included
     unit.code = stripCommentsAndStrings(text);
     unit.refs = new Set([...identifiersOf(unit.code)].filter(id => !definition.names.includes(id)));
+
     for (const frame of unit.cond) {
         for (const directive of frame) {
             for (const id of identifiersOf(stripCommentsAndStrings(directive).replace(/^\s*#\s*\w+/, ''))) {
-                if (id !== 'defined') unit.refs.add(id);
+                if (id !== 'defined') {
+                    unit.refs.add(id);
+                }
             }
         }
     }
+
     return unit;
 }
 
+// share what a unit of another file uses, until nothing changes
 let changed = true;
+
 while (changed) {
     changed = false;
+
     for (const unit of activeUnits().concat(virtualUnits)) {
         for (const name of unit.refs) {
             for (const definition of definitions.get(name) || []) {
                 if (definition.dropped || definition.loc === 'H' || definition.loc === unit.loc) {
                     continue;
                 }
-                if (share(definition)) changed = true;
+
+                if (share(definition)) {
+                    changed = true;
+                }
             }
         }
     }
@@ -608,60 +815,95 @@ const headerOrigin = unit => unit.declares ? unit.declares.loc : unit.movedFrom;
 const headerUnits = activeUnits().filter(u => u.loc === 'H' && !u.inPrelude).concat(virtualUnits);
 const compilerCandidates = new Set(headerUnits.filter(u => isCompilerFile(headerOrigin(u))));
 
+/**
+ * The units that use what 'target' defines or declares.
+ */
 function referencers(target) {
     const names = target.declares ? target.declares.names : target.names;
     return activeUnits().concat(virtualUnits).filter(u => u !== target && u !== target.declares
         && names.some(n => u.refs.has(n)));
 }
+
+// a compiler declaration used outside compiler/ goes to the internal header,
+// until nothing changes
 let promoted = true;
+
 while (promoted) {
     promoted = false;
+
     for (const candidate of [...compilerCandidates]) {
         const usedOutsideCompiler = referencers(candidate).some(r => {
             const location = r.loc === 'H' ? (compilerCandidates.has(r) ? 'C' : 'H') : r.loc;
             return location === 'H' || (location !== 'C' && !isCompilerFile(location));
         });
+
         if (usedOutsideCompiler) {
             compilerCandidates.delete(candidate);
             promoted = true;
         }
     }
 }
+
+// then each header unit knows its header
 for (const unit of headerUnits) {
     unit.header_ = compilerCandidates.has(unit) ? 'C' : 'H';
 }
 
-// ---------------------------------------------------------------------------
-// 5. Writing
+// ### 5. Writing ##############################################################
 
 const FOLDER_HEADERS = { core: 'core/core.h', bytecode: 'bytecode/bytecode.h', builtins: 'builtins/builtins.h' };
 const files = new Map();
+
+/**
+ * Adds 'unit' to the output file 'file'.
+ */
 function addToFile(file, unit) {
-    if (!files.has(file)) files.set(file, []);
+    if (!files.has(file)) {
+        files.set(file, []);
+    }
+
     files.get(file).push(unit);
 }
+
 for (const unit of activeUnits()) {
     // an embedded macro stays inside its function, it is only copied to a header
-    if (unit.loc !== 'H' && !unit.embedded) addToFile(unit.loc, unit);
+    if (unit.loc !== 'H' && !unit.embedded) {
+        addToFile(unit.loc, unit);
+    }
 }
 
+/**
+ * Writes an output file, with at most one blank line in a row and one line end at the end.
+ */
 function write(relativePath, content) {
     const fullPath = path.join(outputDir, relativePath);
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, content.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n');
 }
 
+/**
+ * The ranges of lines of quickjs.c the units come from, as text ("10-200, 900-950").
+ */
 function lineRangesOf(fileUnits) {
+    // the start lines in order, gathered when less than 400 lines apart
     const lines = fileUnits.filter(u => !u.synthetic).map(u => u.startLine).sort((a, b) => a - b);
     const ranges = [];
+
     for (const line of lines) {
         const last = ranges[ranges.length - 1];
         const contiguousGap = 400;
-        if (last && line - last[1] < contiguousGap) last[1] = line; else ranges.push([line, line]);
+        const extendsLast = last && line - last[1] < contiguousGap;
+        if (extendsLast) {
+            last[1] = line;
+        } else {
+            ranges.push([line, line]);
+        }
     }
+
     return ranges.map(([a, b]) => `${a}-${b}`).join(', ');
 }
 
+// The comment at the top of each written file.
 const BANNER = (title, detail) => `/*
  * QuickJS - ${title}
  *
@@ -670,12 +912,16 @@ const BANNER = (title, detail) => `/*
  */
 `;
 
+// Units in the order of quickjs.c.
 const sorted = list => [...list].sort((a, b) => a.sortKey - b.sortKey);
+
+// The text of a unit in its file: a shared one loses 'static'.
 const textOfUnit = unit => {
     const isShared = (unit.kind === 'func' && sharedFunctions.has(unit)) || (unit.kind === 'data' && sharedData.has(unit));
     if (isShared && unit.isStatic) {
         return removeStatic(unit);
     }
+
     return unit.text;
 };
 
@@ -687,27 +933,43 @@ for (const [file, fileUnits] of files) {
     // forward declarations of local static functions and data used before
     // their definition: placed just before the first use
     const forwardBefore = new Map();
+
     for (const unit of ordered) {
         const isLocalFunction = unit.kind === 'func' && !sharedFunctions.has(unit);
         const isLocalData = unit.kind === 'data' && !sharedData.has(unit);
-        if (!isLocalFunction && !isLocalData) continue;
+        if (!isLocalFunction && !isLocalData) {
+            continue;
+        }
+
         const firstUser = ordered.find(u => position.get(u) < position.get(unit) && unit.names.some(n => u.refs.has(n)));
         if (firstUser) {
             const text = isLocalFunction ? prototypeOf(unit, true) : tentativeDeclarationOf(unit);
-            if (!forwardBefore.has(firstUser)) forwardBefore.set(firstUser, []);
+            if (!forwardBefore.has(firstUser)) {
+                forwardBefore.set(firstUser, []);
+            }
+
             forwardBefore.get(firstUser).push({ text, cond: unit.cond });
         }
     }
+
+    // the units, each one after the forward declarations it needs
     const pieces = [];
+
     for (const unit of ordered) {
         for (const declaration of forwardBefore.get(unit) || []) {
             pieces.push(declaration);
         }
+
         pieces.push({ text: textOfUnit(unit), cond: unit.cond });
     }
+
+    // banner, includes, then the units in their #if contexts
     let content = BANNER(file, `Lines of quickjs.c: ${lineRangesOf(ordered)}`);
     content += '\n#include "quickjs-internal.h"\n';
-    if (isCompiler) content += '#include "compiler/compiler.h"\n';
+    if (isCompiler) {
+        content += '#include "compiler/compiler.h"\n';
+    }
+
     content += '\n' + emitWithConditions(pieces) + '\n';
     write(file, content);
 }
@@ -725,10 +987,14 @@ for (const [folder, headerPath] of Object.entries(FOLDER_HEADERS)) {
 
 // quickjs-internal.h
 const droppedPreludeLines = new Set();
+
 for (const unit of units) {
     const leavesPrelude = unit.startLine < config.preludeEnd && !unit.synthetic && (unit.dropped || !unit.inPrelude);
-    if (leavesPrelude) unit.lineIndices.forEach(k => droppedPreludeLines.add(k));
+    if (leavesPrelude) {
+        unit.lineIndices.forEach(k => droppedPreludeLines.add(k));
+    }
 }
+
 const preludeText = sourceLines.slice(0, config.preludeEnd - 1)
     .filter((_, k) => !droppedPreludeLines.has(k)).join('\n');
 
@@ -747,6 +1013,7 @@ if (compilerDeclsOutside.length) {
     internal += '\n/* compiler functions used outside of compiler/ */\n';
     internal += emitWithConditions(compilerDeclsOutside.map(u => ({ text: u.text, cond: u.cond }))) + '\n';
 }
+
 internal += '\n/* ---- inline functions shared between files ---- */\n\n';
 internal += emitWithConditions(internalInline.map(u => ({ text: prototypeOf(u, true), cond: u.cond }))) + '\n\n';
 internal += emitWithConditions(internalInline.map(u => ({ text: u.text, cond: u.cond }))) + '\n';

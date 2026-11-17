@@ -19,43 +19,65 @@ const METHOD_STORED = 0;
 const DOS_TIME = 0;
 const DOS_DATE = (0 << 9) | (1 << 5) | 1;   // 1980-01-01
 
+// CRC-32 of zip (reflected polynomial 0xedb88320): the remainder of each
+// byte value, computed once
 const crcTable = (() => {
     const table = new Uint32Array(256);
+
     for (let n = 0; n < 256; n++) {
         let c = n;
+
+        // one bit at a time: shift right, xor the polynomial when a 1 falls out
         for (let k = 0; k < 8; k++) {
             c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
         }
+
+        // '>>> 0' makes it an unsigned 32-bit number
         table[n] = c >>> 0;
     }
+
     return table;
 })();
 
+/**
+ * CRC-32 of 'bytes' as zip computes it, an unsigned 32-bit number.
+ */
 export function crc32(bytes) {
     let crc = 0xffffffff;
+
     for (let i = 0; i < bytes.length; i++) {
         crc = crcTable[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
     }
+
     return (crc ^ 0xffffffff) >>> 0;
 }
 
+/**
+ * One Uint8Array holding all 'parts' one after the other.
+ */
 function concat(parts) {
     const size = parts.reduce((total, part) => total + part.length, 0);
     const result = new Uint8Array(size);
     let offset = 0;
+
     for (const part of parts) {
         result.set(part, offset);
         offset += part.length;
     }
+
     return result;
 }
 
-// entries: [{ name: string, data: Uint8Array }] -> Uint8Array
+/**
+ * The bytes of a zip archive holding 'entries', stored without compression.
+ * entries: [{ name: string, data: Uint8Array, align?: number }] -> Uint8Array
+ */
 export function writeZip(entries) {
     const encoder = new TextEncoder();
     const localParts = [];
     const centralParts = [];
     let offset = 0;
+
     for (const entry of entries) {
         const name = encoder.encode(entry.name);
         const data = entry.data;
@@ -67,6 +89,7 @@ export function writeZip(entries) {
         const dataStart = offset + 30 + name.length;
         const padding = entry.align === undefined ? 0 : (entry.align - dataStart % entry.align) % entry.align;
 
+        // local header, followed by the name and the padding
         const local = new Uint8Array(30 + name.length + padding);
         const localView = new DataView(local.buffer);
         localView.setUint32(0, SIGNATURE_LOCAL, true);
@@ -82,6 +105,7 @@ export function writeZip(entries) {
         localView.setUint16(28, padding, true);       // extra field length
         local.set(name, 30);
 
+        // its record of the central directory, followed by the name
         const central = new Uint8Array(46 + name.length);
         const centralView = new DataView(central.buffer);
         centralView.setUint32(0, SIGNATURE_CENTRAL, true);
@@ -98,10 +122,13 @@ export function writeZip(entries) {
         centralView.setUint32(42, offset, true);      // offset of the local header
         central.set(name, 46);
 
+        // the entry goes in the archive, its record in the directory
         localParts.push(local, data);
         centralParts.push(central);
         offset += local.length + data.length;
     }
+
+    // end record: where the central directory starts and how many entries it holds
     const centralDirectory = concat(centralParts);
     const end = new Uint8Array(22);
     const endView = new DataView(end.buffer);
@@ -110,27 +137,40 @@ export function writeZip(entries) {
     endView.setUint16(10, entries.length, true);      // entries in total
     endView.setUint32(12, centralDirectory.length, true);
     endView.setUint32(16, offset, true);              // offset of the central directory
+
+    // entries, then the central directory, then the end record
     return concat([...localParts, centralDirectory, end]);
 }
 
-// Uint8Array -> Map(name -> Uint8Array view). Stored entries only.
+/**
+ * The entries of a zip archive. Stored entries only.
+ * Uint8Array -> Map(name -> Uint8Array view).
+ */
 export function readZip(bytes) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+    // find the end record, searching back from the end (a comment may follow it)
     let end = bytes.length - 22;
     while (end >= 0 && view.getUint32(end, true) !== SIGNATURE_END) {
         end--;
     }
+
     if (end < 0) {
         throw new Error("not a zip archive");
     }
+
+    // it gives the number of entries and where the central directory starts
     const count = view.getUint16(end + 10, true);
     let position = view.getUint32(end + 16, true);
     const decoder = new TextDecoder();
     const entries = new Map();
+
     for (let i = 0; i < count; i++) {
+        // read one record of the central directory
         if (view.getUint32(position, true) !== SIGNATURE_CENTRAL) {
             throw new Error("invalid central directory");
         }
+
         const method = view.getUint16(position + 10, true);
         const size = view.getUint32(position + 20, true);
         const nameLength = view.getUint16(position + 28, true);
@@ -141,9 +181,17 @@ export function readZip(bytes) {
         if (method !== METHOD_STORED) {
             throw new Error(`${name}: compressed entries are not supported`);
         }
-        const dataOffset = localOffset + 30 + view.getUint16(localOffset + 26, true) + view.getUint16(localOffset + 28, true);
+
+        // the data follows the local header, whose name and extra field
+        // lengths may differ from the central record's
+        const localNameLength = view.getUint16(localOffset + 26, true);
+        const localExtraLength = view.getUint16(localOffset + 28, true);
+        const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
         entries.set(name, bytes.subarray(dataOffset, dataOffset + size));
+
+        // next record
         position += 46 + nameLength + extraLength + commentLength;
     }
+
     return entries;
 }

@@ -47,7 +47,7 @@ public:
      * Fulfills the promise with 'value' (converted with Convert<T>::to); the
      * resolver is no longer pending. Does nothing if it was not pending.
      */
-    void resolve(const T &value) {
+    void     resolve(const T &value) {
         // already settled, or empty: nothing to settle
         if (!pending()) {
             return;
@@ -91,7 +91,7 @@ public:
      * with the properties 'code' ("ENOENT") and 'errno' (like failSystem).
      * Does nothing if the resolver was not pending.
      */
-    void rejectSystem(int error) {
+    void     rejectSystem(int error) {
         // already settled, or empty: no context to build the error in, and
         // nothing to settle
         if (!pending()) {
@@ -115,7 +115,7 @@ protected:
     /**
      * Rejects the promise with 'error' (taken: owned by this function).
      */
-    void rejectWithError(JSValue error) {
+    void     rejectWithError(JSValue error) {
         // clear the resolver first (settled at most once); copies of the
         // function and of the reason keep them alive meanwhile
         Function rejectFunction = _reject;
@@ -129,7 +129,7 @@ protected:
     /**
      * Drops both functions: the resolver is no longer pending.
      */
-    void clear() {
+    void     clear() {
         _resolve.reset();
         _reject.reset();
     }

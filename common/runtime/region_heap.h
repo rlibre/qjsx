@@ -60,65 +60,95 @@ public:
      * False if it is too small (a few dozen bytes) to hold one block. A
      * region above 2 GB is cut to 2 GB.
      */
-    bool          init(void *start, size_t size);
+    bool             init(void *start, size_t size);
 
     /**
      * A block of at least 'size' bytes, 8-byte aligned; nullptr if none is
      * free (or size is 0).
      */
-    void         *allocate(size_t size);
+    void            *allocate(size_t size);
 
     /**
      * Resizes a block, in place when it can, else by moving it (contents
      * kept); nullptr: a new block. Size 0 releases it and returns nullptr.
      * nullptr if no room: the block is then untouched.
      */
-    void         *reallocate(void *block, size_t size);
+    void            *reallocate(void *block, size_t size);
 
     /**
      * Frees a block (nullptr: nothing). Fatal if the block is not one of this
      * heap's allocated blocks.
      */
-    void          release(void *block);
+    void             release(void *block);
 
     /**
      * Bytes of a block the caller may use (at least what was asked); 0 for
      * nullptr.
      */
-    static size_t usableSize(const void *block);
+    static size_t    usableSize(const void *block);
 
     /**
      * Fills *out (walks the largest free list for largestFree).
      */
-    void          stats(HeapStats *out) const;
+    void             stats(HeapStats *out) const;
 
     /**
      * Checks every block and every list (for the tests: walks the whole
      * heap). nullptr if consistent, else what is wrong (static text).
      */
-    const char   *check() const;
+    const char      *check() const;
 
 private:
     static const int CLASS_COUNT = 128;               // size classes: 32 small, 96 large
     static const int BITMAP_WORDS = CLASS_COUNT / 32; // bits of the non-empty lists
 
-    void          insert(RegionBlock *block);
-    void          remove(RegionBlock *block);
-    int           firstNonEmpty(int fromClass) const;
-    size_t        splitAndUse(RegionBlock *block, size_t blockSize, size_t needed);
-    void          shrink(RegionBlock *block, size_t blockSize, size_t needed);
-    RegionBlock  *ownedBlock(void *payload) const;
-    void          countUsed(size_t added, size_t removed);
+    /**
+     * Puts a free block first in the list of its class.
+     */
+    void             insert(RegionBlock *block);
 
-    uintptr_t     _start = 0;                         // first block (aligned)
-    RegionBlock  *_end = nullptr;                     // end marker: an allocated block of size 0
-    RegionBlock  *_lists[CLASS_COUNT] = {};           // first free block of each class
-    uint32_t      _bitmap[BITMAP_WORDS] = {};         // bit set: the list of that class is not empty
-    size_t        _total = 0;                         // bytes of blocks (_end - _start)
-    size_t        _used = 0;                          // bytes of allocated blocks
-    size_t        _peak = 0;                          // highest _used since the heap was last empty
-    size_t        _usedBlocks = 0;                    // allocated blocks
-    size_t        _freeBlocks = 0;                    // blocks in the lists
+    /**
+     * Takes a free block out of the list of its class.
+     */
+    void             remove(RegionBlock *block);
+
+    /**
+     * The first non-empty class from 'fromClass' on; -1 if none.
+     */
+    int              firstNonEmpty(int fromClass) const;
+
+    /**
+     * Makes a block out of the lists an allocated block of 'needed' bytes,
+     * the rest back to the lists. Returns the final size of the block.
+     */
+    size_t           splitAndUse(RegionBlock *block, size_t blockSize, size_t needed);
+
+    /**
+     * Shrinks an allocated block to 'needed' bytes when the rest makes a
+     * block (freed).
+     */
+    void             shrink(RegionBlock *block, size_t blockSize, size_t needed);
+
+    /**
+     * The header of a payload; fatal unless it is an allocated block of this
+     * heap.
+     */
+    RegionBlock     *ownedBlock(void *payload) const;
+
+    /**
+     * Updates the used bytes and their peak.
+     */
+    void             countUsed(size_t added, size_t removed);
+
+    uintptr_t        _start = 0;                         // first block (aligned)
+    RegionBlock     *_end = nullptr;                     // end marker: an allocated block of size 0
+    RegionBlock     *_lists[CLASS_COUNT] = {};           // first free block of each class
+    uint32_t         _bitmap[BITMAP_WORDS] = {};         // bit set: the list of that class is not empty
+    size_t           _total = 0;                         // bytes of blocks (_end - _start)
+    size_t           _used = 0;                          // bytes of allocated blocks
+    size_t           _peak = 0;                          // highest _used since the heap was last empty
+    size_t           _usedBlocks = 0;                    // allocated blocks
+    size_t           _freeBlocks = 0;                    // blocks in the lists
 };
 
 /**

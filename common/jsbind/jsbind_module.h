@@ -88,8 +88,9 @@ public:
         using Arguments = typename detail::FunctionTraits<decltype(F)>::Arguments;
         int arity = detail::JsArity<Arguments>::value;
         int nameIndex = detail::registerName(_owner, name);
-        _export(name, JS_NewCFunctionMagic(_ctx, &detail::functionTrampoline<F>, name, arity,
-                                           JS_CFUNC_generic_magic, nameIndex));
+        JSValue made = JS_NewCFunctionMagic(_ctx, &detail::functionTrampoline<F>, name, arity,
+                                            JS_CFUNC_generic_magic, nameIndex);
+        _export(name, made);
     }
 
     /**
@@ -162,7 +163,8 @@ private:
      * Declares the export name 'name' of the module (Declare mode).
      */
     void declare(const char *name) {
-        if (JS_AddModuleExport(_ctx, _module, name) < 0) {
+        int declared = JS_AddModuleExport(_ctx, _module, name);
+        if (declared < 0) {
             _ok = false;
         }
     }

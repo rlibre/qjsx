@@ -724,6 +724,36 @@ keeps the old name: `C:\Sandbox\espjs`.
   (`QJSX_JS_HEAP_MB=1`). Board: 20,000 cycles ran out of memory before, 2.3 s with T
   (about 13 ms a GC pass with a small live heap, estimated). Idle GC (user's idea): to
   propose with a measure of a pass on the client's program, not done.
+- Await without allocation (engine change V, agreed by the user 2026-11-17, V1 and V2
+  together, IMPLEMENTED the same day; Debug suite 112 OK, Bellard's tests OK, microbench
+  -4.0 %; `doc/engine-changes.md` V): V1 = an async function keeps in its state what
+  resumes it (two embedded reactions + one embedded job + the delivered value), so an
+  `await` of a native promise or of a non-object value allocates nothing; V2 = `await f()`
+  of an async function from an async function makes no promise (`JS_CALL_FLAG_AWAITED`
+  when OP_await follows the call; the callee keeps its caller as `awaiter` and queues its
+  job at the end; an object result still goes through a promise: thenables). Order of the
+  resumptions identical to upstream: `tests/fixtures/awaitorder.js` compared with
+  `awaitorder.expected` (written by qjs-original). Async generators unchanged. Measured
+  (temp/awaitbench): Teensy depth 3 2175 -> 989 B, `await f()` 48.75 -> 16.75 us,
+  hand-over 86.85 -> 37.10 us; PC `await f()` 0.60 -> 0.10 us. Next idea of the user:
+  speed up the jsbind JS <-> C binding (analyzed 2026-11-17: TLS accesses cost on the
+  Teensy, not done).
+- Unused declarations left out of a package (agreed by the user 2026-11-17, points 1-4,
+  IMPLEMENTED the same day, engine change W, `doc/architecture.md` 4.5): a function
+  costs ~275 B of RAM on a 32-bit board once its module is loaded, called or not. The
+  compiler gives an OUTLINE of each module (`JS_SetModuleOutlineCollector`,
+  `compiler/outline.c`; `compile(..., { outline: true })`): top-level statements (range,
+  removable, names declared / used as written), imports with positions, exports with the
+  ranges of export clause names, hasEval; stored in `.qjslib` (`outline/<module>.json`).
+  `host/js/prune.js` (`qjsx:prune`): `checkImports` (an imported name the module does
+  not export is a build error with its position, user's point 2) and `pruneModules`
+  (statements that do something are kept; names followed through imports, re-exports,
+  `export *`; `import * as` = every export; eval = keep all; unused declarations and
+  export clause names replaced by spaces, line ends kept, module compiled again; the
+  package keeps the original source). Accepted: reads of properties / computed keys are
+  taken as without effect. Measured on the Teensy: 99 functions + a class unused 98.7 ->
+  65.3 KB; `import { Mutex } from "stdlib/tasks"` 82.3 -> 67.0 KB. No option to turn it
+  off. Delay-load of functions (user's idea, point 4): after this and step 3 of S.
 - `stdlib/tasks` (agreed by the user 2026-11-16, IMPLEMENTED the same day; goal: write the
   small tasks of a board as sequential code that waits, not state machines called by
   timers): `task(name, async self => ...)` -> Task (`name`, `stopped`, `stop()` asks and
@@ -1278,7 +1308,8 @@ in the include path (no two headers share a name; keep it so).
   of `doc/jsmanual/api-readme.md`: update both when a port gains a module.
 
 The full rules, with examples, are in `doc/coding-rules.md` (written to be reused in other
-C / C++ projects). Summary of what was agreed:
+projects; C / C++, and JS / TS where they apply, user 2026-11-17: the former French copy at
+the root was removed). Summary of what was agreed:
 
 - File header (user, 2026-11-11, APPLIED to 134 files the same day): every source file of
   the project starts with the block of `doc/coding-rules.md` 3 ("File header"): "qjsx" in

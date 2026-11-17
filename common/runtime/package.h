@@ -22,6 +22,7 @@
 
 namespace package {
 
+// One entry of the archive, read in place.
 struct Entry {
     const char    *name;        // not zero-terminated
     size_t         nameLength;  // bytes in name
@@ -29,6 +30,7 @@ struct Entry {
     size_t         size;        // bytes in data
 };
 
+// The entries of a package held in memory by the caller.
 class Reader {
 public:
     /**

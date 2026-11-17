@@ -46,6 +46,7 @@ void *allocate(size_t size) {
  * malloc() of at least one byte; nullptr when there is no room (not fatal).
  */
 void *tryAllocate(size_t size) {
+    // malloc(0) may give nullptr: ask for at least one byte
     size_t asked = size > 0 ? size : 1;
     return malloc(asked);
 }

@@ -53,7 +53,8 @@ public:
     void init(js::Range<int, 0, 63> pin, js::Optional<AdcOptions> options) {
         // the range asked, checked
         AdcOptions settings = options.has() ? options.value() : AdcOptions();
-        if (!(settings.range >= 0.1 && settings.range <= 40.0)) {
+        bool inRange = settings.range >= 0.1 && settings.range <= 40.0;   // false for NaN too
+        if (!inRange) {
             return (void)js::fail<js::RangeError>("adc: range must be 0.1 to 40 volts");
         }
 
@@ -64,6 +65,7 @@ public:
             return (void)js::failSystem(opened.error, "adc: no analog input on that pin for that range");
         }
 
+        // opened: keep its handle and resolution
         _handle = opened.handle;
         bits = opened.bits;
     }
@@ -73,14 +75,17 @@ public:
      * conversion fails (EIO).
      */
     JS_EXPORT(read) int read() {
+        // closed: nothing to read
         if (!isOpen()) {
             return js::fail("adc: closed");
         }
 
+        // one conversion
         int raw = hal::adc::readRaw(_handle);
         if (raw < 0) {
             return js::failSystem(EIO, "adc: read");
         }
+
         return raw;
     }
 
@@ -89,14 +94,17 @@ public:
      * Throws if closed or if the conversion fails (EIO).
      */
     JS_EXPORT(readVoltage) double readVoltage() {
+        // closed: nothing to read
         if (!isOpen()) {
             return js::fail("adc: closed");
         }
 
+        // one conversion, calibrated by the hal
         int millivolts = hal::adc::readMillivolts(_handle);
         if (millivolts < 0) {
             return js::failSystem(EIO, "adc: readVoltage");
         }
+
         return millivolts / 1000.0;
     }
 

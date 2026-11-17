@@ -104,7 +104,8 @@ int waitReadable(Socket socket, int timeoutMs) {
 /**
  * Nothing to initialize on POSIX.
  */
-void initialize() {}
+void initialize() {
+}
 
 /**
  * errno is already the right code on POSIX.
@@ -157,6 +158,7 @@ namespace {
  * (ENOENT) if the name is unknown.
  */
 bool resolve(const char *host, int port, sockaddr_in *address, int *error) {
+    // IPv4, the port in network order
     memset(address, 0, sizeof(*address));
     address->sin_family = AF_INET;
     address->sin_port = htons((uint16_t)port);
@@ -179,11 +181,13 @@ bool resolve(const char *host, int port, sockaddr_in *address, int *error) {
     hints.ai_socktype = SOCK_STREAM;
 
     addrinfo *found = nullptr;
-    if (getaddrinfo(host, nullptr, &hints, &found) != 0 || found == nullptr) {
+    bool foundOne = getaddrinfo(host, nullptr, &hints, &found) == 0 && found != nullptr;
+    if (!foundOne) {
         *error = ENOENT;   // like Node's ENOTFOUND
         return false;
     }
 
+    // its address taken, the list freed
     address->sin_addr = ((sockaddr_in *)found->ai_addr)->sin_addr;
     freeaddrinfo(found);
     return true;
@@ -195,7 +199,7 @@ bool resolve(const char *host, int port, sockaddr_in *address, int *error) {
 void setUpConnected(Socket socket) {
     // small messages (debugger protocol): send them right away (TCP_NODELAY)
     int noDelay = 1;
-    setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (const char *)(&noDelay), sizeof(noDelay));
+    setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (const char *)&noDelay, sizeof(noDelay));
 
     // macOS has no MSG_NOSIGNAL for send() on older systems: the socket itself
     // is told not to raise SIGPIPE when the peer is gone (see sendAll)
@@ -228,12 +232,13 @@ Socket connectTo(const char *host, int port, int *error) {
     }
 
     // connect; blocks: the net module calls it from a thread of its own
-    if (connect(socket, (sockaddr *)(&address), sizeof(address)) != 0) {
+    if (connect(socket, (sockaddr *)&address, sizeof(address)) != 0) {
         *error = lastError();
         closeSocket(socket);
         return invalidSocket;
     }
 
+    // connected: its options
     setUpConnected(socket);
     return socket;
 }
@@ -243,12 +248,14 @@ Socket connectTo(const char *host, int port, int *error) {
  * On failure *error is set and invalidSocket returned.
  */
 Socket acceptConnection(Socket listener, int *error) {
+    // the next connection (blocks)
     Socket socket = accept(listener, nullptr, nullptr);
     if (socket == invalidSocket) {
         *error = lastError();
         return invalidSocket;
     }
 
+    // its options, as a connected socket
     setUpConnected(socket);
     return socket;
 }
@@ -281,7 +288,7 @@ Socket listenOn(const char *host, int port, int *boundPort, int *error) {
 #endif
 
     // bind and listen (backlog 8)
-    bool ok = bind(socket, (sockaddr *)(&address), sizeof(address)) == 0
+    bool ok = bind(socket, (sockaddr *)&address, sizeof(address)) == 0
            && listen(socket, 8) == 0;
     if (!ok) {
         *error = lastError();
@@ -292,7 +299,7 @@ Socket listenOn(const char *host, int port, int *boundPort, int *error) {
     // read back the bound port (the one chosen by the system when 'port' is 0)
     sockaddr_in bound;
     socklen_t length = sizeof(bound);
-    getsockname(socket, (sockaddr *)(&bound), &length);
+    getsockname(socket, (sockaddr *)&bound, &length);
     *boundPort = ntohs(bound.sin_port);
     return socket;
 }
@@ -352,13 +359,14 @@ bool sendAll(Socket socket, const uint8_t *data, size_t size, int *error) {
  * socket has no peer.
  */
 void peerName(Socket socket, char *text, size_t size, int *port) {
+    // nothing until known
     sockaddr_in address;
     socklen_t length = sizeof(address);
     text[0] = 0;
     *port = 0;
 
     // getpeername fails if the socket has no peer
-    if (getpeername(socket, (sockaddr *)(&address), &length) == 0) {
+    if (getpeername(socket, (sockaddr *)&address, &length) == 0) {
         inet_ntop(AF_INET, &address.sin_addr, text, (socklen_t)size);
         *port = ntohs(address.sin_port);
     }

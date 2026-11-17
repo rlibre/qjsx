@@ -30,11 +30,13 @@ namespace {
  * hold its bytes.
  */
 RamPackage *newPackage(size_t size) {
+    // its bytes: the only allocation allowed to fail
     uint8_t *data = (uint8_t *)memory::tryAllocate(size);
     if (data == nullptr) {
         return nullptr;
     }
 
+    // its record, with the one reference of its creator
     RamPackage *package = (RamPackage *)memory::allocate(sizeof(RamPackage));
     *package = RamPackage{ data, size, "", 1 };
     return package;
@@ -76,6 +78,7 @@ bool RamStorage::beginUpload(size_t size) {
     _upload = package;
     _mutex.unlock();
 
+    // freed outside the lock
     if (previous != nullptr) {
         freePackage(previous);
     }
@@ -102,6 +105,7 @@ bool RamStorage::writeUpload(size_t offset, const uint8_t *data, size_t size) {
  * reference.
  */
 bool RamStorage::finishUpload(const char *buildId) {
+    // nothing uploaded: nothing to finish
     _mutex.lock();
     RamPackage *package = _upload;
     if (package == nullptr) {
@@ -157,6 +161,7 @@ bool RamStorage::installed(char *buildId, size_t buildIdSize, size_t *packageSiz
  * Takes a reference on the current package for the runner.
  */
 const uint8_t *RamStorage::acquire(size_t *size, char *buildId, size_t buildIdSize) {
+    // no package in RAM: the runner takes the installed one
     _mutex.lock();
     RamPackage *package = _current;
     if (package == nullptr) {
@@ -177,6 +182,7 @@ const uint8_t *RamStorage::acquire(size_t *size, char *buildId, size_t buildIdSi
  * Drops the runner's reference.
  */
 void RamStorage::release(const uint8_t *data) {
+    // only the package the runner acquired: any other bytes are ignored
     _mutex.lock();
     RamPackage *package = _running;
     if (package != nullptr && package->data == data) {

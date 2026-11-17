@@ -106,6 +106,7 @@ js::Buffer randomBytes(js::Range<int, 0, 2147483647> size) {
     if (bytes.data() != nullptr) {
         rt::randomBytes(bytes.data(), bytes.size());
     }
+
     return bytes;
 }
 

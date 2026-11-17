@@ -39,6 +39,10 @@ function programSource() {
         lines.push("    return a;");
         lines.push("}");
     }
+    // every function stays in the package: 'qjsx build' leaves out what
+    // nothing uses
+    const names = Array.from({ length: FUNCTION_COUNT }, (unused, f) => `f${f}`);
+    lines.push(`globalThis.allFunctions = [${names.join(", ")}];`);
     lines.push(`const longLine = "é€😀-".repeat(3000);`);
     lines.push("const big = {};");
     lines.push(`for (const name of "abcdefgh") { big[name] = name.repeat(3000); }`);

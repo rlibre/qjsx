@@ -34,7 +34,7 @@ namespace {
 
 const int      FIRST_FAST_PORT = 6;               // GPIO6
 const int      FAST_PORTS = 4;                    // GPIO6 to GPIO9
-const int      PORT_BITS = 32;
+const int      PORT_BITS = 32;                    // bits of a port
 // ALT5: the pad is a GPIO; SION: its input path stays on, so that PSR reads
 // the pad's level for an output too (as PJRC's core does)
 const uint32_t MUX_GPIO = 5 | IOMUXC_SW_MUX_CTL_PAD_SION_MASK;
@@ -48,11 +48,12 @@ const uint32_t PAD_PULL_DOWN_100K = 0;
 const uint32_t PAD_PULL_UP_22K = 3;
 const uint32_t PAD_AT_RESET = 0x10B0;             // the pads' reset value: keeper, DSE 6, speed 2
 
+// The registers of each fast port (index: port number - FIRST_FAST_PORT).
 GPIO_Type *const FAST_PORT_BASES[FAST_PORTS] = { GPIO6, GPIO7, GPIO8, GPIO9 };
 
 // The board's pin of each fast port bit (-1: none), for the interrupt.
-int8_t pinOfBit[FAST_PORTS][PORT_BITS];
-bool   pinOfBitReady = false;
+int8_t pinOfBit[FAST_PORTS][PORT_BITS];   // filled once by mapBits()
+bool   pinOfBitReady = false;             // pinOfBit is filled
 
 /**
  * The fast GPIO port of a pin.
@@ -85,12 +86,14 @@ void mapBits() {
         return;
     }
 
+    // no pin on any bit
     for (int port = 0; port < FAST_PORTS; port++) {
         for (int bit = 0; bit < PORT_BITS; bit++) {
             pinOfBit[port][bit] = -1;
         }
     }
 
+    // then the bit of each pin
     for (int pin = 0; pin < board::PIN_COUNT; pin++) {
         pinOfBit[board::PINS[pin].port - FIRST_FAST_PORT][board::PINS[pin].bit] = (int8_t)pin;
     }
@@ -102,11 +105,13 @@ void mapBits() {
  * The pad control value of a mode and a pull.
  */
 uint32_t padControl(Mode mode, Pull pull) {
+    // drive, speed, hysteresis; open drain
     uint32_t value = PAD_BASE;
     if (mode == Mode::openDrain) {
         value |= IOMUXC_SW_PAD_CTL_PAD_ODE_MASK;
     }
 
+    // the pull, if any
     if (pull == Pull::up) {
         value |= PAD_PULL | IOMUXC_SW_PAD_CTL_PAD_PUS(PAD_PULL_UP_22K);
     } else if (pull == Pull::down) {
@@ -131,7 +136,8 @@ int pinCount() {
  * 3. an output drives 0 from now on, an input does not drive.
  */
 bool configure(int pin, Mode mode, Pull pull) {
-    if (pin < 0 || pin >= board::PIN_COUNT) {
+    bool isPin = pin >= 0 && pin < board::PIN_COUNT;
+    if (!isPin) {
         return false;
     }
 
@@ -184,6 +190,7 @@ void toggle(int pin) {
  * Interrupt on both edges, changes reported by the shared watch.
  */
 bool watch(int pin, int debounceMs, ChangeHandler *handler) {
+    // the shared watch (its event task), once
     if (!gpiowatch::start(board::PIN_COUNT, &read)) {
         return false;
     }
@@ -222,10 +229,12 @@ void unwatch(int pin) {
  * Not watched any more, then as at boot: input, the pad's reset value.
  */
 void reset(int pin) {
-    if (pin < 0 || pin >= board::PIN_COUNT) {
+    bool isPin = pin >= 0 && pin < board::PIN_COUNT;
+    if (!isPin) {
         return;
     }
 
+    // not watched, then an input with the pad as at reset
     unwatch(pin);
     portOf(pin)->GDIR &= ~bitOf(pin);
     IOMUXC->SW_PAD_CTL_PAD[board::PINS[pin].control] = PAD_AT_RESET;
@@ -240,14 +249,17 @@ void reset(int pin) {
  */
 extern "C" void GPIO6_7_8_9_IRQHandler(void) {
     for (int index = 0; index < hal::gpio::FAST_PORTS; index++) {
+        // the bits pending and enabled, acknowledged
         GPIO_Type *port = hal::gpio::FAST_PORT_BASES[index];
         uint32_t pending = port->ISR & port->IMR;
         port->ISR = pending;
 
         while (pending != 0) {
+            // the lowest pending bit, then cleared from 'pending'
             int bit = __builtin_ctz(pending);
             pending &= pending - 1;
 
+            // its pin to the watch (a bit without pin: ignored)
             int pin = hal::gpio::pinOfBit[index][bit];
             if (pin >= 0) {
                 gpiowatch::postFromInterrupt(pin);
@@ -255,5 +267,6 @@ extern "C" void GPIO6_7_8_9_IRQHandler(void) {
         }
     }
 
+    // the acknowledgements done before the return (no spurious interrupt again)
     __DSB();
 }

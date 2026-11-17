@@ -201,66 +201,94 @@ export const OBJECT_KIND = {
 
 export const PROPERTY = { WRITABLE: 1, ENUMERABLE: 2, CONFIGURABLE: 4, ACCESSOR: 8 };
 
-// DATA of SET_STOPS: [{ number, offsets: [pc...] }] -> bytes
-// (for each function: u16 number, u32 count, count x u32 offsets, big endian).
+/**
+ * DATA of SET_STOPS: [{ number, offsets: [pc...] }] -> bytes
+ * (for each function: u16 number, u32 count, count x u32 offsets, big endian).
+ */
 export function encodeStops(functions) {
+    // 6 bytes of header per function, 4 per offset
     const size = functions.reduce((total, entry) => total + 6 + entry.offsets.length * 4, 0);
     const bytes = new Uint8Array(size);
     const view = new DataView(bytes.buffer);
     let position = 0;
+
     for (const entry of functions) {
+        // header: function number, count of offsets
         view.setUint16(position, entry.number);
         view.setUint32(position + 2, entry.offsets.length);
         position += 6;
+
+        // the offsets
         for (const offset of entry.offsets) {
             view.setUint32(position, offset);
             position += 4;
         }
     }
+
     return bytes;
 }
 
-// Cuts the stops of 'functions' ([{ number, offsets }]) into groups whose
-// encodeStops() takes at most 'maxBytes' bytes, each function whole: the
-// agent replaces the stops function by function, so several SET_STOPS do
-// what one would. At least one group (empty when 'functions' is). Throws
-// when a function alone does not fit.
+/**
+ * Cuts the stops of 'functions' ([{ number, offsets }]) into groups whose
+ * encodeStops() takes at most 'maxBytes' bytes, each function whole: the
+ * agent replaces the stops function by function, so several SET_STOPS do
+ * what one would. At least one group (empty when 'functions' is). Throws
+ * when a function alone does not fit.
+ */
 export function splitStops(functions, maxBytes) {
     const groups = [];
     let group = [];
     let size = 0;
+
     for (const entry of functions) {
+        // a function too large for one message cannot be sent at all
         const entrySize = 6 + entry.offsets.length * 4;
         if (entrySize > maxBytes) {
             throw new Error(`function ${entry.number} has ${entry.offsets.length} stops: `
                 + `more than one message of the device holds (${maxBytes} bytes)`);
         }
+
+        // the current group is full: start another one
         if (size + entrySize > maxBytes) {
             groups.push(group);
             group = [];
             size = 0;
         }
+
+        // the function goes into the current group
         group.push(entry);
         size += entrySize;
     }
+
     groups.push(group);
     return groups;
 }
 
+/**
+ * [kind, id, payload] -> CBOR bytes (a missing payload is sent as null).
+ */
 export function encodeMessage(kind, id, payload) {
     return encode([kind, id, payload ?? null]);
 }
 
-// -> { kind, id, payload: Map | null }
+/**
+ * CBOR bytes -> { kind, id, payload: Map | null }
+ */
 export function decodeMessage(bytes) {
+    // a message is an array of three values
     const message = decode(bytes);
-    if (!Array.isArray(message) || message.length !== 3) {
+    const isMessage = Array.isArray(message) && message.length === 3;
+    if (!isMessage) {
         throw new Error("protocol: a message must be [kind, id, payload]");
     }
+
     const [kind, id, payload] = message;
     return { kind, id, payload };
 }
 
+/**
+ * Name of a KIND value, for messages ("kind <number>" when unknown).
+ */
 export function kindName(kind) {
     return Object.keys(KIND).find(name => KIND[name] === kind) ?? `kind ${kind}`;
 }

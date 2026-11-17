@@ -18,18 +18,23 @@
 
 #include "fsl_device_registers.h"
 
-/* masks every interrupt; returns the previous mask */
+/**
+ * Masks every interrupt; returns the previous mask.
+ */
 static inline uint32_t enterCritical(void) {
     uint32_t previous = __get_PRIMASK();
     __disable_irq();
     return previous;
 }
 
-/* restores the mask of enterCritical */
+/**
+ * Restores the mask of enterCritical.
+ */
 static inline void exitCritical(uint32_t previous) {
     __set_PRIMASK(previous);
 }
 
+/* GCC's names given to the functions below (asm labels) */
 uint64_t atomicLoad8(const volatile void *address, int order) __asm__("__atomic_load_8");
 void atomicStore8(volatile void *address, uint64_t value, int order) __asm__("__atomic_store_8");
 uint64_t atomicExchange8(volatile void *address, uint64_t value, int order) __asm__("__atomic_exchange_8");
@@ -91,6 +96,7 @@ bool atomicCompareExchange8(volatile void *address, void *expected, uint64_t des
     } else {
         *(uint64_t *)expected = current;
     }
+
     exitCritical(mask);
     return equal;
 }

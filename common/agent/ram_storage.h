@@ -33,54 +33,57 @@ public:
     /**
      * Frees the packages (none may be acquired any more).
      */
-                   ~RamStorage();
+                    ~RamStorage();
 
     /**
      * Allocates the room of the coming package. False if the RAM cannot hold
      * it (the current package stays).
      */
-    bool           beginUpload(size_t size) override;
+    bool            beginUpload(size_t size) override;
 
     /**
      * Copies a chunk into the coming package.
      */
-    bool           writeUpload(size_t offset, const uint8_t *data, size_t size) override;
+    bool            writeUpload(size_t offset, const uint8_t *data, size_t size) override;
 
     /**
      * The coming package becomes the current one; the previous one is freed
      * (later, if the runner still runs it).
      */
-    bool           finishUpload(const char *buildId) override;
+    bool            finishUpload(const char *buildId) override;
 
     /**
      * Frees the coming package; the current one stays.
      */
-    void           abortUpload() override;
+    void            abortUpload() override;
 
     /**
      * Build id and size of the current package. False if none.
      */
-    bool           installed(char *buildId, size_t buildIdSize, size_t *packageSize) override;
+    bool            installed(char *buildId, size_t buildIdSize, size_t *packageSize) override;
 
     /**
      * The current package for a run (JS thread): its bytes, size and build
      * id; kept alive until release(). nullptr if none.
      */
-    const uint8_t *acquire(size_t *size, char *buildId, size_t buildIdSize);
+    const uint8_t  *acquire(size_t *size, char *buildId, size_t buildIdSize);
 
     /**
      * Gives back what acquire() returned.
      */
-    void           release(const uint8_t *package);
+    void            release(const uint8_t *package);
 
     /**
      * Drops the current package (a package installed in flash replaces it, a
      * desktop "reset" loses it); freed now or when its run releases it.
      */
-    void           clear();
+    void            clear();
 
 private:
-    void           unreference(RamPackage *package);
+    /**
+     * One reference less; the last one frees the package. _mutex held.
+     */
+    void            unreference(RamPackage *package);
 
     platform::Mutex _mutex;                // protects the fields below
     RamPackage     *_current = nullptr;    // the package RUN starts; owned (one reference)

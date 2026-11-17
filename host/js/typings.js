@@ -26,41 +26,56 @@ const TYPES_FOLDER = ".qjsx/types";           // in the project
 const TYPES_REFERENCE = "./.qjsx/types";      // its entry in compilerOptions.types
 const CONFIG_FILES = ["jsconfig.json", "tsconfig.json"];
 
-// The index.d.ts of the folder: every declaration file, globals first.
+/**
+ * The index.d.ts of the folder: every declaration file, globals first.
+ */
 function typingsText() {
     const parts = ["// Written by \"qjsx build\" from the typings of qjsx: do not edit.\n"];
+
+    // globals first, then the modules by name
     const ordered = [...TYPINGS].sort((a, b) => {
         const aGlobals = a.name === "globals" ? 0 : 1;
         const bGlobals = b.name === "globals" ? 0 : 1;
         return aGlobals - bGlobals || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     });
+
+    // each one under a title line
     for (const typing of ordered) {
         parts.push(`// ### ${typing.name} ###\n`);
         parts.push(typing.text);
     }
+
     return parts.join("\n");
 }
 
-// Writes 'text' to 'file' unless it holds it already (VS Code reloads a
-// changed declaration file).
+/**
+ * Writes 'text' to 'file' unless it holds it already (VS Code reloads a
+ * changed declaration file).
+ */
 function writeIfChanged(file, text) {
+    // what the file holds now, null when missing
     let current = null;
     try {
         current = fs.readFileSync(file, "utf8");
     } catch {
         // missing: written below
     }
+
+    // written only when different
     if (current !== text) {
         fs.writeFileSync(file, text);
     }
 }
 
-// The JSON of a jsconfig.json / tsconfig.json, which may hold comments and
-// trailing commas (JSONC). Comments outside strings are removed, then commas
-// before '}' or ']'.
+/**
+ * The JSON of a jsconfig.json / tsconfig.json, which may hold comments and
+ * trailing commas (JSONC). Comments outside strings are removed, then commas
+ * before '}' or ']'.
+ */
 export function parseJsonc(text) {
     let json = "";
     let index = 0;
+
     while (index < text.length) {
         const character = text[index];
         const next = text[index + 1];
@@ -68,9 +83,12 @@ export function parseJsonc(text) {
         // a string: copied whole, escapes included
         if (character === "\"") {
             let end = index + 1;
+
+            // a backslash and the character it escapes are skipped together
             while (end < text.length && text[end] !== "\"") {
                 end += text[end] === "\\" ? 2 : 1;
             }
+
             json += text.slice(index, end + 1);
             index = end + 1;
             continue;
@@ -82,12 +100,14 @@ export function parseJsonc(text) {
             index = end < 0 ? text.length : end;
             continue;
         }
+
         if (character === "/" && next === "*") {
             const end = text.indexOf("*/", index + 2);
             index = end < 0 ? text.length : end + 2;
             continue;
         }
 
+        // anything else: copied
         json += character;
         index++;
     }
@@ -97,7 +117,9 @@ export function parseJsonc(text) {
     return JSON.parse(withoutCommas);
 }
 
-// The jsconfig.json written when the project has no configuration.
+/**
+ * The jsconfig.json written when the project has no configuration.
+ */
 function defaultConfig(output) {
     const config = {
         compilerOptions: {
@@ -109,38 +131,53 @@ function defaultConfig(output) {
         },
         exclude: [".qjsx", output],
     };
+
     return JSON.stringify(config, null, 4) + "\n";
 }
 
-// True when the entry 'entry' of compilerOptions.types names the typings
-// folder (".qjsx/types", "./.qjsx/types/", ".\\.qjsx\\types").
+/**
+ * True when the entry 'entry' of compilerOptions.types names the typings
+ * folder (".qjsx/types", "./.qjsx/types/", ".\\.qjsx\\types").
+ */
 function namesTypesFolder(entry) {
-    const normalized = String(entry).replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/\/+$/, "");
+    // '/' separators, without leading "./" nor trailing '/'
+    const withSlashes = String(entry).replace(/\\/g, "/");
+    const normalized = withSlashes.replace(/^(\.\/)+/, "").replace(/\/+$/, "");
     return normalized === TYPES_FOLDER;
 }
 
-// What to add to the configuration 'config' (parsed, from 'file') so that
-// VS Code sees the typings: { warning, fix } (a sentence, and the JSON text
-// to add, to copy as it is), or null when nothing is missing.
+/**
+ * What to add to the configuration 'config' (parsed, from 'file') so that
+ * VS Code sees the typings: { warning, fix } (a sentence, and the JSON text
+ * to add, to copy as it is), or null when nothing is missing.
+ */
 function missingSetting(config, file) {
     const options = config.compilerOptions ?? {};
+
+    // no types at all: the whole setting is missing
     if (!Array.isArray(options.types)) {
         return { warning: `add to compilerOptions in ${file}:`, fix: `"types": ["${TYPES_REFERENCE}"]` };
     }
-    if (!options.types.some(namesTypesFolder)) {
+
+    // types without the folder: its entry is missing
+    const namesFolder = options.types.some(namesTypesFolder);
+    if (!namesFolder) {
         return { warning: `add to compilerOptions.types in ${file}:`, fix: `"${TYPES_REFERENCE}"` };
     }
+
     return null;
 }
 
-// Writes the typings in the project in 'directory' (its output folder is
-// 'output', relative). Returns { file, configWritten, warning, fix }:
-//   - file: the index.d.ts written;
-//   - configWritten: the jsconfig.json written, or null when the project
-//     had a configuration;
-//   - warning: a sentence when that configuration hides the typings (also
-//     when it cannot be read: VS Code would not read it either), or null;
-//   - fix: the JSON text to add to it, or null.
+/**
+ * Writes the typings in the project in 'directory' (its output folder is
+ * 'output', relative). Returns { file, configWritten, warning, fix }:
+ *   - file: the index.d.ts written;
+ *   - configWritten: the jsconfig.json written, or null when the project
+ *     had a configuration;
+ *   - warning: a sentence when that configuration hides the typings (also
+ *     when it cannot be read: VS Code would not read it either), or null;
+ *   - fix: the JSON text to add to it, or null.
+ */
 export function writeTypings(directory, output) {
     // the declarations, in .qjsx/types
     const folder = join(directory, TYPES_FOLDER);
@@ -163,6 +200,8 @@ export function writeTypings(directory, output) {
     } catch (error) {
         return { file, configWritten: null, warning: `${existing} cannot be read (${error.message}).`, fix: null };
     }
+
+    // a warning and its fix when it does not
     const missing = missingSetting(config, existing);
     if (missing === null) {
         return { file, configWritten: null, warning: null, fix: null };

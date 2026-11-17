@@ -29,7 +29,8 @@ namespace {
 bool endsWith(const char *text, const char *suffix) {
     size_t textLength = strlen(text);
     size_t suffixLength = strlen(suffix);
-    return textLength >= suffixLength && strcmp(text + textLength - suffixLength, suffix) == 0;
+    bool longEnough = textLength >= suffixLength;
+    return longEnough && strcmp(text + textLength - suffixLength, suffix) == 0;
 }
 
 /**
@@ -56,19 +57,18 @@ JSModuleDef *loadFileModule(JSContext *ctx, const char *name, void *) {
  * uncaught exception stops the program.
  */
 rt::RunHooks fileHooks() {
+    // the defaults, plus: stop on an uncaught exception, files as modules
     rt::RunHooks hooks = {};
     hooks.exitOnUncaught = true;
     hooks.loadModule = &loadFileModule;
     return hooks;
 }
 
-/**
- * Main module given as source text.
- */
+// Main module given as source text.
 struct SourceStart {
     const char *name;     // module name (borrowed)
     const char *source;   // source text, borrowed
-    size_t size;          // bytes of source
+    size_t      size;     // bytes of source
 };
 
 /**
@@ -94,6 +94,7 @@ bool startSource(JSContext *ctx, void *startOpaque) {
  * imports may load files. 'source' must stay valid during the call. Returns the exit code.
  */
 int runSource(const char *name, const char *source, size_t size, int argumentCount, char **arguments) {
+    // startSource compiles and evaluates it in the new runtime
     SourceStart start = { name, source, size };
     rt::RunHooks hooks = fileHooks();
     return rt::runProgram(nullptr, &startSource, &start, &hooks, argumentCount, arguments);
@@ -137,7 +138,11 @@ int runPackageFile(const char *path, int argumentCount, char **arguments, const 
     // load the whole package into memory
     size_t size = 0;
     uint8_t *data = files::readAll(path, &size);
-    char *folder = data != nullptr ? folderOf(path) : nullptr;
+    char *folder = nullptr;
+    if (data != nullptr) {
+        folder = folderOf(path);
+    }
+
     if (folder == nullptr) {
         fprintf(stderr, "qjsx: cannot read %s: %s\n", path, strerror(errno));
         memory::release(data);
@@ -183,8 +188,13 @@ int runFile(const char *path, int argumentCount, char **arguments, const Launch 
     bool isPackage = endsWith(normalized, ".qjspkg");
 
     // run it as a package or as a source module
-    int exitCode = isPackage ? runPackageFile(normalized, argumentCount, arguments, launch)
-                             : runScriptFile(normalized, argumentCount, arguments, launch);
+    int exitCode = 0;
+    if (isPackage) {
+        exitCode = runPackageFile(normalized, argumentCount, arguments, launch);
+    } else {
+        exitCode = runScriptFile(normalized, argumentCount, arguments, launch);
+    }
+
     memory::release(normalized);
     return exitCode;
 }

@@ -24,15 +24,22 @@ export default class Ws2812 extends Part {
      */
     constructor(config, board) {
         super(config, board);
+
+        // its fields: count (1 by default), order ("grb" by default)
         const count = config.count ?? 1;
         const order = config.order ?? "grb";
-        if (!Number.isInteger(count) || count < 1 || count > 1024) {
+        const isBadCount = !Number.isInteger(count) || count < 1 || count > 1024;
+        if (isBadCount) {
             throw new Error('"count" must be 1 to 1024');
         }
-        if (typeof order !== "string" || [...order].sort().join("") !== "bgr") {
+
+        // the letters sorted are "bgr" exactly when it holds r, g and b once each
+        const isBadOrder = typeof order !== "string" || [...order].sort().join("") !== "bgr";
+        if (isBadOrder) {
             throw new Error('"order" must be the three letters r, g, b in some order ("grb")');
         }
 
+        // the RMT sends on its pin decoded; all off until then
         this._count = count;
         this._order = order;
         board.rmt(parsePin(config.pin)).onBytes(bytes => this._show(bytes));
@@ -45,19 +52,26 @@ export default class Ws2812 extends Part {
      */
     _show(bytes) {
         const colors = [];
+
         for (let index = 0; index < this._count; index++) {
+            // past the bytes: off
             const offset = index * 3;
-            if (offset + 3 > bytes.length) {
+            const isPastBytes = offset + 3 > bytes.length;
+            if (isPastBytes) {
                 colors.push([0, 0, 0]);
                 continue;
             }
 
+            // its 3 bytes, in the order of the LED
             const color = { r: 0, g: 0, b: 0 };
+
             for (let channel = 0; channel < 3; channel++) {
                 color[this._order[channel]] = bytes[offset + channel];
             }
+
             colors.push([color.r, color.g, color.b]);
         }
+
         this.publish({ colors });
     }
 }

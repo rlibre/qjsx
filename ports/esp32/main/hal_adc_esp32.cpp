@@ -31,8 +31,8 @@ const int HIGHEST_MV = 3300;             // the highest range accepted
 
 // An attenuation and the span it reads.
 struct Attenuation {
-    adc_atten_t atten;                   // the setting of the channel
-    int spanMv;                          // what it reads, about
+    adc_atten_t atten;    // the setting of the channel
+    int         spanMv;   // what it reads, about
 };
 
 // From the smallest span to the largest (ESP-IDF, "ADC attenuation").
@@ -45,16 +45,16 @@ const Attenuation ATTENUATIONS[] = {
 
 // An open input.
 struct Input {
-    bool used;                           // open() gave it
-    int pin;                             // its GPIO
-    adc_channel_t channel;               // its channel of ADC1
-    int spanMv;                          // the span of its attenuation
-    adc_cali_handle_t calibration;       // nullptr: none (a straight line)
+    bool              used;          // open() gave it
+    int               pin;           // its GPIO
+    adc_channel_t     channel;       // its channel of ADC1
+    int               spanMv;        // the span of its attenuation
+    adc_cali_handle_t calibration;   // nullptr: none (a straight line)
 };
 
 adc_oneshot_unit_handle_t unit = nullptr;   // ADC1, made at the first open
 int unitUsers = 0;                          // inputs open on it
-Input inputs[MAX_INPUTS];
+Input inputs[MAX_INPUTS];                   // by handle
 
 /**
  * The attenuation for a range: the first whose span covers it, the largest
@@ -66,6 +66,7 @@ Attenuation attenuationFor(int rangeMv) {
             return attenuation;
         }
     }
+
     return ATTENUATIONS[sizeof(ATTENUATIONS) / sizeof(ATTENUATIONS[0]) - 1];
 }
 
@@ -75,6 +76,8 @@ Attenuation attenuationFor(int rangeMv) {
  */
 adc_cali_handle_t makeCalibration(adc_channel_t channel, adc_atten_t atten) {
     adc_cali_handle_t handle = nullptr;
+
+    // curve fitting, where the chip has it
 #if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
     adc_cali_curve_fitting_config_t curve = {};
     curve.unit_id = ADC_UNIT_1;
@@ -85,6 +88,8 @@ adc_cali_handle_t makeCalibration(adc_channel_t channel, adc_atten_t atten) {
         return handle;
     }
 #endif
+
+    // else line fitting
 #if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
     adc_cali_line_fitting_config_t line = {};
     line.unit_id = ADC_UNIT_1;
@@ -94,6 +99,8 @@ adc_cali_handle_t makeCalibration(adc_channel_t channel, adc_atten_t atten) {
         return handle;
     }
 #endif
+
+    // no scheme, or it failed: none
     (void)channel;
     (void)atten;
     return nullptr;
@@ -106,6 +113,8 @@ void deleteCalibration(adc_cali_handle_t handle) {
     if (handle == nullptr) {
         return;
     }
+
+    // by the scheme makeCalibration() chose
 #if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
     adc_cali_delete_scheme_curve_fitting(handle);
 #elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
@@ -120,6 +129,7 @@ Input *inputOf(int handle) {
     if (handle < 0 || handle >= MAX_INPUTS || !inputs[handle].used) {
         return nullptr;
     }
+
     return &inputs[handle];
 }
 
@@ -141,19 +151,24 @@ Opened open(int pin, int rangeMv) {
     adc_unit_t unitId = ADC_UNIT_1;
     adc_channel_t channel = ADC_CHANNEL_0;
     bool isAdc1 = adc_oneshot_io_to_channel(pin, &unitId, &channel) == ESP_OK && unitId == ADC_UNIT_1;
-    if (!isAdc1 || rangeMv <= 0 || rangeMv > HIGHEST_MV) {
+    bool rangeReadable = rangeMv > 0 && rangeMv <= HIGHEST_MV;
+    if (!isAdc1 || !rangeReadable) {
         return refused;
     }
 
+    // the pin not open yet, a free entry
     int free = -1;
+
     for (int i = 0; i < MAX_INPUTS; i++) {
         if (inputs[i].used && inputs[i].pin == pin) {
             return Opened{ -1, EBUSY, 0, 0 };
         }
+
         if (!inputs[i].used && free < 0) {
             free = i;
         }
     }
+
     if (free < 0) {
         return Opened{ -1, EBUSY, 0, 0 };
     }
@@ -177,6 +192,7 @@ Opened open(int pin, int rangeMv) {
         return Opened{ -1, EIO, 0, 0 };
     }
 
+    // the input, with its calibration
     inputs[free] = Input{ true, pin, channel, attenuation.spanMv, makeCalibration(channel, attenuation.atten) };
     unitUsers++;
     return Opened{ free, 0, SOC_ADC_RTC_MAX_BITWIDTH, attenuation.spanMv };
@@ -186,13 +202,17 @@ Opened open(int pin, int rangeMv) {
  * Closes an input; the unit goes with the last one.
  */
 void close(int handle) {
+    // an open input
     Input *input = inputOf(handle);
     if (input == nullptr) {
         return;
     }
 
+    // its calibration, its entry
     deleteCalibration(input->calibration);
     *input = Input{};
+
+    // the unit, with the last input
     unitUsers--;
     if (unitUsers == 0 && unit != nullptr) {
         adc_oneshot_del_unit(unit);
@@ -204,11 +224,13 @@ void close(int handle) {
  * A raw conversion.
  */
 int readRaw(int handle) {
+    // an open input, converted
     Input *input = inputOf(handle);
     int raw = 0;
     if (input == nullptr || adc_oneshot_read(unit, input->channel, &raw) != ESP_OK) {
         return -1;
     }
+
     return raw;
 }
 
@@ -226,7 +248,8 @@ int readMillivolts(int handle) {
     // calibrated
     Input *input = inputOf(handle);
     int millivolts = 0;
-    if (input->calibration != nullptr && adc_cali_raw_to_voltage(input->calibration, raw, &millivolts) == ESP_OK) {
+    bool calibrated = input->calibration != nullptr && adc_cali_raw_to_voltage(input->calibration, raw, &millivolts) == ESP_OK;
+    if (calibrated) {
         return millivolts;
     }
 

@@ -131,6 +131,7 @@ void releaseJob(Job *job) {
  */
 void runJobs(void *) {
     queueLock.lock();
+
     for (;;) {
         // 1. the oldest job
         while (queueFirst == nullptr) {
@@ -142,11 +143,16 @@ void runJobs(void *) {
         if (queueFirst == nullptr) {
             queueLast = nullptr;
         }
+
         runningBus = job->bus;
         queueLock.unlock();
 
         // 2. run it
-        uint8_t *readData = job->readSize > 0 ? (uint8_t *)memory::allocate(job->readSize) : nullptr;
+        uint8_t *readData = nullptr;
+        if (job->readSize > 0) {
+            readData = (uint8_t *)memory::allocate(job->readSize);
+        }
+
         hal::i2c::Status status = hal::i2c::Status::failed;
         if (job->device < 0) {
             status = hal::i2c::probe(job->bus, job->address, job->timeoutMs);
@@ -163,6 +169,7 @@ void runJobs(void *) {
             memory::release(readData);
             job->mailbox->post(job->source, MESSAGE_DONE, nullptr, 0, value);
         }
+
         releaseJob(job);
 
         // 4. the bus is free
@@ -176,14 +183,17 @@ void runJobs(void *) {
  * True if a job of 'bus' is queued or running. queueLock held.
  */
 bool busHasJobs(int bus) {
+    // the running one, or a queued one
     if (runningBus == bus) {
         return true;
     }
+
     for (Job *job = queueFirst; job != nullptr; job = job->next) {
         if (job->bus == bus) {
             return true;
         }
     }
+
     return false;
 }
 
@@ -193,9 +203,11 @@ bool busHasJobs(int bus) {
  */
 void waitBusIdle(int bus) {
     queueLock.lock();
+
     while (busHasJobs(bus)) {
         queueLock.wait(-1);
     }
+
     queueLock.unlock();
 }
 
@@ -210,6 +222,7 @@ void dropJobs(int bus) {
     Job *kept = nullptr;
     Job *keptLast = nullptr;
     Job *job = queueFirst;
+
     while (job != nullptr) {
         Job *next = job->next;
         if (job->bus == bus) {
@@ -221,10 +234,13 @@ void dropJobs(int bus) {
             } else {
                 keptLast->next = job;
             }
+
             keptLast = job;
         }
+
         job = next;
     }
+
     queueFirst = kept;
     queueLast = keptLast;
 
@@ -232,6 +248,7 @@ void dropJobs(int bus) {
     while (runningBus == bus) {
         queueLock.wait(-1);
     }
+
     queueLock.unlock();
 }
 
@@ -240,22 +257,26 @@ void dropJobs(int bus) {
  * the task cannot start (the job is then freed).
  */
 bool queueJob(Job *job) {
+    // the task, started at the first job
     queueLock.lock();
     if (!taskStarted) {
         taskStarted = platform::startThread(&runJobs, nullptr, platform::defaultThreadOptions("i2c"));
     }
+
     if (!taskStarted) {
         queueLock.unlock();
         releaseJob(job);
         return false;
     }
 
+    // appended to the queue; the task wakes up
     job->next = nullptr;
     if (queueLast == nullptr) {
         queueFirst = job;
     } else {
         queueLast->next = job;
     }
+
     queueLast = job;
     queueLock.notify();
     queueLock.unlock();
@@ -276,16 +297,19 @@ bool copyBytes(js::Value value, uint8_t **out, size_t *size) {
     // a typed array or an ArrayBuffer: copied as it is
     uint8_t *data = nullptr;
     JSValue buffer = JS_UNDEFINED;
-    if (!JS_IsArray(ctx, value.get()) && js::detail::bytesOf(ctx, value.get(), &data, size, &buffer)) {
+    bool isArray = JS_IsArray(ctx, value.get());
+    if (!isArray && js::detail::bytesOf(ctx, value.get(), &data, size, &buffer)) {
         bool fits = *size > 0 && *size <= (size_t)MAX_TRANSFER;
         if (fits) {
             *out = (uint8_t *)memory::allocate(*size);
             memcpy(*out, data, *size);
         }
+
         JS_FreeValue(ctx, buffer);
         if (!fits) {
             js::fail<js::TypeError>("i2c: 1 to %d bytes", MAX_TRANSFER);
         }
+
         return fits;
     }
 
@@ -298,21 +322,28 @@ bool copyBytes(js::Value value, uint8_t **out, size_t *size) {
         JS_FreeValue(ctx, lengthValue);
     }
 
-    uint8_t *bytes = valid ? (uint8_t *)memory::allocate((size_t)length) : nullptr;
+    uint8_t *bytes = nullptr;
+    if (valid) {
+        bytes = (uint8_t *)memory::allocate((size_t)length);
+    }
+
     for (int64_t i = 0; i < length && valid; i++) {
         JSValue item = JS_GetPropertyUint32(ctx, value.get(), (uint32_t)i);
         int64_t byte = 0;
-        valid = JS_IsNumber(item) && JS_ToInt64(ctx, &byte, item) == 0 && byte >= 0 && byte <= 255;
+        bool isInteger = JS_IsNumber(item) && JS_ToInt64(ctx, &byte, item) == 0;
+        valid = isInteger && byte >= 0 && byte <= 255;
         JS_FreeValue(ctx, item);
         bytes[i] = (uint8_t)byte;
     }
 
+    // anything else, or an invalid item: refused
     if (!valid) {
         memory::release(bytes);
         js::fail<js::TypeError>("i2c: bytes must be a Uint8Array or an array of 1 to %d numbers 0..255", MAX_TRANSFER);
         return false;
     }
 
+    // the copy goes to the caller
     *out = bytes;
     *size = (size_t)length;
     return true;
@@ -323,9 +354,9 @@ class I2c;
 // The open I2c object of each bus and its generation (JS thread): a device
 // finds its bus through them, never through a pointer it keeps (the
 // finalizers of a run may come in any order).
-I2c *busOwners[MAX_BUSES] = {};        // nullptr: bus closed
+I2c *busOwners[MAX_BUSES] = {};            // nullptr: bus closed
 uint32_t busGenerations[MAX_BUSES] = {};   // generation of the owner
-uint32_t lastGeneration = 0;           // given to the last bus opened
+uint32_t lastGeneration = 0;               // given to the last bus opened
 
 /**
  * An I2C master bus (JS class I2c).
@@ -352,10 +383,12 @@ public:
         if (!options.sda.has() || !options.scl.has()) {
             return (void)js::fail<js::TypeError>("i2c: the options sda and scl are required");
         }
+
         int bus = (int)port;
         if (bus >= hal::i2c::busCount()) {
             return (void)js::fail<js::RangeError>("i2c: bus %d does not exist (%d buses)", bus, hal::i2c::busCount());
         }
+
         if (busOwners[bus] != nullptr) {
             return (void)js::fail("i2c: bus %d is already open", bus);
         }
@@ -395,15 +428,21 @@ public:
      * JS: probe() blocking the JS thread: true or false.
      */
     JS_EXPORT(probeSync) bool probeSync(js::Range<int, 0, 127> address) {
+        // an open bus
         if (!checkOpen()) {
             return false;
         }
 
+        // after the transfers queued, on the JS thread
         waitBusIdle(_bus);
         hal::i2c::Status status = hal::i2c::probe(_bus, (int)address, _timeoutMs);
-        if (status == hal::i2c::Status::ok || status == hal::i2c::Status::noAck) {
+
+        // an answer or none is the result; any other status throws
+        bool answered = status == hal::i2c::Status::ok || status == hal::i2c::Status::noAck;
+        if (answered) {
             return status == hal::i2c::Status::ok;
         }
+
         return failWith(status, (int)address);
     }
 
@@ -411,10 +450,12 @@ public:
      * JS: frees a bus that a device holds stuck, after the transfers queued.
      */
     JS_EXPORT(reset) void reset() {
+        // an open bus
         if (!checkOpen()) {
             return;
         }
 
+        // after the transfers queued
         waitBusIdle(_bus);
         hal::i2c::resetBus(_bus);
     }
@@ -424,13 +465,16 @@ public:
      * The object can no longer be used.
      */
     JS_EXPORT(close) void close() {
+        // the bus, its devices and its queued jobs
         closeBus();
 
+        // the promises still pending fail
         for (int i = 0; i < MAX_PENDING; i++) {
             if (_pending[i].resolver.pending()) {
                 _pending[i].resolver.reject("i2c: bus closed");
             }
         }
+
         updateKeepAlive();
     }
 
@@ -442,6 +486,7 @@ public:
             js::fail("i2c: bus closed");
             return false;
         }
+
         return true;
     }
 
@@ -453,11 +498,13 @@ public:
                                  int timeoutMs, Answer answer) {
         // the bus must be open, with room for one more promise
         int slot = freeSlot();
-        if (!checkOpen() || slot < 0) {
+        bool isOpen = checkOpen();
+        if (!isOpen || slot < 0) {
             memory::release(writeData);
             if (_bus >= 0) {
                 js::fail("i2c: too many transfers pending (%d at most)", MAX_PENDING);
             }
+
             return js::Promise<js::Value>();
         }
 
@@ -492,7 +539,8 @@ public:
     }
 
     /**
-     * A device of this bus was added (its hal number), or removed.
+     * A device of this bus was added (its hal number). False when the bus has
+     * MAX_DEVICES already.
      */
     bool addDeviceNumber(int device) {
         for (int i = 0; i < MAX_DEVICES; i++) {
@@ -501,9 +549,13 @@ public:
                 return true;
             }
         }
+
         return false;
     }
 
+    /**
+     * A device of this bus was removed (its hal number).
+     */
     void removeDeviceNumber(int device) {
         for (int i = 0; i < MAX_DEVICES; i++) {
             if (_devices[i] == device) {
@@ -512,14 +564,23 @@ public:
         }
     }
 
+    /**
+     * The hal bus; -1 when closed.
+     */
     int busNumber() const {
         return _bus;
     }
 
+    /**
+     * The default clock of its devices, Hz.
+     */
     int frequency() const {
         return _frequency;
     }
 
+    /**
+     * The default time limit of a transfer, ms.
+     */
     int timeoutMs() const {
         return _timeoutMs;
     }
@@ -527,10 +588,10 @@ public:
 private:
     // A promise of a queued transfer, not settled yet.
     struct Pending {
-        uint32_t                id = 0;                  // its job; 0: free slot
+        uint32_t                id = 0;                     // its job; 0: free slot
         Answer                  answer = Answer::nothing;   // what it resolves with
-        int                     address = 0;             // for the error message
-        js::Resolver<js::Value> resolver;                // the promise; not pending: free
+        int                     address = 0;                // for the error message
+        js::Resolver<js::Value> resolver;                   // the promise; not pending: free
     };
 
     /**
@@ -542,6 +603,7 @@ private:
                 return i;
             }
         }
+
         return -1;
     }
 
@@ -550,19 +612,24 @@ private:
      * JS: also called by the finalizer). Nothing once done.
      */
     void closeBus() {
+        // closed already: nothing to do
         if (_bus < 0) {
             return;
         }
 
+        // no more jobs of the bus, then its devices and the bus itself
         dropJobs(_bus);
+
         for (int i = 0; i < MAX_DEVICES; i++) {
             if (_devices[i] >= 0) {
                 hal::i2c::removeDevice(_devices[i]);
                 _devices[i] = -1;
             }
         }
+
         hal::i2c::closeBus(_bus);
 
+        // its source, and the bus number free for another object
         _loop->removeSource(_source);
         _loop = nullptr;
         busOwners[_bus] = nullptr;
@@ -573,10 +640,13 @@ private:
      * Keeps the object (and the program) alive while a promise is pending.
      */
     void updateKeepAlive() {
+        // kept while any promise is pending
         bool keep = false;
+
         for (int i = 0; i < MAX_PENDING && !keep; i++) {
             keep = _pending[i].resolver.pending();
         }
+
         if (keep != _kept) {
             js::keepAlive(this, keep);
             _kept = keep;
@@ -587,24 +657,27 @@ private:
      * A queued transfer is over (JS thread): settles its promise.
      */
     static void onMessage(void *opaque, const rt::Message *message) {
+        // the value: job id in the low 32 bits, hal status above
         I2c *bus = (I2c *)opaque;
         uint32_t id = (uint32_t)(message->value & 0xffffffff);
         hal::i2c::Status status = (hal::i2c::Status)(message->value >> 32);
 
         // its promise
         Pending *pending = nullptr;
+
         for (int i = 0; i < MAX_PENDING && pending == nullptr; i++) {
             if (bus->_pending[i].resolver.pending() && bus->_pending[i].id == id) {
                 pending = &bus->_pending[i];
             }
         }
+
         if (pending == nullptr) {
             return;
         }
 
         // a probe: true / false, an error only for something else
-        if (pending->answer == Answer::presence && status != hal::i2c::Status::failed
-            && status != hal::i2c::Status::timeout) {
+        bool isAnswer = status != hal::i2c::Status::failed && status != hal::i2c::Status::timeout;
+        if (pending->answer == Answer::presence && isAnswer) {
             JSContext *ctx = js::context();
             pending->resolver.resolve(js::Value(ctx, JS_NewBool(ctx, status == hal::i2c::Status::ok)));
         } else if (status != hal::i2c::Status::ok) {
@@ -616,6 +689,7 @@ private:
             pending->resolver.resolve(js::Value());
         }
 
+        // the program may end once nothing is pending
         bus->updateKeepAlive();
     }
 
@@ -626,7 +700,7 @@ private:
                                                       -1, -1, -1, -1, -1, -1, -1, -1 };   // hal devices; -1: free
     Pending                 _pending[MAX_PENDING];       // promises not settled yet
     uint32_t                _lastId = 0;                 // id of the last job queued
-    rt::Loop               *_loop = nullptr;            // loop of the run; nullptr: closed
+    rt::Loop               *_loop = nullptr;             // loop of the run; nullptr: closed
     rt::SourceId            _source = { -1, 0 };         // message source of the results
     bool                    _kept = false;               // js::keepAlive(this, true) is in force
 };
@@ -657,9 +731,12 @@ public:
      * JS object 'busValue' it keeps alive while it lives).
      */
     void bind(int bus, js::Value busValue, int device, int address, int timeoutMs) {
+        // its bus, known by number and generation, and kept alive
         _bus = bus;
         _busGeneration = busGenerations[bus];
         _busValue = busValue;
+
+        // the device in the hal
         _device = device;
         _address = address;
         _timeoutMs = timeoutMs;
@@ -669,12 +746,15 @@ public:
      * JS: writes bytes; a promise settled when done.
      */
     JS_EXPORT(write) js::Promise<js::Value> write(js::Value bytes) {
+        // an open bus, and the bytes copied
         I2c *bus = openBus();
         uint8_t *data = nullptr;
         size_t size = 0;
         if (bus == nullptr || !copyBytes(bytes, &data, &size)) {
             return js::Promise<js::Value>();
         }
+
+        // queued: the bus takes the copy
         return bus->queue(_device, _address, data, size, 0, _timeoutMs, Answer::nothing);
     }
 
@@ -682,10 +762,13 @@ public:
      * JS: reads 'length' bytes; a promise of a Uint8Array.
      */
     JS_EXPORT(read) js::Promise<js::Value> read(js::Range<int, 1, MAX_TRANSFER> length) {
+        // an open bus
         I2c *bus = openBus();
         if (bus == nullptr) {
             return js::Promise<js::Value>();
         }
+
+        // queued
         return bus->queue(_device, _address, nullptr, 0, (size_t)(int)length, _timeoutMs, Answer::bytes);
     }
 
@@ -694,12 +777,15 @@ public:
      * register read); a promise of a Uint8Array.
      */
     JS_EXPORT(writeRead) js::Promise<js::Value> writeRead(js::Value bytes, js::Range<int, 1, MAX_TRANSFER> length) {
+        // an open bus, and the bytes copied
         I2c *bus = openBus();
         uint8_t *data = nullptr;
         size_t size = 0;
         if (bus == nullptr || !copyBytes(bytes, &data, &size)) {
             return js::Promise<js::Value>();
         }
+
+        // queued: the bus takes the copy
         return bus->queue(_device, _address, data, size, (size_t)(int)length, _timeoutMs, Answer::bytes);
     }
 
@@ -707,6 +793,7 @@ public:
      * JS: write() blocking the JS thread.
      */
     JS_EXPORT(writeSync) void writeSync(js::Value bytes) {
+        // an open bus, and the bytes copied
         I2c *bus = openBus();
         uint8_t *data = nullptr;
         size_t size = 0;
@@ -714,6 +801,7 @@ public:
             return;
         }
 
+        // after the transfers queued, on the JS thread
         waitBusIdle(_bus);
         hal::i2c::Status status = hal::i2c::transfer(_device, data, size, nullptr, 0, _timeoutMs);
         memory::release(data);
@@ -726,10 +814,13 @@ public:
      * JS: read() blocking the JS thread: a Uint8Array.
      */
     JS_EXPORT(readSync) js::Value readSync(js::Range<int, 1, MAX_TRANSFER> length) {
+        // an open bus
         I2c *bus = openBus();
         if (bus == nullptr) {
             return js::Value();
         }
+
+        // into a new Uint8Array
         return transferSync(bus, nullptr, 0, (size_t)(int)length);
     }
 
@@ -737,6 +828,7 @@ public:
      * JS: writeRead() blocking the JS thread: a Uint8Array.
      */
     JS_EXPORT(writeReadSync) js::Value writeReadSync(js::Value bytes, js::Range<int, 1, MAX_TRANSFER> length) {
+        // an open bus, and the bytes copied
         I2c *bus = openBus();
         uint8_t *data = nullptr;
         size_t size = 0;
@@ -744,6 +836,7 @@ public:
             return js::Value();
         }
 
+        // into a new Uint8Array; the copy is freed
         js::Value result = transferSync(bus, data, size, (size_t)(int)length);
         memory::release(data);
         return result;
@@ -763,9 +856,11 @@ private:
      * of the bus number, of the same generation. nullptr if not (no error).
      */
     I2c *ownerBus() {
-        if (_device < 0 || busOwners[_bus] == nullptr || busGenerations[_bus] != _busGeneration) {
+        bool isOpen = _device >= 0 && busOwners[_bus] != nullptr && busGenerations[_bus] == _busGeneration;
+        if (!isOpen) {
             return nullptr;
         }
+
         return busOwners[_bus];
     }
 
@@ -777,6 +872,7 @@ private:
         if (bus == nullptr) {
             js::fail(_device < 0 ? "i2c: device closed" : "i2c: bus closed");
         }
+
         return bus;
     }
 
@@ -785,12 +881,14 @@ private:
      * Uint8Array, after the transfers queued for the bus.
      */
     js::Value transferSync(I2c *bus, const uint8_t *writeData, size_t writeSize, size_t readSize) {
+        // the array, then the transfer after the ones queued
         js::Buffer bytes = js::Buffer::create(readSize);
         waitBusIdle(_bus);
         hal::i2c::Status status = hal::i2c::transfer(_device, writeData, writeSize, bytes.data(), readSize, _timeoutMs);
         if (status != hal::i2c::Status::ok) {
             return bus->failWith(status, _address);
         }
+
         return bytes.value();
     }
 
@@ -799,12 +897,14 @@ private:
      * already). No JS: also called by the finalizer. Nothing once done.
      */
     void closeDevice() {
+        // freed in the hal after the transfers queued, if the bus still has it
         I2c *bus = ownerBus();
         if (bus != nullptr) {
             waitBusIdle(_bus);
             hal::i2c::removeDevice(_device);
             bus->removeDeviceNumber(_device);
         }
+
         _device = -1;
     }
 
@@ -821,6 +921,7 @@ private:
  * hal and returns its object. At most MAX_DEVICES per bus.
  */
 js::Value I2c::device(js::Range<int, 0, 127> address, js::Optional<DeviceOptions> options) {
+    // an open bus
     if (!checkOpen()) {
         return js::Value();
     }
@@ -831,20 +932,23 @@ js::Value I2c::device(js::Range<int, 0, 127> address, js::Optional<DeviceOptions
     if (options.has() && options.value().frequency.has()) {
         frequency = (int)options.value().frequency.value();
     }
+
     if (options.has() && options.value().timeout.has()) {
         timeoutMs = (int)options.value().timeout.value();
     }
 
-    // the device in the hal, then its object, which keeps this one alive
+    // the device in the hal, counted by the bus
     int device = hal::i2c::addDevice(_bus, (int)address, (uint32_t)frequency);
     if (device < 0) {
         return js::fail("i2c: cannot add the device 0x%02x on bus %d", (int)address, _bus);
     }
+
     if (!addDeviceNumber(device)) {
         hal::i2c::removeDevice(device);
         return js::fail("i2c: at most %d devices per bus", MAX_DEVICES);
     }
 
+    // its JS object, which keeps the bus object alive
     js::Created<I2cDevice> created = js::create<I2cDevice>();
     if (created.object == nullptr) {
         removeDeviceNumber(device);

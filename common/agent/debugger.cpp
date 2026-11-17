@@ -22,10 +22,10 @@ namespace agent {
  */
 struct Debugger::Request {
     uint8_t *data;    // malloc'd copy of the message
-    size_t size;      // bytes of 'data'
-    int64_t kind;     // protocol request kind
-    int64_t id;       // request id, for the answer
-    bool taken;       // running on the JS thread: stays queued until answered
+    size_t   size;    // bytes of 'data'
+    int64_t  kind;    // protocol request kind
+    int64_t  id;      // request id, for the answer
+    bool     taken;   // running on the JS thread: stays queued until answered
     Request *next;    // next in the queue; nullptr: last
 };
 
@@ -35,7 +35,7 @@ struct Debugger::Request {
 struct Debugger::Handle {
     int64_t id;      // handle sent to the host
     JSValue value;   // owned
-    int group;       // protocol GROUP_*, released together
+    int     group;   // protocol GROUP_*, released together
 };
 
 /**
@@ -44,12 +44,13 @@ struct Debugger::Handle {
  */
 struct Debugger::Fields {
     struct Field {
-        int64_t key;           // protocol KEY_*
+        int64_t        key;    // protocol KEY_*
         const uint8_t *data;   // encoded value, borrowed from the message
-        size_t size;           // bytes of the encoded value
+        size_t         size;   // bytes of the encoded value
     };
+
     Field items[16];   // the first 'count' are used
-    int count = 0;     // fields indexed
+    int   count = 0;   // fields indexed
 
     /**
      * Indexes the payload (an integer-keyed map, or null for no fields).
@@ -275,7 +276,8 @@ Debugger::Debugger(Agent *agent)
       _runAborted(false), _exceptionMode(EXCEPTIONS_NONE), _mailbox(nullptr), _loopSource{ -1, 0 },
       _runActive(false), _ctx(nullptr), _loop(nullptr), _hookInstalled(false), _paused(false),
       _resumeRequested(false), _requestDepth(0), _pausedAtReturn(false), _stepMode(StepMode::None),
-      _stepStartFrame(0), _stepFrames(nullptr), _stepFrameCount(0), _stepCapacity(0), _stepAsyncFrame(0), _handles(nullptr), _handleCount(0), _handleCapacity(0), _nextHandle(1), _scripts(nullptr), _scriptCount(0) {
+      _stepStartFrame(0), _stepFrames(nullptr), _stepFrameCount(0), _stepCapacity(0), _stepAsyncFrame(0),
+      _handles(nullptr), _handleCount(0), _handleCapacity(0), _nextHandle(1), _scripts(nullptr), _scriptCount(0) {
 }
 
 /**
@@ -841,7 +843,8 @@ void Debugger::handleResume(int64_t id, Context context) {
 void Debugger::handleStep(int64_t id, const Fields *fields, Context context) {
     // the step kind: into, over or out
     int64_t kind = 0;
-    if (!fields->integer(KEY_STEP, &kind) || kind < STEP_INTO || kind > STEP_OUT) {
+    bool valid = fields->integer(KEY_STEP, &kind) && kind >= STEP_INTO && kind <= STEP_OUT;
+    if (!valid) {
         respondError(id, "STEP: STEP (1 into, 2 over, 3 out) expected");
         return;
     }
@@ -854,7 +857,13 @@ void Debugger::handleStep(int64_t id, const Fields *fields, Context context) {
 
     // start the step from the frame of the pause and ask the pause loop to
     // return; the hook ends the step (shouldStopStepping)
-    StepMode mode = kind == STEP_INTO ? StepMode::Any : kind == STEP_OVER ? StepMode::Over : StepMode::Out;
+    StepMode mode = StepMode::Out;
+    if (kind == STEP_INTO) {
+        mode = StepMode::Any;
+    } else if (kind == STEP_OVER) {
+        mode = StepMode::Over;
+    }
+
     startStep(mode);
     _resumeRequested = true;
     respondEmpty(id);
@@ -957,6 +966,7 @@ void Debugger::handleSetExceptions(int64_t id, const Fields *fields) {
  * Answers LIST_SCRIPTS with { SCRIPTS: [module name...] }, in load order.
  */
 void Debugger::handleListScripts(int64_t id) {
+    // the names recorded by moduleLoaded()
     cbor::Writer payload;
     payload.integer(KEY_SCRIPTS);
     payload.array(_scriptCount);
@@ -1169,7 +1179,11 @@ void Debugger::handleLoadFunction(int64_t id, const Fields *fields) {
     // no stop pauses meanwhile; the result is the loaded value
     _requestDepth++;
     JSValue script = JS_ReadObject(_ctx, data, size, JS_READ_OBJ_BYTECODE);
-    JSValue function = JS_IsException(script) ? JS_EXCEPTION : JS_EvalFunction(_ctx, script);
+    JSValue function = JS_EXCEPTION;
+    if (!JS_IsException(script)) {
+        function = JS_EvalFunction(_ctx, script);
+    }
+
     _requestDepth--;
 
     // reading or evaluating threw: answer { EXCEPTION }
@@ -1283,6 +1297,7 @@ void Debugger::handleCall(int64_t id, const Fields *fields) {
  * HANDLE.
  */
 void Debugger::handleRelease(int64_t id, const Fields *fields) {
+    // a whole group, or one handle
     int64_t group = 0;
     int64_t handle = 0;
     if (fields->integer(KEY_GROUP, &group)) {
@@ -1669,11 +1684,11 @@ int64_t Debugger::addHandle(JSValueConst value, int group) {
     }
 
     // append the value with the next handle number
-    Handle &handle = _handles[_handleCount++];
-    handle.id = _nextHandle++;
-    handle.value = JS_DupValue(_ctx, value);
-    handle.group = group;
-    return handle.id;
+    Handle *handle = &_handles[_handleCount++];
+    handle->id = _nextHandle++;
+    handle->value = JS_DupValue(_ctx, value);
+    handle->group = group;
+    return handle->id;
 }
 
 /**

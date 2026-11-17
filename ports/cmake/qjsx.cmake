@@ -113,6 +113,14 @@ if(QJSX_PROFILER)
     list(APPEND QJSX_DEFINES "QJSX_PROFILER")
 endif()
 
+# measure (temporary, 2026-11-17): samples of the instruction address of the
+# JS thread, globals __nativeProfileStart(intervalUs, capacity) and
+# __nativeProfileStop(); only the i.MX RT1062 port implements it for now:
+# tools/teensy.ps1 configure -DQJSX_NATIVE_PROFILER=ON (stays in the CMake cache)
+if(QJSX_NATIVE_PROFILER)
+    list(APPEND QJSX_DEFINES "QJSX_NATIVE_PROFILER")
+endif()
+
 # measure (temporary, 2026-11-16): the memory map of the board, global
 # __memoryMap(title), and one pass of the GC, global __gc();
 # idf.py -DQJSX_MEMORY_MAP=ON (stays in the CMake cache)

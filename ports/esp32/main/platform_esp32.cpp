@@ -26,7 +26,7 @@ namespace platform {
 namespace {
 
 // What a task gets when ThreadOptions leaves the choice to the platform.
-const uint32_t DEFAULT_TASK_STACK = 4096;      // bytes (ESP-IDF counts stacks in bytes)
+const uint32_t    DEFAULT_TASK_STACK = 4096;   // bytes (ESP-IDF counts stacks in bytes)
 const UBaseType_t DEFAULT_TASK_PRIORITY = 5;   // above the idle task, like the IDF examples
 
 // The core of a task that does not ask for one (ANY_CORE): every task but
@@ -41,8 +41,8 @@ const BaseType_t IO_TASK_CORE = 0;
 
 // What startThread() gives to the new task (malloc'd, freed by the task).
 struct ThreadStart {
-    ThreadFunction *run;   // thread function
-    void *argument;        // passed to run
+    ThreadFunction *run;        // thread function
+    void           *argument;   // passed to run
 };
 
 /**
@@ -112,9 +112,12 @@ bool startThread(ThreadFunction *run, void *argument, ThreadOptions options) {
  * uses the ADC: called before any program, which may open device/adc.
  */
 void startRandom() {
+    // the seed taken while the ADC's entropy source is on, then the ADC freed
     bootloader_random_enable();
     psa_status_t status = psa_crypto_init();
     bootloader_random_disable();
+
+    // no random generator: nothing secure can run
     if (status != PSA_SUCCESS) {
         fatal("the random generator could not start (psa_crypto_init)");
     }
@@ -129,6 +132,7 @@ void startRandom() {
 void randomBytes(void *buffer, size_t size) {
     const size_t RANDOM_PIECE = 64;
     uint8_t *next = (uint8_t *)buffer;
+
     while (size > 0) {
         // a piece of the DRBG
         size_t piece = size < RANDOM_PIECE ? size : RANDOM_PIECE;
@@ -139,10 +143,12 @@ void randomBytes(void *buffer, size_t size) {
         // mixed with the hardware generator
         uint8_t hardware[RANDOM_PIECE];
         esp_fill_random(hardware, piece);
+
         for (size_t index = 0; index < piece; index++) {
             next[index] ^= hardware[index];
         }
 
+        // the next piece
         next += piece;
         size -= piece;
     }

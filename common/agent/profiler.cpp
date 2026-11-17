@@ -71,6 +71,7 @@ void freeTable() {
         state.modules[i] = nullptr;
         state.atoms[i] = JS_ATOM_NULL;
     }
+
     state.moduleCount = 0;
 }
 
@@ -80,16 +81,19 @@ void freeTable() {
  * two runs.
  */
 void askSample() {
+    // between two runs: nothing to sample
     if (state.ctx == nullptr || state.load == nullptr) {
         return;
     }
 
+    // the JS thread waits in its loop: an idle sample
     bool working = __atomic_load_n(&state.load->working, __ATOMIC_RELAXED) != 0;
     if (!working) {
         state.idle++;
         return;
     }
 
+    // else the interpreter takes the sample at its next check (sample())
     __atomic_store_n(&state.pending, 1, __ATOMIC_RELAXED);
     JS_RequestInterrupt(state.ctx);
 }
@@ -100,6 +104,7 @@ void askSample() {
  */
 void samplingThread(void *) {
     for (;;) {
+        // a long sleep, unless a profile runs: then one tick, and its interval
         int sleep = IDLE_SLEEP_MS;
 
         lock()->lock();
@@ -107,6 +112,7 @@ void samplingThread(void *) {
             sleep = state.intervalMs;
             askSample();
         }
+
         lock()->unlock();
 
         platform::sleepMs(sleep);
@@ -138,6 +144,7 @@ uint32_t moduleIndex(JSContext *ctx, JSAtom atom) {
 
     // known by its name (seen in an earlier run), or added
     uint32_t index = NO_MODULE;
+
     for (int i = 0; i < state.moduleCount && index == NO_MODULE; i++) {
         if (strcmp(state.modules[i], name) == 0) {
             index = (uint32_t)i;
@@ -153,6 +160,7 @@ uint32_t moduleIndex(JSContext *ctx, JSAtom atom) {
     if (index != NO_MODULE) {
         state.atoms[index] = atom;
     }
+
     JS_FreeCString(ctx, name);
     return index;
 }
@@ -165,11 +173,15 @@ void record(JSContext *ctx) {
     JSDebugSampleFrame running[MAX_DEPTH];
     int depth = JS_DebugSampleStack(ctx, running, MAX_DEPTH);
 
+    // each frame packed as (module index << 16) | function number
     Stack sampled = {};
+
     for (int level = 0; level < depth; level++) {
         uint32_t module = moduleIndex(ctx, running[level].module_name);
-        sampled.frames[level] = (module << 16) | ((uint32_t)running[level].function_number & 0xFFFF);
+        uint32_t function = (uint32_t)running[level].function_number & 0xFFFF;
+        sampled.frames[level] = (module << 16) | function;
     }
+
     sampled.depth = depth;
     state.samples++;
 
@@ -211,8 +223,16 @@ void start(int intervalMs) {
     state.overflow = 0;
     __atomic_store_n(&state.pending, 0, __ATOMIC_RELAXED);
 
-    // the interval, then sampling
-    state.intervalMs = intervalMs < 1 ? 1 : (intervalMs > LONGEST_INTERVAL ? LONGEST_INTERVAL : intervalMs);
+    // the interval, brought into 1..LONGEST_INTERVAL
+    if (intervalMs < 1) {
+        state.intervalMs = 1;
+    } else if (intervalMs > LONGEST_INTERVAL) {
+        state.intervalMs = LONGEST_INTERVAL;
+    } else {
+        state.intervalMs = intervalMs;
+    }
+
+    // then sampling, by a thread started the first time
     state.startMs = platform::monotonicMs();
     state.running = true;
 
@@ -229,6 +249,7 @@ void start(int intervalMs) {
 void stop(Report *out) {
     lock()->lock();
 
+    // no more samples; the duration of the profile (0 without start())
     if (state.running) {
         state.running = false;
         out->durationMs = platform::monotonicMs() - state.startMs;
@@ -236,6 +257,7 @@ void stop(Report *out) {
         out->durationMs = 0;
     }
 
+    // the counters, and the table itself (not copied)
     out->intervalMs = state.intervalMs;
     out->samples = state.samples;
     out->idle = state.idle;
@@ -265,9 +287,11 @@ void attach(JSContext *ctx, const rt::JsLoadUsage *load) {
     lock()->lock();
     state.ctx = ctx;
     state.load = load;
+
     for (int i = 0; i < state.moduleCount; i++) {
         state.atoms[i] = JS_ATOM_NULL;
     }
+
     lock()->unlock();
 }
 
@@ -286,14 +310,19 @@ void detach() {
  * Takes the sample asked for, if any, while a profile runs.
  */
 void sample(JSContext *ctx) {
-    if (__atomic_exchange_n(&state.pending, 0, __ATOMIC_RELAXED) == 0) {
+    // no sample asked for (the usual case: no lock taken)
+    bool asked = __atomic_exchange_n(&state.pending, 0, __ATOMIC_RELAXED) != 0;
+    if (!asked) {
         return;
     }
 
+    // recorded only for the run being profiled
     lock()->lock();
-    if (state.running && state.stacks != nullptr && state.ctx == ctx) {
+    bool profiled = state.running && state.stacks != nullptr && state.ctx == ctx;
+    if (profiled) {
         record(ctx);
     }
+
     lock()->unlock();
 }
 

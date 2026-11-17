@@ -12,8 +12,10 @@
 
 namespace rt {
 
+// Creates a native module in a context; nullptr with a pending exception.
 typedef JSModuleDef *NativeModuleFactory(JSContext *ctx, const char *moduleName);
 
+// A module written in C++, registered under its import name.
 struct NativeModule {
     const char          *name;    // import name ("sys/fs"); static text
     NativeModuleFactory *create;  // creates the module in a context
@@ -95,7 +97,13 @@ bool installGlobals(JSContext *ctx);
 
 // Console output of the program (console.*, uncaught exceptions). By default
 // stdout / stderr; the device agent sends it to the host instead.
-enum OutputStream { OUTPUT_STDOUT = 1, OUTPUT_STDERR = 2 };
+enum OutputStream {
+    OUTPUT_STDOUT = 1,   // console.log, console.info...
+    OUTPUT_STDERR = 2,   // console.error, console.warn, uncaught exceptions
+};
+
+// Receives the program's output instead of stdout / stderr ('stream': an
+// OutputStream; 'text' not zero-terminated).
 typedef void OutputSink(void *opaque, int stream, const char *text, size_t length);
 
 /**

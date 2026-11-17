@@ -26,11 +26,11 @@
 
 namespace {
 
-const ledc_mode_t MODE = LEDC_LOW_SPEED_MODE;     // the only mode of the S3
-const uint32_t CLOCK = 80000000;                  // the APB clock, Hz
-const int TIMER_COUNT = LEDC_TIMER_MAX;           // timers of the chip (4)
-const int CHANNEL_COUNT = LEDC_CHANNEL_MAX;       // outputs of the chip (8 on the S3)
-const int MAX_BITS = LEDC_TIMER_BIT_MAX - 1;      // the widest counter of the chip (14 bits on the S3)
+const ledc_mode_t MODE = LEDC_LOW_SPEED_MODE;        // the only mode of the S3
+const uint32_t    CLOCK = 80000000;                  // the APB clock, Hz
+const int         TIMER_COUNT = LEDC_TIMER_MAX;      // timers of the chip (4)
+const int         CHANNEL_COUNT = LEDC_CHANNEL_MAX;  // outputs of the chip (8 on the S3)
+const int         MAX_BITS = LEDC_TIMER_BIT_MAX - 1; // the widest counter of the chip (14 bits on the S3)
 
 // An output: a channel of LEDC.
 struct Channel {
@@ -41,9 +41,9 @@ struct Channel {
     double duty;                                  // the duty cycle asked last, 0 to 1
 };
 
-Channel channels[CHANNEL_COUNT];
-hal::pwm::TimerTable timers = { {}, TIMER_COUNT };
-hal::pwm::TimerSetting settings[TIMER_COUNT];     // how each timer in use makes its frequency
+Channel channels[CHANNEL_COUNT];                     // by handle = LEDC channel number
+hal::pwm::TimerTable timers = { {}, TIMER_COUNT };   // frequency and users of each timer
+hal::pwm::TimerSetting settings[TIMER_COUNT];        // how each timer in use makes its frequency
 
 /**
  * An open output by its handle; nullptr if there is none.
@@ -52,6 +52,7 @@ Channel *channelOf(int handle) {
     if (handle < 0 || handle >= CHANNEL_COUNT || !channels[handle].used) {
         return nullptr;
     }
+
     return &channels[handle];
 }
 
@@ -60,6 +61,7 @@ Channel *channelOf(int handle) {
  * asked) and runs it; false if LEDC refuses.
  */
 bool setUpTimer(int index, uint32_t frequency, const hal::pwm::TimerSetting *setting) {
+    // the timer: its resolution, the frequency, the APB clock
     ledc_timer_config_t config = {};
     config.speed_mode = MODE;
     config.duty_resolution = (ledc_timer_bit_t)setting->bits;
@@ -80,7 +82,8 @@ bool setUpTimer(int index, uint32_t frequency, const hal::pwm::TimerSetting *set
  * Pauses timer 'index' when its last output left it.
  */
 void leaveTimer(int index) {
-    if (hal::pwm::timerLeave(&timers, index)) {
+    bool unused = hal::pwm::timerLeave(&timers, index);
+    if (unused) {
         ledc_timer_pause(MODE, (ledc_timer_t)index);
     }
 }
@@ -122,20 +125,24 @@ Opened open(int pin, uint32_t frequency, double duty, bool invert) {
 
     // an output pin, a frequency the timers can make
     TimerSetting setting = timerSetting(CLOCK, frequency, MAX_BITS);
-    if (!GPIO_IS_VALID_OUTPUT_GPIO(pin) || setting.bits == 0) {
+    bool reachable = setting.bits != 0;
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(pin) || !reachable) {
         return refused;
     }
 
     // the pin free, a free channel
     int free = -1;
+
     for (int i = 0; i < CHANNEL_COUNT; i++) {
         if (channels[i].used && channels[i].pin == pin) {
             return Opened{ -1, EBUSY, {} };
         }
+
         if (!channels[i].used && free < 0) {
             free = i;
         }
     }
+
     if (free < 0) {
         return Opened{ -1, EBUSY, {} };
     }
@@ -146,6 +153,8 @@ Opened open(int pin, uint32_t frequency, double duty, bool invert) {
     if (timer < 0) {
         return Opened{ -1, EBUSY, {} };
     }
+
+    // a new timer: set up for the frequency first
     if (fresh && !setUpTimer(timer, frequency, &setting)) {
         leaveTimer(timer);
         return Opened{ -1, EIO, {} };
@@ -175,6 +184,7 @@ Opened open(int pin, uint32_t frequency, double duty, bool invert) {
  * GPIO output at that level (set first: no glitch); its timer left.
  */
 void close(int handle) {
+    // an open output
     Channel *channel = channelOf(handle);
     if (channel == nullptr) {
         return;
@@ -205,6 +215,7 @@ void close(int handle) {
  * resolution.
  */
 int setFrequency(int handle, uint32_t frequency, Output *out) {
+    // an open output
     Channel *channel = channelOf(handle);
     if (channel == nullptr) {
         return EINVAL;
@@ -231,6 +242,8 @@ int setFrequency(int handle, uint32_t frequency, Output *out) {
         *out = outputOf(handle);
         return EBUSY;
     }
+
+    // a new timer: set up for the frequency
     if (fresh) {
         setUpTimer(timer, frequency, &setting);
     }
@@ -242,6 +255,7 @@ int setFrequency(int handle, uint32_t frequency, Output *out) {
             ledc_timer_pause(MODE, (ledc_timer_t)from);
         }
     }
+
     channel->timer = timer;
 
     // the duty cycle on the new resolution
@@ -254,11 +268,13 @@ int setFrequency(int handle, uint32_t frequency, Output *out) {
  * Another duty cycle, from the next period.
  */
 int setDuty(int handle, double duty, Output *out) {
+    // an open output
     Channel *channel = channelOf(handle);
     if (channel == nullptr) {
         return EINVAL;
     }
 
+    // kept, then given to LEDC
     channel->duty = duty;
     applyDuty(handle);
     *out = outputOf(handle);

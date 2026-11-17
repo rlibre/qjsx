@@ -89,8 +89,9 @@ public:
         // refused: say which access, to what, and how to grant it
         char what[512];
         const char *hint = rt::permissions()->hint();
+        const char *separator = hint[0] != 0 ? ": " : "";
         snprintf(what, sizeof(what), "%s access to \"%s\" is not allowed%s%s", rt::accessName(_access), _given,
-                 hint[0] != 0 ? ": " : "", hint);
+                 separator, hint);
         return js::failSystem(EACCES, what);
     }
 
@@ -101,17 +102,20 @@ private:
     bool        _refused;   // the permissions refused the access
 };
 
+// The options of mkdirSync.
 struct MkdirOptions {
     bool recursive = false;  // also create the missing parents; an existing directory is no error
 };
 JS_STRUCT(MkdirOptions, recursive);
 
+// The options of rmSync.
 struct RmOptions {
     bool recursive = false;  // also remove a directory and its content
     bool force = false;      // no error when the path does not exist
 };
 JS_STRUCT(RmOptions, recursive, force);
 
+// What statSync returns.
 class Stats {
     JS_CLASS(Stats);
 
@@ -144,16 +148,21 @@ public:
  */
 bool wantsText(js::Optional<js::Value> options) {
     // no options (undefined, null): bytes
-    if (!options.has() || options.value().isUndefined() || options.value().isNull()) {
+    bool noOptions = !options.has() || options.value().isUndefined() || options.value().isNull();
+    if (noOptions) {
         return false;
     }
 
     // the encoding is the option itself, or the 'encoding' property of an
     // object (a getter may throw: its exception goes to the caller)
     JSContext *ctx = options.value().context();
-    JSValue encoding = JS_IsObject(options.value().get())
-        ? JS_GetPropertyStr(ctx, options.value().get(), "encoding")
-        : JS_DupValue(ctx, options.value().get());
+    JSValue encoding = JS_UNDEFINED;
+    if (JS_IsObject(options.value().get())) {
+        encoding = JS_GetPropertyStr(ctx, options.value().get(), "encoding");
+    } else {
+        encoding = JS_DupValue(ctx, options.value().get());
+    }
+
     if (JS_IsException(encoding)) {
         js::detail::markPendingException();
         return false;
@@ -210,8 +219,13 @@ js::Value readFileSync(js::Str path, js::Optional<js::Value> options) {
 
     // copy it into a JS string or array, then free the C buffer
     JSContext *ctx = js::context();
-    JSValue result = text ? JS_NewStringLen(ctx, (const char *)data, size)
-                          : js::detail::newUint8Array(ctx, data, size);
+    JSValue result = JS_UNDEFINED;
+    if (text) {
+        result = JS_NewStringLen(ctx, (const char *)data, size);
+    } else {
+        result = js::detail::newUint8Array(ctx, data, size);
+    }
+
     memory::release(data);
     return js::Value(ctx, result);
 }
@@ -273,16 +287,18 @@ void writeFileSync(js::Str path, js::Value data) {
  * directory...).
  */
 bool existsSync(js::Str path) {
-    // nothing exists on a device without file system
+    // refused by the permissions: an error that says how to grant it
     ProgramPath file(path.data(), rt::Access::read);
     if (file.refused()) {
         return file.fail();
     }
 
+    // nothing exists on a device without file system
     if (!file.valid()) {
         return false;
     }
 
+    // the system says whether it exists
     files::Status status;
     return files::stat(file.text(), &status) && status.exists;
 }
@@ -299,7 +315,8 @@ js::Value statSync(js::Str path) {
     }
 
     files::Status status;
-    if (!files::stat(file.text(), &status)) {
+    bool found = files::stat(file.text(), &status);
+    if (!found) {
         return js::failSystem(errno, path.data());
     }
 
@@ -316,10 +333,11 @@ js::Value statSync(js::Str path) {
     return stats.value;
 }
 
+// What addName fills: the array of readdirSync.
 struct ArrayFiller {
-    JSContext *ctx;  // borrowed
-    JSValue array;   // the array being filled (freed by readdirSync on failure)
-    uint32_t count;  // names appended so far (next index)
+    JSContext *ctx;    // borrowed
+    JSValue    array;  // the array being filled (freed by readdirSync on failure)
+    uint32_t   count;  // names appended so far (next index)
 };
 
 /**
@@ -368,7 +386,13 @@ void mkdirSync(js::Str path, js::Optional<MkdirOptions> options) {
 
     // create it, with its parents if recursive
     bool recursive = options.has() && options.value().recursive;
-    bool ok = recursive ? files::makeDirectories(directory.text()) : files::makeDirectory(directory.text());
+    bool ok = false;
+    if (recursive) {
+        ok = files::makeDirectories(directory.text());
+    } else {
+        ok = files::makeDirectory(directory.text());
+    }
+
     if (!ok) {
         return (void)js::failSystem(errno, path.data());
     }
@@ -380,9 +404,10 @@ void mkdirSync(js::Str path, js::Optional<MkdirOptions> options) {
  */
 bool removeTree(const char *path);
 
+// The state of removeChild while removeTree empties a directory.
 struct TreeRemover {
     const char *directory;  // path of the directory being emptied; borrowed
-    bool ok;                // false once a removal failed
+    bool        ok;         // false once a removal failed
 };
 
 /**
@@ -426,7 +451,8 @@ bool removeTree(const char *path) {
 
     // a directory: first remove each of its entries, depth first
     TreeRemover remover = { path, true };
-    if (!files::listDirectory(path, &removeChild, &remover) || !remover.ok) {
+    bool listed = files::listDirectory(path, &removeChild, &remover);
+    if (!listed || !remover.ok) {
         return false;
     }
 
@@ -439,6 +465,7 @@ bool removeTree(const char *path) {
  * directory tree with recursive.
  */
 void rmSync(js::Str path, js::Optional<RmOptions> options) {
+    // the options
     bool recursive = options.has() && options.value().recursive;
     bool force = options.has() && options.value().force;
 
@@ -464,7 +491,13 @@ void rmSync(js::Str path, js::Optional<RmOptions> options) {
     }
 
     // delete the file or the whole tree
-    bool ok = status.isDirectory ? removeTree(target.text()) : files::removeFile(target.text());
+    bool ok = false;
+    if (status.isDirectory) {
+        ok = removeTree(target.text());
+    } else {
+        ok = files::removeFile(target.text());
+    }
+
     if (!ok) {
         return (void)js::failSystem(errno, path.data());
     }

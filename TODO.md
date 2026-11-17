@@ -1,6 +1,29 @@
 # TODO
 
-## Où on en est (2026-11-16, à relire en reprenant le travail)
+## Où on en est (2026-11-17, à relire en reprenant le travail)
+
+- [x] **2026-11-17 : await sans allocation (moteur V, V1 + V2)** : une fonction async
+      garde dans son état ce qui la réveille (plus d'allocation par `await`), et
+      `await f()` d'une fonction async ne fait plus de promesse. Ordre des reprises
+      identique à QuickJS d'origine (`tests/fixtures/awaitorder.js`), suite Debug 112 OK,
+      tests de Bellard OK, microbench −4,0 %. Mesures (`temp/awaitbench`) : Teensy,
+      profondeur 3 2175 → 989 o, `await f()` 48,75 → 16,75 µs, passage entre deux tâches
+      86,85 → 37,10 µs ; PC `await f()` 0,60 → 0,10 µs. Pas encore essayé sur l'ESP32.
+- [x] **2026-11-17 : élagage au build (moteur W)** : le compilateur décrit chaque module
+      (instructions de haut niveau, noms déclarés et lus, imports, exports) ; `qjsx build`
+      retire les déclarations que rien n'utilise (bibliothèques comprises) et refuse un
+      import d'un nom non exporté, avec sa position. Teensy : 99 fonctions + une classe
+      inutilisées 98,7 → 65,3 Ko ; `Mutex` seul de `stdlib/tasks` 82,3 → 67,0 Ko.
+      `tests/prune.test.js` + fixture `prune` (paquet = sources). Pas d'option pour le
+      couper.
+- [ ] **Profileur C sur la Teensy** (`QJSX_NATIVE_PROFILER`, accordé 2026-11-17) puis
+      trouver pourquoi un `await` y coûte ×167 le PC quand le reste coûte ×30-40.
+- [ ] **Chargement paresseux du bytecode des fonctions** (« delay-load », idée de
+      l'utilisateur, accordée pour plus tard) : ≈ 150 o par fonction jamais appelée ;
+      après l'étape 3 de S (tables des variables lues en place).
+- [ ] **jsbind** : chemin d'un appel sans `thread_local` (≈ 5 accès par appel, coûteux
+      sur la Teensy), valeur empruntée pour les arguments `js::Value` ; mesuré
+      (`temp/bindbench`), pas fait.
 
 - [x] **Dernier état (2026-11-16 au soir ; rien de commité depuis 277fd22 ; l'utilisateur
       commite)** :

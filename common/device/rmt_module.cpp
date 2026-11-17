@@ -62,11 +62,13 @@ platform::Mutex targetLock;       // targets
  * to the loop of the Rmt of the channel, if any.
  */
 void onSendDone(int channel) {
+    // the target of the channel, under the lock: the JS thread may close it now
     targetLock.lock();
     Target target = targets[channel];
     if (target.mailbox != nullptr) {
         target.mailbox->post(target.source, MESSAGE_DONE, nullptr, 0, 0);
     }
+
     targetLock.unlock();
 }
 
@@ -75,12 +77,15 @@ void onSendDone(int channel) {
  * exception) if it is not one.
  */
 bool integerIn(JSContext *ctx, JSValueConst value, int64_t low, int64_t high, int64_t *out) {
+    // a number, as an integer, in the range
     if (!JS_IsNumber(value)) {
         return false;
     }
+
     if (JS_ToInt64(ctx, out, value) < 0) {
         return false;
     }
+
     return *out >= low && *out <= high;
 }
 
@@ -89,6 +94,7 @@ bool integerIn(JSContext *ctx, JSValueConst value, int64_t low, int64_t high, in
  * array of two tick counts.
  */
 bool readBitTiming(JSContext *ctx, JSValueConst value, hal::rmt::BitTiming *timing) {
+    // an array
     if (!JS_IsArray(ctx, value)) {
         return false;
     }
@@ -98,10 +104,12 @@ bool readBitTiming(JSContext *ctx, JSValueConst value, hal::rmt::BitTiming *timi
     JSValue lowValue = JS_GetPropertyUint32(ctx, value, 1);
     int64_t high = 0;
     int64_t low = 0;
-    bool ok = integerIn(ctx, highValue, 1, MAX_TICKS, &high) && integerIn(ctx, lowValue, 1, MAX_TICKS, &low);
+    bool highValid = integerIn(ctx, highValue, 1, MAX_TICKS, &high);
+    bool ok = highValid && integerIn(ctx, lowValue, 1, MAX_TICKS, &low);
     JS_FreeValue(ctx, highValue);
     JS_FreeValue(ctx, lowValue);
 
+    // written even when invalid: the caller then drops them
     timing->high = (uint16_t)high;
     timing->low = (uint16_t)low;
     return ok;
@@ -140,6 +148,7 @@ public:
         _source = _loop->addSource(&onMessage, this);
         hal::rmt::setDoneHandler(&onSendDone);
 
+        // the target of the channel, for the event task of the hal
         targetLock.lock();
         targets[channel] = Target{ _loop->mailbox(), _source };
         targets[channel].mailbox->retain();
@@ -151,6 +160,7 @@ public:
      * when they have been sent.
      */
     JS_EXPORT(send) js::Promise<js::Value> send(js::Value pulses) {
+        // open, and no send in progress
         JSContext *ctx = js::context();
         if (!startSend()) {
             return js::Promise<js::Value>();
@@ -164,11 +174,14 @@ public:
             isArray = JS_ToInt64(ctx, &length, lengthValue) == 0;
             JS_FreeValue(ctx, lengthValue);
         }
-        if (!isArray || length == 0 || length % 2 != 0) {
+
+        bool isPairs = isArray && length != 0 && length % 2 == 0;
+        if (!isPairs) {
             _sending = false;
             return js::fail<js::TypeError>("rmt: send: pulses must be [ticks, level, ...], an even number of integers");
         }
 
+        // each pair as a pulse, up to the first invalid one
         size_t count = (size_t)length / 2;
         hal::rmt::Pulse *list = (hal::rmt::Pulse *)memory::allocate(sizeof(hal::rmt::Pulse) * count);
         bool valid = true;
@@ -178,7 +191,8 @@ public:
             JSValue levelValue = JS_GetPropertyUint32(ctx, pulses.get(), (uint32_t)(2 * i + 1));
             int64_t ticks = 0;
             int64_t level = 0;
-            valid = integerIn(ctx, ticksValue, 1, 0xffffffffLL, &ticks) && integerIn(ctx, levelValue, 0, 1, &level);
+            bool ticksValid = integerIn(ctx, ticksValue, 1, 0xffffffffLL, &ticks);
+            valid = ticksValid && integerIn(ctx, levelValue, 0, 1, &level);
             JS_FreeValue(ctx, ticksValue);
             JS_FreeValue(ctx, levelValue);
             list[i] = hal::rmt::Pulse{ (uint32_t)ticks, (int)level };
@@ -191,6 +205,7 @@ public:
             _sending = false;
             return js::fail<js::TypeError>("rmt: send: each pulse is a tick count (>= 1) and a level (0 or 1)");
         }
+
         return finishStart(sent);
     }
 
@@ -200,6 +215,7 @@ public:
      * when they have been sent.
      */
     JS_EXPORT(sendBytes) js::Promise<js::Value> sendBytes(js::Bytes bytes, BytesOptions options) {
+        // open, and no send in progress
         JSContext *ctx = js::context();
         if (!startSend()) {
             return js::Promise<js::Value>();
@@ -208,14 +224,16 @@ public:
         // the timing of the bits
         hal::rmt::BitTiming bit0 = {};
         hal::rmt::BitTiming bit1 = {};
-        bool timed = readBitTiming(ctx, options.bit0.get(), &bit0) && readBitTiming(ctx, options.bit1.get(), &bit1);
+        bool bit0Valid = readBitTiming(ctx, options.bit0.get(), &bit0);
+        bool timed = bit0Valid && readBitTiming(ctx, options.bit1.get(), &bit1);
         if (!timed || bytes.size() == 0) {
             _sending = false;
             return js::fail<js::TypeError>("rmt: sendBytes: bytes not empty, bit0 and bit1 as [high, low] ticks (1 to %d)", MAX_TICKS);
         }
 
         // send them (the hal copies them)
-        bool sent = hal::rmt::sendBytes(_channel, bytes.data(), bytes.size(), bit0, bit1, (uint32_t)(int)options.reset);
+        uint32_t resetTicks = (uint32_t)(int)options.reset;
+        bool sent = hal::rmt::sendBytes(_channel, bytes.data(), bytes.size(), bit0, bit1, resetTicks);
         return finishStart(sent);
     }
 
@@ -224,9 +242,11 @@ public:
      * longer be used.
      */
     JS_EXPORT(close) void close() {
+        // a pending send fails, then the channel goes
         if (_waiter.pending()) {
             _waiter.reject("rmt: closed while sending");
         }
+
         closeChannel();
         updateKeepAlive();
     }
@@ -237,14 +257,18 @@ private:
      * pending error otherwise. Marks the send started.
      */
     bool startSend() {
+        // open, and no send in progress
         if (_channel < 0) {
             js::fail("rmt: closed");
             return false;
         }
+
         if (_sending) {
             js::fail("rmt: a send is already in progress");
             return false;
         }
+
+        // started
         _sending = true;
         return true;
     }
@@ -253,11 +277,13 @@ private:
      * The promise of a send the hal accepted ('sent') or refused.
      */
     js::Promise<js::Value> finishStart(bool sent) {
+        // refused: no send in progress
         if (!sent) {
             _sending = false;
             return js::fail("rmt: the hardware refused the send");
         }
 
+        // accepted: a promise settled by onMessage(), the program kept alive
         js::Promise<js::Value> promise = js::Promise<js::Value>::create();
         _waiter = promise.resolver();
         updateKeepAlive();
@@ -269,12 +295,15 @@ private:
      * called by the finalizer).
      */
     void closeChannel() {
+        // closed already: nothing to do
         if (_channel < 0) {
             return;
         }
 
+        // the hal first: no done handler call for it from now on
         hal::rmt::close(_channel);
 
+        // then the target (released outside the lock), and the source
         targetLock.lock();
         rt::Mailbox *mailbox = targets[_channel].mailbox;
         targets[_channel] = Target{ nullptr, { -1, 0 } };
@@ -304,11 +333,13 @@ private:
      * The send is over (JS thread): settles its promise.
      */
     static void onMessage(void *opaque, const rt::Message *) {
+        // no send in progress any more; its promise is settled
         Rmt *rmt = (Rmt *)opaque;
         rmt->_sending = false;
         if (rmt->_waiter.pending()) {
             rmt->_waiter.resolve(js::Value());
         }
+
         rmt->updateKeepAlive();
     }
 

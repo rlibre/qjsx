@@ -62,6 +62,7 @@ SemaphoreHandle_t mutexHandle(pthread_mutex_t *mutex) {
  * again. 0, or ETIMEDOUT.
  */
 int waitCondition(pthread_cond_t *condition, pthread_mutex_t *mutex, TickType_t ticks) {
+    // never created: nothing to wait for
     if (*condition == NOT_CREATED) {
         return EINVAL;
     }

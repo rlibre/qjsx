@@ -49,6 +49,7 @@ JS_ENUM(MacKind, base, wifi, ap, bluetooth, ethernet);
  * board.id(): the unique id of the chip, in a new Uint8Array.
  */
 js::Buffer id() {
+    // MAX_CHIP_ID bytes at most, copied into the array
     uint8_t bytes[board::MAX_CHIP_ID];
     size_t size = board::chipId(bytes);
     return js::Buffer::copy(bytes, size);
@@ -71,6 +72,7 @@ js::Buffer mac(js::Optional<MacKind> kind) {
     if (!board::macAddress(boardKind, bytes)) {
         return js::fail("board.mac(): this chip has no MAC address of that kind");
     }
+
     return js::Buffer::copy(bytes, sizeof(bytes));
 }
 
@@ -133,9 +135,11 @@ js::Value memoryReport() {
  * elapsed since the program started, to compute it over any time.
  */
 js::Value loadReport() {
+    // what the loop of the program measured
     JSContext *ctx = js::context();
     rt::LoadStats stats = rt::Loop::current()->load();
 
+    // the object
     JSValue object = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, object, "js", JS_NewFloat64(ctx, stats.load));
     JS_SetPropertyStr(ctx, object, "jsPeak", JS_NewFloat64(ctx, stats.peak));

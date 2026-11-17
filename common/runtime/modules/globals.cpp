@@ -31,8 +31,8 @@ namespace {
 
 // ### output (see rt::setOutputSink) ##########################################
 
-rt::OutputSink *outputSink = nullptr;
-void *outputSinkOpaque = nullptr;
+rt::OutputSink *outputSink = nullptr;         // set by rt::setOutputSink(); nullptr: stdout / stderr
+void           *outputSinkOpaque = nullptr;   // passed to outputSink
 
 /**
  * Error writer given to jsbind (uncaught exceptions...): goes to the
@@ -44,9 +44,9 @@ void writeErrorOutput(const char *text, size_t length) {
 
 // Growing text buffer: a console line is sent in one piece.
 struct TextBuffer {
-    char *data = nullptr;  // malloc'd, not zero-terminated; nullptr: empty
-    size_t length = 0;     // bytes used
-    size_t capacity = 0;   // bytes allocated
+    char  *data = nullptr;  // malloc'd, not zero-terminated; nullptr: empty
+    size_t length = 0;      // bytes used
+    size_t capacity = 0;    // bytes allocated
 
     /**
      * Frees the buffer.
@@ -223,6 +223,7 @@ js::Value getRandomValues(js::Value array) {
         JS_FreeValue(ctx, buffer);
         return js::fail<js::TypeError>("crypto.getRandomValues: the argument must be an integer typed array, not a float one");
     }
+
     if (size > MAX_RANDOM_VALUES) {
         JS_FreeValue(ctx, buffer);
         failQuotaExceeded(ctx, size);
@@ -236,6 +237,7 @@ js::Value getRandomValues(js::Value array) {
     if (bytes == nullptr) {
         return js::fail<js::TypeError>("crypto.getRandomValues: the array has no memory (detached buffer)");
     }
+
     rt::randomBytes(bytes + offset, size);
     return array;
 }
@@ -255,16 +257,20 @@ js::Value randomUUID() {
     static const char digits[] = "0123456789abcdef";
     char text[37];
     int position = 0;
+
     for (int index = 0; index < 16; index++) {
         bool dashBefore = index == 4 || index == 6 || index == 8 || index == 10;
         if (dashBefore) {
             text[position++] = '-';
         }
+
         text[position++] = digits[bytes[index] >> 4];
         text[position++] = digits[bytes[index] & 0x0F];
     }
+
     text[position] = '\0';
 
+    // as a JS string
     JSContext *ctx = js::context();
     return js::Value(ctx, JS_NewString(ctx, text));
 }
@@ -366,11 +372,13 @@ js::Value cwd() {
 
     // the run's own folder
     const rt::Permissions *permissions = rt::permissions();
-    if (permissions != nullptr && !permissions->hasFileSystem()) {
+    bool noFileSystem = permissions != nullptr && !permissions->hasFileSystem();
+    if (noFileSystem) {
         return js::Value(ctx, JS_NewString(ctx, "/"));
     }
 
-    if (permissions != nullptr && permissions->workingFolder() != nullptr) {
+    bool hasWorkingFolder = permissions != nullptr && permissions->workingFolder() != nullptr;
+    if (hasWorkingFolder) {
         return js::Value(ctx, JS_NewString(ctx, permissions->workingFolder()));
     }
 
@@ -389,8 +397,8 @@ js::Value cwd() {
 // The arguments of process.argv (rt::setProcessArguments), one set per
 // thread: each thread that creates a runtime sets its own first (the twin
 // agent runs the device and its web page on two threads).
-thread_local int processArgumentCount = 0;
-thread_local char **processArguments = nullptr;
+thread_local int    processArgumentCount = 0;    // entries of processArguments
+thread_local char **processArguments = nullptr;  // borrowed from the caller of setProcessArguments
 
 /**
  * New JS object process.versions (plain properties: printed by
@@ -475,8 +483,9 @@ JSValue newEnv(JSContext *ctx) {
     return env;
 }
 
-// #############################################################################
-// TextEncoder / TextDecoder (UTF-8 only, like most engines guarantee)
+// ### TextEncoder / TextDecoder ###############################################
+
+// UTF-8 only, like most engines guarantee.
 
 /**
  * True if the TextDecoder label names UTF-8, compared without case. Unlike
@@ -505,6 +514,7 @@ bool isUtf8Label(const js::Str *label) {
     return false;
 }
 
+// The global TextEncoder (UTF-8).
 class TextEncoder {
     JS_CLASS(TextEncoder);
 
@@ -526,6 +536,7 @@ public:
     }
 };
 
+// The global TextDecoder (UTF-8 only).
 class TextDecoder {
     JS_CLASS(TextDecoder);
 
@@ -535,7 +546,8 @@ public:
      * other than UTF-8. The options argument (fatal, ignoreBOM) is ignored.
      */
     void init(js::Optional<js::Str> label) {
-        if (label.has() && !isUtf8Label(&label.value())) {
+        bool notUtf8 = label.has() && !isUtf8Label(&label.value());
+        if (notUtf8) {
             return (void)js::fail<js::RangeError>("TextDecoder: only utf-8 is supported");
         }
     }
@@ -587,6 +599,7 @@ void memoryMap(js::Str title) {
 void collectGarbage() {
     JS_RunGC(JS_GetRuntime(js::context()));
 }
+
 #endif
 
 #ifdef QJSX_ALLOC_HISTOGRAM
@@ -604,20 +617,53 @@ js::Str allocHistogram() {
 
     // one line per size, the live bytes summed
     uint32_t liveBytes = 0;
+
     for (int step = 0; step < JS_ALLOC_HISTOGRAM_STEPS; step++) {
         if (histogram->made[step] == 0) {
             continue;
         }
+
+        // the last step counts every larger size
         bool larger = step == JS_ALLOC_HISTOGRAM_STEPS - 1;
         liveBytes += larger ? histogram->large_live_bytes : histogram->live[step] * step * 8;
-        length += snprintf(text + length, capacity - length, "%s%d %lu %lu\n", larger ? ">=" : "", step * 8,
+        const char *prefix = larger ? ">=" : "";
+        length += snprintf(text + length, capacity - length, "%s%d %lu %lu\n", prefix, step * 8,
             (unsigned long)histogram->live[step], (unsigned long)histogram->made[step]);
     }
+
+    // then the total
     length += snprintf(text + length, capacity - length, "live bytes %lu", (unsigned long)liveBytes);
 
     // the JS string is made from the text when the function returns
     return js::Str(text, length);
 }
+
+#endif
+
+#ifdef QJSX_NATIVE_PROFILER
+/**
+ * Measure (temporary, QJSX_NATIVE_PROFILER): starts sampling where the JS
+ * thread is in the native code, every 'intervalUs' microseconds, at most
+ * 'capacity' samples (platform::nativeProfileStart).
+ */
+void nativeProfileStart(int intervalUs, int capacity) {
+    bool started = platform::nativeProfileStart(intervalUs, capacity);
+    if (!started) {
+        return (void)js::fail("__nativeProfileStart: this port has no native profiler");
+    }
+}
+
+/**
+ * Measure (temporary, QJSX_NATIVE_PROFILER): stops sampling; the samples as
+ * the bytes of a Uint32Array (little endian): instruction addresses, or
+ * platform::NATIVE_SAMPLE_* markers.
+ */
+js::Buffer nativeProfileStop() {
+    int count = 0;
+    const uint32_t *samples = platform::nativeProfileStop(&count);
+    return js::Buffer::copy((const uint8_t *)samples, (size_t)count * sizeof(uint32_t));
+}
+
 #endif
 
 } // namespace
@@ -651,6 +697,12 @@ JS_GLOBALS(runtime, globals) {
 #ifdef QJSX_ALLOC_HISTOGRAM
     // measure (temporary): sizes of the blocks of the JS heap
     JS_FUNCTION_AS(globals, allocHistogram, "__allocHistogram");
+#endif
+
+#ifdef QJSX_NATIVE_PROFILER
+    // measure (temporary): where the JS thread is in the native code
+    JS_FUNCTION_AS(globals, nativeProfileStart, "__nativeProfileStart");
+    JS_FUNCTION_AS(globals, nativeProfileStop, "__nativeProfileStop");
 #endif
 
     // UTF-8 encoder and decoder
@@ -737,14 +789,16 @@ char *resolveProgramPath(const char *path) {
     // a device without file system
     size_t pathLength = strlen(path);
     const rt::Permissions *permissions = rt::permissions();
-    if (permissions != nullptr && !permissions->hasFileSystem()) {
+    bool noFileSystem = permissions != nullptr && !permissions->hasFileSystem();
+    if (noFileSystem) {
         errno = ENOSYS;
         return nullptr;
     }
 
     // absolute, or no working folder: as it is
     const char *folder = permissions != nullptr ? permissions->workingFolder() : nullptr;
-    if (folder == nullptr || files::isAbsolute(path)) {
+    bool keepAsItIs = folder == nullptr || files::isAbsolute(path);
+    if (keepAsItIs) {
         return memory::copyText(path, pathLength);
     }
 

@@ -14,16 +14,19 @@
 //                          no source text, positions nor variable names; the
 //                          module name and the function numbers stay
 //   debug/<name>.json      debug sidecar of the script
+//   names.bin              the names the bytecode is linked to (see linkModules)
 //   src/<path>             exact copy of the compiled source
 //
 // The modules of the package:
 //   - the modules of the program: every file of 'sources', named by its path
 //     in the project ("src/main.js");
 //   - the library modules they import ("stdlib/path"), and those these
-//     import in turn, each one whole, taken from the .qjslib libraries (the
-//     standard one and those of 'libraries', see qjsx:library). A device has
-//     no compiler and no JS in its firmware: it finds them in the package
-//     like any other module.
+//     import in turn, taken from the .qjslib libraries (the standard one and
+//     those of 'libraries', see qjsx:library). A device has no compiler and
+//     no JS in its firmware: it finds them in the package like any other
+//     module.
+// Then every imported name is checked, and the top-level declarations that
+// nothing uses are left out of every module (qjsx:prune).
 // Every import is followed when the package is built, which is why 'import()'
 // is refused (qjsx:compile). A name that is neither a module of the program
 // nor of a library is a native module: it is listed in manifest.natives and
@@ -45,6 +48,7 @@ import { loadProject, PROJECT_FILE } from "qjsx:project";
 import { hex, encodeText } from "qjsx:util";
 import { compileModule, compilerId, BYTECODE_VERSION } from "qjsx:compile";
 import { link, engineNames } from "sys/compiler";
+import { checkImports, pruneModules } from "qjsx:prune";
 import {
     readLibrary, libraryModule, libraryOf, isNativeModule, bareNameError, madeByThisCompiler, standardLibraryFile,
     STANDARD_LIBRARY, NATIVE_PREFIXES,
@@ -57,24 +61,35 @@ export const PACKAGE_FORMAT = 1;
 export const NAMES_ENTRY = "names.bin";
 const NAMES_ALIGNMENT = 8;
 
-// Links the modules of the package (sys/compiler link()): every name they
-// use gets one number for the whole package, their bytecode is written with
-// these numbers ('bytecode' of each module is replaced) and the names go in
-// one entry. A device then runs the bytecode where the package lies and
-// keeps none of these names in its RAM. Returns the entry of the names.
+/**
+ * Links the modules of the package (sys/compiler link()): every name they
+ * use gets one number for the whole package, their bytecode is written with
+ * these numbers ('bytecode' of each module is replaced) and the names go in
+ * one entry. A device then runs the bytecode where the package lies and
+ * keeps none of these names in its RAM. Returns the entry of the names.
+ */
 function linkModules(modules) {
+    // one numbering of the names for all the modules
     const linked = link(modules.map(module => module.bytecode));
+
+    // each module gets its bytecode written with these numbers
     modules.forEach((module, index) => {
         module.bytecode = linked.modules[index];
     });
+
     return { name: NAMES_ENTRY, data: linked.names, align: NAMES_ALIGNMENT };
 }
 
-// A module of the program, compiled from its file: what goes into the
-// package ('script' is its record in the manifest).
+/**
+ * A module of the program, compiled from its file: what goes into the
+ * package ('script' is its record in the manifest).
+ */
 function programModule(directory, path) {
+    // compile its file
     const source = fs.readFileSync(join(directory, path), "utf8");
     const compiled = compileModule(path, source);
+
+    // its record of the manifest, named by its path
     const script = {
         path,
         module: true,
@@ -84,6 +99,7 @@ function programModule(directory, path) {
         debug: `debug/${path}.json`,
         source: `src/${path}`,
     };
+
     return {
         script,
         source,
@@ -91,13 +107,19 @@ function programModule(directory, path) {
         sidecar: compiled.sidecar,
         imports: compiled.imports,
         warnings: compiled.warnings,
+        outline: compiled.outline,
     };
 }
 
-// A module of a library, as it goes into the package: same shape as
-// programModule(); its record says which library it comes from.
+/**
+ * A module of a library, as it goes into the package: same shape as
+ * programModule(); its record says which library it comes from.
+ */
 function packagedLibraryModule(library, name) {
+    // the module, compiled again when the library cannot give it as it is
     const module = libraryModule(library, name);
+
+    // its record of the manifest, with the library it comes from
     const script = {
         path: name,
         module: true,
@@ -108,6 +130,7 @@ function packagedLibraryModule(library, name) {
         debug: `debug/${name}.json`,
         source: `src/${name}.js`,
     };
+
     return {
         script,
         source: module.source,
@@ -115,12 +138,43 @@ function packagedLibraryModule(library, name) {
         sidecar: module.sidecar,
         imports: module.imports,
         warnings: module.warnings,
+        outline: module.outline,
     };
 }
 
-// The libraries the program may import, Map(name -> library): the standard
-// one, when its file is there, then those of 'libraries' in qjsx.json.
+/**
+ * Leaves out of the modules of the package the top-level declarations
+ * nothing uses (qjsx:prune): each module that changes is compiled again from
+ * its source with them replaced by spaces; the package keeps its original
+ * source (the positions are the same), which the debugger shows. Returns the
+ * notes that say what was left out.
+ */
+function leaveOutUnused(packaged) {
+    const notes = [];
+
+    for (const change of pruneModules(packaged)) {
+        // compile the module again from its pruned source
+        const module = packaged.get(change.name);
+        const compiled = compileModule(change.name, change.source);
+        module.bytecode = compiled.bytecode;
+        module.script.buildId = compiled.buildId;
+        module.sidecar = { ...compiled.sidecar, sourceHash: module.script.sourceHash };
+
+        // say what was left out
+        if (change.removed.length > 0) {
+            notes.push(`${change.name}: left out, not used: ${change.removed.join(", ")}`);
+        }
+    }
+
+    return notes;
+}
+
+/**
+ * The libraries the program may import, Map(name -> library): the standard
+ * one, when its file is there, then those of 'libraries' in qjsx.json.
+ */
 function loadLibraries(project) {
+    // the files: the standard library first, when there
     const files = project.libraries.map(path => resolve(project.directory, path));
     const standard = standardLibraryFile();
     if (fs.existsSync(standard)) {
@@ -128,23 +182,31 @@ function loadLibraries(project) {
     }
 
     const libraries = new Map();
+
     for (const file of files) {
+        // read it: its name must not be a native prefix
         const library = readLibrary(file);
         if (NATIVE_PREFIXES.includes(library.name)) {
             throw new Error(`${file}: a library cannot be named '${library.name}', the prefix of the native modules`);
         }
+
+        // nor the name of another library
         const sameName = libraries.get(library.name);
         if (sameName !== undefined) {
             throw new Error(`two libraries are named '${library.name}': ${sameName.file} and ${file}`);
         }
+
         libraries.set(library.name, library);
     }
+
     return libraries;
 }
 
-// What 'importer' imports, when it is not already in the package: a native
-// module (sys/..., device/...), added to 'natives' (nothing is returned), or a
-// module of a library, returned to be added. Anything else is an error.
+/**
+ * What 'importer' imports, when it is not already in the package: a native
+ * module (sys/..., device/...), added to 'natives' (nothing is returned), or a
+ * module of a library, returned to be added. Anything else is an error.
+ */
 function importedModule(importer, imported, libraries, natives) {
     const where = `${importer.script.path} imports '${imported.specifier}'`;
 
@@ -163,6 +225,7 @@ function importedModule(importer, imported, libraries, natives) {
         if (!library.modules.has(imported.name)) {
             throw new Error(`${where}: the library '${library.name}' (${library.file}) has no such module`);
         }
+
         return packagedLibraryModule(library, imported.name);
     }
 
@@ -175,6 +238,7 @@ function importedModule(importer, imported, libraries, natives) {
     if (libraryName === STANDARD_LIBRARY) {
         throw new Error(`${where}: the standard library was not found (${standardLibraryFile()})`);
     }
+
     if (libraryName !== undefined) {
         throw new Error(`${where}: not a module of the program, and no library '${libraryName}' is declared ('libraries' in ${PROJECT_FILE})`);
     }
@@ -183,13 +247,19 @@ function importedModule(importer, imported, libraries, natives) {
     throw bareNameError(where, imported.name);
 }
 
-// Removes the oldest packages of the project, keeping 'keep' of them.
+/**
+ * Removes the oldest packages of the project, keeping 'keep' of them.
+ */
 function prune(output, name, keep, current) {
-    const pattern = new RegExp(`^${name.replace(/[.]/g, "\\.")}-[0-9a-f]{12}\\.qjspkg$`);
+    // the packages of the project (<name>-<12 hex digits>.qjspkg), newest first
+    const escapedName = name.replace(/[.]/g, "\\.");
+    const pattern = new RegExp(`^${escapedName}-[0-9a-f]{12}\\.qjspkg$`);
     const packages = fs.readdirSync(output)
         .filter(file => pattern.test(file))
         .map(file => ({ file: join(output, file), time: fs.statSync(join(output, file)).mtimeMs }))
         .sort((a, b) => b.time - a.time);
+
+    // remove those after the first 'keep' (at least one kept), never the current one
     for (const old of packages.slice(Math.max(keep, 1))) {
         if (old.file !== current) {
             fs.unlinkSync(old.file);
@@ -197,31 +267,41 @@ function prune(output, name, keep, current) {
     }
 }
 
-// Builds the package of the project in 'directory'. Returns { file, buildId,
-// scriptCount, size, warnings, notes }:
-//   - 'warnings' has one { file, kind, line, column } per use of eval() or of
-//     the Function constructor in a compiled module (qjsx:compile,
-//     warningText);
-//   - 'notes' are sentences about what the build did besides compiling (a
-//     library compiled again because another compiler made it).
+/**
+ * Builds the package of the project in 'directory'. Returns { file, buildId,
+ * scriptCount, size, warnings, notes }:
+ *   - 'warnings' has one { file, kind, line, column } per use of eval() or of
+ *     the Function constructor in a compiled module (qjsx:compile,
+ *     warningText);
+ *   - 'notes' are sentences about what the build did besides compiling (a
+ *     library compiled again because another compiler made it).
+ */
 export function build(directory) {
+    // a program project (not a library)
     const project = loadProject(directory);
     if (project.modules !== undefined) {
         throw new Error(`${join(directory, PROJECT_FILE)} describes a library ('modules'): use 'qjsx mklib'`);
     }
+
+    // its sources, the main module among them
     const sources = matchFiles(directory, project.sources, project.exclude);
     if (!sources.includes(project.main)) {
         throw new Error(`the main module '${project.main}' is not among the sources (${project.sources.join(", ")})`);
     }
+
+    // the libraries it may import
     const libraries = loadLibraries(project);
 
     // the modules of the program; none may bear the name of a library module
     const packaged = new Map();   // module name -> module, in package order
+
     for (const path of sources) {
         const library = libraries.get(libraryOf(path));
-        if (library !== undefined && library.modules.has(path)) {
+        const isLibraryModuleName = library !== undefined && library.modules.has(path);
+        if (isLibraryModuleName) {
             throw new Error(`the source '${path}' has the name of a module of the library '${library.name}' (${library.file})`);
         }
+
         packaged.set(path, programModule(directory, path));
     }
 
@@ -229,12 +309,16 @@ export function build(directory) {
     // those they import, until nothing is missing
     const natives = new Set();
     const toFollow = [...packaged.values()];
+
     while (toFollow.length > 0) {
         const importer = toFollow.shift();
+
         for (const imported of importer.imports) {
-            if (packaged.has(imported.name) || natives.has(imported.name)) {
+            const isKnown = packaged.has(imported.name) || natives.has(imported.name);
+            if (isKnown) {
                 continue;
             }
+
             const added = importedModule(importer, imported, libraries, natives);
             if (added !== undefined) {
                 packaged.set(imported.name, added);
@@ -242,6 +326,10 @@ export function build(directory) {
             }
         }
     }
+
+    // every imported name must exist, then what nothing uses is left out
+    checkImports(packaged);
+    const prunedNotes = leaveOutUnused(packaged);
 
     // link the modules: one table of names for the package, first entry
     // after the manifest
@@ -251,17 +339,22 @@ export function build(directory) {
     const entries = [namesEntry];
     const entryNames = new Set([namesEntry.name]);
     const scripts = [];
+
     for (const module of packaged.values()) {
         scripts.push(module.script);
+
+        // its bytecode, sidecar and source
         const moduleEntries = [
             { name: module.script.bytecode, data: module.bytecode },
             { name: module.script.debug, data: encodeText(JSON.stringify(module.sidecar, null, 1)) },
             { name: module.script.source, data: encodeText(module.source) },
         ];
+
         for (const entry of moduleEntries) {
             if (entryNames.has(entry.name)) {
                 throw new Error(`two modules give the package entry '${entry.name}' (one of them is ${module.script.path})`);
             }
+
             entryNames.add(entry.name);
             entries.push(entry);
         }
@@ -271,7 +364,8 @@ export function build(directory) {
     // again from its sources: say so
     const usedNames = new Set(scripts.map(script => script.library).filter(name => name !== undefined));
     const usedLibraries = [...usedNames].map(name => ({ name, version: libraries.get(name).version }));
-    const notes = [];
+    const notes = [...prunedNotes];
+
     for (const name of usedNames) {
         const library = libraries.get(name);
         if (!madeByThisCompiler(library)) {
@@ -282,6 +376,7 @@ export function build(directory) {
 
     // what the compiled modules ask of the compiler at run time
     const warnings = [];
+
     for (const module of packaged.values()) {
         warnings.push(...module.warnings.map(warning => ({ file: module.script.path, ...warning })));
     }
@@ -292,10 +387,14 @@ export function build(directory) {
     if (project.env !== undefined) {
         identity += `\nenv:${JSON.stringify(project.env)}`;
     }
+
     if (project.desktop !== undefined) {
         identity += `\ndesktop:${JSON.stringify(project.desktop)}`;
     }
+
     const buildId = hex(sha256(identity)).slice(0, 32);
+
+    // the manifest, first entry of the archive
     const manifest = {
         format: PACKAGE_FORMAT,
         name: project.name,
@@ -313,11 +412,13 @@ export function build(directory) {
     };
     entries.unshift({ name: "manifest.json", data: encodeText(JSON.stringify(manifest, null, 1)) });
 
+    // write the archive, named by the build id, then remove the oldest packages
     const output = join(directory, project.output);
     fs.mkdirSync(output, { recursive: true });
     const file = join(output, `${project.name}-${buildId.slice(0, 12)}.qjspkg`);
     const archive = writeZip(entries);
     fs.writeFileSync(file, archive);
     prune(output, project.name, project.keep, file);
+
     return { file, buildId, scriptCount: scripts.length, size: archive.length, warnings, notes };
 }

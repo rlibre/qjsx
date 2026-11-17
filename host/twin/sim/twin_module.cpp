@@ -87,7 +87,9 @@ js::Value pins() {
 
     // one object each
     JSValue array = JS_NewArray(ctx);
+
     for (int i = 0; i < count; i++) {
+        // its state, its voltage
         const twin::PinState *state = &states[i];
         JSValue pin = JS_NewObject(ctx);
         JSValue forced = state->forced < 0 ? JS_NULL : JS_NewInt32(ctx, state->forced);
@@ -113,7 +115,10 @@ js::Value pins() {
             JS_SetPropertyStr(ctx, pwm, "duty", JS_NewFloat64(ctx, state->pwmDuty));
             JS_SetPropertyStr(ctx, pwm, "invert", JS_NewBool(ctx, state->pwmInvert));
         }
+
         JS_SetPropertyStr(ctx, pin, "pwm", pwm);
+
+        // into the array
         JS_SetPropertyUint32(ctx, array, (uint32_t)i, pin);
     }
 
@@ -137,7 +142,7 @@ void reset() {
     rt::requestRestart();
 }
 
-// ### The components (qjsx:twin, host/twin/js/twin.js) #######################
+// ### The components (qjsx:twin, host/twin/js/twin.js) ########################
 
 /**
  * JS pinDrive(pin, level): a component drives a pin to 0 or 1, or lets it
@@ -202,6 +207,7 @@ void i2cAnswer(double request, js::Str status, js::Optional<js::Bytes> bytes) {
  * waits for it before running the program.
  */
 void ready(js::Optional<js::Str> error) {
+    // built
     if (!error.has()) {
         twin::readyReport(nullptr);
         return;
@@ -218,7 +224,9 @@ void ready(js::Optional<js::Str> error) {
  * A little-endian 32-bit number at 'bytes'.
  */
 uint32_t readU32(const uint8_t *bytes) {
-    return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8) | ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
+    uint32_t low = (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8);
+    uint32_t high = ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
+    return low | high;
 }
 
 /**
@@ -230,14 +238,18 @@ uint32_t readU32(const uint8_t *bytes) {
  */
 JSValue bridgeEvent(JSContext *ctx, const rt::Message *message) {
     JSValue event = JS_NewObject(ctx);
+
     switch ((twin::BridgeEvent)message->kind) {
         case twin::BridgeEvent::pinChange: {
+            // [level]
+            int level = message->size > 0 ? message->data[0] : 0;
             JS_SetPropertyStr(ctx, event, "type", JS_NewString(ctx, "pin"));
             JS_SetPropertyStr(ctx, event, "pin", JS_NewInt32(ctx, (int)message->value));
-            JS_SetPropertyStr(ctx, event, "level", JS_NewInt32(ctx, message->size > 0 ? message->data[0] : 0));
+            JS_SetPropertyStr(ctx, event, "level", JS_NewInt32(ctx, level));
             break;
         }
         case twin::BridgeEvent::rmtBytes: {
+            // the bytes as sent
             js::Buffer bytes = js::Buffer::copy(message->data, message->size);
             JS_SetPropertyStr(ctx, event, "type", JS_NewString(ctx, "rmtBytes"));
             JS_SetPropertyStr(ctx, event, "pin", JS_NewInt32(ctx, (int)message->value));
@@ -248,12 +260,14 @@ JSValue bridgeEvent(JSContext *ctx, const rt::Message *message) {
             // [ticks, level, ticks, level, ...]
             JSValue pulses = JS_NewArray(ctx);
             size_t count = message->size / 5;
+
             for (size_t i = 0; i < count; i++) {
                 const uint8_t *entry = message->data + i * 5;
                 JS_SetPropertyUint32(ctx, pulses, (uint32_t)(2 * i), JS_NewUint32(ctx, readU32(entry)));
                 JS_SetPropertyUint32(ctx, pulses, (uint32_t)(2 * i + 1), JS_NewInt32(ctx, entry[4]));
             }
 
+            // the event
             JS_SetPropertyStr(ctx, event, "type", JS_NewString(ctx, "rmtPulses"));
             JS_SetPropertyStr(ctx, event, "pin", JS_NewInt32(ctx, (int)message->value));
             JS_SetPropertyStr(ctx, event, "pulses", pulses);
@@ -298,11 +312,14 @@ public:
      * alive.
      */
     void init(js::Function callback) {
+        // the callback, a source of this runtime's loop given to the twin
         _callback = callback;
         _ctx = js::context();
         _loop = rt::Loop::current();
         _source = _loop->addSource(&handle, this);
         twin::bridgeAttach(_loop->mailbox(), _source);
+
+        // alive until close(), whether JS keeps it or not
         js::keepAlive(this, true);
     }
 
@@ -319,10 +336,12 @@ private:
      * Lets the bridge go, once.
      */
     void detach() {
+        // once only
         if (_loop == nullptr) {
             return;
         }
 
+        // events dropped from now on, the source removed
         twin::bridgeDetach();
         _loop->removeSource(_source);
         _loop = nullptr;
@@ -333,9 +352,12 @@ private:
      * through a local copy (the callback may close the bridge).
      */
     static void handle(void *opaque, const rt::Message *message) {
+        // the event of the message
         Bridge *bridge = (Bridge *)opaque;
         JSContext *ctx = bridge->_ctx;
         js::Value event(ctx, bridgeEvent(ctx, message));
+
+        // to the callback, through a copy that outlives a close() it makes
         js::Function callback = bridge->_callback;
         callback(event);
     }
@@ -416,7 +438,9 @@ js::Value uarts() {
 
     // one object each
     JSValue array = JS_NewArray(ctx);
+
     for (int i = 0; i < count; i++) {
+        // its state, its links, its settings
         const twin::UartState *state = &states[i];
         const hal::serial::Settings *settings = &state->settings;
         JSValue uart = JS_NewObject(ctx);
@@ -434,6 +458,8 @@ js::Value uarts() {
         JS_SetPropertyStr(ctx, uart, "rx", pinValue(ctx, settings->rx));
         JS_SetPropertyStr(ctx, uart, "rts", pinValue(ctx, settings->rts));
         JS_SetPropertyStr(ctx, uart, "cts", pinValue(ctx, settings->cts));
+
+        // into the array
         JS_SetPropertyUint32(ctx, array, (uint32_t)i, uart);
     }
 
@@ -454,10 +480,14 @@ void addRecord(void *context, uint32_t sequence, twin::UartSource source, const 
     JSContext *ctx = js::context();
 
     // who wrote it
-    const char *sourceName = source == twin::UartSource::program ? "program"
-                           : source == twin::UartSource::page    ? "page"
-                           : source == twin::UartSource::serial  ? "serial"
-                                                                 : "tcp";
+    const char *sourceName = "tcp";
+    if (source == twin::UartSource::program) {
+        sourceName = "program";
+    } else if (source == twin::UartSource::page) {
+        sourceName = "page";
+    } else if (source == twin::UartSource::serial) {
+        sourceName = "serial";
+    }
 
     // { sequence, source, bytes }
     js::Buffer copy = js::Buffer::copy(bytes, size);
@@ -484,6 +514,7 @@ js::Value uartTraffic(js::Range<int, 0, twin::MAX_UARTS - 1> uart, double after)
     TrafficList list = { JS_NewArray(ctx), 0 };
     uint32_t newest = twin::uartTraffic((int)uart, from, &addRecord, &list);
 
+    // { sequence, records }
     JSValue result = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, result, "sequence", JS_NewUint32(ctx, newest));
     JS_SetPropertyStr(ctx, result, "records", list.array);
@@ -496,22 +527,33 @@ js::Value uartTraffic(js::Range<int, 0, twin::MAX_UARTS - 1> uart, double after)
  */
 js::Value i2cBuses() {
     JSContext *ctx = js::context();
+
+    // the states, copied under the lock of the buses
     twin::I2cBusState states[twin::I2C_BUSES];
     twin::i2cBusStates(states);
 
+    // one object each
     JSValue array = JS_NewArray(ctx);
+
     for (int i = 0; i < twin::I2C_BUSES; i++) {
+        // the bus, its pins when open
         const twin::I2cBusState *state = &states[i];
         JSValue bus = JS_NewObject(ctx);
         JS_SetPropertyStr(ctx, bus, "bus", JS_NewInt32(ctx, i));
         JS_SetPropertyStr(ctx, bus, "open", JS_NewBool(ctx, state->open));
         JS_SetPropertyStr(ctx, bus, "sda", state->open ? JS_NewInt32(ctx, state->sda) : JS_NULL);
         JS_SetPropertyStr(ctx, bus, "scl", state->open ? JS_NewInt32(ctx, state->scl) : JS_NULL);
+
+        // the frequencies of its devices
         JSValue frequencies = JS_NewArray(ctx);
+
         for (int k = 0; k < state->frequencyCount; k++) {
             JS_SetPropertyUint32(ctx, frequencies, (uint32_t)k, JS_NewUint32(ctx, state->frequencies[k]));
         }
+
         JS_SetPropertyStr(ctx, bus, "frequencies", frequencies);
+
+        // into the array
         JS_SetPropertyUint32(ctx, array, (uint32_t)i, bus);
     }
 
@@ -574,8 +616,8 @@ void addI2cRecord(void *context, const twin::I2cRecord *record) {
  * JS i2cTrace(after): { sequence, records } — the transfers numbered after
  * 'after' (every bus), each { sequence, time (ms), bus, address, status:
  * "ok" | "nack" | "timeout" | "failed", frequency (Hz; 0: a probe),
- * writeSize, readSize, written, read (the first bytes) }| "nack" | "timeout" | "failed", writeSize, readSize, written, read
- * (the first bytes) }; sequence is the number of the newest.
+ * writeSize, readSize, written, read (the first bytes) }; sequence is the
+ * number of the newest.
  */
 js::Value i2cTrace(double after) {
     JSContext *ctx = js::context();
@@ -584,9 +626,11 @@ js::Value i2cTrace(double after) {
     bool valid = after >= 0 && after <= 4294967295.0;
     uint32_t from = valid ? (uint32_t)after : 0;
 
+    // the records
     TrafficList list = { JS_NewArray(ctx), 0 };
     uint32_t newest = twin::i2cTrace(from, &addI2cRecord, &list);
 
+    // { sequence, records }
     JSValue result = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, result, "sequence", JS_NewUint32(ctx, newest));
     JS_SetPropertyStr(ctx, result, "records", list.array);
@@ -639,6 +683,7 @@ void addScopePin(void *context, int pin, const twin::ScopeChanges *changes, cons
         JS_SetPropertyUint32(ctx, result->pwm, result->pwmCount++, running);
     }
 
+    // nothing more when it did not change
     bool changed = changes->count > 0 || changes->dropped > 0;
     if (!changed) {
         return;
@@ -650,6 +695,7 @@ void addScopePin(void *context, int pin, const twin::ScopeChanges *changes, cons
     JSValue pwm = JS_NewArray(ctx);
     uint32_t levelCount = 0;
     uint32_t pwmCount = 0;
+
     for (int i = 0; i < changes->count; i++) {
         const twin::ScopeRecord *record = &changes->records[i];
         if (record->pwm) {
@@ -657,6 +703,7 @@ void addScopePin(void *context, int pin, const twin::ScopeChanges *changes, cons
             continue;
         }
 
+        // a change of level: [time, level, millivolts]
         uint32_t slot = levelCount++ * 3;
         JS_SetPropertyUint32(ctx, records, slot, JS_NewFloat64(ctx, (double)record->timeUs));
         JS_SetPropertyUint32(ctx, records, slot + 1, JS_NewInt32(ctx, record->level));
@@ -678,9 +725,11 @@ void addScopePin(void *context, int pin, const twin::ScopeChanges *changes, cons
  */
 JSValue numberArray(JSContext *ctx, const uint32_t *values, int count) {
     JSValue array = JS_NewArray(ctx);
+
     for (int i = 0; i < count; i++) {
         JS_SetPropertyUint32(ctx, array, (uint32_t)i, JS_NewUint32(ctx, values[i]));
     }
+
     return array;
 }
 
@@ -703,9 +752,11 @@ void addTrain(void *context, const twin::ScopeTrain *train) {
     // a send of bytes: the bytes and the timing of their bits
     if (train->bytes) {
         JSValue bytes = JS_NewArray(ctx);
+
         for (size_t i = 0; i < train->size; i++) {
             JS_SetPropertyUint32(ctx, bytes, (uint32_t)i, JS_NewInt32(ctx, train->data[i]));
         }
+
         uint32_t bit0[2] = { train->bit0.high, train->bit0.low };
         uint32_t bit1[2] = { train->bit1.high, train->bit1.low };
         JS_SetPropertyStr(ctx, item, "bytes", bytes);
@@ -719,15 +770,18 @@ void addTrain(void *context, const twin::ScopeTrain *train) {
     if (!train->bytes) {
         JSValue pulses = JS_NewArray(ctx);
         size_t count = train->size / 5;
+
         for (size_t i = 0; i < count; i++) {
             const uint8_t *entry = train->data + i * 5;
-            uint32_t ticks = entry[0] | (uint32_t)entry[1] << 8 | (uint32_t)entry[2] << 16 | (uint32_t)entry[3] << 24;
+            uint32_t ticks = readU32(entry);
             JS_SetPropertyUint32(ctx, pulses, (uint32_t)(i * 2), JS_NewUint32(ctx, ticks));
             JS_SetPropertyUint32(ctx, pulses, (uint32_t)(i * 2 + 1), JS_NewInt32(ctx, entry[4]));
         }
+
         JS_SetPropertyStr(ctx, item, "pulses", pulses);
     }
 
+    // appended
     JS_SetPropertyUint32(ctx, list->array, list->count++, item);
 }
 
@@ -752,6 +806,7 @@ js::Value scope() {
     TrafficList trains = { JS_NewArray(ctx), 0 };
     twin::scopeReadTrains(&addTrain, &trains);
 
+    // { now, levels, millivolts, pwm, rmt, changes }
     JSValue value = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, value, "now", JS_NewFloat64(ctx, (double)nowUs));
     JS_SetPropertyStr(ctx, value, "levels", result.levels);
@@ -799,6 +854,8 @@ void addPortName(void *context, const char *name, int) {
  */
 js::Value serialPorts() {
     JSContext *ctx = js::context();
+
+    // filled by addPortName, one name per port
     PortList list = { JS_NewArray(ctx), 0 };
     twin::serialPorts(&addPortName, &list);
     return js::Value(ctx, list.array);
@@ -830,7 +887,9 @@ js::Value usb() {
 
     // its functions
     JSValue functions = JS_NewArray(ctx);
+
     for (int i = 0; i < hal::usb::MAX_SERIALS; i++) {
+        // { tcp }
         JSValue function = JS_NewObject(ctx);
         JS_SetPropertyStr(ctx, function, "tcp", tcpValue(ctx, &state.tcp[i]));
         JS_SetPropertyUint32(ctx, functions, (uint32_t)i, function);
@@ -846,11 +905,13 @@ js::Value usb() {
  * by the twin within 10 ms. False if there is no such link.
  */
 bool tcpListen(js::Str key, js::Range<int, 0, 65535> port, bool listen) {
+    // the link of that key, if any
     twin::TcpLink *link = twin::findTcpLink(key.data());
     if (link == nullptr) {
         return false;
     }
 
+    // asked; the "twin tcp" thread applies it
     link->request((int)port, listen);
     return true;
 }

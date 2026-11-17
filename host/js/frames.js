@@ -1,3 +1,4 @@
+
 /*          _
  *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
  * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
@@ -22,66 +23,99 @@
 export const MAGIC = 0xe5;
 export const VERSION = 1;
 
-// CRC-16/CCITT-FALSE: polynomial 0x1021, initial value 0xFFFF.
-// Check value: crc16("123456789") = 0x29B1.
+/**
+ * CRC-16/CCITT-FALSE: polynomial 0x1021, initial value 0xFFFF.
+ * Check value: crc16("123456789") = 0x29B1.
+ */
 export function crc16(bytes) {
     let crc = 0xffff;
+
     for (const byte of bytes) {
+        // the byte enters the high half, then one shift per bit: when the bit
+        // shifted out is set, the polynomial is subtracted (xor); 16 bits kept
         crc ^= byte << 8;
+
         for (let bit = 0; bit < 8; bit++) {
             crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
         }
     }
+
     return crc;
 }
 
-// Consistent Overhead Byte Stuffing.
+/**
+ * Consistent Overhead Byte Stuffing.
+ */
 export function cobsEncode(data) {
+    // worst case: one code byte per 254 data bytes, plus the first one
     const output = new Uint8Array(data.length + Math.ceil(data.length / 254) + 1);
     let codeIndex = 0;
     let write = 1;
     let code = 1;
+
     for (const byte of data) {
+        // a zero ends a block: its code (distance to the zero) goes in the
+        // place kept for it, and a new place is kept for the next code
         if (byte === 0) {
             output[codeIndex] = code;
             codeIndex = write++;
             code = 1;
             continue;
         }
+
+        // any other byte is copied
         output[write++] = byte;
         code++;
+
+        // a block of 254 bytes without zero ends with code 0xFF
         if (code === 0xff) {
             output[codeIndex] = code;
             codeIndex = write++;
             code = 1;
         }
     }
+
+    // code of the last block
     output[codeIndex] = code;
     return output.subarray(0, write);
 }
 
-// Returns null if 'data' is not valid COBS.
+/**
+ * Returns null if 'data' is not valid COBS.
+ */
 export function cobsDecode(data) {
     const output = new Uint8Array(data.length);
     let read = 0;
     let write = 0;
+
     while (read < data.length) {
+        // code byte: the block holds code - 1 bytes; 0 or a block past the end is invalid
         const code = data[read++];
-        if (code === 0 || read + code - 1 > data.length) {
+        const isInvalid = code === 0 || read + code - 1 > data.length;
+        if (isInvalid) {
             return null;
         }
+
+        // copy the block
         for (let i = 1; i < code; i++) {
             output[write++] = data[read++];
         }
-        if (code !== 0xff && read < data.length) {
+
+        // a block shorter than 254 bytes stood for a zero, except the last one
+        const endsWithZero = code !== 0xff && read < data.length;
+        if (endsWithZero) {
             output[write++] = 0;
         }
     }
+
     return output.subarray(0, write);
 }
 
-// message (CBOR bytes) -> frame bytes, delimiters included.
+/**
+ * message (CBOR bytes) -> frame bytes, delimiters included.
+ */
 export function encodeFrame(message) {
+    // MAGIC, VERSION, CRC (big endian), then the message
     const crc = crc16(message);
     const body = new Uint8Array(4 + message.length);
     body[0] = MAGIC;
@@ -89,39 +123,57 @@ export function encodeFrame(message) {
     body[2] = crc >> 8;
     body[3] = crc & 0xff;
     body.set(message, 4);
+
+    // COBS, between two 0x00
     const encoded = cobsEncode(body);
     const frame = new Uint8Array(encoded.length + 2);
     frame.set(encoded, 1);   // frame[0] and the last byte stay 0x00
     return frame;
 }
 
-// Splits a byte stream into messages and text. Feed it the received bytes;
-// it calls onMessage(cborBytes) for each valid frame and onText(bytes) for
-// everything else.
+/**
+ * Splits a byte stream into messages and text. Feed it the received bytes;
+ * it calls onMessage(cborBytes) for each valid frame and onText(bytes) for
+ * everything else.
+ */
 export class FrameParser {
+    /**
+     * onMessage(cborBytes) and onText(bytes) receive what feed() splits.
+     */
     constructor(onMessage, onText) {
         this.onMessage = onMessage;
         this.onText = onText;
         this.pending = [];
     }
 
+    /**
+     * Gives received bytes; every 0x00 ends a segment.
+     */
     feed(bytes) {
         for (const byte of bytes) {
             if (byte !== 0) {
                 this.pending.push(byte);
                 continue;
             }
+
             this.flushSegment();
         }
     }
 
-    // A segment between two 0x00: a frame if it decodes, text otherwise.
+    /**
+     * A segment between two 0x00: a frame if it decodes, text otherwise.
+     */
     flushSegment() {
+        // nothing between two 0x00 (the end of a frame and the start of the next)
         if (this.pending.length === 0) {
             return;
         }
+
+        // take the pending bytes
         const segment = Uint8Array.from(this.pending);
         this.pending = [];
+
+        // a frame, or text
         const message = decodeFrameBody(segment);
         if (message !== null) {
             this.onMessage(message);
@@ -130,9 +182,11 @@ export class FrameParser {
         }
     }
 
-    // Console text has no final 0x00: call this when the link is idle to
-    // give the pending bytes as text if they end a line. (A frame is always
-    // sent in one go, so it is never left pending at idle time.)
+    /**
+     * Console text has no final 0x00: call this when the link is idle to
+     * give the pending bytes as text if they end a line. (A frame is always
+     * sent in one go, so it is never left pending at idle time.)
+     */
     flushText() {
         const endsLine = this.pending.length > 0 && this.pending[this.pending.length - 1] === 0x0a;
         if (endsLine) {
@@ -143,13 +197,20 @@ export class FrameParser {
     }
 }
 
-// COBS segment -> message bytes, or null if it is not a valid frame.
+/**
+ * COBS segment -> message bytes, or null if it is not a valid frame.
+ */
 export function decodeFrameBody(segment) {
+    // COBS, then MAGIC and VERSION
     const body = cobsDecode(segment);
-    if (body === null || body.length < 4 || body[0] !== MAGIC || body[1] !== VERSION) {
+    const isNotFrame = body === null || body.length < 4 || body[0] !== MAGIC || body[1] !== VERSION;
+    if (isNotFrame) {
         return null;
     }
+
+    // the CRC must match the message
     const message = body.subarray(4);
     const crc = (body[2] << 8) | body[3];
-    return crc16(message) === crc ? message : null;
+    const crcMatches = crc16(message) === crc;
+    return crcMatches ? message : null;
 }

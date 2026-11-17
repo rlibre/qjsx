@@ -158,6 +158,9 @@ static __exception int js_parse_export(JSParseState *s)
     case '{':
         first_export = m->export_entries_count;
         while (s->token.val != '}') {
+            /* qjsx: where this name starts, for the outline (engine change W) */
+            const uint8_t *name_start = s->token.ptr;
+            const uint8_t *name_end;
             if (!token_is_ident(s->token.val)) {
                 js_parse_error(s, "identifier expected");
                 return -1;
@@ -199,6 +202,10 @@ static __exception int js_parse_export(JSParseState *s)
             JS_FreeAtom(ctx, local_name);
             JS_FreeAtom(ctx, export_name);
             if (!me)
+                return -1;
+            /* qjsx: its text, with the comma that follows it if any */
+            name_end = s->token.val == ',' ? s->token.ptr + 1 : s->last_ptr;
+            if (js_outline_export_range(s, m->export_entries_count - 1, name_start, name_end))
                 return -1;
             if (s->token.val != ',')
                 break;
@@ -287,8 +294,11 @@ static __exception int js_parse_export(JSParseState *s)
     return js_parse_expect_semi(s);
 }
 
+/* qjsx: 'name_ptr' is where the imported name is written (outline, engine
+   change W) */
 static int add_import(JSParseState *s, JSModuleDef *m,
-                      JSAtom local_name, JSAtom import_name, BOOL is_star)
+                      JSAtom local_name, JSAtom import_name, BOOL is_star,
+                      const uint8_t *name_ptr)
 {
     JSContext *ctx = s->ctx;
     int i, var_idx;
@@ -319,7 +329,7 @@ static int add_import(JSParseState *s, JSModuleDef *m,
     mi->import_name = JS_DupAtom(ctx, import_name);
     mi->var_idx = var_idx;
     mi->is_star = is_star;
-    return 0;
+    return js_outline_import_position(s, m->import_entries_count - 1, name_ptr);
 }
 
 static __exception int js_parse_import(JSParseState *s)
@@ -355,11 +365,12 @@ static __exception int js_parse_import(JSParseState *s)
                 return js_parse_error_reserved_identifier(s);
             }
             /* "default" import */
+            const uint8_t *name_ptr = s->token.ptr;   /* qjsx */
             local_name = JS_DupAtom(ctx, s->token.u.ident.atom);
             import_name = JS_ATOM_default;
             if (next_token(s))
                 goto fail;
-            if (add_import(s, m, local_name, import_name, FALSE))
+            if (add_import(s, m, local_name, import_name, FALSE, name_ptr))
                 goto fail;
             JS_FreeAtom(ctx, local_name);
 
@@ -371,6 +382,7 @@ static __exception int js_parse_import(JSParseState *s)
 
         if (s->token.val == '*') {
             /* name space import */
+            const uint8_t *star_ptr = s->token.ptr;   /* qjsx */
             if (next_token(s))
                 return -1;
             if (!token_is_pseudo_keyword(s, JS_ATOM_as))
@@ -385,7 +397,7 @@ static __exception int js_parse_import(JSParseState *s)
             import_name = JS_ATOM__star_;
             if (next_token(s))
                 goto fail;
-            if (add_import(s, m, local_name, import_name, TRUE))
+            if (add_import(s, m, local_name, import_name, TRUE, star_ptr))
                 goto fail;
             JS_FreeAtom(ctx, local_name);
         } else if (s->token.val == '{') {
@@ -394,6 +406,7 @@ static __exception int js_parse_import(JSParseState *s)
 
             while (s->token.val != '}') {
                 BOOL is_string;
+                const uint8_t *name_ptr = s->token.ptr;   /* qjsx */
                 if (s->token.val == TOK_STRING) {
                     is_string = TRUE;
                     if (js_string_find_invalid_codepoint(JS_VALUE_GET_STRING(s->token.u.str.str)) >= 0) {
@@ -434,7 +447,7 @@ static __exception int js_parse_import(JSParseState *s)
                     }
                     local_name = JS_DupAtom(ctx, import_name);
                 }
-                if (add_import(s, m, local_name, import_name, FALSE))
+                if (add_import(s, m, local_name, import_name, FALSE, name_ptr))
                     goto fail;
                 JS_FreeAtom(ctx, local_name);
                 JS_FreeAtom(ctx, import_name);

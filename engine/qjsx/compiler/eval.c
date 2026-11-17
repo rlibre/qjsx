@@ -92,7 +92,14 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     push_scope(s); /* body scope */
     fd->body_scope = fd->scope_level;
 
+    /* qjsx: the outline of a module, when a collector asks for it (engine
+       change W): given once the module is parsed, freed whatever the result */
+    if (m != NULL && js_outline_start(s))
+        goto fail;
     err = js_parse_program(s);
+    if (!err && m != NULL)
+        js_outline_report(s, m);
+    js_outline_free(s);
     if (err) {
     fail:
         free_token(s, &s->token);

@@ -415,6 +415,9 @@ typedef struct JSParseState {
     /* qjsx: 'import()' is a syntax error (JS_EVAL_FLAG_NO_DYNAMIC_IMPORT) */
     BOOL no_dynamic_import;
     GetLineColCache get_line_col_cache;
+    /* qjsx: outline of the module being parsed (compiler/outline.c), NULL
+       when no collector asks for it */
+    struct JSOutlineBuilder *outline;
 } JSParseState;
 
 typedef enum {
@@ -517,6 +520,16 @@ BOOL js_debug_has_stop_marker(const uint8_t *bc_buf, int start, int end);
 void js_debug_info_collect(JSContext *ctx, JSFunctionDef *fd, JSFunctionBytecode *b);
 void js_compile_warning(JSParseState *s, JSCompileWarningKind kind, const uint8_t *ptr);
 BOOL js_last_op_is_scope_var(JSFunctionDef *fd, JSAtom name);
+/* qjsx: compiler/outline.c (engine change W) */
+int js_outline_start(JSParseState *s);
+void js_outline_statement_begin(JSParseState *s);
+int js_outline_statement_end(JSParseState *s);
+void js_outline_name_used(JSParseState *s, JSAtom name);
+int js_outline_import_position(JSParseState *s, int import_index, const uint8_t *ptr);
+int js_outline_export_range(JSParseState *s, int export_index, const uint8_t *start, const uint8_t *end);
+void js_outline_eval_seen(JSParseState *s);
+void js_outline_report(JSParseState *s, JSModuleDef *m);
+void js_outline_free(JSParseState *s);
 /* qjsx: compiler/tdz.c */
 int remove_useless_tdz_checks(JSContext *ctx, JSFunctionDef *fd);
 /* qjsx: compiler/fold.c */

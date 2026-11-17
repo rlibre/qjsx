@@ -44,6 +44,17 @@
 //   { kind: "eval" | "Function", line, column }   (from 1, as in a SyntaxError)
 // "eval" is a direct eval(...), "Function" a call or a 'new' of Function;
 // indirect uses are not seen (JS_SetCompileWarningHandler, quickjs-debug.h).
+// 'outline': true gives 'outline' in the result (null otherwise, and for a
+// script), what 'qjsx build' reads to leave out what nothing uses (engine
+// change W, JS_SetModuleOutlineCollector):
+//   { statements: [{ start, end, removable, declared: [names],
+//                    references: [names] }],
+//     imports: [{ module, imported ("*" for import * as), local, position }],
+//     exports: [{ exported (null for export * from), local, module (null for
+//                 a name of the module), start, end (a name of an export
+//                 clause, else 0, 0) }],
+//     hasEval }
+// Positions are byte offsets in the UTF-8 source.
 //
 // Constants: 'quickjsVersion', 'qjsxVersion', and 'bytecodeVersion', the
 // version of the bytecode this compiler writes: an engine only reads its own.
@@ -59,20 +70,22 @@ namespace {
 
 JS_ENUM(Strip, none, source, all);
 
+// The options of compile() (JS_STRUCT: unknown fields are refused).
 struct CompileOptions {
-    bool module = true;            // true: ES module, false: global script
+    bool  module = true;           // true: ES module, false: global script
     Strip strip = Strip::source;   // debug info removed from the bytecode
-    bool debug = false;            // true: also return the sidecar debug info
-    bool dynamicImport = true;     // false: 'import()' is a syntax error
+    bool  debug = false;           // true: also return the sidecar debug info
+    bool  dynamicImport = true;    // false: 'import()' is a syntax error
+    bool  outline = false;         // true: also return the outline of a module
 };
-JS_STRUCT(CompileOptions, module, strip, debug, dynamicImport);
+JS_STRUCT(CompileOptions, module, strip, debug, dynamicImport, outline);
 
-// #############################################################################
-// Debug info: the engine calls collectFunction() for each compiled function.
+// ### Debug info ##############################################################
+// The engine calls collectFunction() for each compiled function.
 
 // Where collectFunction() puts the records during one compile() call.
 struct DebugCollection {
-    JSValue functions;   // JS array of function records
+    JSValue  functions;  // JS array of function records
     uint32_t count;      // number of records in 'functions'
 };
 
@@ -103,6 +116,7 @@ JSValue positionsToJs(JSContext *ctx, const JSDebugFunctionInfo *info) {
     uint32_t index = 0;
 
     for (int i = 0; i < info->position_count; i++) {
+        // pc, source offset, kind
         const JSDebugPosition &position = info->positions[i];
         JS_SetPropertyUint32(ctx, array, index++, JS_NewInt64(ctx, position.pc));
         JS_SetPropertyUint32(ctx, array, index++, JS_NewInt64(ctx, position.source_pos));
@@ -120,6 +134,7 @@ JSValue variablesToJs(JSContext *ctx, const JSDebugVariable *variables, int coun
     JSValue array = JS_NewArray(ctx);
 
     for (int i = 0; i < count; i++) {
+        // { name, scope?, flags } at its slot index
         JSValue variable = JS_NewObject(ctx);
         JS_SetPropertyStr(ctx, variable, "name", atomOrNull(ctx, variables[i].name));
         if (withScope) {
@@ -146,6 +161,7 @@ JSValue constantsToJs(JSContext *ctx, const JSDebugFunctionInfo *info) {
         JS_SetPropertyStr(ctx, entry, "value", JS_DupValue(ctx, info->constants[i].value));
         JS_SetPropertyUint32(ctx, array, i, entry);
     }
+
     return array;
 }
 
@@ -202,7 +218,7 @@ void collectFunction(JSContext *ctx, const JSDebugFunctionInfo *info, void *opaq
 
 // Where collectWarning() puts the records during one compile() call.
 struct WarningCollection {
-    JSValue warnings;   // JS array of warning records
+    JSValue  warnings;  // JS array of warning records
     uint32_t count;     // number of records in 'warnings'
 };
 
@@ -214,6 +230,7 @@ void collectWarning(JSContext *ctx, JSCompileWarningKind kind, int line, int col
     WarningCollection *collection = (WarningCollection *)opaque;
     const char *kindName = kind == JS_COMPILE_WARNING_EVAL ? "eval" : "Function";
 
+    // { kind, line, column }, appended
     JSValue record = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, record, "kind", JS_NewString(ctx, kindName));
     setNumber(ctx, record, "line", line);
@@ -221,11 +238,111 @@ void collectWarning(JSContext *ctx, JSCompileWarningKind kind, int line, int col
     JS_SetPropertyUint32(ctx, collection->warnings, collection->count++, record);
 }
 
+// ### Outline #################################################################
+// The engine calls collectOutline() once the module is parsed (engine change W).
+
+/**
+ * The names as a JS array of strings.
+ */
+JSValue atomsToJs(JSContext *ctx, const JSAtom *atoms, int count) {
+    JSValue array = JS_NewArray(ctx);
+
+    for (int i = 0; i < count; i++) {
+        JS_SetPropertyUint32(ctx, array, i, JS_AtomToString(ctx, atoms[i]));
+    }
+
+    return array;
+}
+
+/**
+ * The statements as an array of { start, end, removable, declared,
+ * references }.
+ */
+JSValue outlineStatementsToJs(JSContext *ctx, const JSModuleOutline *outline) {
+    JSValue array = JS_NewArray(ctx);
+
+    for (int i = 0; i < outline->statement_count; i++) {
+        const JSOutlineStatement *statement = &outline->statements[i];
+        JSValue record = JS_NewObject(ctx);
+        setNumber(ctx, record, "start", statement->start);
+        setNumber(ctx, record, "end", statement->end);
+        JS_SetPropertyStr(ctx, record, "removable", JS_NewBool(ctx, statement->removable));
+        JS_SetPropertyStr(ctx, record, "declared", atomsToJs(ctx, statement->declared, statement->declared_count));
+        JS_SetPropertyStr(ctx, record, "references", atomsToJs(ctx, statement->references, statement->reference_count));
+        JS_SetPropertyUint32(ctx, array, i, record);
+    }
+
+    return array;
+}
+
+/**
+ * The imports as an array of { module, imported, local, position }.
+ */
+JSValue outlineImportsToJs(JSContext *ctx, const JSModuleOutline *outline) {
+    JSValue array = JS_NewArray(ctx);
+
+    for (int i = 0; i < outline->import_count; i++) {
+        const JSOutlineImport *imported = &outline->imports[i];
+        JSValue record = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, record, "module", JS_AtomToString(ctx, imported->module));
+        JS_SetPropertyStr(ctx, record, "imported", JS_AtomToString(ctx, imported->imported));
+        JS_SetPropertyStr(ctx, record, "local", JS_AtomToString(ctx, imported->local));
+        setNumber(ctx, record, "position", imported->position);
+        JS_SetPropertyUint32(ctx, array, i, record);
+    }
+
+    return array;
+}
+
+/**
+ * The exports as an array of { exported, local, module, start, end }
+ * ('exported' null for 'export * from', 'module' null for a name of the
+ * module itself).
+ */
+JSValue outlineExportsToJs(JSContext *ctx, const JSModuleOutline *outline) {
+    JSValue array = JS_NewArray(ctx);
+
+    for (int i = 0; i < outline->export_count; i++) {
+        const JSOutlineExport *exported = &outline->exports[i];
+        JSValue record = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, record, "exported", atomOrNull(ctx, exported->exported));
+        JS_SetPropertyStr(ctx, record, "local", JS_AtomToString(ctx, exported->local));
+        JS_SetPropertyStr(ctx, record, "module", atomOrNull(ctx, exported->module));
+        setNumber(ctx, record, "start", exported->start);
+        setNumber(ctx, record, "end", exported->end);
+        JS_SetPropertyUint32(ctx, array, i, record);
+    }
+
+    return array;
+}
+
+/**
+ * Module outline collector (JS_SetModuleOutlineCollector): '*opaque' (a
+ * JSValue) receives { statements, imports, exports, hasEval }.
+ */
+void collectOutline(JSContext *ctx, const JSModuleOutline *outline, void *opaque) {
+    JSValue *result = (JSValue *)opaque;
+
+    // { statements, imports, exports, hasEval }
+    JSValue record = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, record, "statements", outlineStatementsToJs(ctx, outline));
+    JS_SetPropertyStr(ctx, record, "imports", outlineImportsToJs(ctx, outline));
+    JS_SetPropertyStr(ctx, record, "exports", outlineExportsToJs(ctx, outline));
+    JS_SetPropertyStr(ctx, record, "hasEval", JS_NewBool(ctx, outline->has_eval));
+
+    // it replaces what *result held
+    JS_FreeValue(ctx, *result);
+    *result = record;
+}
+
+// ### Imports #################################################################
+
 /**
  * JS array of the names of the modules that the compiled module asks for, as
  * written in its source; an empty array for a script ('isModule' false).
  */
 JSValue importsToJs(JSContext *ctx, JSValueConst compiled, bool isModule) {
+    // a script asks for nothing
     JSValue imports = JS_NewArray(ctx);
     if (!isModule) {
         return imports;
@@ -249,6 +366,7 @@ struct CompileExtras {
     JSValue debug;      // array of function records, or null without debug: true
     JSValue imports;    // array of module names
     JSValue warnings;   // array of warning records
+    JSValue outline;    // outline of a module, or null without outline: true
 };
 
 /**
@@ -258,11 +376,12 @@ void freeExtras(JSContext *ctx, const CompileExtras *extras) {
     JS_FreeValue(ctx, extras->debug);
     JS_FreeValue(ctx, extras->imports);
     JS_FreeValue(ctx, extras->warnings);
+    JS_FreeValue(ctx, extras->outline);
 }
 
 /**
- * { bytecode, debug, imports, warnings } returned by compile(); takes
- * ownership of the values of 'extras'.
+ * { bytecode, debug, imports, warnings, outline } returned by compile();
+ * takes ownership of the values of 'extras'.
  */
 js::Value compileResult(JSContext *ctx, const js::Buffer *bytecode, const CompileExtras *extras) {
     JSValue result = JS_NewObject(ctx);
@@ -270,6 +389,7 @@ js::Value compileResult(JSContext *ctx, const js::Buffer *bytecode, const Compil
     JS_SetPropertyStr(ctx, result, "debug", extras->debug);
     JS_SetPropertyStr(ctx, result, "imports", extras->imports);
     JS_SetPropertyStr(ctx, result, "warnings", extras->warnings);
+    JS_SetPropertyStr(ctx, result, "outline", extras->outline);
     return js::Value(ctx, result);
 }
 
@@ -293,10 +413,12 @@ int stripFlags(Strip strip) {
 }
 
 /**
- * JS compile(source, name, options): { bytecode, debug, imports, warnings }.
+ * JS compile(source, name, options): { bytecode, debug, imports, warnings,
+ * outline }.
  * A syntax error is thrown to the caller.
  */
 js::Value compile(js::Str source, js::Str name, js::Optional<CompileOptions> optionsArgument) {
+    // the options, their defaults without them
     CompileOptions options = optionsArgument.has() ? optionsArgument.value() : CompileOptions();
     JSContext *ctx = js::context();
     JSRuntime *rt = JS_GetRuntime(ctx);
@@ -311,6 +433,12 @@ js::Value compile(js::Str source, js::Str name, js::Optional<CompileOptions> opt
     // collect the compile warnings of this call
     WarningCollection warned = { JS_NewArray(ctx), 0 };
     JS_SetCompileWarningHandler(rt, collectWarning, &warned);
+
+    // with outline: true, the outline of a module
+    JSValue outline = JS_NULL;
+    if (options.outline && options.module) {
+        JS_SetModuleOutlineCollector(rt, collectOutline, &outline);
+    }
 
     // set the runtime's strip flags for this call
     int previousStrip = JS_GetStripInfo(rt);
@@ -329,8 +457,10 @@ js::Value compile(js::Str source, js::Str name, js::Optional<CompileOptions> opt
     JS_SetStripInfo(rt, previousStrip);
     JS_SetDebugInfoCollector(rt, nullptr, nullptr);
     JS_SetCompileWarningHandler(rt, nullptr, nullptr);
+    JS_SetModuleOutlineCollector(rt, nullptr, nullptr);
 
-    CompileExtras extras = { collection.functions, JS_UNDEFINED, warned.warnings };
+    // what was gathered; a syntax error: dropped, the exception to the caller
+    CompileExtras extras = { collection.functions, JS_UNDEFINED, warned.warnings, outline };
     if (JS_IsException(compiled)) {
         freeExtras(ctx, &extras);
         js::detail::markPendingException();   // the SyntaxError goes to the caller
@@ -356,7 +486,7 @@ js::Value compile(js::Str source, js::Str name, js::Optional<CompileOptions> opt
     return compileResult(ctx, &copy, &extras);
 }
 
-// ### Link #####################################################################
+// ### Link ####################################################################
 
 /**
  * The bytes of a Uint8Array (not copied): nullptr when 'array' is not one.
@@ -414,6 +544,7 @@ js::Value link(js::Value modules) {
 
     // 1. read every module: its names take the next numbers
     for (uint32_t i = 0; i < count && problem == nullptr; i++) {
+        // its bytes, read into the runtime of the link
         JSValue element = JS_GetPropertyUint32(ctx, modules.get(), i);
         size_t size = 0;
         const uint8_t *data = bytesOf(ctx, element, &size);
@@ -428,6 +559,7 @@ js::Value link(js::Value modules) {
                 read[readCount++] = module;
             }
         }
+
         JS_FreeValue(ctx, element);
     }
 
@@ -447,6 +579,7 @@ js::Value link(js::Value modules) {
     }
 
     for (uint32_t i = 0; i < readCount && problem == nullptr; i++) {
+        // written with fixed name numbers, copied into a Uint8Array
         size_t size = 0;
         uint8_t *bytecode = JS_WriteObject(linkContext, &size, read[i], JS_WRITE_OBJ_BYTECODE | JS_WRITE_OBJ_FIXED_ATOMS);
         if (bytecode == nullptr) {
@@ -457,6 +590,8 @@ js::Value link(js::Value modules) {
             js_free(linkContext, bytecode);
         }
     }
+
+    // { names, modules }
     JS_SetPropertyStr(ctx, result, "modules", written);
 
     // free the modules, then the runtime of the link
@@ -468,10 +603,12 @@ js::Value link(js::Value modules) {
     JS_FreeContext(linkContext);
     JS_FreeRuntime(linkRuntime);
 
+    // a problem: thrown, the result dropped
     if (problem != nullptr) {
         JS_FreeValue(ctx, result);
         return js::fail(problem);
     }
+
     return js::Value(ctx, result);
 }
 

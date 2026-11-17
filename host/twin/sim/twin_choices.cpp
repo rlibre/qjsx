@@ -58,6 +58,7 @@ Choice *findChoice(const char *key) {
  * the table is full. Lock held.
  */
 bool keepChoice(const char *key, const char *json) {
+    // the entry of the key, or a new one while the table has room
     Choice *choice = findChoice(key);
     if (choice == nullptr) {
         if (choiceCount >= MAX_CHOICES) {
@@ -69,6 +70,7 @@ bool keepChoice(const char *key, const char *json) {
         choice->json = nullptr;
     }
 
+    // its text replaced by a copy of 'json'
     if (choice->json != nullptr) {
         memory::release(choice->json);
     }
@@ -84,6 +86,7 @@ bool keepChoice(const char *key, const char *json) {
 void writeFile() {
     // the size: braces, and per entry the key, its object, quotes and spaces
     size_t size = 8;
+
     for (int i = 0; i < choiceCount; i++) {
         size += strlen(choices[i].key) + strlen(choices[i].json) + 16;
     }
@@ -91,6 +94,7 @@ void writeFile() {
     // { "key": object, ... }
     char *text = (char *)memory::allocate(size);
     size_t used = (size_t)snprintf(text, size, "{");
+
     for (int i = 0; i < choiceCount; i++) {
         const char *separator = i == 0 ? "" : ",";
         used += (size_t)snprintf(text + used, size - used, "%s\n    \"%s\": %s", separator, choices[i].key,
@@ -99,6 +103,7 @@ void writeFile() {
 
     used += (size_t)snprintf(text + used, size - used, "\n}\n");
 
+    // written whole; a failure is only said
     if (!files::writeAll(choicesPath, text, used)) {
         fprintf(stderr, "qjsx twin: cannot write %s\n", choicesPath);
     }
@@ -126,11 +131,13 @@ void choicesLoad(const char *storage) {
         return;
     }
 
+    // its text copied as a C string
     char *json = (char *)memory::allocate(size + 1);
     memcpy(json, text, size);
     json[size] = 0;
     memory::release(text);
 
+    // parsed in a runtime of its own
     JSRuntime *runtime = JS_NewRuntime();
     JSContext *ctx = JS_NewContext(runtime);
     JSValue file = JS_ParseJSON(ctx, json, size, choicesPath);
@@ -139,14 +146,26 @@ void choicesLoad(const char *storage) {
     // 3. its objects, each by its key
     JSPropertyEnum *properties = nullptr;
     uint32_t count = 0;
-    bool listed = JS_IsObject(file)
+    bool isObject = JS_IsObject(file);
+    bool listed = isObject
                && JS_GetOwnPropertyNames(ctx, &properties, &count, file, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0;
     lock.lock();
+
     for (uint32_t i = 0; listed && i < count; i++) {
         JSValue value = JS_GetProperty(ctx, file, properties[i].atom);
         const char *key = JS_AtomToCString(ctx, properties[i].atom);
-        JSValue object = JS_IsObject(value) ? JS_JSONStringify(ctx, value, JS_UNDEFINED, JS_UNDEFINED) : JS_UNDEFINED;
-        const char *objectText = JS_IsString(object) ? JS_ToCString(ctx, object) : nullptr;
+
+        // an object property, made JSON text again; anything else skipped
+        JSValue object = JS_UNDEFINED;
+        if (JS_IsObject(value)) {
+            object = JS_JSONStringify(ctx, value, JS_UNDEFINED, JS_UNDEFINED);
+        }
+
+        const char *objectText = nullptr;
+        if (JS_IsString(object)) {
+            objectText = JS_ToCString(ctx, object);
+        }
+
         if (key != nullptr && objectText != nullptr) {
             keepChoice(key, objectText);
         }
@@ -159,6 +178,7 @@ void choicesLoad(const char *storage) {
 
     lock.unlock();
 
+    // the short-lived runtime freed
     if (listed) {
         JS_FreePropertyEnum(ctx, properties, count);
     }
@@ -176,7 +196,11 @@ bool choicesRead(const char *key, ChoiceReader *read, void *context) {
     // a copy of the text, the lock released before any parsing
     lock.lock();
     Choice *choice = findChoice(key);
-    char *json = choice != nullptr ? memory::copyText(choice->json, strlen(choice->json)) : nullptr;
+    char *json = nullptr;
+    if (choice != nullptr) {
+        json = memory::copyText(choice->json, strlen(choice->json));
+    }
+
     lock.unlock();
     if (json == nullptr) {
         return false;
@@ -191,6 +215,7 @@ bool choicesRead(const char *key, ChoiceReader *read, void *context) {
         read(context, ctx, object);
     }
 
+    // the short-lived runtime and the copy freed
     JS_FreeValue(ctx, object);
     JS_FreeContext(ctx);
     JS_FreeRuntime(runtime);
@@ -202,10 +227,12 @@ bool choicesRead(const char *key, ChoiceReader *read, void *context) {
  * Keeps the object and writes the file.
  */
 void choicesWrite(const char *key, const char *json) {
+    // nothing to write to before choicesLoad()
     if (choicesPath == nullptr) {
         return;
     }
 
+    // kept, then the whole file written again
     lock.lock();
     if (keepChoice(key, json)) {
         writeFile();

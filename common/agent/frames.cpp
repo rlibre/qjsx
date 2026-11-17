@@ -206,9 +206,9 @@ void Parser::flushSegment() {
     // a frame is valid COBS with magic, version and a matching CRC: onMessage
     // gets the message after the 4-byte header; anything else goes to onText
     size_t decoded = 0;
-    bool isFrame = cobsDecode(_segment, _length, &decoded) && decoded >= 4
-        && _segment[0] == MAGIC && _segment[1] == VERSION
-        && crc16(_segment + 4, decoded - 4) == ((_segment[2] << 8) | _segment[3]);
+    bool hasHeader = cobsDecode(_segment, _length, &decoded) && decoded >= 4;
+    bool isOurs = hasHeader && _segment[0] == MAGIC && _segment[1] == VERSION;
+    bool isFrame = isOurs && crc16(_segment + 4, decoded - 4) == ((_segment[2] << 8) | _segment[3]);
     if (isFrame) {
         _onMessage(_opaque, _segment + 4, decoded - 4);
     } else if (_onText != nullptr) {

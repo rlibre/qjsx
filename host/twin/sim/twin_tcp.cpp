@@ -53,12 +53,14 @@ void readInt(JSContext *ctx, JSValueConst object, const char *name, int *value) 
 void takeChoice(void *context, JSContext *ctx, JSValueConst choice) {
     TcpLink *link = (TcpLink *)context;
 
+    // its port and whether it listens
     int port = 0;
     readInt(ctx, choice, "port", &port);
     JSValue listenValue = JS_GetPropertyStr(ctx, choice, "listen");
     bool listen = JS_ToBool(ctx, listenValue) == 1;
     JS_FreeValue(ctx, listenValue);
 
+    // asked as the page would
     link->request(port, listen);
 }
 
@@ -67,11 +69,13 @@ void takeChoice(void *context, JSContext *ctx, JSValueConst choice) {
  * chosen).
  */
 void saveChoice(TcpLink *link) {
+    // no port chosen yet: nothing to keep
     TcpState state = link->state();
     if (state.port == 0) {
         return;
     }
 
+    // { port, listen } under the key of the link
     char json[CHOICE_SIZE];
     snprintf(json, sizeof(json), "{ \"port\": %d, \"listen\": %s }", state.port, state.listen ? "true" : "false");
     choicesWrite(link->key(), json);
@@ -83,6 +87,7 @@ void saveChoice(TcpLink *link) {
  */
 void serveLinks(void *) {
     for (;;) {
+        // one look at each link; a changed choice saved
         for (int i = 0; i < linkCount; i++) {
             bool changed = links[i]->poll(listenHost);
             if (changed && links[i]->persisted()) {
@@ -90,13 +95,14 @@ void serveLinks(void *) {
             }
         }
 
+        // then a pause before the next look
         platform::sleepMs(POLL_MS);
     }
 }
 
 } // namespace
 
-// ### TcpLink ################################################################
+// ### TcpLink #################################################################
 
 /**
  * Names the link and gives its handlers.
@@ -135,6 +141,7 @@ void TcpLink::setActive(bool active) {
  * sees the client go).
  */
 void TcpLink::send(const uint8_t *data, size_t size) {
+    // under the lock: the thread may drop the client meanwhile
     _lock.lock();
     if (_client != sockets::invalidSocket) {
         int error = 0;
@@ -191,19 +198,22 @@ void TcpLink::reconcile(const char *host) {
 
     // 1. close
     bool open = _listener != sockets::invalidSocket;
-    if (open && (!wanted || _listenedPort != _port)) {
+    bool unwanted = !wanted || _listenedPort != _port;
+    if (open && unwanted) {
         dropClient();
         sockets::closeSocket(_listener);
         _listener = sockets::invalidSocket;
         open = false;
     }
 
+    // nothing more when it should not listen, or listens already
     if (!wanted || open) {
         return;
     }
 
-    // 2. open
-    if (_port < 1 || _port > 65535) {
+    // 2. open, on a valid port
+    bool validPort = _port >= 1 && _port <= 65535;
+    if (!validPort) {
         snprintf(_error, sizeof(_error), "no port chosen");
         _listen = false;
         return;
@@ -212,6 +222,8 @@ void TcpLink::reconcile(const char *host) {
     int bound = 0;
     int error = 0;
     _listener = sockets::listenOn(host, _port, &bound, &error);
+
+    // a failure turns the listening off and says why
     if (_listener == sockets::invalidSocket) {
         if (error == EADDRINUSE) {
             snprintf(_error, sizeof(_error), "port %d in use", _port);
@@ -223,6 +235,7 @@ void TcpLink::reconcile(const char *host) {
         return;
     }
 
+    // listening: its port remembered, no error any more
     _listenedPort = _port;
     _error[0] = 0;
 }
@@ -250,13 +263,14 @@ bool TcpLink::poll(const char *host) {
     uint8_t *data = nullptr;
     int received = 0;
     bool listening = _listener != sockets::invalidSocket;
-    if (listening && _client == sockets::invalidSocket) {
+    bool hasClient = _client != sockets::invalidSocket;
+    if (listening && !hasClient) {
         if (sockets::waitReadable(_listener, 0) > 0) {
             int error = 0;
             _client = sockets::acceptConnection(_listener, &error);
             connected = _client != sockets::invalidSocket;
         }
-    } else if (_client != sockets::invalidSocket && sockets::waitReadable(_client, 0) > 0) {
+    } else if (hasClient && sockets::waitReadable(_client, 0) > 0) {
         // 3. what the client sent, or its end
         received = sockets::receiveBlock(_client, &data);
         if (received <= 0) {
@@ -279,7 +293,7 @@ bool TcpLink::poll(const char *host) {
     return changed;
 }
 
-// ### The links together #####################################################
+// ### The links together ######################################################
 
 /**
  * Adds a link to those the thread serves.
@@ -296,6 +310,7 @@ void registerTcpLink(TcpLink *link) {
 bool startTcp(const char *host) {
     // the choices kept
     listenHost = host;
+
     for (int i = 0; i < linkCount; i++) {
         if (links[i]->persisted()) {
             choicesRead(links[i]->key(), &takeChoice, links[i]);

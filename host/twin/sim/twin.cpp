@@ -29,19 +29,19 @@ const int MAX_NATIVES = 16;        // native modules a board may list
 
 // A simulated pin (under stateLock).
 struct Pin {
-    PinState state;                      // what the page reads
-    bool watched;                        // hal::gpio::watch() is in force
-    bool partWatched;                    // a component watches it (bridge events)
-    hal::gpio::ChangeHandler *handler;   // called when its level changes (watched)
-    uint8_t latch;                       // what an output or open drain drives
-    int64_t pwmStartUs;                  // when its PWM got its frequency, duty cycle (scopeNowUs)
+    PinState                  state;         // what the page reads
+    bool                      watched;       // hal::gpio::watch() is in force
+    bool                      partWatched;   // a component watches it (bridge events)
+    hal::gpio::ChangeHandler *handler;       // called when its level changes (watched)
+    uint8_t                   latch;         // what an output or open drain drives
+    int64_t                   pwmStartUs;    // when its PWM got its frequency, duty cycle (scopeNowUs)
 };
 
 // What a change of a pin calls once the lock is released.
 struct Change {
-    hal::gpio::ChangeHandler *handler;   // the program's handler; nullptr: none
-    bool tellParts;                      // post a pinChange to the bridge
-    int level;                           // the new level
+    hal::gpio::ChangeHandler *handler;       // the program's handler; nullptr: none
+    bool                      tellParts;     // post a pinChange to the bridge
+    int                       level;         // the new level
 };
 
 // The board (written by load() before any thread uses it).
@@ -99,6 +99,7 @@ uint8_t pwmLevel(const Pin *pin, int64_t nowUs) {
     if (state->pwmDuty >= 1.0) {
         return active;
     }
+
     if (state->pwmDuty <= 0.0 || state->pwmFrequency <= 0.0) {
         return idle;
     }
@@ -111,7 +112,10 @@ uint8_t pwmLevel(const Pin *pin, int64_t nowUs) {
     if (intoPeriodUs < 0) {
         intoPeriodUs += periodUs;
     }
-    return intoPeriodUs / periodUs < state->pwmDuty ? active : idle;
+
+    // active for the duty cycle at the start of the period
+    bool inActiveShare = intoPeriodUs / periodUs < state->pwmDuty;
+    return inActiveShare ? active : idle;
 }
 
 /**
@@ -134,7 +138,8 @@ uint8_t computeLevel(Pin *pin) {
 
     // a component driving the other level: a short on a real board
     int partLevel = pin->state.partDrive;
-    pin->state.conflict = programLevel >= 0 && partLevel >= 0 && programLevel != partLevel;
+    bool bothDrive = programLevel >= 0 && partLevel >= 0;
+    pin->state.conflict = bothDrive && programLevel != partLevel;
 
     // the program, then the page, then a component, then the pulls
     if (programLevel >= 0) {
@@ -158,7 +163,8 @@ uint8_t computeLevel(Pin *pin) {
  */
 int voltageOf(const Pin *pin) {
     const PinState *state = &pin->state;
-    return state->voltageMv >= 0 ? state->voltageMv : state->level * vrefMv;
+    bool setByPart = state->voltageMv >= 0;
+    return setByPart ? state->voltageMv : state->level * vrefMv;
 }
 
 /**
@@ -169,10 +175,12 @@ int voltageOf(const Pin *pin) {
  * pwmDrive). stateLock held.
  */
 Change update(int index) {
+    // the level again
     Pin *pin = &pinTable[index];
     uint8_t previous = pin->state.level;
     pin->state.level = computeLevel(pin);
 
+    // changed: who to tell, and the analyzer (not for a PWM pin)
     bool changed = pin->state.level != previous;
     Change change = { nullptr, false, pin->state.level };
     if (changed) {
@@ -191,10 +199,12 @@ Change update(int index) {
  * released).
  */
 void notify(Change change, int pin) {
+    // the program's handler, on this thread
     if (change.handler != nullptr) {
         change.handler(pin, change.level);
     }
 
+    // the components, through the bridge
     if (change.tellParts) {
         uint8_t level = (uint8_t)change.level;
         bridgePost(BridgeEvent::pinChange, pin, &level, 1);
@@ -206,8 +216,16 @@ void notify(Change change, int pin) {
  */
 char *copyString(JSContext *ctx, JSValueConst object, const char *name) {
     JSValue value = JS_GetPropertyStr(ctx, object, name);
-    const char *text = JS_IsString(value) ? JS_ToCString(ctx, value) : nullptr;
-    char *copy = text != nullptr ? memory::copyText(text, strlen(text)) : nullptr;
+    const char *text = nullptr;
+    if (JS_IsString(value)) {
+        text = JS_ToCString(ctx, value);
+    }
+
+    char *copy = nullptr;
+    if (text != nullptr) {
+        copy = memory::copyText(text, strlen(text));
+    }
+
     JS_FreeCString(ctx, text);
     JS_FreeValue(ctx, value);
     return copy;
@@ -221,14 +239,18 @@ char *copyString(JSContext *ctx, JSValueConst object, const char *name) {
 int readIntegers(JSContext *ctx, JSValueConst object, const char *name, int low, int high, int *out, int capacity) {
     JSValue array = JS_GetPropertyStr(ctx, object, name);
     int count = 0;
+
     for (uint32_t i = 0; JS_IsArray(ctx, array) && count >= 0; i++) {
+        // the next item; the end of the array stops
         JSValue item = JS_GetPropertyUint32(ctx, array, i);
         if (JS_IsUndefined(item)) {
             break;
         }
 
+        // an integer in range, and room for it; else -1
         int32_t value = 0;
-        bool valid = JS_IsNumber(item) && JS_ToInt32(ctx, &value, item) == 0 && value >= low && value <= high;
+        bool isInteger = JS_IsNumber(item) && JS_ToInt32(ctx, &value, item) == 0;
+        bool valid = isInteger && value >= low && value <= high;
         JS_FreeValue(ctx, item);
         if (!valid || count >= capacity) {
             count = -1;
@@ -246,6 +268,7 @@ int readIntegers(JSContext *ctx, JSValueConst object, const char *name, int low,
  * vref; false after printing what is wrong.
  */
 bool readAdc(JSContext *ctx, JSValueConst description, const char *path) {
+    // no "adc": no analog input
     JSValue adc = JS_GetPropertyStr(ctx, description, "adc");
     if (JS_IsUndefined(adc)) {
         return true;
@@ -261,12 +284,25 @@ bool readAdc(JSContext *ctx, JSValueConst description, const char *path) {
     JSValue vrefValue = JS_GetPropertyStr(ctx, adc, "vref");
     int32_t bitsRead = 12;
     double vref = 3.3;
-    bool bitsValid = JS_IsUndefined(bitsValue) || (JS_ToInt32(ctx, &bitsRead, bitsValue) == 0 && bitsRead >= 8 && bitsRead <= 16);
-    bool vrefValid = JS_IsUndefined(vrefValue) || (JS_ToFloat64(ctx, &vref, vrefValue) == 0 && vref > 0 && vref <= 40);
+    bool bitsValid = true;
+    if (!JS_IsUndefined(bitsValue)) {
+        bool converted = JS_ToInt32(ctx, &bitsRead, bitsValue) == 0;
+        bitsValid = converted && bitsRead >= 8 && bitsRead <= 16;
+    }
+
+    bool vrefValid = true;
+    if (!JS_IsUndefined(vrefValue)) {
+        bool converted = JS_ToFloat64(ctx, &vref, vrefValue) == 0;
+        vrefValid = converted && vref > 0 && vref <= 40;
+    }
+
     JS_FreeValue(ctx, bitsValue);
     JS_FreeValue(ctx, vrefValue);
     JS_FreeValue(ctx, adc);
-    if (pinListCount < 0 || spanCount < 0 || !bitsValid || !vrefValid) {
+
+    // all of them right, else what is expected
+    bool listsValid = pinListCount >= 0 && spanCount >= 0;
+    if (!listsValid || !bitsValid || !vrefValid) {
         fprintf(stderr, "qjsx agent: %s: \"adc\" is { pins: [pin numbers], bits: 8 to 16, spans: [mV], vref: volts }\n",
                 path);
         return false;
@@ -276,6 +312,7 @@ bool readAdc(JSContext *ctx, JSValueConst description, const char *path) {
     for (int i = 0; i < pinListCount; i++) {
         analogPins[pinList[i]] = true;
     }
+
     converterBits = bitsRead;
     vrefMv = (int)(vref * 1000.0 + 0.5);
     return true;
@@ -295,12 +332,14 @@ bool readDescription(JSContext *ctx, JSValueConst description, const char *path)
     JS_ToInt32(ctx, &pinValue, pinsValue);
     JS_FreeValue(ctx, pinsValue);
     bool complete = nameText != nullptr && platformText != nullptr;
-    if (!complete || pinValue < 1 || pinValue > MAX_PINS) {
+    bool pinsValid = pinValue >= 1 && pinValue <= MAX_PINS;
+    if (!complete || !pinsValid) {
         fprintf(stderr, "qjsx agent: %s: \"name\", \"platform\" and \"pins\" (1 to %d) are required\n", path,
                 MAX_PINS);
         return false;
     }
 
+    // no chip: its name
     if (chipText == nullptr) {
         chipText = memory::copyText(nameText, strlen(nameText));
     }
@@ -330,9 +369,14 @@ bool readDescription(JSContext *ctx, JSValueConst description, const char *path)
 
     // the native modules of the board
     JSValue nativesValue = JS_GetPropertyStr(ctx, description, "natives");
+
     for (uint32_t i = 0; JS_IsArray(ctx, nativesValue) && nativeNameCount < MAX_NATIVES; i++) {
         JSValue item = JS_GetPropertyUint32(ctx, nativesValue, i);
-        const char *name = JS_IsString(item) ? JS_ToCString(ctx, item) : nullptr;
+        const char *name = nullptr;
+        if (JS_IsString(item)) {
+            name = JS_ToCString(ctx, item);
+        }
+
         JS_FreeValue(ctx, item);
         if (name == nullptr) {
             break;
@@ -367,6 +411,7 @@ bool load(const char *path) {
         return false;
     }
 
+    // kept as a C string, for the page (boardJson)
     boardText = (char *)memory::allocate(size + 1);
     memcpy(boardText, text, size);
     boardText[size] = 0;
@@ -393,6 +438,7 @@ bool load(const char *path) {
     // the pins at rest: nothing forced, nothing driven by a component; the
     // analyzer starts from there
     scopeStart();
+
     for (int i = 0; i < pins; i++) {
         pinTable[i].state.forced = -1;
         pinTable[i].state.partDrive = -1;
@@ -401,6 +447,7 @@ bool load(const char *path) {
         scopeSetInitial(i, pinTable[i].state.level, voltageOf(&pinTable[i]));
     }
 
+    // ready
     loaded = true;
     return true;
 }
@@ -479,7 +526,9 @@ int nativeCount() {
  * Copies the pins' states.
  */
 void snapshot(PinState *states, int count) {
+    // copied under the lock
     stateLock.lock();
+
     for (int i = 0; i < count && i < pins; i++) {
         states[i] = pinTable[i].state;
     }
@@ -491,12 +540,21 @@ void snapshot(PinState *states, int count) {
  * The page forces a pin (or lets it go).
  */
 void force(int pin, int level) {
-    if (pin < 0 || pin >= pins) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
         return;
     }
 
+    // -1 lets it go, else 0 or 1
+    int forced = -1;
+    if (level >= 0) {
+        forced = level != 0 ? 1 : 0;
+    }
+
+    // its level again; the change told outside the lock
     stateLock.lock();
-    pinTable[pin].state.forced = (int8_t)(level < 0 ? -1 : (level != 0 ? 1 : 0));
+    pinTable[pin].state.forced = (int8_t)forced;
     Change change = update(pin);
     stateLock.unlock();
 
@@ -507,12 +565,21 @@ void force(int pin, int level) {
  * A component drives a pin (or lets it go).
  */
 void partDrive(int pin, int level) {
-    if (pin < 0 || pin >= pins) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
         return;
     }
 
+    // -1 lets it go, else 0 or 1
+    int driven = -1;
+    if (level >= 0) {
+        driven = level != 0 ? 1 : 0;
+    }
+
+    // its level again; the change told outside the lock
     stateLock.lock();
-    pinTable[pin].state.partDrive = (int8_t)(level < 0 ? -1 : (level != 0 ? 1 : 0));
+    pinTable[pin].state.partDrive = (int8_t)driven;
     Change change = update(pin);
     stateLock.unlock();
 
@@ -523,12 +590,17 @@ void partDrive(int pin, int level) {
  * A component pulls a pin up or down, or not any more.
  */
 void partPull(int pin, int pull) {
-    if (pin < 0 || pin >= pins) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
         return;
     }
 
+    // 1 up, 2 down, anything else none; its level again, the change told
+    // outside the lock
+    bool pulls = pull == 1 || pull == 2;
     stateLock.lock();
-    pinTable[pin].state.partPull = (uint8_t)(pull == 1 || pull == 2 ? pull : 0);
+    pinTable[pin].state.partPull = (uint8_t)(pulls ? pull : 0);
     Change change = update(pin);
     stateLock.unlock();
 
@@ -539,10 +611,13 @@ void partPull(int pin, int pull) {
  * A component watches a pin, or not any more.
  */
 void partWatch(int pin, bool watched) {
-    if (pin < 0 || pin >= pins) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
         return;
     }
 
+    // the bridge tells the components of its changes from now on (or not)
     stateLock.lock();
     pinTable[pin].partWatched = watched;
     stateLock.unlock();
@@ -552,10 +627,13 @@ void partWatch(int pin, bool watched) {
  * A channel of hal::rmt takes or lets go a pin.
  */
 void setRmt(int pin, bool driven) {
-    if (pin < 0 || pin >= pins) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
         return;
     }
 
+    // shown on the page
     stateLock.lock();
     pinTable[pin].state.rmt = driven;
     stateLock.unlock();
@@ -580,15 +658,20 @@ int adcBits() {
  * the largest up to vref; 0 above vref.
  */
 int adcSpanFor(int rangeMv) {
-    if (rangeMv <= 0 || rangeMv > vrefMv) {
+    // a range up to vref
+    bool readable = rangeMv > 0 && rangeMv <= vrefMv;
+    if (!readable) {
         return 0;
     }
 
+    // the first span that covers it
     for (int i = 0; i < spanCount; i++) {
         if (rangeMv <= spans[i]) {
             return spans[i];
         }
     }
+
+    // else the largest one, or vref without a list
     return spanCount > 0 ? spans[spanCount - 1] : vrefMv;
 }
 
@@ -596,10 +679,13 @@ int adcSpanFor(int rangeMv) {
  * The voltage on a pin: a component's, else its level times vref.
  */
 int pinVoltage(int pin) {
-    if (pin < 0 || pin >= pins) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
         return 0;
     }
 
+    // read under the lock
     stateLock.lock();
     int millivolts = voltageOf(&pinTable[pin]);
     stateLock.unlock();
@@ -610,10 +696,13 @@ int pinVoltage(int pin) {
  * The program opens or closes the analog input of a pin.
  */
 void setAdc(int pin, bool open) {
-    if (pin < 0 || pin >= pins) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
         return;
     }
 
+    // shown on the page
     stateLock.lock();
     pinTable[pin].state.adc = open;
     stateLock.unlock();
@@ -624,11 +713,20 @@ void setAdc(int pin, bool open) {
  * change of the voltage goes to the analyzer.
  */
 void partVoltage(int pin, int millivolts) {
-    if (pin < 0 || pin >= pins) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
         return;
     }
 
-    int bounded = millivolts < 0 ? -1 : (millivolts > vrefMv ? vrefMv : millivolts);
+    // -1 (none), else at most vref
+    int bounded = millivolts;
+    if (millivolts < 0) {
+        bounded = -1;
+    } else if (millivolts > vrefMv) {
+        bounded = vrefMv;
+    }
+
     stateLock.lock();
 
     // the new voltage
@@ -650,10 +748,13 @@ void partVoltage(int pin, int millivolts) {
  * A bus of hal::i2c takes or lets go a pin.
  */
 void setI2c(int pin, bool used) {
-    if (pin < 0 || pin >= pins) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
         return;
     }
 
+    // shown on the page
     stateLock.lock();
     pinTable[pin].state.i2c = used;
     stateLock.unlock();
@@ -666,7 +767,9 @@ void setI2c(int pin, bool used) {
  * period, the phase kept, as LEDC does (user, 2026-11-13).
  */
 void pwmDrive(int pin, bool invert, double frequency, double duty) {
-    if (pin < 0 || pin >= pins) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
         return;
     }
 
@@ -706,7 +809,9 @@ void pwmDrive(int pin, bool invert, double frequency, double duty) {
  * idle level.
  */
 void pwmStop(int pin, bool invert) {
-    if (pin < 0 || pin >= pins) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < pins;
+    if (!boardPin) {
         return;
     }
 
@@ -726,6 +831,7 @@ void pwmStop(int pin, bool invert) {
     if (target->state.level == before) {
         scopeRecord(pin, target->state.level, voltageOf(target));
     }
+
     stateLock.unlock();
 
     notify(change, pin);
@@ -733,7 +839,7 @@ void pwmStop(int pin, bool invert) {
 
 } // namespace twin
 
-// ### hal::gpio, simulated #####################################################
+// ### hal::gpio, simulated ####################################################
 
 namespace hal {
 namespace gpio {
@@ -749,10 +855,13 @@ int pinCount() {
  * The program takes the pin: mode, pull; an output starts at 0.
  */
 bool configure(int pin, Mode mode, Pull pull) {
-    if (pin < 0 || pin >= twin::pinCount()) {
+    // a pin of the board
+    bool boardPin = pin >= 0 && pin < twin::pinCount();
+    if (!boardPin) {
         return false;
     }
 
+    // its mode and pull, the latch at 0; the change told outside the lock
     twin::stateLock.lock();
     twin::Pin *target = &twin::pinTable[pin];
     target->state.configured = true;
@@ -770,9 +879,14 @@ bool configure(int pin, Mode mode, Pull pull) {
  * The level on the line; a PWM output's at this instant.
  */
 int read(int pin) {
+    // the level on the line, or the square signal at this instant
     twin::stateLock.lock();
     const twin::Pin *target = &twin::pinTable[pin];
-    int level = target->state.pwm ? twin::pwmLevel(target, twin::scopeNowUs()) : target->state.level;
+    int level = target->state.level;
+    if (target->state.pwm) {
+        level = twin::pwmLevel(target, twin::scopeNowUs());
+    }
+
     twin::stateLock.unlock();
     return level;
 }
@@ -781,6 +895,7 @@ int read(int pin) {
  * Sets what the output drives.
  */
 void write(int pin, int level) {
+    // the latch, the level again; the change told outside the lock
     twin::stateLock.lock();
     twin::pinTable[pin].latch = level != 0 ? 1 : 0;
     twin::Change change = twin::update(pin);
@@ -793,6 +908,7 @@ void write(int pin, int level) {
  * Inverts what the output drives.
  */
 void toggle(int pin) {
+    // the latch inverted, the level again; the change told outside the lock
     twin::stateLock.lock();
     twin::pinTable[pin].latch ^= 1;
     twin::Change change = twin::update(pin);
@@ -806,6 +922,7 @@ void toggle(int pin) {
  * thread that made it (no debounce: the twin's lines do not bounce).
  */
 bool watch(int pin, int, ChangeHandler *handler) {
+    // its handler, called by update() at each change from now on
     twin::stateLock.lock();
     twin::pinTable[pin].watched = true;
     twin::pinTable[pin].handler = handler;
@@ -817,6 +934,7 @@ bool watch(int pin, int, ChangeHandler *handler) {
  * Stops watching.
  */
 void unwatch(int pin) {
+    // the handler not called any more
     twin::stateLock.lock();
     twin::pinTable[pin].watched = false;
     twin::stateLock.unlock();
@@ -827,6 +945,7 @@ void unwatch(int pin) {
  * hear of a change of its level (the program's handler is gone).
  */
 void reset(int pin) {
+    // back to rest, the level again; the change told outside the lock
     twin::stateLock.lock();
     twin::Pin *target = &twin::pinTable[pin];
     target->watched = false;

@@ -17,7 +17,8 @@ namespace cbor {
 /**
  * Empty writer: no buffer until the first write.
  */
-Writer::Writer() : _data(nullptr), _size(0), _capacity(0) {}
+Writer::Writer() : _data(nullptr), _size(0), _capacity(0) {
+}
 
 /**
  * Frees the buffer.
@@ -69,8 +70,19 @@ void Writer::head(int major, uint64_t value) {
     } else {
         // otherwise info 24..27 announces 1, 2, 4 or 8 bytes: the fewest
         // that hold the value
-        int byteCount = value < 0x100 ? 1 : value < 0x10000 ? 2 : value < 0x100000000ull ? 4 : 8;
-        int info = byteCount == 1 ? 24 : byteCount == 2 ? 25 : byteCount == 4 ? 26 : 27;
+        int byteCount = 8;
+        int info = 27;
+        if (value < 0x100) {
+            byteCount = 1;
+            info = 24;
+        } else if (value < 0x10000) {
+            byteCount = 2;
+            info = 25;
+        } else if (value < 0x100000000ull) {
+            byteCount = 4;
+            info = 26;
+        }
+
         buffer[length++] = (uint8_t)(type | info);
 
         // then those bytes, big endian
@@ -179,7 +191,8 @@ void Writer::floating(double value) {
 /**
  * Starts at the beginning of the buffer.
  */
-Reader::Reader(const uint8_t *data, size_t size) : _data(data), _size(size), _position(0) {}
+Reader::Reader(const uint8_t *data, size_t size) : _data(data), _size(size), _position(0) {
+}
 
 /**
  * Type of the next item, read from its initial byte without moving.
@@ -268,7 +281,17 @@ bool Reader::head(int *major, uint64_t *argument) {
 
     // 24..27 announce 1, 2, 4 or 8 more bytes, which must be there;
     // 28..31 (reserved, indefinite length) are rejected
-    int byteCount = info == 24 ? 1 : info == 25 ? 2 : info == 26 ? 4 : info == 27 ? 8 : 0;
+    int byteCount = 0;
+    if (info == 24) {
+        byteCount = 1;
+    } else if (info == 25) {
+        byteCount = 2;
+    } else if (info == 26) {
+        byteCount = 4;
+    } else if (info == 27) {
+        byteCount = 8;
+    }
+
     if (byteCount == 0 || _position + byteCount > _size) {
         return false;
     }
@@ -421,6 +444,23 @@ double halfToDouble(uint16_t half) {
     return sign ? -magnitude : magnitude;
 }
 
+/**
+ * Bytes after the initial byte of a float item, from its additional info
+ * (25, 26, 27: 2, 4 or 8 bytes).
+ */
+size_t floatByteCount(uint8_t initial) {
+    int info = initial & 0x1f;
+    if (info == 25) {
+        return 2;
+    }
+
+    if (info == 26) {
+        return 4;
+    }
+
+    return 8;
+}
+
 } // namespace
 
 /**
@@ -434,8 +474,7 @@ bool Reader::floating(double *value) {
 
     // its size comes from the additional info (25, 26 or 27: 2, 4 or 8
     // bytes), checked against the buffer end
-    int info = _data[_position] & 0x1f;
-    size_t byteCount = info == 25 ? 2 : info == 26 ? 4 : 8;
+    size_t byteCount = floatByteCount(_data[_position]);
     if (_position + 1 + byteCount > _size) {
         return false;
     }
@@ -485,15 +524,16 @@ bool Reader::skipAt(int depth) {
 
     // simple values: a single byte
     Type type = peek();
-    if (type == Type::False || type == Type::True || type == Type::Null || type == Type::Undefined) {
+    bool isBoolean = type == Type::False || type == Type::True;
+    bool isSimple = isBoolean || type == Type::Null || type == Type::Undefined;
+    if (isSimple) {
         _position++;
         return true;
     }
 
     // floats: the initial byte, then 2, 4 or 8 bytes
     if (type == Type::Float) {
-        int info = _data[_position] & 0x1f;
-        size_t size = info == 25 ? 2 : info == 26 ? 4 : 8;
+        size_t size = floatByteCount(_data[_position]);
         if (!fits(1 + size)) {
             return false;
         }

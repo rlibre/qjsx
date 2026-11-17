@@ -30,7 +30,7 @@ namespace {
  */
 struct Session {
     const package::Reader *package;   // may be null
-    const RunHooks *hooks;            // may be null
+    const RunHooks        *hooks;     // may be null
 };
 
 /**
@@ -75,6 +75,7 @@ int bytecodeReadFlags(JSContext *ctx) {
     if (JS_HasPackageAtoms(JS_GetRuntime(ctx))) {
         return JS_READ_OBJ_BYTECODE | JS_READ_OBJ_ROM_DATA | JS_READ_OBJ_FIXED_ATOMS;
     }
+
     return JS_READ_OBJ_BYTECODE;
 }
 
@@ -315,7 +316,7 @@ void setDeviceProcess(JSContext *ctx, JSValueConst manifest, const char *main) {
  */
 struct PackageStart {
     const package::Reader *reader;  // borrowed
-    const RunHooks *hooks;          // may be null
+    const RunHooks        *hooks;   // may be null
 };
 
 /**
@@ -340,7 +341,8 @@ bool startPackage(JSContext *ctx, void *startOpaque) {
     // nor a package whose names this engine refused (createRuntime): its
     // bytecode is written with their numbers
     bool hasNames = start->reader->find(NAMES_ENTRY) != nullptr;
-    if (hasNames && !JS_HasPackageAtoms(JS_GetRuntime(ctx))) {
+    bool namesRefused = hasNames && !JS_HasPackageAtoms(JS_GetRuntime(ctx));
+    if (namesRefused) {
         fprintf(stderr, "qjsx: the names of the package are not the ones of this engine: rebuild it\n");
         JS_FreeValue(ctx, manifest);
         return false;
@@ -358,6 +360,7 @@ bool startPackage(JSContext *ctx, void *startOpaque) {
     // every package run: process.versions.build is its build id
     setBuildVersion(ctx, manifest);
 
+    // done with the manifest; no main module: already said why
     JS_FreeValue(ctx, manifest);
     if (main == nullptr) {
         return false;
@@ -400,7 +403,7 @@ bool startPackage(JSContext *ctx, void *startOpaque) {
 struct Runtime {
     JSRuntime *runtime;  // freed by destroyRuntime()
     JSContext *ctx;      // freed by destroyRuntime()
-    Loop *loop;          // current loop of the thread; freed by destroyRuntime()
+    Loop      *loop;     // current loop of the thread; freed by destroyRuntime()
 };
 
 // ### Measured JS heap ########################################################
@@ -421,6 +424,7 @@ const JSMallocFunctions *boardAllocator() {
  * from the transport thread.
  */
 void recordHeap(JSMallocState *state) {
+    // the count now
     JsHeapUsage *usage = (JsHeapUsage *)state->opaque;
     size_t used = state->malloc_size;
     __atomic_store_n(&usage->used, used, __ATOMIC_RELAXED);
@@ -513,6 +517,7 @@ Runtime createRuntime(Session *session) {
         JS_SetPackageAtoms(created.runtime, names->data, names->size);
     }
 
+    // then the context
     created.ctx = JS_NewContext(created.runtime);
 
     // a run starts: the reproducible random sequence of a twin starts again,
@@ -539,6 +544,7 @@ Runtime createRuntime(Session *session) {
         *loadUsage = JsLoadUsage{ 0, 0, 0, 0, 1 };   // working: the main module is evaluated first
         created.loop->publishLoadTo(loadUsage);
     }
+
     return created;
 }
 
@@ -589,7 +595,13 @@ void setImportMeta(JSContext *ctx, JSModuleDef *module, const char *name, bool i
     size_t size = strlen(name) + 16;
     char *url = (char *)memory::allocate(size);
     bool windowsAbsolute = name[0] != 0 && name[1] == ':';
-    const char *scheme = name[0] == '/' ? "file://" : windowsAbsolute ? "file:///" : "";
+    const char *scheme = "";
+    if (name[0] == '/') {
+        scheme = "file://";
+    } else if (windowsAbsolute) {
+        scheme = "file:///";
+    }
+
     snprintf(url, size, "%s%s", scheme, name);
     files::useSlashes(url);   // a URL has no '\' (Windows)
 
@@ -683,7 +695,8 @@ int runProgram(const package::Reader *package, StartFunction *start, void *start
     int exitCode = started ? runtime.loop->run() : 1;
 
     // tell the hooks the loop has ended (the runtime still exists)
-    if (hooks != nullptr && hooks->finished != nullptr) {
+    bool wantsFinished = hooks != nullptr && hooks->finished != nullptr;
+    if (wantsFinished) {
         hooks->finished(hooks->opaque);
     }
 

@@ -477,6 +477,12 @@ JSValue js_async_function_resolve_call(JSContext *ctx,
 JSValue js_async_function_call(JSContext *ctx, JSValueConst func_obj,
                                       JSValueConst this_obj,
                                       int argc, JSValueConst *argv, int flags);
+/* qjsx: engine change V (generators.c): the resume job embedded in an
+   async function state */
+void js_async_function_await_enqueue(JSContext *ctx, JSAsyncFunctionState *s,
+                                     JSValue value, BOOL is_throw);
+int js_async_function_await_job(JSContext *ctx, JSJobEntry *e);
+void js_async_function_await_job_free(JSRuntime *rt, JSJobEntry *e);
 void js_async_generator_finalizer(JSRuntime *rt, JSValue obj);
 void js_async_generator_mark(JSRuntime *rt, JSValueConst val,
                                     JS_MarkFunc *mark_func);

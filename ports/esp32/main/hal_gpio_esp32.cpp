@@ -48,7 +48,8 @@ bool startEvents() {
     // the interrupt service (already installed by someone else: fine)
     if (!serviceInstalled) {
         esp_err_t installed = gpio_install_isr_service(0);
-        if (installed != ESP_OK && installed != ESP_ERR_INVALID_STATE) {
+        bool usable = installed == ESP_OK || installed == ESP_ERR_INVALID_STATE;
+        if (!usable) {
             return false;
         }
 
@@ -84,12 +85,18 @@ bool configure(int pin, Mode mode, Pull pull) {
         write(pin, 0);
     }
 
-    // mode (outputs readable too), pulls, no interrupt yet
+    // the driver's mode: outputs readable too
+    gpio_mode_t direction = GPIO_MODE_INPUT_OUTPUT_OD;
+    if (mode == Mode::input) {
+        direction = GPIO_MODE_INPUT;
+    } else if (mode == Mode::output) {
+        direction = GPIO_MODE_INPUT_OUTPUT;
+    }
+
+    // mode, pulls, no interrupt yet
     gpio_config_t config = {};
     config.pin_bit_mask = 1ULL << pin;
-    config.mode = mode == Mode::input ? GPIO_MODE_INPUT
-                : mode == Mode::output ? GPIO_MODE_INPUT_OUTPUT
-                : GPIO_MODE_INPUT_OUTPUT_OD;
+    config.mode = direction;
     config.pull_up_en = pull == Pull::up ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE;
     config.pull_down_en = pull == Pull::down ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE;
     config.intr_type = GPIO_INTR_DISABLE;
@@ -100,11 +107,14 @@ bool configure(int pin, Mode mode, Pull pull) {
  * The input register of the pin's bank.
  */
 int read(int pin) {
+    // second bank: pins 32 and above
 #if SOC_GPIO_PIN_COUNT > 32
     if (pin >= 32) {
         return (int)((REG_READ(GPIO_IN1_REG) >> (pin - 32)) & 1);
     }
 #endif
+
+    // first bank
     return (int)((REG_READ(GPIO_IN_REG) >> pin) & 1);
 }
 
@@ -113,6 +123,7 @@ int read(int pin) {
  * registers of its bank).
  */
 void write(int pin, int level) {
+    // second bank: pins 32 and above
 #if SOC_GPIO_PIN_COUNT > 32
     if (pin >= 32) {
         uint32_t bit = 1u << (pin - 32);
@@ -120,6 +131,8 @@ void write(int pin, int level) {
         return;
     }
 #endif
+
+    // first bank
     uint32_t bit = 1u << pin;
     REG_WRITE(level ? GPIO_OUT_W1TS_REG : GPIO_OUT_W1TC_REG, bit);
 }
@@ -131,6 +144,7 @@ void write(int pin, int level) {
  * pins are not touched).
  */
 void toggle(int pin) {
+    // second bank: pins 32 and above
 #if SOC_GPIO_PIN_COUNT > 32
     if (pin >= 32) {
         uint32_t bit = 1u << (pin - 32);
@@ -139,6 +153,8 @@ void toggle(int pin) {
         return;
     }
 #endif
+
+    // first bank
     uint32_t bit = 1u << pin;
     bool driven = (REG_READ(GPIO_OUT_REG) & bit) != 0;
     REG_WRITE(driven ? GPIO_OUT_W1TC_REG : GPIO_OUT_W1TS_REG, bit);
@@ -148,6 +164,7 @@ void toggle(int pin) {
  * Interrupt on both edges, changes reported by the shared watch.
  */
 bool watch(int pin, int debounceMs, ChangeHandler *handler) {
+    // the interrupt service and the shared watch, started at the first watch
     if (!startEvents()) {
         return false;
     }
@@ -158,7 +175,8 @@ bool watch(int pin, int debounceMs, ChangeHandler *handler) {
         return true;
     }
 
-    // the interrupt of the pin, on both edges
+    // the interrupt of the pin, on both edges (each step only if the one
+    // before succeeded); a failure undoes the watch
     bool ok = gpio_set_intr_type((gpio_num_t)pin, GPIO_INTR_ANYEDGE) == ESP_OK
            && gpio_isr_handler_add((gpio_num_t)pin, &onInterrupt, (void *)(intptr_t)pin) == ESP_OK
            && gpio_intr_enable((gpio_num_t)pin) == ESP_OK;
@@ -173,10 +191,12 @@ bool watch(int pin, int debounceMs, ChangeHandler *handler) {
  * Removes the interrupt of the pin, then forgets the watch.
  */
 void unwatch(int pin) {
+    // no service: no pin was ever watched
     if (!serviceInstalled) {
         return;
     }
 
+    // the interrupt first: no more changes come in, then the watch
     gpio_intr_disable((gpio_num_t)pin);
     gpio_isr_handler_remove((gpio_num_t)pin);
     gpiowatch::remove(pin);

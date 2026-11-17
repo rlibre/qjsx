@@ -22,8 +22,7 @@
 //   }
 //
 //   board.pin(n)            level, mode, voltage (volts, read and set), drive(0 | 1 | null),
-//                           pull("up" | "down" | null), onChange(level => ...)| 1 | null), pull("up" | "down" | null),
-//                           onChange(level => ...)
+//                           pull("up" | "down" | null), onChange(level => ...)
 //   board.i2c({ sda, scl }) attach(address, { onTransfer(written, readLength) }), detach(address)
 //   board.rmt(pin)          onBytes(bytes => ...), onPulses(pulses => ...)
 //   board.now()             ms since the twin started
@@ -42,10 +41,13 @@ const PULLS = { none: 0, up: 1, down: 2 };
  * "0x76" (JSON has no hexadecimal). Throws if it is not one.
  */
 export function parseAddress(value) {
+    // a text is read as a number ("0x76" gives 118), then checked
     const address = typeof value === "string" ? Number(value) : value;
-    if (!Number.isInteger(address) || address < 0 || address > 127) {
+    const isBadAddress = !Number.isInteger(address) || address < 0 || address > 127;
+    if (isBadAddress) {
         throw new Error(`"address" must be a 7-bit I2C address ("0x76" or 118), not ${JSON.stringify(value)}`);
     }
+
     return address;
 }
 
@@ -55,9 +57,11 @@ export function parseAddress(value) {
  */
 export function parsePin(value, name = "pin") {
     const count = twinboard.pins().length;
-    if (!Number.isInteger(value) || value < 0 || value >= count) {
+    const isBadPin = !Number.isInteger(value) || value < 0 || value >= count;
+    if (isBadPin) {
         throw new Error(`"${name}" must be a pin of the board (0 to ${count - 1}), not ${JSON.stringify(value)}`);
     }
+
     return value;
 }
 
@@ -71,10 +75,10 @@ export class Part {
      * fields, which the subclass checks); 'board': the board.
      */
     constructor(config, board) {
-        this.id = config.id;
-        this.label = config.label ?? config.id;
-        this.config = config;
-        this.board = board;
+        this.id = config.id;                        // unique among the parts
+        this.label = config.label ?? config.id;     // shown on the page
+        this.config = config;                       // its entry of the wiring
+        this.board = board;                         // the Board
     }
 
     /**
@@ -97,6 +101,7 @@ export class Part {
      * nothing: its output would mix with the program's).
      */
     log(...values) {
+        // texts as they are, other values as JSON, separated by a space
         const text = values.map(value => (typeof value === "string" ? value : JSON.stringify(value))).join(" ");
         this.board._logged(this, text);
     }
@@ -105,9 +110,12 @@ export class Part {
 // ### Pin #####################################################################
 
 class Pin {
+    /**
+     * The pin 'number' of the board, with no listener yet.
+     */
     constructor(number) {
-        this.number = number;
-        this._listeners = [];
+        this.number = number;           // its number on the board
+        this._listeners = [];           // functions of onChange(), called by Board._dispatch
     }
 
     /**
@@ -139,9 +147,13 @@ class Pin {
      * null: not any more.
      */
     set voltage(volts) {
-        if (volts !== null && (typeof volts !== "number" || !(volts >= 0))) {
+        // !(volts >= 0) also refuses NaN
+        const isBadVoltage = volts !== null && (typeof volts !== "number" || !(volts >= 0));
+        if (isBadVoltage) {
             throw new TypeError("pin.voltage: volts (0 or more), or null");
         }
+
+        // to the twin in millivolts; -1: not any more
         twinboard.pinVoltage(this.number, volts === null ? -1 : Math.round(volts * 1000));
     }
 
@@ -149,9 +161,12 @@ class Pin {
      * Drives the line to 0 or 1 (a button pressed); null lets it go.
      */
     drive(level) {
-        if (level !== null && level !== 0 && level !== 1) {
+        const isBadLevel = level !== null && level !== 0 && level !== 1;
+        if (isBadLevel) {
             throw new TypeError("pin.drive: 0, 1 or null");
         }
+
+        // -1 lets the line go
         twinboard.pinDrive(this.number, level === null ? -1 : level);
     }
 
@@ -164,6 +179,7 @@ class Pin {
         if (pull === undefined) {
             throw new TypeError('pin.pull: "up", "down" or null');
         }
+
         twinboard.pinPull(this.number, pull);
     }
 
@@ -172,6 +188,7 @@ class Pin {
      * the change comes through the bridge).
      */
     onChange(listener) {
+        // kept, and the bridge told to report the changes of this pin
         this._listeners.push(listener);
         twinboard.pinWatch(this.number, true);
     }
@@ -180,9 +197,13 @@ class Pin {
 // ### I2C #####################################################################
 
 class I2cBus {
+    /**
+     * The bus of the pins 'sda' / 'scl', nothing attached yet ('_board' is
+     * set by Board.i2c()).
+     */
     constructor(sda, scl) {
-        this.sda = sda;
-        this.scl = scl;
+        this.sda = sda;               // pin number
+        this.scl = scl;               // pin number
         this._handlers = new Map();   // address -> { onTransfer }
         this._parts = new Map();      // address -> id of the part that attached it
     }
@@ -193,14 +214,19 @@ class I2cBus {
      * for a NACK. Throws if a part already answers there.
      */
     attach(address, handler) {
+        // a free address, a handler with onTransfer()
         const checked = parseAddress(address);
         if (this._handlers.has(checked)) {
             const owner = this._parts.get(checked);
             throw new Error(`I2C address 0x${checked.toString(16)} is already taken by part "${owner}"`);
         }
+
         if (typeof handler?.onTransfer !== "function") {
             throw new TypeError("i2c.attach: the handler needs onTransfer(written, readLength)");
         }
+
+        // kept with the part being built, noted on both pins, then the twin
+        // answers at that address
         const part = this._board._currentPart ?? "?";
         this._handlers.set(checked, handler);
         this._parts.set(checked, part);
@@ -223,10 +249,13 @@ class I2cBus {
 // ### RMT #####################################################################
 
 class RmtLine {
+    /**
+     * What device/rmt sends on 'pin', with no listener yet.
+     */
     constructor(pin) {
-        this.pin = pin;
-        this._bytes = [];
-        this._pulses = [];
+        this.pin = pin;                 // pin number
+        this._bytes = [];               // listeners of onBytes()
+        this._pulses = [];              // listeners of onPulses()
     }
 
     /**
@@ -251,9 +280,12 @@ class RmtLine {
 // the models: 'hooks' = { published(part, state), logged(part, text),
 // failed(id, error) } (id of the part, undefined when unknown).
 export class Board {
+    /**
+     * The board, no part on it yet ('hooks': see above).
+     */
     constructor(hooks) {
-        this._hooks = hooks;
-        this._start = Date.now();
+        this._hooks = hooks;            // published, logged, failed
+        this._start = Date.now();       // ms, Date.now() when the twin started
         this._pins = new Map();         // number -> Pin
         this._pinOwners = new Map();    // number -> id of the part that took it
         this._pinUsers = new Map();     // number -> Set of ids of the parts on it (taken, or a shared bus)
@@ -283,9 +315,11 @@ export class Board {
      * analog input reads ("adc.vref" of the description, 3.3 by default).
      */
     get supply() {
+        // read once from the description of the board
         if (this._supply === undefined) {
             this._supply = JSON.parse(twinboard.board()).adc?.vref ?? 3.3;
         }
+
         return this._supply;
     }
 
@@ -293,20 +327,26 @@ export class Board {
      * A pin of the board. Throws if another part already took it.
      */
     pin(number) {
+        // taken by another part: refused
         const checked = parsePin(number);
         const owner = this._pinOwners.get(checked);
         const part = this._currentPart;
-        if (owner !== undefined && part !== undefined && owner !== part) {
+        const isTakenByAnother = owner !== undefined && part !== undefined && owner !== part;
+        if (isTakenByAnother) {
             throw new Error(`pin ${checked} is already used by part "${owner}"`);
         }
+
+        // asked while a part is built: the pin is that part's
         if (part !== undefined) {
             this._pinOwners.set(checked, part);
             this._noteUse(checked, part);
         }
 
+        // one Pin per number, made at the first request
         if (!this._pins.has(checked)) {
             this._pins.set(checked, new Pin(checked));
         }
+
         return this._pins.get(checked);
     }
 
@@ -314,18 +354,21 @@ export class Board {
      * The I2C bus of the pins 'sda' / 'scl' (shared by the parts on it).
      */
     i2c({ sda, scl } = {}) {
+        // two different pins
         const sdaPin = parsePin(sda, "sda");
         const sclPin = parsePin(scl, "scl");
         if (sdaPin === sclPin) {
             throw new Error('"sda" and "scl" must be two pins');
         }
 
+        // one bus per pair of pins, made at the first request
         const key = `${sdaPin}/${sclPin}`;
         if (!this._buses.has(key)) {
             const bus = new I2cBus(sdaPin, sclPin);
             bus._board = this;
             this._buses.set(key, bus);
         }
+
         return this._buses.get(key);
     }
 
@@ -333,13 +376,17 @@ export class Board {
      * What device/rmt sends on a pin.
      */
     rmt(pin) {
+        // asked while a part is built: noted on the pin (not exclusive)
         const checked = parsePin(pin);
         if (this._currentPart !== undefined) {
             this._noteUse(checked, this._currentPart);
         }
+
+        // one line per pin, made at the first request
         if (!this._rmt.has(checked)) {
             this._rmt.set(checked, new RmtLine(checked));
         }
+
         return this._rmt.get(checked);
     }
 
@@ -348,11 +395,14 @@ export class Board {
      */
     pinsOfParts() {
         const result = {};
+
         for (const [pin, parts] of this._pinUsers) {
             for (const part of parts) {
+                // '??=' makes the list of a part at its first pin
                 (result[part] ??= []).push(pin);
             }
         }
+
         return result;
     }
 
@@ -365,13 +415,20 @@ export class Board {
         if (!this._pinUsers.has(pin)) {
             this._pinUsers.set(pin, new Set());
         }
+
         this._pinUsers.get(pin).add(part);
     }
 
+    /**
+     * Part.publish(): to the twin's hook.
+     */
     _published(part, state) {
         this._hooks.published(part, state);
     }
 
+    /**
+     * Part.log(): to the twin's hook.
+     */
     _logged(part, text) {
         this._hooks.logged(part, text);
     }
@@ -381,31 +438,41 @@ export class Board {
      */
     _dispatch(event) {
         switch (event.type) {
-        case "pin": {
-            for (const listener of this._pins.get(event.pin)?._listeners ?? []) {
-                this._call(() => listener(event.level));
+            case "pin": {
+                // a level changed: the listeners of that pin
+                const listeners = this._pins.get(event.pin)?._listeners ?? [];
+                for (const listener of listeners) {
+                    this._call(() => listener(event.level));
+                }
+
+                break;
             }
-            break;
-        }
-        case "rmtBytes": {
-            for (const listener of this._rmt.get(event.pin)?._bytes ?? []) {
-                this._call(() => listener(event.bytes));
+            case "rmtBytes": {
+                // bytes sent: the byte listeners of that pin
+                const listeners = this._rmt.get(event.pin)?._bytes ?? [];
+                for (const listener of listeners) {
+                    this._call(() => listener(event.bytes));
+                }
+
+                break;
             }
-            break;
-        }
-        case "rmtPulses": {
-            for (const listener of this._rmt.get(event.pin)?._pulses ?? []) {
-                this._call(() => listener(event.pulses));
+            case "rmtPulses": {
+                // pulses sent: the pulse listeners of that pin
+                const listeners = this._rmt.get(event.pin)?._pulses ?? [];
+                for (const listener of listeners) {
+                    this._call(() => listener(event.pulses));
+                }
+
+                break;
             }
-            break;
-        }
-        case "i2c": {
-            this._answerTransfer(event);
-            break;
-        }
-        default: {
-            break;
-        }
+            case "i2c": {
+                // a transfer: answered at once
+                this._answerTransfer(event);
+                break;
+            }
+            default: {
+                break;
+            }
         }
     }
 
@@ -426,6 +493,7 @@ export class Board {
      * the answer back at once (the program waits for it).
      */
     _answerTransfer(event) {
+        // nobody at that address: a NACK
         const bus = this._buses.get(`${event.sda}/${event.scl}`);
         const handler = bus?._handlers.get(event.address);
         if (handler === undefined) {
@@ -443,10 +511,13 @@ export class Board {
             return;
         }
 
-        if (answer === null || answer === undefined) {
+        // its answer to the program: a NACK, bytes, or a failed transfer
+        const isNack = answer === null || answer === undefined;
+        if (isNack) {
             twinboard.i2cAnswer(event.request, "nack");
         } else if (answer instanceof Uint8Array || Array.isArray(answer)) {
-            twinboard.i2cAnswer(event.request, "ok", answer instanceof Uint8Array ? answer : new Uint8Array(answer));
+            const bytes = answer instanceof Uint8Array ? answer : new Uint8Array(answer);
+            twinboard.i2cAnswer(event.request, "ok", bytes);
         } else {
             const part = bus._parts.get(event.address);
             this._hooks.failed(part, new TypeError("onTransfer must return bytes or null (not a promise)"));
@@ -463,12 +534,16 @@ export class Board {
 // the pointer too ("increment", the default), or come as register / value
 // pairs ("pairs", as the BME280). Usable as the handler of i2c.attach().
 export class Registers {
+    /**
+     * 'size' registers at 0, the pointer at 0; 'writes': "increment" or
+     * "pairs" (see above).
+     */
     constructor(size = 256, { writes = "increment" } = {}) {
-        this.bytes = new Uint8Array(size);
-        this.pointer = 0;
-        this._writes = writes;
-        this._writeHandlers = new Map();   // register -> [fn(value, register)]
-        this._readHandlers = [];           // [fn(start, length)]
+        this.bytes = new Uint8Array(size);   // the registers
+        this.pointer = 0;                    // register of the next read or write
+        this._writes = writes;               // "increment" or "pairs"
+        this._writeHandlers = new Map();     // register -> [fn(value, register)]
+        this._readHandlers = [];             // [fn(start, length)]
     }
 
     /**
@@ -476,7 +551,9 @@ export class Registers {
      * as the chip itself would (no write handler called).
      */
     set(register, values) {
-        const list = Array.isArray(values) || values instanceof Uint8Array ? values : [values];
+        // one value is a list of one; the registers wrap around at the end
+        const isList = Array.isArray(values) || values instanceof Uint8Array;
+        const list = isList ? values : [values];
         list.forEach((value, index) => {
             this.bytes[(register + index) % this.bytes.length] = value & 0xff;
         });
@@ -496,6 +573,7 @@ export class Registers {
         if (!this._writeHandlers.has(register)) {
             this._writeHandlers.set(register, []);
         }
+
         this._writeHandlers.get(register).push(handler);
     }
 
@@ -524,18 +602,24 @@ export class Registers {
             }
         }
 
-        // the read, from the pointer on
+        // nothing to read: no read handler called
         if (readLength === 0) {
             return new Uint8Array(0);
         }
+
+        // the read handlers refresh the registers first
         for (const handler of this._readHandlers) {
             handler(this.pointer, readLength);
         }
+
+        // the read, from the pointer on
         const answer = new Uint8Array(readLength);
+
         for (let index = 0; index < readLength; index++) {
             answer[index] = this.bytes[this.pointer];
             this.pointer = (this.pointer + 1) % this.bytes.length;
         }
+
         return answer;
     }
 
@@ -553,6 +637,7 @@ export class Registers {
      */
     _write(register, value) {
         this.bytes[register] = value;
+
         for (const handler of this._writeHandlers.get(register) ?? []) {
             handler(value, register);
         }

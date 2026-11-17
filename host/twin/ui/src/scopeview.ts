@@ -149,12 +149,16 @@ function formatTime(us: number): string {
     if (us === 0) {
         return "0";
     }
+
+    // the largest unit under which it stays below 1000
     if (Math.abs(us) < 1000) {
         return `${us} µs`;
     }
+
     if (Math.abs(us) < 1000000) {
         return `${us / 1000} ms`;
     }
+
     return `${us / 1000000} s`;
 }
 
@@ -192,7 +196,8 @@ function levelY(row: TraceRow, level: number) {
  */
 function endPwm(trace: PinTrace, time: number) {
     const last = trace.pwm[trace.pwm.length - 1];
-    if (last !== undefined && last.to === Infinity) {
+    const isRunning = last !== undefined && last.to === Infinity;
+    if (isRunning) {
         last.to = Math.max(last.from, time);
     }
 }
@@ -208,6 +213,7 @@ function segmentOf(running: ScopePwm): PwmSegment {
  * The train of an RMT send, its end computed from its pulses.
  */
 function trainOf(send: ScopeRmt): RmtTrain {
+    // the send as a train (the fields of the other kind empty), then its end
     const train: RmtTrain = {
         from: send.time,
         to: send.time,
@@ -226,6 +232,7 @@ function trainOf(send: ScopeRmt): RmtTrain {
  * The name of a VCD file of a recording: "qjsx-analyzer-20261113-143205.vcd".
  */
 function recordingFileName() {
+    // the date and the time now, two digits each part
     const now = new Date();
     const two = (value: number) => String(value).padStart(2, "0");
     const day = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}`;
@@ -274,6 +281,9 @@ export class ScopeView extends VBox {
      */
     constructor(props: BoxProps, twinSettings: StateProxy<TwinSettings>) {
         super(props);
+
+        // the settings of the analyzer, as the browser kept them, and those
+        // of the page
         const defaults: ScopeSettings = { channels: [], perDivUs: 1000, mode: "roll", triggerPin: -1, edge: "rising" };
         this._settings = this.loadPState(SCOPE_KEY, defaults);
         this._twinSettings = twinSettings;
@@ -352,6 +362,7 @@ export class ScopeView extends VBox {
         // a right click on the traces: save, clear (user)
         this.refs.scroller.addDOMEvent("contextmenu", (event: MouseEvent) => this._showMenu(event));
 
+        // the pins kept, their buttons and the lists
         this._showChannels();
 
         // the setting changed (settings page): the list offers again
@@ -400,9 +411,11 @@ export class ScopeView extends VBox {
                 states.push(data.now, level, data.millivolts[pin]);
                 return { states, busy: [], pwm: [], rmt: [] };
             });
+
             for (const running of data.pwm) {
                 this._traces[running.pin]?.pwm.push(segmentOf(running));
             }
+
             this._now = data.now;
 
             // a trigger looked for from there (Single armed there), the
@@ -413,6 +426,7 @@ export class ScopeView extends VBox {
                 this._recordStart = data.now;
                 this._recorded = 0;
             }
+
             return;
         }
 
@@ -423,15 +437,17 @@ export class ScopeView extends VBox {
                 continue;
             }
 
-            // its changes of level
+            // its changes of level: [time, level, millivolts, ...]
             const records = change.records;
+
             for (let i = 0; i < records.length; i += 3) {
                 trace.states.push(records[i], records[i + 1], records[i + 2]);
             }
 
             // those of its PWM: the running segment ends, a frequency starts
-            // another
+            // another ([time, frequency, duty, invert, ...])
             const pwm = change.pwm;
+
             for (let i = 0; i < pwm.length; i += 4) {
                 const time = pwm[i];
                 const frequency = pwm[i + 1];
@@ -440,6 +456,8 @@ export class ScopeView extends VBox {
                     trace.pwm.push({ from: time, to: Infinity, frequency, duty: pwm[i + 2], invert: pwm[i + 3] !== 0 });
                 }
             }
+
+            // counted for the cap of a recording
             this._recorded += records.length / 3 + pwm.length / 4;
 
             // changes only counted: busy from the last record to the last of
@@ -467,16 +485,19 @@ export class ScopeView extends VBox {
         for (const send of data.rmt) {
             this._traces[send.pin]?.rmt.push(trainOf(send));
         }
+
         this._recorded += data.rmt.length;
 
+        // the time of the twin now
         this._now = data.now;
 
         // a recording keeps everything, up to MAX_CHANGES changes; else
         // what is too old goes
-        if (this._recordStart !== null && this._recorded >= MAX_CHANGES) {
+        const isRecording = this._recordStart !== null;
+        if (isRecording && this._recorded >= MAX_CHANGES) {
             warn(tx.twin.scope_record, tx.twin.scope_record_full);
             this._setRecord(false);
-        } else if (this._recordStart === null) {
+        } else if (!isRecording) {
             this._forgetOld();
         }
 
@@ -493,11 +514,14 @@ export class ScopeView extends VBox {
      * view waits for a trigger.
      */
     private _redraw() {
+        // the height of the traces, then both canvases drawn
         const needed = this._tracesHeight();
         const room = this.refs.scroller.dom.clientHeight;
         this.refs.canvas.setStyleValue("height", Math.max(needed, room));
         this.refs.canvas.redraw();
         this.refs.axis.redraw();
+
+        // waiting for a trigger: said in the bar
         this.refs.status.setText(this._waiting() ? tx.twin.scope_waiting : "");
     }
 
@@ -507,10 +531,12 @@ export class ScopeView extends VBox {
      */
     private _tracesHeight() {
         let height = ROW_GAP;
+
         for (const channel of this._shownChannels()) {
             const rowHeight = this._isAnalog(channel.pin) ? ANALOG_HEIGHT + 2 * ANALOG_MARGIN : LOGIC_HEIGHT;
             height += rowHeight + ROW_GAP;
         }
+
         return height;
     }
 
@@ -520,10 +546,13 @@ export class ScopeView extends VBox {
      * last recording kept for Save).
      */
     private _toggleRun() {
+        // pressed: a new acquisition
         if (!this._running) {
             this._start();
             return;
         }
+
+        // released: the recording ends (which stops), else the view stops
         if (this._recordAsked) {
             this._setRecord(false);
         } else {
@@ -548,6 +577,7 @@ export class ScopeView extends VBox {
      * one, else where it is.
      */
     private _stop() {
+        // where the view is now, taken before it stops running
         const end = this._liveEnd();
         this._running = false;
         this._stoppedAt = this._now;
@@ -565,6 +595,9 @@ export class ScopeView extends VBox {
     private _setRecord(on: boolean) {
         this.refs.record.setCheck(on);
         this._recordAsked = on;
+
+        // on: the last recording dropped; it starts now (at the first
+        // message when nothing came yet, or with a new acquisition)
         if (on) {
             this._recording = null;
             this._recorded = 0;
@@ -574,6 +607,7 @@ export class ScopeView extends VBox {
             } else {
                 this._recordStart = this._traces.length > 0 ? this._now : null;
             }
+
             return;
         }
 
@@ -582,6 +616,8 @@ export class ScopeView extends VBox {
             const traces = copyTraces(this._traces, this._recordStart, this._now);
             this._recording = { traces, start: this._recordStart, end: this._now };
         }
+
+        // the view frozen on it
         this._recordStart = null;
         this._stop();
     }
@@ -594,12 +630,16 @@ export class ScopeView extends VBox {
         if (this._recording === null) {
             return;
         }
+
+        // the pins shown, as variables of the file
         const channels = this._shownChannels().map(channel => ({
             pin: channel.pin,
             name: `GPIO${channel.pin}`,
             analog: this._isAnalog(channel.pin),
             vref: this._vrefMv() / 1000,
         }));
+
+        // the file given to the user; cut: said where
         const vcd = recordingToVcd(this._recording, channels);
         downloadText(recordingFileName(), vcd.parts);
         if (vcd.cutAt !== null) {
@@ -613,8 +653,11 @@ export class ScopeView extends VBox {
      * does not open too.
      */
     private _showMenu(event: MouseEvent) {
+        // neither the menu of the browser nor that of the panels
         event.preventDefault();
         event.stopPropagation();
+
+        // save (without a recording: disabled), clear, at the pointer
         const menu = new Menu({
             items: [
                 { text: tx.twin.scope_save, disabled: this._recording === null, click: () => this._save() },
@@ -664,13 +707,18 @@ export class ScopeView extends VBox {
      * Single is armed from now (a new acquisition when the view was frozen).
      */
     private _rearm() {
+        // no trigger: the view waits where it is, Single armed from now
         this._trigger = null;
         this._waitingEnd = this._now;
         this._armedAt = this._now;
-        if (this._settings.mode === "single" && !this._running) {
+
+        // Single on a frozen view: a new acquisition
+        const mustStart = this._settings.mode === "single" && !this._running;
+        if (mustStart) {
             this._start();
             return;
         }
+
         this._redraw();
     }
 
@@ -683,6 +731,7 @@ export class ScopeView extends VBox {
         if (shown.includes(this._settings.triggerPin)) {
             return this._settings.triggerPin;
         }
+
         return shown.length > 0 ? shown[0] : -1;
     }
 
@@ -725,7 +774,8 @@ export class ScopeView extends VBox {
         const mode = this._settings.mode;
         const pin = this._triggerPin();
         const trace = this._traces[pin];
-        if (mode === "roll" || trace === undefined || !this._running) {
+        const cannotTrigger = mode === "roll" || trace === undefined || !this._running;
+        if (cannotTrigger) {
             return;
         }
 
@@ -738,10 +788,12 @@ export class ScopeView extends VBox {
         // Single: the first one after it was armed, then frozen on it
         if (mode === "single") {
             const caught = firstEdgeAfter(trace, edge, this._armedAt);
-            if (caught !== null && complete(caught)) {
+            const isCaught = caught !== null && complete(caught);
+            if (isCaught) {
                 this._trigger = caught;
                 this._freezeOnTrigger();
             }
+
             return;
         }
 
@@ -749,11 +801,14 @@ export class ScopeView extends VBox {
         // window is complete
         const recent = this._now - span - LOOKBACK_US;
         let from = this._trigger !== null ? Math.max(recent, this._trigger + span) : recent;
+
         for (;;) {
             const next = firstEdgeAfter(trace, edge, from);
-            if (next === null || !complete(next)) {
+            const isUsable = next !== null && complete(next);
+            if (!isUsable) {
                 break;
             }
+
             this._trigger = next;
             from = next + span;
         }
@@ -764,33 +819,41 @@ export class ScopeView extends VBox {
      * with it), the view on the trigger.
      */
     private _freezeOnTrigger() {
+        // stopped (through the end of the recording, when one is on)
         if (this._recordAsked) {
             this._setRecord(false);
         } else {
             this._stop();
         }
 
+        // the view ends so that the trigger is at a tenth from its left
         const span = this._settings.perDivUs * DIVISIONS;
         this._viewEnd = this._trigger + span * (1 - TRIGGER_SHARE);
         this._redraw();
     }
+
+    // ### Pins shown #########################################################
 
     /**
      * The pin chosen in the "add a pin" list joins the traces, in the first
      * color no other trace has (the first one when all are taken).
      */
     private _addChosenPin() {
+        // the first item: not a pin
         const value = String(this.refs.addPin.getValue());
         if (value === NO_PIN) {
             return;
         }
 
+        // the first color free
         const taken = this._settings.channels.map(channel => channel.color);
         let color = 0;
+
         while (color < COLOR_COUNT && taken.includes(color)) {
             color++;
         }
 
+        // the pin added (kept by the browser), the buttons and lists again
         this._settings.channels.push({ pin: Number(value), color: color < COLOR_COUNT ? color : 0 });
         this._showChannels();
     }
@@ -893,9 +956,11 @@ export class ScopeView extends VBox {
         if (this._settings.mode === "roll") {
             return this._now;
         }
+
         if (this._trigger === null) {
             return this._waitingEnd;
         }
+
         const span = this._settings.perDivUs * DIVISIONS;
         return this._trigger + span * (1 - TRIGGER_SHARE);
     }
@@ -910,12 +975,15 @@ export class ScopeView extends VBox {
         if (this._triggerShown()) {
             return this._trigger;
         }
+
         if (this._waiting()) {
             return this._waitingEnd;
         }
+
         if (this._running) {
             return this._now;
         }
+
         return this._frozenOnRecording() ? this._recording.start : this._stoppedAt;
     }
 
@@ -934,9 +1002,11 @@ export class ScopeView extends VBox {
 
         // each one, with its time
         const divisions: Division[] = [];
+
         for (let index = first; index <= last; index++) {
             divisions.push({ index, time: zero + index * perDiv });
         }
+
         return divisions;
     }
 
@@ -963,6 +1033,8 @@ export class ScopeView extends VBox {
         if (this._running) {
             return;
         }
+
+        // the pixels turned, as µs of the view
         const delta = event.deltaX !== 0 ? event.deltaX : event.deltaY;
         const view = this._window(this.refs.canvas.dom.clientWidth);
         const usPerPixel = (view.end - view.start) / (view.right - view.left);
@@ -975,11 +1047,13 @@ export class ScopeView extends VBox {
      * view keeps the time under the pointer where it is.
      */
     private _zoom(event: WheelEvent) {
-
-        // the next time base
+        // the next time base (none past the ends of the list, nor from a
+        // time base not in it)
         const index = TIME_BASES.indexOf(this._settings.perDivUs);
-        const next = Math.min(TIME_BASES.length - 1, Math.max(0, index + (event.deltaY > 0 ? 1 : -1)));
-        if (next === index || index < 0) {
+        const step = event.deltaY > 0 ? 1 : -1;
+        const next = Math.min(TIME_BASES.length - 1, Math.max(0, index + step));
+        const cannotZoom = next === index || index < 0;
+        if (cannotZoom) {
             return;
         }
 
@@ -993,6 +1067,7 @@ export class ScopeView extends VBox {
             this._viewEnd = pointed + (1 - share) * span;
         }
 
+        // shown in the list, then applied
         this.refs.timeBase.setValue(String(TIME_BASES[next]));
         this._setTimeBase(TIME_BASES[next]);
     }
@@ -1016,6 +1091,7 @@ export class ScopeView extends VBox {
         this._fillAddList();
         this._fillTriggerList();
 
+        // the traces
         this._redraw();
     }
 
@@ -1028,13 +1104,17 @@ export class ScopeView extends VBox {
         const chosen = this._shownChannels().map(channel => channel.pin);
         const usedOnly = this._twinSettings.usedPinsOnly;
         const offered: number[] = [];
+
+        // each pin of the board not shown yet, in use when the setting asks
         for (let pin = 0; pin < pinCount; pin++) {
             const hasPart = this._parts.some(part => part.pins.includes(pin));
             const allowed = !usedOnly || pinInUse(this._pins[pin], hasPart);
-            if (!chosen.includes(pin) && allowed) {
+            const isOffered = !chosen.includes(pin) && allowed;
+            if (isOffered) {
                 offered.push(pin);
             }
         }
+
         return offered;
     }
 
@@ -1051,13 +1131,16 @@ export class ScopeView extends VBox {
         if (key === this._offered) {
             return;
         }
+
         this._offered = key;
 
         // the list, its first item selected
         const items: ListItem[] = [{ id: NO_PIN, text: tx.twin.scope_add }];
+
         for (const pin of offered) {
             items.push({ id: String(pin), text: this._pinName(pin) });
         }
+
         this.refs.addPin.setItems(items);
         this.refs.addPin.setValue(NO_PIN);
     }
@@ -1085,12 +1168,16 @@ export class ScopeView extends VBox {
      */
     private _forgetOld() {
         const oldest = this._now - KEPT_US;
+
         for (const trace of this._traces) {
+            // the states before the last one at or before 'oldest'
             const firstKept = firstStateAfter(trace.states, oldest) - 1;
             if (firstKept > 0) {
                 trace.states.dropOldest(firstKept);
             }
-            trace.busy = trace.busy.filter(interval => interval.to >= oldest);
+
+            // the busy times, PWM segments and RMT sends over before it
+            trace.busy =trace.busy.filter(interval => interval.to >= oldest);
             trace.pwm = trace.pwm.filter(segment => segment.to >= oldest);
             trace.rmt = trace.rmt.filter(train => train.to >= oldest);
         }
@@ -1146,6 +1233,7 @@ export class ScopeView extends VBox {
      *    its trace, in its color.
      */
     private _paint(ctx: CanvasEx) {
+        // the colors and the font of the page
         const canvas = this.refs.canvas;
         const textColor = canvas.getStyleVariable("--scope-text");
         const gridColor = canvas.getStyleVariable("--scope-grid");
@@ -1161,6 +1249,7 @@ export class ScopeView extends VBox {
         // 2. the lines of the divisions
         ctx.strokeStyle = gridColor;
         ctx.lineWidth = 1;
+
         for (const division of this._divisions(view)) {
             const x = Math.round(xOf(division.time));
             ctx.beginPath();
@@ -1170,7 +1259,8 @@ export class ScopeView extends VBox {
         }
 
         // the trigger shown: a dashed line, the whole height
-        if (this._triggerShown() && this._trigger >= start && this._trigger <= end) {
+        const isTriggerInView = this._triggerShown() && this._trigger >= start && this._trigger <= end;
+        if (isTriggerInView) {
             const x = Math.round(xOf(this._trigger));
             ctx.strokeStyle = textColor;
             ctx.setLineDash([4, 4]);
@@ -1193,6 +1283,7 @@ export class ScopeView extends VBox {
         // 3. each pin, one under the other, in its color (an analog one
         // between its margins)
         let top = ROW_GAP;
+
         for (const channel of shown) {
             const analog = this._isAnalog(channel.pin);
             const height = analog ? ANALOG_HEIGHT : LOGIC_HEIGHT;
@@ -1213,6 +1304,7 @@ export class ScopeView extends VBox {
      * of it).
      */
     private _paintAxis(ctx: CanvasEx) {
+        // the window of the traces, its divisions, the small font
         const canvas = this.refs.canvas;
         const view = this._window(canvas.dom.clientWidth);
         const divisions = this._divisions(view);
@@ -1222,6 +1314,7 @@ export class ScopeView extends VBox {
         // the ticks
         ctx.strokeStyle = canvas.getStyleVariable("--scope-grid");
         ctx.lineWidth = 1;
+
         for (const division of divisions) {
             const x = Math.round(xOfTime(view, division.time));
             ctx.beginPath();
@@ -1240,13 +1333,17 @@ export class ScopeView extends VBox {
         // the times, centered under their tick, or ending there when the
         // right edge leaves no room
         ctx.fillStyle = canvas.getStyleVariable("--scope-text");
+
         for (let i = 0; i < divisions.length; i++) {
-            if (divisions[i].index % step !== 0) {
+            const isSkipped = divisions[i].index % step !== 0;
+            if (isSkipped) {
                 continue;
             }
+
             const x = Math.round(xOfTime(view, divisions[i].time));
             const halfWidth = ctx.measureText(texts[i]).width / 2;
-            ctx.textAlign = x + halfWidth <= ctx.width ? "center" : "right";
+            const fitsCentered = x + halfWidth <= ctx.width;
+            ctx.textAlign = fitsCentered ? "center" : "right";
             ctx.fillText(texts[i], x, (ctx.height + TICK_LENGTH) / 2);
         }
     }
@@ -1261,9 +1358,15 @@ export class ScopeView extends VBox {
     private _paintPin(ctx: CanvasEx, pin: number, row: TraceRow, look: ScaleLook) {
         const { top, height, analog, color, start, end, left, right, xOf } = row;
         const vrefMv = this._vrefMv();
-        const yOf = (states: StateList, index: number) => analog
-            ? top + height - states.millivolts(index) * height / vrefMv
-            : (states.level(index) !== 0 ? top : top + height);
+
+        // the y of a state: its voltage in an analog row, else its level
+        const yOf = (states: StateList, index: number) => {
+            if (analog) {
+                return top + height - states.millivolts(index) * height / vrefMv;
+            }
+
+            return states.level(index) !== 0 ? top : top + height;
+        };
 
         // the name
         ctx.font = look.fonts.normal;
@@ -1279,6 +1382,7 @@ export class ScopeView extends VBox {
             ctx.font = look.fonts.small;
             ctx.fillStyle = look.text;
             ctx.textAlign = "right";
+
             for (const [y, label] of levels) {
                 const lineY = Math.round(y);
                 ctx.beginPath();
@@ -1289,8 +1393,10 @@ export class ScopeView extends VBox {
             }
         }
 
+        // nothing acquired for it: the name only
         const trace = this._shownTraces()[pin];
-        if (trace === undefined || trace.states.length === 0) {
+        const hasNoState = trace === undefined || trace.states.length === 0;
+        if (hasNoState) {
             return;
         }
 
@@ -1303,13 +1409,16 @@ export class ScopeView extends VBox {
         // the busy bands, the color of the trace seen through
         ctx.fillStyle = color;
         ctx.globalAlpha = BUSY_OPACITY;
+
         for (const interval of trace.busy) {
-            if (interval.to >= start && interval.from <= end) {
+            const isInView = interval.to >= start && interval.from <= end;
+            if (isInView) {
                 const x = xOf(Math.max(interval.from, start));
                 const width = Math.max(1, xOf(Math.min(interval.to, end)) - x);
                 ctx.fillRect(x, top, width, height);
             }
         }
+
         ctx.globalAlpha = 1;
 
         // the PWM segments and RMT sends in the window: the states are not
@@ -1322,11 +1431,13 @@ export class ScopeView extends VBox {
         if (covers.length > 0) {
             ctx.beginPath();
             ctx.rect(left, top - 2, right - left, height + 4);
+
             for (const cover of covers) {
                 const from = xOf(Math.max(cover.from, start));
                 const to = xOf(Math.min(cover.to, end));
                 ctx.rect(from, top - 2, to - from, height + 4);
             }
+
             ctx.clip("evenodd");
         }
 
@@ -1339,12 +1450,14 @@ export class ScopeView extends VBox {
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(Math.max(left, xOf(states.time(first))), y);
+
         for (let i = first + 1; i < states.length && states.time(i) <= end; i++) {
             const x = xOf(states.time(i));
             ctx.lineTo(x, y);
             y = yOf(states, i);
             ctx.lineTo(x, y);
         }
+
         ctx.lineTo(xOf(end), y);
         ctx.stroke();
         ctx.restore();
@@ -1360,6 +1473,7 @@ export class ScopeView extends VBox {
             if (!inWindow(segment)) {
                 return;
             }
+
             const previous = trace.pwm[index - 1];
             const next = trace.pwm[index + 1];
             const follows = previous !== undefined && previous.to === segment.from;
@@ -1398,7 +1512,8 @@ export class ScopeView extends VBox {
 
         // its text, when it fits
         ctx.font = look.fonts.small;
-        if (ctx.measureText(text).width + BAND_TEXT_PADDING <= width) {
+        const fits = ctx.measureText(text).width + BAND_TEXT_PADDING <= width;
+        if (fits) {
             ctx.fillStyle = look.text;
             ctx.textAlign = "center";
             ctx.fillText(text, x + width / 2, top + height / 2);
@@ -1422,7 +1537,8 @@ export class ScopeView extends VBox {
 
         // too fast to draw: a band
         const periodPx = xOf(segment.from + 1000000 / segment.frequency) - xOf(segment.from);
-        if (pwmToggles(segment) && periodPx < MIN_PERIOD_PX) {
+        const isTooFast = pwmToggles(segment) && periodPx < MIN_PERIOD_PX;
+        if (isTooFast) {
             this._paintBand(ctx, row, look, from, to, `${frequencyText(segment.frequency)} · ${percentText(segment.duty)}`);
             return;
         }
@@ -1439,6 +1555,7 @@ export class ScopeView extends VBox {
         } else {
             ctx.moveTo(xOf(from), y);
         }
+
         if (pwmToggles(segment)) {
             for (let n = pwmFirstChangeAfter(segment, from); pwmChangeTime(segment, n) < to; n++) {
                 const x = xOf(pwmChangeTime(segment, n));
@@ -1450,9 +1567,11 @@ export class ScopeView extends VBox {
 
         // to its end, back to the line after it when it ends in the window
         ctx.lineTo(xOf(to), y);
-        if (yAfter !== null && segment.to <= end) {
+        const endsInView = yAfter !== null && segment.to <= end;
+        if (endsInView) {
             ctx.lineTo(xOf(to), yAfter);
         }
+
         ctx.stroke();
     }
 
@@ -1492,9 +1611,11 @@ export class ScopeView extends VBox {
 
         // a step at each pulse in the window
         let time = train.from;
+
         for (let index = 0; index < count && time < to; index++) {
             const pulseEnd = time + rmtPulseTicks(train, index) * train.tickUs;
-            if (pulseEnd > from) {
+            const isInView = pulseEnd > from;
+            if (isInView) {
                 const x = xOf(Math.max(time, from));
                 const level = levelY(row, rmtPulseLevel(train, index));
                 if (y === null) {
@@ -1503,8 +1624,10 @@ export class ScopeView extends VBox {
                     ctx.lineTo(x, y);
                     ctx.lineTo(x, level);
                 }
+
                 y = level;
             }
+
             time = pulseEnd;
         }
 
@@ -1515,6 +1638,7 @@ export class ScopeView extends VBox {
                 ctx.lineTo(xOf(to), yAfter);
             }
         }
+
         ctx.stroke();
     }
 }

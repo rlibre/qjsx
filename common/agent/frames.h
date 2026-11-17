@@ -14,8 +14,8 @@
 
 namespace frames {
 
-const uint8_t MAGIC = 0xe5;
-const uint8_t VERSION = 1;
+const uint8_t MAGIC = 0xe5;   // first byte of a frame's body
+const uint8_t VERSION = 1;    // version of the framing
 
 /**
  * CRC-16/CCITT-FALSE of 'data' (polynomial 0x1021, initial value 0xffff).

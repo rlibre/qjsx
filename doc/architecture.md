@@ -971,10 +971,13 @@ import { read } from "sensors/bme280";
 | `manifest.json` | `format` (1), `kind` (`"library"`), `name`, `version`, `created`, `compiler`, `bytecode`, `natives[]`, `modules[]` |
 | `bytecode/<module>.qbc` | bytecode of the module: a cache, used only by a build whose compiler is the one that produced it |
 | `debug/<module>.json` | its debug sidecar (same condition) |
+| `outline/<module>.json` | its outline (engine change W): what `qjsx build` reads to leave out what nothing uses (same condition) |
 | `src/<module>.js` | its source: what a build made with another compiler recompiles, and what the debugger shows |
 
 Each item of `modules[]` gives `name` (`"sensors/bme280"`), `buildId`, `sourceHash`, the
-names of its three entries and `imports` (the names of the modules it imports).
+names of its four entries and `imports` (the names of the modules it imports). A library
+made before the outlines (2026-11-17) has no `outline`: its modules are compiled again from
+their sources.
 
 **Making a library: `qjsx mklib [directory] [--output <file>]`.** The command serves
 `stdlib` as well as a user's libraries. The folder contains a library
@@ -1004,10 +1007,33 @@ The same sources are also embedded in the host executable, under the same names
    - a bare name (`fs`, the old naming): an error that gives the new form (`sys/fs`);
    - otherwise an error, which names the importing module (relative import not found,
      library not declared, module missing from the library).
-4. It writes into the package the bytecode, the debug sidecar and the source of each module, those
+4. It checks that every name a module imports from another module of the package is
+   exported by it, itself or through a re-export: else an error with the position of
+   the name (`src/main.js:3:10: 'sleep' is not exported by stdlib/tasks`), where the
+   device would refuse the program when it starts. Native modules are not checked.
+5. It leaves out what nothing uses (2026-11-17, `host/js/prune.js`, engine change W).
+   On a device every function costs RAM once its module is loaded, called or not
+   (about 275 bytes on a 32-bit board). From the outline of each module:
+   - every top-level statement that does something is kept, with the names it uses;
+     a removable one (a declaration whose run only creates what it declares: function,
+     class without static field or block, literals...) only when one of its names is
+     used;
+   - a name used is its declaration, or an import: then the export of the other module,
+     followed through re-exports and `export * from`; `import * as ns` uses every export
+     of the module;
+   - a module with a direct `eval` keeps everything;
+   - a top-level declaration is only reachable by its name written in the code (a module
+     does not put its names on `globalThis`): a function held by an object is named by
+     it, so `x["name"]()` never reaches a declaration left out.
+   What is unused (and the names of export clauses nothing imports) is replaced by
+   spaces, line ends kept, and the module is compiled again: positions are unchanged, the
+   package keeps the original source, which the debugger shows (a breakpoint in a
+   declaration left out slides to the next statement). The build prints what it left out
+   ("stdlib/tasks: left out, not used: Task, Ticker, Mailbox, task"). Class methods are
+   never left out one by one, only a class nothing uses.
+6. It writes into the package the bytecode, the debug sidecar and the source of each module, those
    of the libraries under `bytecode/<library>/<module>.qbc`. A library module
-   that nobody imports is not copied; there is no finer sorting (function by
-   function).
+   that nobody imports is not copied.
 
 The debugger sees library modules like the others: their sidecar and their source
 are in the package.

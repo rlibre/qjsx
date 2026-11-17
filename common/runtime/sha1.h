@@ -17,6 +17,7 @@
 
 namespace crypto {
 
+// One SHA-1 computation (see the top of this file).
 struct Sha1 {
     uint32_t state[5];   // current hash value (H0..H4)
     uint64_t length;     // bytes processed

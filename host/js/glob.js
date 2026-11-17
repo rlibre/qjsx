@@ -15,11 +15,19 @@ import { join } from "stdlib/path";
 
 const SKIPPED_DIRECTORIES = new Set([".git"]);
 
+/**
+ * Regular expression matching the whole path for the glob 'pattern'.
+ */
 export function globToRegExp(pattern) {
     let expression = "";
+
+    // translate the pattern character by character
     for (let i = 0; i < pattern.length; i++) {
         const c = pattern[i];
-        if (c === "*" && pattern[i + 1] === "*") {
+        const isDoubleStar = c === "*" && pattern[i + 1] === "*";
+
+        if (isDoubleStar) {
+            // "**/" matches any number of directories, a bare "**" anything
             const followedBySlash = pattern[i + 2] === "/";
             expression += followedBySlash ? "(?:.*/)?" : ".*";
             i += followedBySlash ? 2 : 1;
@@ -28,19 +36,28 @@ export function globToRegExp(pattern) {
         } else if (c === "?") {
             expression += "[^/]";
         } else {
+            // any other character matches itself: escape the regexp syntax
             expression += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
         }
     }
+
     return new RegExp(`^${expression}$`);
 }
 
-// Every file under 'root', as paths relative to it with '/' separators.
+/**
+ * Every file under 'root', as paths relative to it with '/' separators.
+ */
 export function listFiles(root, relative = "") {
-    const directory = relative.length > 0 ? join(root, relative) : root;
+    const hasRelative = relative.length > 0;
+    const directory = hasRelative ? join(root, relative) : root;
     const files = [];
+
+    // walk the directory: recurse into sub-directories (but the skipped ones)
     for (const name of fs.readdirSync(directory)) {
-        const path = relative.length > 0 ? `${relative}/${name}` : name;
-        if (fs.statSync(join(root, path)).isDirectory()) {
+        const path = hasRelative ? `${relative}/${name}` : name;
+        const isDirectory = fs.statSync(join(root, path)).isDirectory();
+
+        if (isDirectory) {
             if (!SKIPPED_DIRECTORIES.has(name)) {
                 files.push(...listFiles(root, path));
             }
@@ -48,13 +65,17 @@ export function listFiles(root, relative = "") {
             files.push(path);
         }
     }
+
     return files;
 }
 
-// Files matching one of 'include' and none of 'exclude', sorted.
+/**
+ * Files matching one of 'include' and none of 'exclude', sorted.
+ */
 export function matchFiles(root, include, exclude = []) {
     const included = include.map(globToRegExp);
     const excluded = exclude.map(globToRegExp);
+
     return listFiles(root)
         .filter(path => included.some(pattern => pattern.test(path)))
         .filter(path => !excluded.some(pattern => pattern.test(path)))

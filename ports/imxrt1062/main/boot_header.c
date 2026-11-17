@@ -38,12 +38,12 @@ typedef struct {
 typedef struct {
     uint32_t header;        /* IVT_HEADER */
     uint32_t entry;         /* the vector table */
-    uint32_t reserved1;
+    uint32_t reserved1;     /* 0 */
     uint32_t dcd;           /* device configuration data: none */
     uint32_t bootData;      /* &qjsxBootData */
     uint32_t self;          /* &qjsxImageVectorTable */
     uint32_t csf;           /* signature: none */
-    uint32_t reserved2;
+    uint32_t reserved2;     /* 0 */
 } ImageVectorTable;
 
 __attribute__((section(".boot_data"), used))

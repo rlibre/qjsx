@@ -25,6 +25,7 @@ class Storage;
 
 namespace board {
 
+// The chip and the board, as identity() describes them.
 struct Identity {
     const char *chip;        // "ESP32-S3", "RP2350B", "desktop"
     const char *board;       // "Olimex PICO2-XXL"...
@@ -174,7 +175,7 @@ const uint8_t *openPackage(size_t *size);
  * Releases what openPackage() returned (unmaps the flash, frees the file
  * copy).
  */
-void           closePackage(const uint8_t *package);
+void closePackage(const uint8_t *package);
 
 /**
  * Starts the links to the host (USB, UART, TCP...): the bytes they receive

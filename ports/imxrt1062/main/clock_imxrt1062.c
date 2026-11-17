@@ -56,6 +56,7 @@ void qjsxStartClocks(void) {
 
     // the core voltage, then wait for the DCDC to settle
     DCDC->REG3 = (DCDC->REG3 & ~DCDC_REG3_TRG_MASK) | DCDC_REG3_TRG(CORE_VOLTAGE_TARGET);
+
     while ((DCDC->REG0 & DCDC_REG0_STS_DC_OK_MASK) == 0u) {
     }
 

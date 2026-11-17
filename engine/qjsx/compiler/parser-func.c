@@ -792,7 +792,11 @@ __exception int js_parse_program(JSParseState *s)
     }
 
     while (s->token.val != TOK_EOF) {
+        /* qjsx: each top-level statement goes in the outline of the module */
+        js_outline_statement_begin(s);
         if (js_parse_source_element(s))
+            return -1;
+        if (js_outline_statement_end(s))
             return -1;
     }
     fd->source_end = s->buf_end - s->buf_start;   /* qjsx */

@@ -37,12 +37,25 @@ check "debugger support of the engine" "$BIN/qjsx-tests" run -A tests/debug.test
 check "region heap (JS heap of a raw region)" "$BIN/qjsx-tests" run -A tests/region_heap.test.js
 check "runtime library" "$BIN/qjsx" run -A tests/runtime.test.js
 check "tasks of the standard library (stop, ticker, mailbox, mutex)" "$BIN/qjsx" run -A tests/tasks.test.js
+# engine change V: the order of the awaits as upstream QuickJS's (the expected
+# output was written by qjs-original, tools/quickjs-split/test)
+check "awaits resume in the order of upstream QuickJS (engine change V)" \
+    bash -c "'$BIN/qjsx' run tests/fixtures/awaitorder.js | diff --strip-trailing-cr tests/fixtures/awaitorder.expected -"
 check "cycles collected in a heap of a fixed size (GC threshold capped by the limit)" \
     env QJSX_JS_HEAP_MB=1 "$BIN/qjsx" run -A tests/gclimit.test.js
 check "temporal dead zone (let / const checks kept where needed)" "$BIN/qjsx" run -A tests/tdz.test.js
 check "constant folding (literal expressions computed by the compiler)" "$BIN/qjsx" run -A tests/fold.test.js
 check "constants of a module replaced by their value" "$BIN/qjsx" run -A tests/modconst.test.js
 check "link of a package (names of the package, linked bytecode)" "$BIN/qjsx" run -A tests/link.test.js
+check "unused declarations left out of a package, imported names checked" "$BIN/qjsx" run -A tests/prune.test.js
+# the package of that fixture, where declarations were left out, prints what
+# its sources print, with and without compiler
+PRUNE_PACKAGE=$(ls tests/fixtures/prune/build/packages/*.qjspkg 2>/dev/null | head -1)
+"$BIN/qjsx" run tests/fixtures/prune/src/main.js > build/prune-source.txt 2>&1
+"$BIN/qjsx" run "$PRUNE_PACKAGE" > build/prune-package.txt 2>&1
+"$BIN/qjsx-target" run "$PRUNE_PACKAGE" > build/prune-target.txt 2>&1
+check "a package with declarations left out runs like its sources" diff build/prune-source.txt build/prune-package.txt
+check "the same, without compiler" diff build/prune-source.txt build/prune-target.txt
 check "tool modules" "$BIN/qjsx" run -A tests/tools.test.js
 check "protocol (CBOR, COBS, frames)" "$BIN/qjsx" run -A tests/protocol.test.js
 check "debug info (lines, breakpoints, scopes)" "$BIN/qjsx" run -A tests/debuginfo.test.js

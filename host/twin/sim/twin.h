@@ -112,7 +112,7 @@ const char *const *natives();
  */
 int nativeCount();
 
-// ### Choices of the page (twin_choices.cpp) #################################
+// ### Choices of the page (twin_choices.cpp) ##################################
 //
 // What the page chooses for a link (the TCP port of a UART, the PC serial
 // port it is wired to...) is kept in <storage>/twin.json, one JSON object per
@@ -162,7 +162,7 @@ void setRmt(int pin, bool driven);
  */
 void setI2c(int pin, bool used);
 
-// ### Analog inputs (twin_adc.cpp) ###########################################
+// ### Analog inputs (twin_adc.cpp) ############################################
 //
 // The board description says which pins have an analog input ("adc": {
 // "pins", "bits", "spans" (the ranges its converter can read, in mV, from
@@ -201,7 +201,7 @@ void setAdc(int pin, bool open);
  */
 void partVoltage(int pin, int millivolts);
 
-// ### PWM outputs (twin_pwm.cpp) #############################################
+// ### PWM outputs (twin_pwm.cpp) ##############################################
 //
 // The board description says what its PWM has ("pwm": { "outputs",
 // "timers", "clock" (Hz), "maxBits" }, the LEDC of the ESP32-S3: 8, 4,
@@ -231,7 +231,7 @@ void pwmDrive(int pin, bool invert, double frequency, double duty);
  */
 void pwmStop(int pin, bool invert);
 
-// ### I2C buses (twin_i2c.cpp) ###############################################
+// ### I2C buses (twin_i2c.cpp) ################################################
 //
 // The buses the program opens, and the trace of its transfers for the page:
 // the last I2C_TRACE_RECORDS of them, every bus together, numbered.
@@ -240,13 +240,13 @@ const int I2C_BUSES = 2;                 // as the ESP32-S3
 const size_t I2C_TRACE_BYTES = 32;       // bytes kept of what a transfer writes, and of what it reads
 const int I2C_TRACE_RECORDS = 256;       // transfers kept
 
-// What the page reads of a bus.
 const int I2C_MAX_FREQUENCIES = 4;       // distinct frequencies of a bus the page is told
 
+// What the page reads of a bus.
 struct I2cBusState {
     bool     open;                       // the program has it open
-    int      sda;                        // its pins (open)
-    int      scl;
+    int      sda;                        // its data pin (open)
+    int      scl;                        // its clock pin (open)
     uint32_t frequencies[I2C_MAX_FREQUENCIES];   // of the devices on it, distinct, in Hz
     int      frequencyCount;             // entries of frequencies
 };
@@ -261,7 +261,7 @@ struct I2cRecord {
     uint32_t frequencyHz;                // the frequency of the device; 0: a probe (no device)
     size_t   writeSize;                  // bytes written (the first I2C_TRACE_BYTES kept)
     size_t   readSize;                   // bytes asked (the first I2C_TRACE_BYTES of the answer kept)
-    uint8_t  written[I2C_TRACE_BYTES];
+    uint8_t  written[I2C_TRACE_BYTES];   // what was written (the first bytes)
     uint8_t  read[I2C_TRACE_BYTES];      // what came back (ok); zeros otherwise
 };
 
@@ -279,7 +279,7 @@ void i2cBusStates(I2cBusState *states);
  */
 uint32_t i2cTrace(uint32_t after, I2cTraceVisitor *visit, void *context);
 
-// ### Analyzer of the pins (twin_scope.cpp) ##################################
+// ### Analyzer of the pins (twin_scope.cpp) ###################################
 //
 // Every change on a pin (its level, or the voltage a component sets on it)
 // is recorded with its time, for the analyzer panel of the page; the page's
@@ -408,7 +408,7 @@ void partPull(int pin, int pull);
  */
 void partWatch(int pin, bool watched);
 
-// ### Bridge to the components (twin_bridge.cpp) #############################
+// ### Bridge to the components (twin_bridge.cpp) ##############################
 //
 // The models of the parts run in the twin's JS runtime (host/twin/js/twin.js);
 // the simulated hardware tells them what the program does through messages
@@ -480,7 +480,7 @@ void readyReport(const char *error);
  */
 bool readyWait(int64_t timeoutMs, char **error);
 
-// ### USB device (twin_usb.cpp) ##############################################
+// ### USB device (twin_usb.cpp) ###############################################
 //
 // The serial functions of the USB device are TCP links (twin_tcp.h), which
 // listen only while the program has the device started.
@@ -505,7 +505,7 @@ void setupUsb(const char *host, int port);
  */
 void usbState(UsbState *state);
 
-// ### UARTs (twin_uart.cpp) ##################################################
+// ### UARTs (twin_uart.cpp) ###################################################
 //
 // The UARTs of the board ("uarts" of the description) are the ports of
 // device/serial in the twin: the program opens them by number, the pins are
@@ -594,7 +594,7 @@ uint32_t uartTraffic(int uart, uint32_t after, TrafficVisitor *visit, void *cont
  */
 bool uartReceive(int uart, UartSource source, const uint8_t *bytes, size_t size);
 
-// ### UARTs wired to PC serial ports (twin_uart_serial.cpp) ##################
+// ### UARTs wired to PC serial ports (twin_uart_serial.cpp) ###################
 //
 // A UART of the twin can be wired to a real serial port of the PC (a USB
 // serial adapter...), its other end: the port is open while the program has

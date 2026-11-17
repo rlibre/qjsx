@@ -79,6 +79,7 @@ bool isTaken(int number) {
  */
 bool waitUntilFree(int number) {
     for (int waited = 0; waited < CLOSING_WAIT_MS; waited += CLOSING_POLL_MS) {
+        // free now, or look again a little later
         if (!isTaken(number)) {
             return true;
         }
@@ -86,6 +87,7 @@ bool waitUntilFree(int number) {
         platform::sleepMs(CLOSING_POLL_MS);
     }
 
+    // a last look at the end of the wait
     return !isTaken(number);
 }
 
@@ -93,12 +95,19 @@ bool waitUntilFree(int number) {
  * The configuration of the driver for 'settings'.
  */
 uart_config_t configOf(const Settings *settings) {
+    // the driver's parity
+    uart_parity_t parity = UART_PARITY_DISABLE;
+    if (settings->parity == Parity::even) {
+        parity = UART_PARITY_EVEN;
+    } else if (settings->parity == Parity::odd) {
+        parity = UART_PARITY_ODD;
+    }
+
+    // the format, the flow control, the clock
     uart_config_t config = {};
     config.baud_rate = settings->baudRate;
     config.data_bits = (uart_word_length_t)(UART_DATA_5_BITS + (settings->dataBits - 5));
-    config.parity = settings->parity == Parity::even  ? UART_PARITY_EVEN
-                  : settings->parity == Parity::odd   ? UART_PARITY_ODD
-                                                      : UART_PARITY_DISABLE;
+    config.parity = parity;
     config.stop_bits = settings->stopBits == 2 ? UART_STOP_BITS_2 : UART_STOP_BITS_1;
     config.flow_ctrl = settings->flowControl ? UART_HW_FLOWCTRL_CTS_RTS : UART_HW_FLOWCTRL_DISABLE;
     config.rx_flow_ctrl_thresh = FLOW_THRESHOLD;
@@ -131,7 +140,8 @@ Port *openPort(const char *, int number, const Settings *settings, int *error) {
         return nullptr;
     }
 
-    if (!waitUntilFree(number) || uart_is_driver_installed((uart_port_t)number)) {
+    bool free = waitUntilFree(number) && !uart_is_driver_installed((uart_port_t)number);
+    if (!free) {
         *error = EBUSY;
         return nullptr;
     }
@@ -140,7 +150,8 @@ Port *openPort(const char *, int number, const Settings *settings, int *error) {
     Port *port = &ports[number];
     port->number = (uart_port_t)number;
     port->events = nullptr;
-    if (uart_driver_install(port->number, RX_BUFFER, TX_BUFFER, EVENT_QUEUE, &port->events, 0) != ESP_OK) {
+    bool installed = uart_driver_install(port->number, RX_BUFFER, TX_BUFFER, EVENT_QUEUE, &port->events, 0) == ESP_OK;
+    if (!installed) {
         *error = EIO;
         return nullptr;
     }
@@ -181,10 +192,12 @@ int readPort(Port *port, uint8_t *buffer, size_t size) {
     // 2. wait for the driver
     if (buffered == 0) {
         uart_event_t event;
-        if (xQueueReceive(port->events, &event, pdMS_TO_TICKS(READ_WAIT_MS)) != pdTRUE) {
+        bool signalled = xQueueReceive(port->events, &event, pdMS_TO_TICKS(READ_WAIT_MS)) == pdTRUE;
+        if (!signalled) {
             return 0;
         }
 
+        // an overflow: what the driver holds is dropped
         bool overflow = event.type == UART_FIFO_OVF || event.type == UART_BUFFER_FULL;
         if (overflow) {
             uart_flush_input(port->number);
@@ -193,6 +206,7 @@ int readPort(Port *port, uint8_t *buffer, size_t size) {
             return 0;
         }
 
+        // else what came
         uart_get_buffered_data_len(port->number, &buffered);
     }
 
@@ -202,6 +216,7 @@ int readPort(Port *port, uint8_t *buffer, size_t size) {
         return 0;
     }
 
+    // without waiting: the bytes are there
     int received = uart_read_bytes(port->number, buffer, wanted, 0);
     return received < 0 ? -1 : received;
 }
@@ -218,9 +233,11 @@ bool writePort(Port *port, const uint8_t *data, size_t size) {
  * Removes the driver, gives the pins back, frees the UART.
  */
 void closePort(Port *port) {
+    // the driver, then the pins
     uart_driver_delete(port->number);
     releasePins(port);
 
+    // the UART free again
     tableLock.lock();
     taken[port->number] = false;
     tableLock.unlock();
@@ -231,6 +248,7 @@ void closePort(Port *port) {
  */
 void listPorts(hal::serial::ListHandler *add, void *context) {
     for (int number = 0; number < UARTS; number++) {
+        // neither ours nor the system's
         bool free = !isTaken(number) && !uart_is_driver_installed((uart_port_t)number);
         if (free) {
             add(context, nullptr, number);
@@ -266,10 +284,13 @@ const Driver *boardDriver() {
  */
 void drainUntil(int64_t deadlineMs) {
     for (int number = 0; number < UARTS; number++) {
+        // the deadline passed: stop waiting
         int64_t remaining = deadlineMs - platform::monotonicMs();
         if (remaining <= 0) {
             return;
         }
+
+        // an open UART: until its driver has sent everything, or the deadline
         if (isTaken(number)) {
             uart_wait_tx_done((uart_port_t)number, pdMS_TO_TICKS(remaining));
         }

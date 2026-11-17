@@ -29,19 +29,19 @@
 import { Application } from "x4js";
 
 export const MSG = {
-    board:    "twin.board",
-    state:    "twin.state",
-    forcePin: "twin.pin.force",
-    uartData: "twin.uart.data",
-    uartSend: "twin.uart.send",
+    board:      "twin.board",
+    state:      "twin.state",
+    forcePin:   "twin.pin.force",
+    uartData:   "twin.uart.data",
+    uartSend:   "twin.uart.send",
     uartSerial: "twin.uart.serial",
-    tcpListen: "twin.tcp.listen",
-    parts:     "twin.parts",
-    partState: "twin.part.state",
+    tcpListen:  "twin.tcp.listen",
+    parts:      "twin.parts",
+    partState:  "twin.part.state",
     partAction: "twin.part.action",
-    log:       "twin.log",
-    i2cData:   "twin.i2c.data",
-    scopeData: "twin.scope.data",
+    log:        "twin.log",
+    i2cData:    "twin.i2c.data",
+    scopeData:  "twin.scope.data",
 };
 
 // What a TCP link is for: a UART, or a serial function of the USB device.

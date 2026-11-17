@@ -54,7 +54,9 @@ interface Shown<T> {
  * name for a part of the project).
  */
 function partTitle(part: PartInfo) {
-    const model = part.model.split("/").filter(name => name !== "" && name !== ".").pop() ?? part.model;
+    // the last name of the model's path ("./sensors/thermo" -> "thermo")
+    const names = part.model.split("/").filter(name => name !== "" && name !== ".");
+    const model = names.pop() ?? part.model;
     return `${part.label} · ${model}`;
 }
 
@@ -64,8 +66,10 @@ function partTitle(part: PartInfo) {
  * the state of the pins (none yet: the numbers only).
  */
 function partSummary(part: PartInfo, pins: PinState[]) {
+    // each pin: its number, then its use ("-": unused or not known yet)
     return part.pins.map(pin => {
-        const mode = pins[pin] !== undefined ? pinMode(pins[pin]) : "-";
+        const isKnown = pins[pin] !== undefined;
+        const mode = isKnown ? pinMode(pins[pin]) : "-";
         return mode === "-" ? `GPIO${pin}` : `GPIO${pin} ${mode}`;
     }).join(", ");
 }
@@ -91,8 +95,11 @@ export class BoardView extends VBox {
      */
     constructor(props: BoxProps) {
         super(props);
+
+        // the order of the sections, as the browser kept it
         this._order = this.loadPState(ORDER_KEY, { keys: [] });
 
+        // the name of the board, its description, then its sections
         this.setContent([
             this.refs.name = new Label({ cls: "board-name", text: "" }),
             this.refs.description = new Label({ cls: "board-description", text: "" }),
@@ -120,19 +127,25 @@ export class BoardView extends VBox {
         // the USB device
         const sections: Section[] = [];
         this._usb = null;
-        if (board.natives.includes("device/usb")) {
+        const hasUsb = board.natives.includes("device/usb");
+        if (hasUsb) {
             const view = new UsbView();
-            this._usb = { section: new Section({ title: tx.twin.usb_title, persist: "usb", content: view }), view };
+            const section = new Section({ title: tx.twin.usb_title, persist: "usb", content: view });
+            this._usb = { section, view };
             sections.push(this._usb.section);
         }
 
         // the UARTs, but the agent's link
         this._uarts.clear();
-        const uartCount = board.natives.includes("device/serial") ? board.uarts ?? 0 : 0;
+        const hasSerial = board.natives.includes("device/serial");
+        const uartCount = hasSerial ? board.uarts ?? 0 : 0;
+
         for (let uart = 0; uart < uartCount; uart++) {
-            if (uart === board.linkUart) {
+            const isLink = uart === board.linkUart;
+            if (isLink) {
                 continue;
             }
+
             const view = new UartPanel({}, uart);
             const section = new Section({
                 title: `${tx.twin.uart} ${uart}`,
@@ -146,7 +159,9 @@ export class BoardView extends VBox {
 
         // the I2C buses, hidden until the program opens one with no part on it
         this._i2c.clear();
-        const busCount = board.natives.includes("device/i2c") ? I2C_BUSES : 0;
+        const hasI2c = board.natives.includes("device/i2c");
+        const busCount = hasI2c ? I2C_BUSES : 0;
+
         for (let bus = 0; bus < busCount; bus++) {
             const view = new I2cPanel({});
             const section = new Section({
@@ -160,6 +175,7 @@ export class BoardView extends VBox {
             sections.push(section);
         }
 
+        // shown among the parts, in the order kept
         this._deviceList = sections;
         this._arrange();
     }
@@ -169,6 +185,8 @@ export class BoardView extends VBox {
      * open and no part is wired on it (a part shows itself).
      */
     setI2c(buses: I2cBusState[]) {
+        // each bus of the board (a bus it does not have: nothing); shown
+        // while open with no part on it
         for (const state of buses) {
             const shown = this._i2c.get(state.bus);
             shown?.section.show(state.open && state.parts.length === 0);
@@ -180,6 +198,7 @@ export class BoardView extends VBox {
      * Adds transfers to the trace of their bus.
      */
     addI2cRecords(records: I2cRecord[]) {
+        // each bus gets its own transfers, if any
         for (const [bus, shown] of this._i2c) {
             const own = records.filter(record => record.bus === bus);
             if (own.length > 0) {
@@ -194,9 +213,9 @@ export class BoardView extends VBox {
      * own, in the order of the wiring (the board's first).
      */
     setParts(parts: PartInfo[]) {
+        // the view of each part
         this._parts.clear();
 
-        // the view of each part
         for (const part of parts) {
             this._parts.set(part.id, new PartView({ cls: "part" }, part));
         }
@@ -214,12 +233,15 @@ export class BoardView extends VBox {
         }
 
         // the other parts: a section each
-        for (const part of parts.filter(item => item.model !== BUTTON_MODEL)) {
+        const others = parts.filter(item => item.model !== BUTTON_MODEL);
+
+        for (const part of others) {
             const section = new Section({ title: partTitle(part), persist: `part-${part.id}`, content: this._parts.get(part.id) });
             this._partSections.push({ part, section });
             sections.push(section);
         }
 
+        // shown among the devices, in the order kept, with their pins
         this._partList = sections;
         this._arrange();
         this.setPins(this._pins);
@@ -233,13 +255,20 @@ export class BoardView extends VBox {
      */
     private _arrange() {
         const all = [...this._partList, ...this._deviceList];
+
+        // the rank of a section: its place among the keys kept, after them
+        // when not known
         const rank = (section: Section) => {
             const index = this._order.keys.indexOf(section.key);
             return index < 0 ? this._order.keys.length : index;
         };
+
+        // sorted by rank, the same rank in the order they come
         const sorted = all.map((section, index) => ({ section, index }))
             .sort((a, b) => rank(a.section) - rank(b.section) || a.index - b.index)
             .map(entry => entry.section);
+
+        // shown in that order
         this.refs.sections.setContent(sorted);
     }
 
@@ -248,6 +277,7 @@ export class BoardView extends VBox {
      * this board).
      */
     private _sectionOf(dragged: Component): Section {
+        // the section around it, if it is one of ours
         const section = dragged?.parentElement(Section) ?? null;
         const ours = section !== null && [...this._partList, ...this._deviceList].includes(section);
         return ours ? section : null;
@@ -259,25 +289,32 @@ export class BoardView extends VBox {
      * the drop, the section moves there and the order is kept.
      */
     private _onDrop(command: "enter" | "leave" | "drag" | "drop", dragged: Component, infos: DropInfo) {
+        // left: no line any more
         if (command === "leave") {
             this._showDropPlace(null);
             return;
         }
-        if (command !== "drag" && command !== "drop") {
+
+        // "enter": nothing to do until it moves
+        const isDragOrDrop = command === "drag" || command === "drop";
+        if (!isDragOrDrop) {
             return;
         }
 
         // the place under the pointer
         const moving = this._sectionOf(dragged);
         const place = this._placeAt(infos.pt.y, moving);
+
+        // dragged: the line there
         if (command === "drag") {
             this._showDropPlace(place);
             return;
         }
 
-        // the drop
+        // the drop: the line taken off, the section moved there
         this._showDropPlace(null);
-        if (moving !== null && place !== null) {
+        const canMove = moving !== null && place !== null;
+        if (canMove) {
             this._move(moving, place);
         }
     }
@@ -288,16 +325,22 @@ export class BoardView extends VBox {
      */
     private _placeAt(y: number, moving: Section): DropPlace {
         const shown = this.refs.sections.enumChildComponents(false).filter(child => child.isVisible()) as Section[];
+
+        // the first section that ends below 'y': before or after it, by its half
         for (const section of shown) {
             const rect = section.getBoundingRect();
             const top = rect.top + window.scrollY;
-            if (y < top + rect.height) {
+            const isAbove = y < top + rect.height;
+            if (isAbove) {
                 const after = y > top + rect.height / 2;
                 return section === moving ? null : { section, after };
             }
         }
+
+        // below them all: after the last one
         const last = shown[shown.length - 1];
-        return last === undefined || last === moving ? null : { section: last, after: true };
+        const isNowhere = last === undefined || last === moving;
+        return isNowhere ? null : { section: last, after: true };
     }
 
     /**
@@ -305,9 +348,12 @@ export class BoardView extends VBox {
      * the previous mark taken off.
      */
     private _showDropPlace(place: DropPlace) {
+        // the previous mark taken off
         if (this._dropPlace !== null) {
             this._dropPlace.section.removeClass("drop-before drop-after");
         }
+
+        // the new one, if any
         this._dropPlace = place;
         if (place !== null) {
             place.section.addClass(place.after ? "drop-after" : "drop-before");
@@ -319,21 +365,29 @@ export class BoardView extends VBox {
      * section shown or not, and shows them again in it.
      */
     private _move(moving: Section, place: DropPlace) {
+        // every section but the one moved, then that one at its new place
         const order = (this.refs.sections.enumChildComponents(false) as Section[]).filter(section => section !== moving);
         const index = order.indexOf(place.section) + (place.after ? 1 : 0);
         order.splice(index, 0, moving);
+
+        // that order kept by the browser, and shown
         this._order.keys = order.map(section => section.key);
         this._arrange();
     }
+
+    // ### Following the twin #################################################
 
     /**
      * Follows the state of the pins in the summaries of the parts.
      */
     setPins(pins: PinState[]) {
+        // the parts: their pins and the use of each
         this._pins = pins;
+
         for (const { part, section } of this._partSections) {
             section.setSummary(partSummary(part, pins));
         }
+
         // the buttons on a pin ("BOOT: GPIO0"); the reset button, on none,
         // is not listed
         if (this._buttonSection !== null) {

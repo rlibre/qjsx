@@ -74,6 +74,8 @@ function nextStateTime(cursor: Cursor, recording: Recording): number {
     if (cursor.state >= cursor.end) {
         return Infinity;
     }
+
+    // the state before the start counts as at the start
     return Math.max(0, cursor.trace.states.time(cursor.state) - recording.start);
 }
 
@@ -83,9 +85,11 @@ function nextStateTime(cursor: Cursor, recording: Recording): number {
  */
 function nextBusyTime(cursor: Cursor, recording: Recording): number {
     const busy = cursor.trace.busy;
-    if (cursor.analog || cursor.busy >= busy.length) {
+    const hasNone = cursor.analog || cursor.busy >= busy.length;
+    if (hasNone) {
         return Infinity;
     }
+
     return busy[cursor.busy].from - recording.start;
 }
 
@@ -97,6 +101,7 @@ function nextBusyTime(cursor: Cursor, recording: Recording): number {
  */
 function nextPwmTime(cursor: Cursor, recording: Recording): number {
     const segments = cursor.trace.pwm;
+
     while (cursor.segment < segments.length) {
         // entering it
         const segment = segments[cursor.segment];
@@ -106,7 +111,8 @@ function nextPwmTime(cursor: Cursor, recording: Recording): number {
 
         // its next change, before its end
         const time = pwmChangeTime(segment, cursor.change);
-        if (pwmToggles(segment) && time < segment.to) {
+        const isInSegment = pwmToggles(segment) && time < segment.to;
+        if (isInSegment) {
             return time - recording.start;
         }
 
@@ -114,6 +120,7 @@ function nextPwmTime(cursor: Cursor, recording: Recording): number {
         cursor.segment++;
         cursor.change = -1;
     }
+
     return Infinity;
 }
 
@@ -122,10 +129,28 @@ function nextPwmTime(cursor: Cursor, recording: Recording): number {
  * an analog pin.
  */
 function levelLine(cursor: Cursor, level: number): string {
+    // an analog pin: the voltage of the level
     if (cursor.analog) {
-        return `r${(level !== 0 ? cursor.vref : 0).toFixed(3)} ${cursor.id}`;
+        const volts = level !== 0 ? cursor.vref : 0;
+        return `r${volts.toFixed(3)} ${cursor.id}`;
     }
-    return `${level !== 0 ? 1 : 0}${cursor.id}`;
+
+    // a logic pin: the bit
+    const bit = level !== 0 ? 1 : 0;
+    return `${bit}${cursor.id}`;
+}
+
+/**
+ * The value of the state 'index' of a cursor's pin in the file: its voltage
+ * for an analog pin, else its bit.
+ */
+function stateValueLine(cursor: Cursor, index: number): string {
+    const states = cursor.trace.states;
+    if (cursor.analog) {
+        return `r${(states.millivolts(index) / 1000).toFixed(3)} ${cursor.id}`;
+    }
+
+    return `${states.level(index) !== 0 ? 1 : 0}${cursor.id}`;
 }
 
 /**
@@ -157,15 +182,22 @@ function takePwmChange(cursor: Cursor, recording: Recording): string {
  */
 function nextRmtTime(cursor: Cursor, recording: Recording): number {
     const trains = cursor.trace.rmt;
+
     while (cursor.train < trains.length) {
         const train = trains[cursor.train];
         const count = rmtPulseCount(train);
+
+        // entering it
         if (cursor.pulse < 0) {
             return Math.max(train.from, recording.start) - recording.start;
         }
+
+        // its next pulse
         if (cursor.pulse < count) {
             return cursor.pulseTime - recording.start;
         }
+
+        // its end
         if (cursor.pulse === count) {
             return train.to - recording.start;
         }
@@ -174,6 +206,7 @@ function nextRmtTime(cursor: Cursor, recording: Recording): number {
         cursor.train++;
         cursor.pulse = -1;
     }
+
     return Infinity;
 }
 
@@ -183,10 +216,7 @@ function nextRmtTime(cursor: Cursor, recording: Recording): number {
 function stateLine(cursor: Cursor, time: number): string {
     const states = cursor.trace.states;
     const index = Math.max(0, firstStateAfter(states, time) - 1);
-    if (cursor.analog) {
-        return `r${(states.millivolts(index) / 1000).toFixed(3)} ${cursor.id}`;
-    }
-    return `${states.level(index) !== 0 ? 1 : 0}${cursor.id}`;
+    return stateValueLine(cursor, index);
 }
 
 /**
@@ -199,17 +229,23 @@ function takeRmtChange(cursor: Cursor, recording: Recording): string {
 
     // entering the send: the pulse at that instant, the next one after it
     if (cursor.pulse < 0) {
+        // the pulses that end at or before the entry skipped
         const entry = Math.max(train.from, recording.start);
         let index = 0;
         let time = train.from;
+
         while (index < count && time + rmtPulseTicks(train, index) * train.tickUs <= entry) {
             time += rmtPulseTicks(train, index) * train.tickUs;
             index++;
         }
+
+        // all of them: the send is over there, the pin back to its state
         if (index === count) {
             cursor.pulse = count + 1;
             return stateLine(cursor, train.to);
         }
+
+        // the level of that pulse, the next one at its end
         cursor.pulse = index + 1;
         cursor.pulseTime = time + rmtPulseTicks(train, index) * train.tickUs;
         return levelLine(cursor, rmtPulseLevel(train, index));
@@ -234,18 +270,15 @@ function takeRmtChange(cursor: Cursor, recording: Recording): string {
  */
 function takeChange(cursor: Cursor, recording: Recording): string {
     // a busy time starting before the next state: unknown
-    if (nextBusyTime(cursor, recording) < nextStateTime(cursor, recording)) {
+    const isBusyFirst = nextBusyTime(cursor, recording) < nextStateTime(cursor, recording);
+    if (isBusyFirst) {
         cursor.busy++;
         return `x${cursor.id}`;
     }
 
     // the next state
-    const states = cursor.trace.states;
     const index = cursor.state++;
-    if (cursor.analog) {
-        return `r${(states.millivolts(index) / 1000).toFixed(3)} ${cursor.id}`;
-    }
-    return `${states.level(index) !== 0 ? 1 : 0}${cursor.id}`;
+    return stateValueLine(cursor, index);
 }
 
 /**
@@ -278,18 +311,24 @@ export function recordingToVcd(recording: Recording, channels: VcdChannel[]): Vc
         const kind = channel.analog ? "real 64" : "wire 1";
         lines.push(`$var ${kind} ${identifier(index)} ${channel.name} $end`);
     });
+
     lines.push("$upscope $end");
     lines.push("$enddefinitions $end");
 
     // 2. the cursors
     const cursors: Cursor[] = [];
     channels.forEach((channel, index) => {
+        // a pin not recorded: no cursor (its variable stays without a value)
         const trace = recording.traces[channel.pin];
         if (trace === undefined) {
             return;
         }
+
+        // its first busy time in the recording (none: past the end)
         const states = trace.states;
         const busy = trace.busy.findIndex(interval => interval.from >= recording.start);
+
+        // from its state at the start (the last one before it)
         cursors.push({
             trace,
             analog: channel.analog,
@@ -311,12 +350,15 @@ export function recordingToVcd(recording: Recording, channels: VcdChannel[]): Vc
     let current = -1;
     let written = 0;
     let cutAt: number | null = null;
+
     for (;;) {
         // the soonest change of every cursor: a state (or busy time), a PWM
-        // change or an RMT one (in that order at the same time)
+        // change or an RMT one (in that order at the same time); asking
+        // the PWM and RMT times moves a cursor past what is over
         let soonest: Cursor = null;
         let soonestTime = Infinity;
         let soonestKind: "state" | "pwm" | "rmt" = "state";
+
         for (const cursor of cursors) {
             const stateTime = Math.min(nextStateTime(cursor, recording), nextBusyTime(cursor, recording));
             const pwmTime = nextPwmTime(cursor, recording);
@@ -325,10 +367,19 @@ export function recordingToVcd(recording: Recording, channels: VcdChannel[]): Vc
             if (time < soonestTime) {
                 soonest = cursor;
                 soonestTime = time;
-                soonestKind = time === stateTime ? "state" : (time === pwmTime ? "pwm" : "rmt");
+                if (time === stateTime) {
+                    soonestKind = "state";
+                } else if (time === pwmTime) {
+                    soonestKind = "pwm";
+                } else {
+                    soonestKind = "rmt";
+                }
             }
         }
-        if (soonest === null || soonestTime > length) {
+
+        // nothing left in the recording: done
+        const isDone = soonest === null || soonestTime > length;
+        if (isDone) {
             break;
         }
 
@@ -344,6 +395,7 @@ export function recordingToVcd(recording: Recording, channels: VcdChannel[]): Vc
             lines.push(`#${time}`);
             current = time;
         }
+
         if (soonestKind === "state") {
             lines.push(takeChange(soonest, recording));
         } else if (soonestKind === "pwm") {
@@ -351,12 +403,15 @@ export function recordingToVcd(recording: Recording, channels: VcdChannel[]): Vc
         } else {
             lines.push(takeRmtChange(soonest, recording));
         }
+
+        // counted; a part of the text kept every LINES_PER_PART lines
         written++;
         if (lines.length >= LINES_PER_PART) {
             flush();
         }
     }
 
+    // the end time (where it stopped, else the end of the recording)
     lines.push(`#${Math.round((cutAt ?? length) * 1000)}`);
     flush();
     return { parts, cutAt };

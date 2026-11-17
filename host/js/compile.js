@@ -24,7 +24,9 @@ import { hex } from "qjsx:util";
 
 export const SIDECAR_FORMAT = 2;   // 2: with 'functions'
 
-// Identifies the compiler: bytecode is only valid for the engine that made it.
+/**
+ * Identifies the compiler: bytecode is only valid for the engine that made it.
+ */
 export function compilerId() {
     return `qjsx ${qjsxVersion} / QuickJS ${quickjsVersion}`;
 }
@@ -34,30 +36,37 @@ export function compilerId() {
 // libraries; a device refuses a package that holds another one.
 export const BYTECODE_VERSION = bytecodeVersion;
 
-// Text of a compile warning ({ kind, line, column } given by the compiler):
-// what the module asks of the compiler when it runs, which a device, having
-// no compiler, cannot do.
+/**
+ * Text of a compile warning ({ kind, line, column } given by the compiler):
+ * what the module asks of the compiler when it runs, which a device, having
+ * no compiler, cannot do.
+ */
 export function warningText(warning) {
     const construct = warning.kind === "eval" ? "eval()" : "the Function constructor";
     return `${construct} needs the compiler, which a device does not have: it throws there`;
 }
 
-// Name of the module that 'importer' means by 'specifier'. Same rule as the
-// engine's default normalizer (js_default_module_normalize_name in
-// engine/qjsx/core/modules.c), which the device applies when it loads the
-// module: a specifier that does not start with '.' is a name, taken as it is;
-// else its leading "./" and "../" are resolved against the folder of the
-// importer's name.
+/**
+ * Name of the module that 'importer' means by 'specifier'. Same rule as the
+ * engine's default normalizer (js_default_module_normalize_name in
+ * engine/qjsx/core/modules.c), which the device applies when it loads the
+ * module: a specifier that does not start with '.' is a name, taken as it is;
+ * else its leading "./" and "../" are resolved against the folder of the
+ * importer's name.
+ */
 export function normalizeImport(importer, specifier) {
+    // a name: taken as it is
     if (!specifier.startsWith(".")) {
         return specifier;
     }
 
+    // a relative specifier: start from the folder of the importer
     const lastSlash = importer.lastIndexOf("/");
     let folder = lastSlash < 0 ? "" : importer.slice(0, lastSlash);
     let rest = specifier;
 
     for (;;) {
+        // "./" stays in the folder
         if (rest.startsWith("./")) {
             rest = rest.slice(2);
             continue;
@@ -70,29 +79,38 @@ export function normalizeImport(importer, specifier) {
         if (!canGoUp) {
             break;
         }
+
         const cut = folder.lastIndexOf("/");
         folder = cut < 0 ? "" : folder.slice(0, cut);
         rest = rest.slice(3);
     }
 
+    // what is left of the specifier, in what is left of the folder
     return folder === "" ? rest : `${folder}/${rest}`;
 }
 
-// Compiles the module 'name' (the name recorded in the bytecode, by which
-// the other modules import it) from its source text. The bytecode has no
-// debug info (no source text, positions nor variable names): it is what runs
-// on a device; the debug info goes into the sidecar. 'import()' is refused:
-// every module of a program must be known when it is built.
-// Returns { buildId, sourceHash, bytecode, sidecar, imports, warnings }:
-//   - 'imports' has one { specifier, name } per module it imports, each
-//     module once: the text written in the source and the name of the module
-//     it means;
-//   - 'warnings' has one { kind, line, column } per use of eval() or of the
-//     Function constructor (see warningText).
+/**
+ * Compiles the module 'name' (the name recorded in the bytecode, by which
+ * the other modules import it) from its source text. The bytecode has no
+ * debug info (no source text, positions nor variable names): it is what runs
+ * on a device; the debug info goes into the sidecar. 'import()' is refused:
+ * every module of a program must be known when it is built.
+ * Returns { buildId, sourceHash, bytecode, sidecar, imports, warnings, outline }:
+ *   - 'imports' has one { specifier, name } per module it imports, each
+ *     module once: the text written in the source and the name of the module
+ *     it means;
+ *   - 'warnings' has one { kind, line, column } per use of eval() or of the
+ *     Function constructor (see warningText);
+ *   - 'outline': its top-level statements, imports and exports, which 'qjsx
+ *     build' reads to leave out what nothing uses (qjsx:prune; format in
+ *     host/modules/compiler_module.cpp).
+ */
 export function compileModule(name, source) {
-    const options = { module: true, strip: "all", debug: true, dynamicImport: false };
-    const { bytecode, debug, imports, warnings } = compile(source, name, options);
+    // compile: stripped bytecode, its debug info apart
+    const options = { module: true, strip: "all", debug: true, dynamicImport: false, outline: true };
+    const { bytecode, debug, imports, warnings, outline } = compile(source, name, options);
 
+    // its identifiers and its sidecar
     const buildId = hex(sha256(bytecode)).slice(0, 32);
     const sourceHash = hex(sha256(source));
     const sidecar = {
@@ -106,6 +124,7 @@ export function compileModule(name, source) {
     // the compiler gives one specifier per import statement: keep each
     // imported module once, with the first text that names it
     const imported = new Map();
+
     for (const specifier of imports) {
         const importedName = normalizeImport(name, specifier);
         if (!imported.has(importedName)) {
@@ -120,5 +139,6 @@ export function compileModule(name, source) {
         sidecar,
         imports: [...imported.values()],
         warnings,
+        outline,
     };
 }

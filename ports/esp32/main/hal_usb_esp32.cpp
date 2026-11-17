@@ -35,17 +35,17 @@ namespace {
 
 const uint16_t DEFAULT_PRODUCT_ID = 0x4001;      // what esp_tinyusb gives a device of CDC only (0x4000 | CDC)
 const uint16_t DEVICE_RELEASE = 0x0100;          // bcdDevice: 1.00
-const int WRITE_TIMEOUT_MS = 50;                 // longest wait for the host to take the bytes of a write
-const int TASK_STACK = 4096;                     // stack of the TinyUSB task, bytes
-const int TASK_PRIORITY = 5;                     // its priority
-const int TASK_CORE = 0;                         // its core: the JS task runs on core 1
+const int      WRITE_TIMEOUT_MS = 50;            // longest wait for the host to take the bytes of a write
+const int      TASK_STACK = 4096;                // stack of the TinyUSB task, bytes
+const int      TASK_PRIORITY = 5;                // its priority
+const int      TASK_CORE = 0;                    // its core: the JS task runs on core 1
 
 // Interfaces and endpoints of the serial functions, as esp_tinyusb numbers
 // them in its default descriptors (two interfaces and three endpoints each).
 const uint8_t ENDPOINT_IN = 0x80;                // direction bit of an IN endpoint
-const int NOTIFY_PACKET = 8;                     // packet size of the notification endpoint
-const int DATA_PACKET = 64;                      // packet size of the data endpoints (full speed)
-const int POWER_MA = 100;                        // current asked from the host
+const int     NOTIFY_PACKET = 8;                 // packet size of the notification endpoint
+const int     DATA_PACKET = 64;                  // packet size of the data endpoints (full speed)
+const int     POWER_MA = 100;                    // current asked from the host
 
 // String descriptors, by index.
 enum StringIndex {
@@ -94,7 +94,8 @@ void onReceive(int serial, cdcacm_event_t *) {
     uint8_t *block = (uint8_t *)memory::allocate(CONFIG_TINYUSB_CDC_RX_BUFSIZE);
     size_t size = 0;
     esp_err_t read = tinyusb_cdcacm_read((tinyusb_cdcacm_itf_t)serial, block, CONFIG_TINYUSB_CDC_RX_BUFSIZE, &size);
-    if (read != ESP_OK || size == 0) {
+    bool gotBytes = read == ESP_OK && size > 0;
+    if (!gotBytes) {
         memory::release(block);
         return;
     }
@@ -107,6 +108,7 @@ void onReceive(int serial, cdcacm_event_t *) {
         memory::release(block);
         return;
     }
+
     handler(serial, block, size);
 }
 
@@ -114,10 +116,12 @@ void onReceive(int serial, cdcacm_event_t *) {
  * The host changed the line state of a serial function (TinyUSB task).
  */
 void onLineState(int serial, cdcacm_event_t *event) {
+    // the handler, read under the lock
     handlerLock.lock();
     LineStateHandler *handler = lineStateHandler;
     handlerLock.unlock();
 
+    // called outside it
     if (handler != nullptr) {
         handler(serial, event->line_state_changed_data.dtr, event->line_state_changed_data.rts);
     }
@@ -159,9 +163,11 @@ void fillDescriptors(const Descriptors *descriptors) {
  * Frees the first 'count' serial functions and the driver.
  */
 void uninstall(int count) {
+    // the functions first, then the driver
     for (int i = 0; i < count; i++) {
         tinyusb_cdcacm_deinit(i);
     }
+
     tinyusb_driver_uninstall();
 }
 
@@ -181,7 +187,9 @@ void setHandlers(DataHandler *data, LineStateHandler *lineState) {
  * Starts the device: descriptors, driver, then the serial functions.
  */
 bool start(const Descriptors *descriptors, int serials) {
-    if (started || serials < 1 || serials > MAX_SERIALS || serials > CONFIG_TINYUSB_CDC_COUNT) {
+    // stopped, a number of functions the configurations and esp_tinyusb allow
+    bool countValid = serials >= 1 && serials <= MAX_SERIALS && serials <= CONFIG_TINYUSB_CDC_COUNT;
+    if (started || !countValid) {
         return false;
     }
 
@@ -205,6 +213,7 @@ bool start(const Descriptors *descriptors, int serials) {
 
     // 3. the serial functions
     for (int i = 0; i < serials; i++) {
+        // one function; a failure undoes the ones before and the driver
         tinyusb_config_cdcacm_t function;
         memset(&function, 0, sizeof(function));
         function.cdc_port = (tinyusb_cdcacm_itf_t)i;
@@ -216,6 +225,7 @@ bool start(const Descriptors *descriptors, int serials) {
         }
     }
 
+    // started
     started = true;
     serialCount = serials;
     return true;
@@ -225,10 +235,12 @@ bool start(const Descriptors *descriptors, int serials) {
  * Stops the device: the serial functions, then the driver.
  */
 void stop() {
+    // stopped already
     if (!started) {
         return;
     }
 
+    // the functions and the driver
     uninstall(serialCount);
     started = false;
     serialCount = 0;
@@ -241,7 +253,9 @@ void stop() {
  * when the host has not set the device up (cable unplugged).
  */
 bool write(int serial, const uint8_t *data, size_t size) {
-    if (!started || serial < 0 || serial >= serialCount) {
+    // a function of the started device
+    bool isFunction = serial >= 0 && serial < serialCount;
+    if (!started || !isFunction) {
         return false;
     }
 
@@ -257,6 +271,7 @@ bool write(int serial, const uint8_t *data, size_t size) {
     size_t queued = 0;
 
     while (queued < size && platform::monotonicMs() < deadline) {
+        // what fits; the rest after a push and a short wait
         queued += tinyusb_cdcacm_write_queue(function, data + queued, size - queued);
         if (queued < size) {
             tinyusb_cdcacm_write_flush(function, 0);
@@ -275,15 +290,18 @@ bool write(int serial, const uint8_t *data, size_t size) {
  * Nothing when the device is not started or no host set it up.
  */
 void drainUntil(int64_t deadlineMs) {
+    // no device, or no host to take the bytes
     if (!started || !tud_mounted()) {
         return;
     }
 
     for (int serial = 0; serial < serialCount; serial++) {
+        // each function pushed, within what is left until the deadline
         int64_t remaining = deadlineMs - platform::monotonicMs();
         if (remaining <= 0) {
             return;
         }
+
         tinyusb_cdcacm_write_flush((tinyusb_cdcacm_itf_t)serial, pdMS_TO_TICKS(remaining));
     }
 }
@@ -292,12 +310,15 @@ void drainUntil(int64_t deadlineMs) {
  * The line state TinyUSB keeps: bit 0 DTR, bit 1 RTS.
  */
 void lineState(int serial, bool *dtr, bool *rts) {
+    // both low, unless a function of the started device
     *dtr = false;
     *rts = false;
-    if (!started || serial < 0 || serial >= serialCount) {
+    bool isFunction = serial >= 0 && serial < serialCount;
+    if (!started || !isFunction) {
         return;
     }
 
+    // its bits in TinyUSB's line state
     uint8_t state = tud_cdc_n_get_line_state(serial);
     *dtr = (state & 0x01) != 0;
     *rts = (state & 0x02) != 0;

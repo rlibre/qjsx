@@ -83,9 +83,7 @@ struct SerialWiring {
     bool        realSpeed;                // the program's writes take the time of the line
 };
 
-/**
- * Options of "qjsx agent", with their defaults.
- */
+// Options of "qjsx agent", with their defaults.
 struct Options {
     const char *host = "127.0.0.1";       // address to listen on (borrowed from argv)
     int         port = 5555;              // TCP port to listen on
@@ -145,6 +143,7 @@ struct ProjectTwin {
  * UART; false when the list is full.
  */
 bool addWiring(SerialWiring *list, int *count, SerialWiring wiring) {
+    // the same UART: replaced
     for (int i = 0; i < *count; i++) {
         if (list[i].uart == wiring.uart) {
             list[i] = wiring;
@@ -152,6 +151,7 @@ bool addWiring(SerialWiring *list, int *count, SerialWiring wiring) {
         }
     }
 
+    // else appended, while there is room
     if (*count >= twin::MAX_UARTS) {
         return false;
     }
@@ -165,17 +165,22 @@ bool addWiring(SerialWiring *list, int *count, SerialWiring wiring) {
  * false when it is not that.
  */
 bool parseWiring(char *text, SerialWiring *wiring) {
+    // "<something>=<something>"
     char *equal = strchr(text, '=');
-    if (equal == nullptr || equal == text || equal[1] == 0) {
+    bool hasParts = equal != nullptr && equal != text && equal[1] != 0;
+    if (!hasParts) {
         return false;
     }
 
+    // a UART number before the '='
     char *end = nullptr;
     long uart = strtol(text, &end, 10);
-    if (end != equal || uart < 0 || uart >= twin::MAX_UARTS) {
+    bool validUart = end == equal && uart >= 0 && uart < twin::MAX_UARTS;
+    if (!validUart) {
         return false;
     }
 
+    // the port after it, at real speed
     *wiring = SerialWiring{ (int)uart, equal + 1, true };
     return true;
 }
@@ -257,8 +262,10 @@ bool readPort(JSContext *ctx, JSValueConst object, const char *name, const char 
     JSValue value = JS_GetPropertyStr(ctx, object, name);
     bool missing = JS_IsUndefined(value);
     int32_t port = 0;
-    bool valid = JS_IsNumber(value) && JS_ToInt32(ctx, &port, value) == 0 && port >= 1 && port <= 65535;
+    bool isInteger = JS_IsNumber(value) && JS_ToInt32(ctx, &port, value) == 0;
+    bool valid = isInteger && port >= 1 && port <= 65535;
     JS_FreeValue(ctx, value);
+    // missing: left alone; else a port
     if (missing) {
         return true;
     }
@@ -280,37 +287,58 @@ bool readWirings(JSContext *ctx, JSValueConst uarts, const char *file, ProjectTw
     // each property: a UART number, then a port or { port, realSpeed }
     JSPropertyEnum *properties = nullptr;
     uint32_t count = 0;
-    if (JS_GetOwnPropertyNames(ctx, &properties, &count, uarts, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0) {
+    int listed = JS_GetOwnPropertyNames(ctx, &properties, &count, uarts, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY);
+    if (listed != 0) {
         return false;
     }
 
     bool ok = true;
+
     for (uint32_t i = 0; ok && i < count; i++) {
         // the UART
         const char *key = JS_AtomToCString(ctx, properties[i].atom);
         char *end = nullptr;
-        long uart = key != nullptr ? strtol(key, &end, 10) : -1;
-        bool validUart = key != nullptr && end != key && *end == 0 && uart >= 0 && uart < twin::MAX_UARTS;
+        long uart = -1;
+        if (key != nullptr) {
+            uart = strtol(key, &end, 10);
+        }
+
+        bool isNumber = key != nullptr && end != key && *end == 0;
+        bool validUart = isNumber && uart >= 0 && uart < twin::MAX_UARTS;
 
         // its port, and the speed
         JSValue value = JS_GetProperty(ctx, uarts, properties[i].atom);
-        JSValue portValue = JS_IsObject(value) ? JS_GetPropertyStr(ctx, value, "port") : JS_DupValue(ctx, value);
-        JSValue speedValue = JS_IsObject(value) ? JS_GetPropertyStr(ctx, value, "realSpeed") : JS_UNDEFINED;
-        const char *port = JS_IsString(portValue) ? JS_ToCString(ctx, portValue) : nullptr;
+        JSValue portValue = JS_UNDEFINED;
+        JSValue speedValue = JS_UNDEFINED;
+        if (JS_IsObject(value)) {
+            portValue = JS_GetPropertyStr(ctx, value, "port");
+            speedValue = JS_GetPropertyStr(ctx, value, "realSpeed");
+        } else {
+            portValue = JS_DupValue(ctx, value);
+        }
+
+        const char *port = nullptr;
+        if (JS_IsString(portValue)) {
+            port = JS_ToCString(ctx, portValue);
+        }
+
         bool validPort = port != nullptr && port[0] != 0;
         bool validSpeed = JS_IsUndefined(speedValue) || JS_IsBool(speedValue);
 
+        // all valid: kept (the port copied)
         ok = validUart && validPort && validSpeed;
         if (ok) {
             bool realSpeed = JS_IsUndefined(speedValue) || JS_ToBool(ctx, speedValue) == 1;
             SerialWiring wiring = { (int)uart, memory::copyText(port, strlen(port)), realSpeed };
             ok = addWiring(twin->wirings, &twin->wiringCount, wiring);
         }
+
         if (!ok) {
             fprintf(stderr, "qjsx agent: %s: \"twin.uarts.%s\" must be a PC port (\"COM5\") or { \"port\", \"realSpeed\" }\n",
                     file, key != nullptr ? key : "?");
         }
 
+        // the values of this property freed
         JS_FreeCString(ctx, port);
         JS_FreeValue(ctx, speedValue);
         JS_FreeValue(ctx, portValue);
@@ -345,8 +373,12 @@ bool readProjectTwin(const char *folder, ProjectTwin *twin) {
     JSContext *ctx = JS_NewContext(runtime);
     JSValue settings = JS_ParseJSON(ctx, (const char *)text, size, file);
     memory::release(text);
-    JSValue section = JS_IsObject(settings) ? JS_GetPropertyStr(ctx, settings, "twin") : JS_UNDEFINED;
+    JSValue section = JS_UNDEFINED;
     bool ok = JS_IsObject(settings);
+    if (ok) {
+        section = JS_GetPropertyStr(ctx, settings, "twin");
+    }
+
     if (!ok) {
         fprintf(stderr, "qjsx agent: %s is not a JSON object\n", file);
     }
@@ -354,7 +386,11 @@ bool readProjectTwin(const char *folder, ProjectTwin *twin) {
     // the section: "board" required, "ports" optional
     if (ok && !JS_IsUndefined(section)) {
         JSValue board = JS_GetPropertyStr(ctx, section, "board");
-        const char *name = JS_IsString(board) ? JS_ToCString(ctx, board) : nullptr;
+        const char *name = nullptr;
+        if (JS_IsString(board)) {
+            name = JS_ToCString(ctx, board);
+        }
+
         ok = name != nullptr && name[0] != 0;
         if (!ok) {
             fprintf(stderr, "qjsx agent: %s: \"twin.board\" (the board of the twin) is required\n", file);
@@ -366,6 +402,7 @@ bool readProjectTwin(const char *folder, ProjectTwin *twin) {
         JS_FreeCString(ctx, name);
         JS_FreeValue(ctx, board);
 
+        // the ports, each one optional
         JSValue ports = JS_GetPropertyStr(ctx, section, "ports");
         if (ok && JS_IsObject(ports)) {
             ok = readPort(ctx, ports, "agent", file, &twin->agentPort) && readPort(ctx, ports, "ui", file, &twin->uiPort) &&
@@ -390,8 +427,10 @@ bool readProjectTwin(const char *folder, ProjectTwin *twin) {
         JSValue seed = JS_GetPropertyStr(ctx, section, "randomSeed");
         if (ok && !JS_IsUndefined(seed)) {
             double number = 0;
-            bool valid = JS_IsNumber(seed) && JS_ToFloat64(ctx, &number, seed) == 0 && number >= 0 &&
-                         number <= 9007199254740991.0 && number == (double)(uint64_t)number;
+            bool isNumber = JS_IsNumber(seed) && JS_ToFloat64(ctx, &number, seed) == 0;
+            bool inRange = isNumber && number >= 0 && number <= 9007199254740991.0;
+            // (the cast to uint64_t only once the number is known in range)
+            bool valid = inRange && number == (double)(uint64_t)number;
             if (valid) {
                 twin->seeded = true;
                 twin->randomSeed = (uint64_t)number;
@@ -404,6 +443,7 @@ bool readProjectTwin(const char *folder, ProjectTwin *twin) {
         JS_FreeValue(ctx, seed);
     }
 
+    // the short-lived context freed
     JS_FreeValue(ctx, section);
     JS_FreeValue(ctx, settings);
     JS_FreeContext(ctx);
@@ -428,6 +468,7 @@ bool applyProject(Options *options) {
         return true;
     }
 
+    // its "twin" section
     const char *folder = options->projectGiven ? options->project : ".";
     ProjectTwin twin;
     if (!readProjectTwin(folder, &twin)) {
@@ -440,26 +481,34 @@ bool applyProject(Options *options) {
             fprintf(stderr, "qjsx agent: %s/%s has no \"twin\" section\n", folder, PROJECT_FILE);
             return false;
         }
+
         return true;
     }
 
     // the board: a name, or a description file of the project
     size_t length = strlen(twin.board);
     bool isFile = length > 5 && strcmp(twin.board + length - 5, ".json") == 0;
+    bool isRelativeFile = isFile && !files::isAbsolute(twin.board);
     if (options->board == nullptr) {
-        options->board = isFile && !files::isAbsolute(twin.board) ? joinPath(folder, twin.board) : twin.board;
+        options->board = twin.board;
+        if (isRelativeFile) {
+            options->board = joinPath(folder, twin.board);
+        }
     }
 
     // the ports the command line did not give
     if (!options->portGiven && twin.agentPort != 0) {
         options->port = twin.agentPort;
     }
+
     if (!options->uiPortGiven && twin.uiPort != 0) {
         options->uiPort = twin.uiPort;
     }
+
     if (!options->usbPortGiven && twin.usbPort != 0) {
         options->usbPort = twin.usbPort;
     }
+
     if (!options->uartPortGiven && twin.uartPort != 0) {
         options->uartPort = twin.uartPort;
     }
@@ -467,9 +516,11 @@ bool applyProject(Options *options) {
     // the wired UARTs the command line did not wire
     for (int i = 0; i < twin.wiringCount; i++) {
         bool given = false;
+
         for (int j = 0; j < options->wiringCount; j++) {
             given = given || options->wirings[j].uart == twin.wirings[i].uart;
         }
+
         if (!given) {
             addWiring(options->wirings, &options->wiringCount, twin.wirings[i]);
         }
@@ -486,6 +537,7 @@ bool applyProject(Options *options) {
         options->storage = joinPath(folder, "build/agent");
     }
 
+    // the folder of the parts, for the twin's runtime
     options->project = folder;
     return true;
 }
@@ -520,6 +572,7 @@ char *boardPath(const char *executable, const char *board) {
  * runtime of its own, until the process ends.
  */
 void runTwinUi(void *argument) {
+    // the command, until it ends
     UiArguments *arguments = (UiArguments *)argument;
     host::runCommand(arguments->count, arguments->words);
 
@@ -535,17 +588,21 @@ void runTwinUi(void *argument) {
  */
 bool fixWirings(const Options *options) {
     for (int i = 0; i < options->wiringCount; i++) {
+        // a UART of the board
         const SerialWiring *wiring = &options->wirings[i];
         if (wiring->uart >= twin::uartCount()) {
             fprintf(stderr, "qjsx agent: the board has no UART %d to wire to %s\n", wiring->uart, wiring->port);
             return false;
         }
+
+        // not the agent's link
         if (wiring->uart == twin::linkUartNumber()) {
             fprintf(stderr, "qjsx agent: UART %d is the agent's link of the board: it cannot be wired to %s\n",
                     wiring->uart, wiring->port);
             return false;
         }
 
+        // wired from the start, not saved
         twin::serialFix(wiring->uart, wiring->port, wiring->realSpeed);
     }
 
@@ -592,7 +649,8 @@ bool startTwin(const char *executable, const Options *options) {
     twin::choicesLoad(options->storage);
     twin::setupUarts(options->host, options->uartPort);
     twin::setupUsb(options->host, options->usbPort);
-    if (!twin::startTcp(options->host) || !fixWirings(options) || !twin::setupSerial()) {
+    bool linksStarted = twin::startTcp(options->host) && fixWirings(options) && twin::setupSerial();
+    if (!linksStarted) {
         return false;
     }
 
@@ -602,17 +660,22 @@ bool startTwin(const char *executable, const Options *options) {
     snprintf(arguments->port, sizeof(arguments->port), "%d", options->uiPort);
     const char *fixed[] = { executable, "twin-ui", "--host", options->host, "--port", arguments->port };
     int count = 0;
+
     for (const char *word : fixed) {
         arguments->words[count++] = (char *)word;
     }
+
     if (options->project != nullptr) {
         arguments->words[count++] = (char *)"--project";
         arguments->words[count++] = (char *)options->project;
     }
+
     if (options->uiDir != nullptr) {
         arguments->words[count++] = (char *)"--ui-dir";
         arguments->words[count++] = (char *)options->uiDir;
     }
+
+    // the words used
     arguments->count = count;
 
     // the page's thread
@@ -629,12 +692,14 @@ bool startTwin(const char *executable, const Options *options) {
         fprintf(stderr, "qjsx agent: the twin's runtime did not start\n");
         return false;
     }
+
     if (error != nullptr) {
         fprintf(stderr, "qjsx agent: %s\n", error);
         memory::release(error);
         return false;
     }
 
+    // ready: where the page is
     printf("qjsx agent: twin of %s, page on http://%s:%d/\n", twin::name(), options->host, options->uiPort);
     return true;
 }
@@ -662,7 +727,8 @@ int runAgentCommand(int argc, char **argv) {
     rt::registerNativeModule("device/board", &jsNewModule_board);
 
     // the twin of a board, if asked
-    if (options.board != nullptr && !startTwin(argv[0], &options)) {
+    bool wantsTwin = options.board != nullptr;
+    if (wantsTwin && !startTwin(argv[0], &options)) {
         return 1;
     }
 

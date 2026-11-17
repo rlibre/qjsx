@@ -71,6 +71,8 @@ function compensateTemperature(adcT) {
  * Pressure in Pa from the raw pressure and t_fine.
  */
 function compensatePressure(adcP, tFine) {
+    // the two terms of the datasheet from t_fine; var1 = 0 would divide by
+    // zero below (the datasheet returns 0 too)
     const { P1, P2, P3, P4, P5, P6, P7, P8, P9 } = CALIBRATION;
     let var1 = tFine / 2 - 64000;
     let var2 = (var1 * var1 * P6) / 32768;
@@ -82,6 +84,7 @@ function compensatePressure(adcP, tFine) {
         return 0;
     }
 
+    // the pressure from the raw value, then its correction
     let pressure = 1048576 - adcP;
     pressure = ((pressure - var2 / 4096) * 6250) / var1;
     var1 = (P9 * pressure * pressure) / 2147483648;
@@ -106,9 +109,12 @@ function compensateHumidity(adcH, tFine) {
  * 'target' (the formulas are monotonic: a bisection).
  */
 function invert(compensate, target, max) {
+    // the direction of the formula, the whole range to search
     const increasing = compensate(max) > compensate(0);
     let low = 0;
     let high = max;
+
+    // narrow [low, high] down to two neighbours around the target
     while (high - low > 1) {
         const middle = Math.floor((low + high) / 2);
         const below = compensate(middle) < target;
@@ -119,6 +125,7 @@ function invert(compensate, target, max) {
         }
     }
 
+    // the closer of the two
     const lowError = Math.abs(compensate(low) - target);
     const highError = Math.abs(compensate(high) - target);
     return lowError <= highError ? low : high;
@@ -133,9 +140,11 @@ function invert(compensate, target, max) {
 function initialValue(initial, name, fallback) {
     const value = initial?.[name] ?? fallback;
     const [min, max] = RANGES[name];
-    if (typeof value !== "number" || value < min || value > max) {
+    const isOutOfRange = typeof value !== "number" || value < min || value > max;
+    if (isOutOfRange) {
         throw new Error(`"initial.${name}" must be a number from ${min} to ${max}`);
     }
+
     return value;
 }
 
@@ -143,6 +152,8 @@ function initialValue(initial, name, fallback) {
  * The bytes of the calibration registers, little endian as the chip.
  */
 function calibrationBytes() {
+    // 0x88..0xA1: 16-bit words (signed ones written as their two's
+    // complement by '& 0xffff'), then dig_H1
     const { T1, T2, T3, P1, P2, P3, P4, P5, P6, P7, P8, P9, H1, H2, H3, H4, H5, H6 } = CALIBRATION;
     const first = new DataView(new ArrayBuffer(26));
     [T1, T2, T3, P1, P2, P3, P4, P5, P6, P7, P8, P9].forEach((value, index) => {
@@ -159,6 +170,7 @@ function calibrationBytes() {
     second[4] = (H4 & 0x0f) | ((H5 & 0x0f) << 4);
     second[5] = (H5 >> 4) & 0xff;
     second[6] = H6 & 0xff;
+
     return { first: new Uint8Array(first.buffer), second };
 }
 
@@ -175,8 +187,11 @@ export default class Bme280 extends Part {
      */
     constructor(config, board) {
         super(config, board);
+
+        // one of the two addresses of the chip (pin SDO)
         const address = parseAddress(config.address ?? "0x76");
-        if (address !== 0x76 && address !== 0x77) {
+        const isBadAddress = address !== 0x76 && address !== 0x77;
+        if (isBadAddress) {
             throw new Error('"address" of a BME280 is "0x76" (SDO to ground) or "0x77" (SDO to the supply)');
         }
 
@@ -200,10 +215,13 @@ export default class Bme280 extends Part {
      * values, measured at the next measurement (at once in normal mode).
      */
     onAction(action, args) {
-        if (action !== "set" || typeof args !== "object" || args === null) {
+        // "set" with an object only
+        const isNotSet = action !== "set" || typeof args !== "object" || args === null;
+        if (isNotSet) {
             return;
         }
 
+        // each quantity given, kept in the range of the chip
         for (const name of ["temperature", "humidity", "pressure"]) {
             const value = args[name];
             if (typeof value === "number") {
@@ -211,6 +229,7 @@ export default class Bme280 extends Part {
                 this[`_${name}`] = Math.min(max, Math.max(min, value));
             }
         }
+
         this._publishState();
     }
 
@@ -219,12 +238,17 @@ export default class Bme280 extends Part {
      * calibration, everything else 0, the data as "not measured".
      */
     _powerOn() {
+        // everything 0, then the id
         const registers = this._registers;
         registers.bytes.fill(0);
         registers.set(REG_ID, CHIP_ID);
+
+        // the calibration
         const calibration = calibrationBytes();
         registers.set(REG_CALIBRATION_1, calibration.first);
         registers.set(REG_CALIBRATION_2, calibration.second);
+
+        // nothing measured yet
         this._setData(SKIPPED_20, SKIPPED_20, SKIPPED_16);
     }
 
@@ -243,6 +267,7 @@ export default class Bme280 extends Part {
      * goes back to sleep; normal mode measures too.
      */
     _onCtrlMeas() {
+        // forced: back to sleep after it (mode bits 1..0 cleared)
         const mode = this._mode();
         if (mode === "forced") {
             this._measure();
@@ -251,6 +276,7 @@ export default class Bme280 extends Part {
         } else if (mode === "normal") {
             this._measure();
         }
+
         this._publishState();
     }
 
@@ -281,6 +307,7 @@ export default class Bme280 extends Part {
      * not 0 (ctrl_meas for temperature and pressure, ctrl_hum for humidity).
      */
     _measure() {
+        // the oversampling of each quantity (0: not measured)
         const ctrlMeas = this._registers.get(REG_CTRL_MEAS);
         const measureTemperature = (ctrlMeas >> 5) & 0x07;
         const measurePressure = (ctrlMeas >> 2) & 0x07;
@@ -292,8 +319,11 @@ export default class Bme280 extends Part {
         const adcP = invert(raw => compensatePressure(raw, tFine), this._pressure * 100, 0xfffff);
         const adcH = invert(raw => compensateHumidity(raw, tFine), this._humidity, 0xffff);
 
-        this._setData(measurePressure ? adcP : SKIPPED_20, measureTemperature ? adcT : SKIPPED_20,
-            measureHumidity ? adcH : SKIPPED_16);
+        // the data registers; a quantity not measured reads as skipped
+        const rawPressure = measurePressure ? adcP : SKIPPED_20;
+        const rawTemperature = measureTemperature ? adcT : SKIPPED_20;
+        const rawHumidity = measureHumidity ? adcH : SKIPPED_16;
+        this._setData(rawPressure, rawTemperature, rawHumidity);
     }
 
     /**

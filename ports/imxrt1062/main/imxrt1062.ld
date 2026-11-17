@@ -74,8 +74,8 @@ SECTIONS
   .text :
   {
     . = ALIGN(4);
-    *(EXCLUDE_FILE(*fsl_romapi.c.obj) .text)
-    *(EXCLUDE_FILE(*fsl_romapi.c.obj) .text*)
+    *(EXCLUDE_FILE(*fsl_romapi.c.obj *region_heap.cpp.obj *libc_a-memset.o) .text)
+    *(EXCLUDE_FILE(*fsl_romapi.c.obj *region_heap.cpp.obj *libc_a-memset.o) .text*)
     *(.rodata)
     *(.rodata*)
     *(.glue_7)
@@ -166,6 +166,9 @@ SECTIONS
     *(CodeQuickAccess)
     *(.ramfunc*)
     *fsl_romapi.c.obj(.text .text*)
+    /* EXPERIMENT 2026-11-17 (await on the Teensy): the JS heap and memset */
+    *region_heap.cpp.obj(.text .text*)
+    *libc_a-memset.o(.text .text*)
     . = ALIGN(4);
     __ram_function_end__ = .;
   } > ITCM

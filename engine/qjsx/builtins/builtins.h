@@ -206,6 +206,10 @@ extern const JSCFunctionListEntry js_generator_function_proto_funcs[1];
 extern const JSCFunctionListEntry js_generator_proto_funcs[4];
 JSValue js_promise_resolve(JSContext *ctx, JSValueConst this_val,
                                   int argc, JSValueConst *argv, int magic);
+/* qjsx: engine change V1 (promise.c) */
+JSValue js_promise_resolve_new(JSContext *ctx, JSValueConst this_val,
+                               JSValueConst value, BOOL is_reject);
+void js_promise_await(JSContext *ctx, JSValueConst promise, JSAsyncFunctionState *s);
 __exception int perform_promise_then(JSContext *ctx,
                                             JSValueConst promise,
                                             JSValueConst *resolve_reject,

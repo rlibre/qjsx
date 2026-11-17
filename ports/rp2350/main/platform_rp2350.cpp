@@ -24,14 +24,14 @@ namespace platform {
 namespace {
 
 // What a task gets when ThreadOptions leaves the choice to the platform.
-const size_t DEFAULT_TASK_STACK = 4096;        // bytes, as on the ESP32
+const size_t      DEFAULT_TASK_STACK = 4096;   // bytes, as on the ESP32
 const UBaseType_t DEFAULT_TASK_PRIORITY = 5;   // above the idle task
-const uint32_t FATAL_FLUSH_MS = 100;           // fatal() lets the USB send its message that long
+const uint32_t    FATAL_FLUSH_MS = 100;        // fatal() lets the USB send its message that long
 
 // What startThread() gives to the new task (malloc'd, freed by the task).
 struct ThreadStart {
-    ThreadFunction *run;   // thread function
-    void *argument;        // passed to run
+    ThreadFunction *run;        // thread function
+    void           *argument;   // passed to run
 };
 
 /**

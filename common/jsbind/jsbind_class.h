@@ -96,7 +96,8 @@ constexpr int maximumNames = 32768;
  */
 inline int registerName(const char *owner, const char *member) {
     // build the name
-    size_t size = strlen(member) + (owner != nullptr ? strlen(owner) + 1 : 0) + 1;
+    size_t ownerSize = owner != nullptr ? strlen(owner) + 1 : 0;
+    size_t size = strlen(member) + ownerSize + 1;
     char *name = (char *)memory::allocate(size);
     if (owner != nullptr) {
         snprintf(name, size, "%s.%s", owner, member);
@@ -169,7 +170,8 @@ struct JsArity<meta::TypeList<A...>> {
     static constexpr int value = (0 + ... + (meta::IsSame<meta::Decay<A>, Args>::value ? 0 : 1));
 };
 
-// #############################################################################
+// ### Converted arguments #####################################################
+
 // Converted arguments, stored as the bases of ArgPack (one per index).
 
 template<size_t I, class A>
@@ -206,7 +208,10 @@ struct ArgPack<meta::Indices<I...>, A...> : ArgSlot<I, A>... {
         if constexpr (meta::IsSame<meta::Decay<B>, Args>::value) {
             // js::Args: the arguments from J on, as they are
             int first = (int)J;
-            target = Args{ ctx, argc > first ? argc - first : 0, argc > first ? argv + first : argv };
+            bool hasRest = argc > first;
+            int restCount = hasRest ? argc - first : 0;
+            JSValueConst *rest = hasRest ? argv + first : argv;
+            target = Args{ ctx, restCount, rest };
             return true;
         } else {
             // any other type: convert argument J (undefined if missing); an
@@ -308,7 +313,8 @@ inline JSValue functionTrampoline(JSContext *ctx, JSValueConst, int argc, JSValu
     return callFunction<F>(ctx, argc, argv, names[magic], meta::MakeIndices<Arguments::size>(), Arguments());
 }
 
-// #############################################################################
+// ### Objects kept alive ######################################################
+
 // Objects kept alive while they have pending activity (see js::keepAlive).
 //
 // Keeping takes a counted reference on the JS object and links its header
@@ -316,8 +322,8 @@ inline JSValue functionTrampoline(JSContext *ctx, JSValueConst, int argc, JSValu
 // list; the reference itself is freed later by collectReleased(), at a safe
 // point. Keeping again before that reuses the reference still held.
 
-inline thread_local InstanceHeader *firstKept = nullptr;
-inline thread_local int keptCount = 0;
+inline thread_local InstanceHeader *firstKept = nullptr;  // the 'kept' list
+inline thread_local int             keptCount = 0;        // entries of the 'kept' list
 // Released by keepAlive(false); freed later, at a safe point.
 inline thread_local InstanceHeader *firstReleased = nullptr;
 
@@ -447,7 +453,7 @@ inline void releaseAllKeptAlive() {
  */
 template<class T>
 struct Created {
-    T    *object;     // nullptr if the creation failed
+    T    *object;  // nullptr if the creation failed
     Value value;   // the JS object
 };
 
@@ -532,7 +538,8 @@ public:
             // either function or the property name could not be created:
             // free what was
             JSAtom atom = JS_NewAtom(_ctx, name);
-            if (JS_IsException(getter) || JS_IsException(setter) || atom == JS_ATOM_NULL) {
+            bool anyFailed = JS_IsException(getter) || JS_IsException(setter) || atom == JS_ATOM_NULL;
+            if (anyFailed) {
                 JS_FreeValue(_ctx, getter);
                 JS_FreeValue(_ctx, setter);
                 JS_FreeAtom(_ctx, atom);
@@ -639,7 +646,8 @@ private:
         using Field = meta::Decay<typename MemberTraits<decltype(M)>::Field>;
         Field value;
         Where where = { names[magic], 0, nullptr };
-        if (!Convert<Field>::from(ctx, argc > 0 ? argv[0] : JS_UNDEFINED, value, where)) {
+        JSValueConst newValue = argc > 0 ? argv[0] : JS_UNDEFINED;
+        if (!Convert<Field>::from(ctx, newValue, value, where)) {
             return JS_EXCEPTION;
         }
 
@@ -789,13 +797,17 @@ struct ClassAccess {
             if (!methods->built) {
                 methods->count = 0;
             }
+
             JS_FreeValue(ctx, created);
             return JS_EXCEPTION;
         }
+
+        // the list is complete: the next contexts of the thread only install it
         methods->built = true;
 
         // then the methods, each made by QuickJS at its first read
-        if (JS_SetPropertyFunctionList(ctx, created, methods->entries, methods->count) < 0) {
+        int listed = JS_SetPropertyFunctionList(ctx, created, methods->entries, methods->count);
+        if (listed < 0) {
             JS_FreeValue(ctx, created);
             return JS_EXCEPTION;
         }

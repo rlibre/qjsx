@@ -90,6 +90,7 @@ void yieldIfDue() {
  * A FreeRTOS recursive mutex (freed by the destructor).
  */
 Mutex::Mutex() {
+    // out of memory is fatal
     _state = xSemaphoreCreateRecursiveMutex();
     if (_state == nullptr) {
         fatal("out of memory (mutex)");
@@ -132,10 +133,12 @@ struct SignalState {
  * Creates the mutex and the wake-up semaphore (freed by the destructor).
  */
 Signal::Signal() {
+    // the state and its two semaphores; out of memory is fatal
     SignalState *state = (SignalState *)memory::allocate(sizeof(SignalState));
     state->lock = xSemaphoreCreateMutex();
     state->wakeUp = xSemaphoreCreateBinary();
-    if (state->lock == nullptr || state->wakeUp == nullptr) {
+    bool created = state->lock != nullptr && state->wakeUp != nullptr;
+    if (!created) {
         fatal("out of memory (signal)");
     }
 

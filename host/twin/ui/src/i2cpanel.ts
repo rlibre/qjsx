@@ -28,9 +28,12 @@ const MAX_LINES = 500;
  * kHz" (the frequencies of its devices, once the program made some).
  */
 export function i2cSummary(state: I2cBusState) {
+    // closed: only that
     if (!state.open) {
         return tx.twin.i2c_closed;
     }
+
+    // its pins, then the frequencies of its devices, if any
     const pins = `sda ${state.sda} · scl ${state.scl}`;
     const frequencies = state.frequencies.map(frequencyText).join(", ");
     return frequencies === "" ? pins : `${pins} · ${frequencies}`;
@@ -42,7 +45,8 @@ export function i2cSummary(state: I2cBusState) {
  */
 function asHex(bytes: number[], size: number) {
     const text = bytes.map(byte => byte.toString(16).toUpperCase().padStart(2, "0")).join(" ");
-    return size > bytes.length ? `${text} …` : text;
+    const isCut = size > bytes.length;
+    return isCut ? `${text} …` : text;
 }
 
 /**
@@ -57,19 +61,25 @@ function timeText(ms: number) {
  * result when it is not ok; "probe" for a transfer of nothing.
  */
 function recordText(record: I2cRecord) {
-    // what was written and read
+    // when, to whom, at what frequency (a probe has none)
     const address = `0x${record.address.toString(16).padStart(2, "0")}`;
     const parts = [timeText(record.time), address];
     if (record.frequency > 0) {
         parts.push(frequencyText(record.frequency));
     }
-    if (record.writeSize === 0 && record.readSize === 0) {
+
+    // what was written and read (a probe: nothing)
+    const isProbe = record.writeSize === 0 && record.readSize === 0;
+    if (isProbe) {
         parts.push(tx.twin.i2c_probe);
     }
+
     if (record.writeSize > 0) {
         parts.push(`W ${asHex(record.written, record.writeSize)}`);
     }
-    if (record.readSize > 0 && record.status === "ok") {
+
+    const hasRead = record.readSize > 0 && record.status === "ok";
+    if (hasRead) {
         parts.push(`R ${asHex(record.read, record.readSize)}`);
     }
 
@@ -77,6 +87,7 @@ function recordText(record: I2cRecord) {
     if (record.status !== "ok") {
         parts.push(record.status.toUpperCase());
     }
+
     return parts.join("  ");
 }
 
@@ -95,6 +106,7 @@ export class I2cPanel extends VBox {
     constructor(props: BoxProps) {
         super({ ...props, cls: `i2c-panel ${props.cls ?? ""}` });
 
+        // the settings button: its menu clears the trace
         this.menuButton = new Button({
             cls: "outline menu-button",
             icon: gearIcon,
@@ -102,6 +114,7 @@ export class I2cPanel extends VBox {
             menu: () => [{ text: tx.twin.i2c_clear, click: () => this.clear() }],
         });
 
+        // the trace
         this.setContent([
             this.refs.log = new LogView({ cls: "i2c-log" }),
         ]);
@@ -112,12 +125,14 @@ export class I2cPanel extends VBox {
      * scrolled up (LogView).
      */
     addRecords(records: I2cRecord[]) {
-        // the lines, the oldest dropped past MAX_LINES
+        // the lines
         for (const record of records) {
             const line = new Label({ cls: `i2c-line ${record.status}`, text: recordText(record) });
             this._lines.push(line);
             this.refs.log.appendContent(line);
         }
+
+        // the oldest dropped past MAX_LINES
         while (this._lines.length > MAX_LINES) {
             this.refs.log.removeChild(this._lines.shift());
         }

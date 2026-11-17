@@ -81,8 +81,10 @@ bool __no_inline_not_in_flash_func(setUpChip)(const WindowSetup *setup) {
     // read the ID, one byte per transfer; keep the known good die byte
     uint8_t knownGoodDie = 0;
     qmi_hw->direct_csr |= QMI_DIRECT_CSR_ASSERT_CS1N_BITS;
+
     for (int index = 0; index < ID_ANSWER_BYTES; index++) {
         qmi_hw->direct_tx = index == 0 ? COMMAND_READ_ID : 0xff;
+
         while ((qmi_hw->direct_csr & QMI_DIRECT_CSR_TXEMPTY_BITS) == 0) {
         }
 
@@ -93,6 +95,7 @@ bool __no_inline_not_in_flash_func(setUpChip)(const WindowSetup *setup) {
         }
     }
 
+    // chip released; no known good die: no PSRAM, the XIP back
     qmi_hw->direct_csr &= ~QMI_DIRECT_CSR_ASSERT_CS1N_BITS;
     if (knownGoodDie != KNOWN_GOOD_DIE) {
         qmi_hw->direct_csr = 0;
@@ -128,9 +131,8 @@ bool __no_inline_not_in_flash_func(setUpChip)(const WindowSetup *setup) {
  *   - every phase 4 bits wide, 8-bit command, 6 dummy clocks to read.
  */
 WindowSetup computeSetup(uint32_t maxClockHz) {
-    uint32_t systemHz = clock_get_hz(clk_sys);
-
     // clock and read delay
+    uint32_t systemHz = clock_get_hz(clk_sys);
     uint32_t divisor = (systemHz + maxClockHz - 1) / maxClockHz;
     if (divisor < 2 && systemHz > FAST_CLOCK_HZ) {
         divisor = 2;
@@ -148,6 +150,7 @@ WindowSetup computeSetup(uint32_t maxClockHz) {
     uint32_t halfChipClock = (divisor + 1) / 2;
     uint32_t minDeselect = deselectClocks > halfChipClock ? deselectClocks - halfChipClock : 0;
 
+    // timing: cool down, pages, chip select limits, read delay, clock
     WindowSetup setup;
     setup.timing = 1u << QMI_M1_TIMING_COOLDOWN_LSB
         | QMI_M1_TIMING_PAGEBREAK_VALUE_1024 << QMI_M1_TIMING_PAGEBREAK_LSB
@@ -190,7 +193,8 @@ bool checkPsram(size_t size) {
     }
 
     for (size_t place : places) {
-        if (memory[place] != (0xa5c30000u ^ (uint32_t)place)) {
+        uint32_t expected = 0xa5c30000u ^ (uint32_t)place;
+        if (memory[place] != expected) {
             return false;
         }
     }

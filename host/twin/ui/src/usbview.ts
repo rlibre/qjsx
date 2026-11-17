@@ -37,6 +37,7 @@ export function usbSummary(usb: UsbState) {
         return tx.twin.usb_stopped;
     }
 
+    // its descriptors: who, what, the ids, the serial number if any
     const serial = usb.serialNumber !== "" ? `, ${usb.serialNumber}` : "";
     const ids = `${usbId(usb.vendorId)}:${usbId(usb.productId)}`;
     return `${tx.twin.usb_started}: ${usb.manufacturer} / ${usb.product} (${ids}${serial})`;
@@ -54,6 +55,7 @@ class UsbFunctionRow extends HBox {
         super({ cls: "usb-function unused" });
         this._index = index;
 
+        // the icon, the name, what is going on, the TCP link
         this.setContent([
             this.refs.icon = new Icon({ cls: "usb-function-icon", iconId: plugIcon }),
             new Label({ cls: "usb-function-name", text: `${tx.twin.usb_serial} ${index}` }),
@@ -72,8 +74,9 @@ class UsbFunctionRow extends HBox {
         // used by the program or not, and why not
         const used = usb.started && this._index < usb.serials;
         const tcp = usb.functions[this._index].tcp;
+        const isUndeclared = usb.started && !used;
         let state = tx.twin.usb_device_stopped;
-        if (usb.started && !used) {
+        if (isUndeclared) {
             state = tx.twin.usb_not_declared;
         } else if (used) {
             state = tcp.client ? tx.twin.usb_host : tx.twin.usb_no_host;
@@ -96,9 +99,11 @@ export class UsbView extends VBox {
     constructor() {
         super({ cls: "usb-view" });
 
+        // a row per possible function
         for (let index = 0; index < MAX_SERIALS; index++) {
             this._rows.push(new UsbFunctionRow(index));
         }
+
         this.setContent(this._rows);
     }
 

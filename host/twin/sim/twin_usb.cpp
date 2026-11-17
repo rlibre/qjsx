@@ -38,8 +38,8 @@ platform::Mutex lock;                        // all below
 bool running = false;                        // started
 int functionCount = 0;                       // functions of the started device
 hal::usb::Descriptors descriptors;           // of the started device
-hal::usb::DataHandler *dataHandler = nullptr;
-hal::usb::LineStateHandler *lineStateHandler = nullptr;
+hal::usb::DataHandler *dataHandler = nullptr;           // bytes of a client, to the program
+hal::usb::LineStateHandler *lineStateHandler = nullptr; // DTR / RTS changes, to the program
 
 /**
  * Bytes from the TCP client of a function ("twin tcp" thread): to the data
@@ -54,6 +54,7 @@ void onTcpData(void *context, uint8_t *data, size_t size) {
     hal::usb::DataHandler *onData = part ? dataHandler : nullptr;
     lock.unlock();
 
+    // handed over (the handler owns the block), or dropped
     if (onData != nullptr) {
         onData(function->index, data, size);
     } else {
@@ -68,11 +69,13 @@ void onTcpData(void *context, uint8_t *data, size_t size) {
 void onTcpClient(void *context, bool connected) {
     Function *function = (Function *)context;
 
+    // the handler, if the function is part of the running device
     lock.lock();
     bool part = running && function->index < functionCount;
     hal::usb::LineStateHandler *onLine = part ? lineStateHandler : nullptr;
     lock.unlock();
 
+    // a client connected = the port opened: DTR and RTS at 1
     if (onLine != nullptr) {
         onLine(function->index, connected, connected);
     }
@@ -88,7 +91,9 @@ namespace twin {
  * page chooses.
  */
 void setupUsb(const char *host, int port) {
+    // a port given: every function listens on its own, not saved
     bool forced = port != 0;
+
     for (int i = 0; i < hal::usb::MAX_SERIALS; i++) {
         Function *function = &functions[i];
         function->index = i;
@@ -96,6 +101,8 @@ void setupUsb(const char *host, int port) {
         function->tcp.setup(function->key, !forced, &onTcpData, &onTcpClient, function);
         function->tcp.setActive(false);
         registerTcpLink(&function->tcp);
+
+        // forced: port + n, asked now, listening once the device starts
         if (forced) {
             function->tcp.request(port + i, true);
             printf("qjsx twin: usb serial %d on tcp %s:%d once started\n", i, host, port + i);
@@ -107,12 +114,14 @@ void setupUsb(const char *host, int port) {
  * The state of the USB device for the page.
  */
 void usbState(UsbState *state) {
+    // the device
     lock.lock();
     state->started = running;
     state->descriptors = descriptors;
     state->serials = running ? functionCount : 0;
     lock.unlock();
 
+    // the link of each function (it has a lock of its own)
     for (int i = 0; i < hal::usb::MAX_SERIALS; i++) {
         state->tcp[i] = functions[i].tcp.state();
     }
@@ -127,6 +136,7 @@ namespace usb {
  * The handlers of the events.
  */
 void setHandlers(DataHandler *data, LineStateHandler *lineState) {
+    // read by the "twin tcp" thread: under the lock
     lock.lock();
     dataHandler = data;
     lineStateHandler = lineState;
@@ -137,7 +147,9 @@ void setHandlers(DataHandler *data, LineStateHandler *lineState) {
  * Starts the device: the links of its functions become active.
  */
 bool start(const Descriptors *started, int serials) {
-    if (serials < 1 || serials > MAX_SERIALS) {
+    // 1 to MAX_SERIALS functions
+    bool validCount = serials >= 1 && serials <= MAX_SERIALS;
+    if (!validCount) {
         return false;
     }
 
@@ -168,11 +180,13 @@ bool start(const Descriptors *started, int serials) {
  * Stops the device: its links stop listening, their clients are dropped.
  */
 void stop() {
+    // the device
     lock.lock();
     running = false;
     functionCount = 0;
     lock.unlock();
 
+    // every link inactive: no listening, clients dropped
     for (int i = 0; i < MAX_SERIALS; i++) {
         functions[i].tcp.setActive(false);
     }
@@ -182,10 +196,12 @@ void stop() {
  * Sends bytes to the client of the function; dropped without one.
  */
 bool write(int serial, const uint8_t *data, size_t size) {
+    // a function of the running device
     lock.lock();
     bool valid = running && serial >= 0 && serial < functionCount;
     lock.unlock();
 
+    // to its client (its link drops them without one)
     if (valid) {
         functions[serial].tcp.send(data, size);
     }
@@ -197,10 +213,12 @@ bool write(int serial, const uint8_t *data, size_t size) {
  * DTR and RTS: at 1 while a client is connected.
  */
 void lineState(int serial, bool *dtr, bool *rts) {
+    // a function of the running device
     lock.lock();
     bool valid = running && serial >= 0 && serial < functionCount;
     lock.unlock();
 
+    // both lines follow its client
     bool connected = valid && functions[serial].tcp.hasClient();
     *dtr = connected;
     *rts = connected;

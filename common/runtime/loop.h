@@ -31,11 +31,13 @@
 
 namespace rt {
 
+// A source of messages: its slot in the loop and the generation of that slot.
 struct SourceId {
     int      index;       // slot in the loop's source table
     uint32_t generation;  // generation of the slot when the id was made
 };
 
+// A message posted by a producer thread for the JS thread.
 struct Message {
     SourceId source;  // source that posted it (its handler receives it)
     int      kind;    // meaning chosen by the source
@@ -138,28 +140,28 @@ public:
     /**
      * The loop starts: it works from 'nowMs' (monotonicMs()).
      */
-    void             start(int64_t nowMs);
+    void                 start(int64_t nowMs);
 
     /**
      * The loop is about to wait: the work since it woke up is counted, and
      * published.
      */
-    void             waitBegins(int64_t nowMs);
+    void                 waitBegins(int64_t nowMs);
 
     /**
      * The loop woke up: it works from now.
      */
-    void             waitEnds(int64_t nowMs);
+    void                 waitEnds(int64_t nowMs);
 
     /**
      * The load now, the work in progress included.
      */
-    LoadStats        stats(int64_t nowMs);
+    LoadStats            stats(int64_t nowMs);
 
     /**
      * See Loop::publishLoadTo().
      */
-    void             publishTo(JsLoadUsage *usage) {
+    void                 publishTo(JsLoadUsage *usage) {
         _published = usage;
     }
 
@@ -171,24 +173,25 @@ private:
      * Moves the current slot to the one of 'nowMs'; the slots skipped are
      * emptied.
      */
-    void             advance(int64_t nowMs);
+    void                 advance(int64_t nowMs);
 
     /**
      * Share of the last second worked, with 'workingMs' of work in progress
      * (0 to 1; less than a second since the start: the share of that time).
      */
-    double           windowLoad(int64_t workingMs, int64_t nowMs) const;
+    double               windowLoad(int64_t workingMs, int64_t nowMs) const;
 
-    int64_t          _startMs = 0;        // when the loop started
-    int64_t          _slotStartMs = 0;    // when the current slot started
-    int              _current = 0;        // index of the current slot
-    int64_t          _slots[SLOTS] = {};  // ms of work that ended in each slot
-    int64_t          _workSince = -1;     // when the work in progress began; -1: waiting
-    int64_t          _busyMs = 0;         // ms worked since the start (ended pieces)
-    double           _peak = 0;           // the most of a full second's load
-    JsLoadUsage     *_published = nullptr;  // where waitBegins() publishes; nullptr: nowhere
+    int64_t              _startMs = 0;          // when the loop started
+    int64_t              _slotStartMs = 0;      // when the current slot started
+    int                  _current = 0;          // index of the current slot
+    int64_t              _slots[SLOTS] = {};    // ms of work that ended in each slot
+    int64_t              _workSince = -1;       // when the work in progress began; -1: waiting
+    int64_t              _busyMs = 0;           // ms worked since the start (ended pieces)
+    double               _peak = 0;             // the most of a full second's load
+    JsLoadUsage         *_published = nullptr;  // where waitBegins() publishes; nullptr: nowhere
 };
 
+// The event loop of one JS thread (see the top of this file).
 class Loop {
 public:
     /**
@@ -328,6 +331,7 @@ public:
 
 private:
     struct Timer;
+    // A slot of the source table.
     struct Source {
         MessageHandler *handler;     // called on the JS thread
         void           *opaque;      // passed to handler; borrowed

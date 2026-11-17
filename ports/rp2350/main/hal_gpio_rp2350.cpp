@@ -68,6 +68,7 @@ int pinCount() {
  * 3. an output (push-pull or open drain) drives 0 from now on.
  */
 bool configure(int pin, Mode mode, Pull pull) {
+    // a GPIO of the chip
     if (pin < 0 || pin >= (int)NUM_BANK0_GPIOS) {
         return false;
     }
@@ -99,11 +100,13 @@ int read(int pin) {
  * low, 1 lets it go.
  */
 void write(int pin, int level) {
+    // open drain: the direction drives (0) or lets go (1); the latch stays 0
     if (modes[pin] == Mode::openDrain) {
         gpio_set_dir((uint)pin, level != 0 ? GPIO_IN : GPIO_OUT);
         return;
     }
 
+    // push-pull: the output bit
     gpio_put((uint)pin, level != 0);
 }
 
@@ -115,6 +118,7 @@ void toggle(int pin) {
     uint32_t bit = bitOf(pin);
     bool openDrain = modes[pin] == Mode::openDrain;
 
+    // first bank: pins 0 to 31
     if (pin < BANK_PINS) {
         if (openDrain) {
             sio_hw->gpio_oe_togl = bit;
@@ -125,6 +129,7 @@ void toggle(int pin) {
         return;
     }
 
+    // second bank: pins 32 and above
     if (openDrain) {
         sio_hw->gpio_hi_oe_togl = bit;
     } else {
@@ -136,6 +141,7 @@ void toggle(int pin) {
  * Interrupt on both edges, changes reported by the shared watch.
  */
 bool watch(int pin, int debounceMs, ChangeHandler *handler) {
+    // the shared watch, started at the first watch
     if (!gpiowatch::start((int)NUM_BANK0_GPIOS, &read)) {
         return false;
     }
@@ -163,6 +169,7 @@ void unwatch(int pin) {
  * Not watched any more, then as at boot: no function, no pull.
  */
 void reset(int pin) {
+    // the watch first, then the pin as at boot
     unwatch(pin);
     gpio_disable_pulls((uint)pin);
     gpio_deinit((uint)pin);

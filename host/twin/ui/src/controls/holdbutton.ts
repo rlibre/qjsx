@@ -29,6 +29,7 @@ export class HoldButton extends Button {
     constructor(props: HoldButtonProps) {
         super(props);
 
+        // the callbacks of the props, or ones that do nothing
         this._press = props.press ?? (() => {});
         this._release = props.release ?? (() => {});
 
@@ -42,6 +43,7 @@ export class HoldButton extends Button {
      * The pointer goes down: the button is pressed.
      */
     private _onDown(event: PointerEvent) {
+        // no default action of the browser (text selection, focus), then pressed
         event.preventDefault();
         this._down = true;
         this.addClass("down");
@@ -52,9 +54,12 @@ export class HoldButton extends Button {
      * The pointer goes up or leaves: released, if it was held.
      */
     private _onUp() {
+        // not held: nothing to release (the pointer only passed over it)
         if (!this._down) {
             return;
         }
+
+        // released
         this._down = false;
         this.removeClass("down");
         this._release();

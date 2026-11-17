@@ -72,7 +72,7 @@ struct Uart {
     uint32_t              sequence;          // number of the newest record
 };
 
-Uart uartTable[twin::MAX_UARTS];
+Uart uartTable[twin::MAX_UARTS];             // the first uartCount() are the board's
 
 /**
  * UART 'number' of the board, or nullptr.
@@ -87,7 +87,8 @@ Uart *uartAt(int number) {
  * drops the oldest records past LOG_LIMIT bytes. Lock held.
  */
 void addRecord(Uart *uart, twin::UartSource source, const uint8_t *data, size_t size) {
-    // the record, newest
+    // the record, with the last bytes (at least one byte allocated: an empty
+    // record has none)
     size_t kept = size < LOG_LIMIT ? size : LOG_LIMIT;
     Record *record = (Record *)memory::allocate(sizeof(Record));
     record->sequence = ++uart->sequence;
@@ -96,6 +97,8 @@ void addRecord(Uart *uart, twin::UartSource source, const uint8_t *data, size_t 
     memcpy(record->bytes, data + (size - kept), kept);
     record->size = kept;
     record->next = nullptr;
+
+    // appended, the newest
     if (uart->last != nullptr) {
         uart->last->next = record;
     } else {
@@ -121,6 +124,7 @@ void addRecord(Uart *uart, twin::UartSource source, const uint8_t *data, size_t 
  * have the UART open (dropped).
  */
 bool deliver(Uart *uart, twin::UartSource source, const uint8_t *data, size_t size) {
+    // dropped when the program does not have the UART open
     uart->lock.lock();
     if (!uart->open) {
         uart->lock.unlock();
@@ -130,6 +134,7 @@ bool deliver(Uart *uart, twin::UartSource source, const uint8_t *data, size_t si
     // into the ring, as much as fits
     size_t room = RECEIVE_BUFFER - uart->receivedCount;
     size_t taken = size < room ? size : room;
+
     for (size_t i = 0; i < taken; i++) {
         size_t at = (uart->receivedStart + uart->receivedCount + i) % RECEIVE_BUFFER;
         uart->received[at] = data[i];
@@ -142,6 +147,7 @@ bool deliver(Uart *uart, twin::UartSource source, const uint8_t *data, size_t si
     uart->lock.notify();
     uart->lock.unlock();
 
+    // what did not fit is said
     if (taken < size) {
         fprintf(stderr, "qjsx twin: UART %d: receive buffer full, %d bytes lost\n", uart->port.number,
                 (int)(size - taken));
@@ -234,6 +240,7 @@ int readPort(hal::serial::Port *port, uint8_t *buffer, size_t size) {
 
     // take what is there
     size_t taken = uart->receivedCount < size ? uart->receivedCount : size;
+
     for (size_t i = 0; i < taken; i++) {
         buffer[i] = uart->received[(uart->receivedStart + i) % RECEIVE_BUFFER];
     }
@@ -252,10 +259,12 @@ int readPort(hal::serial::Port *port, uint8_t *buffer, size_t size) {
 bool writePort(hal::serial::Port *port, const uint8_t *data, size_t size) {
     Uart *uart = &uartTable[port->number];
 
+    // recorded for the page
     uart->lock.lock();
     addRecord(uart, twin::UartSource::program, data, size);
     uart->lock.unlock();
 
+    // to the TCP client and the wired PC port (outside the lock: may wait)
     uart->tcp.send(data, size);
     twin::serialUartWrite(port->number, data, size);
     return true;
@@ -267,6 +276,7 @@ bool writePort(hal::serial::Port *port, const uint8_t *data, size_t size) {
 void closePort(hal::serial::Port *port) {
     Uart *uart = &uartTable[port->number];
 
+    // closed, its buffer emptied, the reader woken
     uart->lock.lock();
     uart->open = false;
     uart->receivedCount = 0;
@@ -283,7 +293,8 @@ void closePort(hal::serial::Port *port) {
 void listPorts(hal::serial::ListHandler *add, void *context) {
     for (int number = 0; number < twin::uartCount(); number++) {
         Uart *uart = &uartTable[number];
-        if (!uart->link && !isOpen(uart)) {
+        bool available = !uart->link && !isOpen(uart);
+        if (available) {
             add(context, nullptr, number);
         }
     }
@@ -330,6 +341,8 @@ void setupUarts(const char *host, int port) {
         snprintf(uart->key, sizeof(uart->key), "uart%d", i);
         uart->tcp.setup(uart->key, !forced, &onTcpData, &onTcpClient, uart);
         registerTcpLink(&uart->tcp);
+
+        // forced: port + n, listening from the start
         if (forced) {
             uart->tcp.request(port + i, true);
             printf("qjsx twin: uart %d on tcp %s:%d\n", i, host, port + i);
@@ -342,6 +355,7 @@ void setupUarts(const char *host, int port) {
  */
 void uartStates(UartState *states, int count) {
     for (int i = 0; i < count && i < uartCount(); i++) {
+        // the UART
         Uart *uart = &uartTable[i];
         uart->lock.lock();
         states[i].link = uart->link;
@@ -349,8 +363,13 @@ void uartStates(UartState *states, int count) {
         states[i].settings = uart->settings;
         uart->lock.unlock();
 
+        // its TCP link (none for the agent's link), its wiring
         TcpState none = { 0, false, false, false, "" };
-        states[i].tcp = uart->link ? none : uart->tcp.state();
+        states[i].tcp = none;
+        if (!uart->link) {
+            states[i].tcp = uart->tcp.state();
+        }
+
         serialState(i, &states[i].serial);
     }
 }
@@ -364,7 +383,9 @@ uint32_t uartTraffic(int number, uint32_t after, TrafficVisitor *visit, void *co
         return 0;
     }
 
+    // the records newer than 'after', oldest first
     uart->lock.lock();
+
     for (Record *record = uart->first; record != nullptr; record = record->next) {
         if (record->sequence > after) {
             visit(context, record->sequence, record->source, record->bytes, record->size);
@@ -380,6 +401,7 @@ uint32_t uartTraffic(int number, uint32_t after, TrafficVisitor *visit, void *co
  * Bytes for the program (the page, the PC serial port).
  */
 bool uartReceive(int number, UartSource source, const uint8_t *bytes, size_t size) {
+    // a UART of the board, not the agent's link
     Uart *uart = uartAt(number);
     if (uart == nullptr || uart->link) {
         return false;

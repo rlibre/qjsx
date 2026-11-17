@@ -87,12 +87,14 @@ const void *existingUsb = nullptr;     // the Usb object not closed nor collecte
  * Usb object, or drops them when there is none.
  */
 void onReceived(int serial, uint8_t *data, size_t size) {
+    // the target under the lock: the JS thread may change it now
     targetLock.lock();
     if (target.mailbox != nullptr) {
         target.mailbox->post(target.source, MESSAGE_DATA, data, size, serial);
     } else {
         memory::release(data);
     }
+
     targetLock.unlock();
 }
 
@@ -101,12 +103,15 @@ void onReceived(int serial, uint8_t *data, size_t size) {
  * started Usb object, if any.
  */
 void onLineChanged(int serial, bool dtr, bool rts) {
+    // the serial function and the two lines in one value
     int64_t value = serial | (dtr ? DTR_FLAG : 0) | (rts ? RTS_FLAG : 0);
 
+    // to the target, under the lock
     targetLock.lock();
     if (target.mailbox != nullptr) {
         target.mailbox->post(target.source, MESSAGE_LINE_STATE, nullptr, 0, value);
     }
+
     targetLock.unlock();
 }
 
@@ -126,14 +131,17 @@ bool copyText(const js::Optional<js::Str> *text, const char *fallback, const cha
 
     // printable ASCII (what the USB string descriptors of the hal carry)
     bool printable = size <= (size_t)hal::usb::MAX_TEXT;
+
     for (size_t i = 0; i < size && printable; i++) {
         printable = data[i] >= 0x20 && data[i] <= 0x7e;
     }
+
     if (!printable) {
         js::fail<js::RangeError>("usb: %s: at most %d printable ASCII characters", field, hal::usb::MAX_TEXT);
         return false;
     }
 
+    // copied, null terminated
     memcpy(out, data, size);
     out[size] = '\0';
     return true;
@@ -213,6 +221,7 @@ public:
             return (void)js::fail<js::TypeError>("usb: write: data must be a string or bytes");
         }
 
+        // the hal refused them
         if (!written) {
             return (void)js::failSystem(EIO, "usb");
         }
@@ -223,11 +232,13 @@ public:
      * not started).
      */
     JS_EXPORT(lineState) js::Value lineState() {
+        // from the hal, when this function's device is the started one
         bool dtr = false;
         bool rts = false;
         if (_generation == startedGeneration) {
             hal::usb::lineState(_serial, &dtr, &rts);
         }
+
         return lineStateObject(dtr, rts);
     }
 
@@ -277,10 +288,13 @@ public:
      * device itself stays started for the next program.
      */
     ~Usb() {
+        // no more events for this object; the device stays started
         if (_started) {
             stopEvents();
             startedGeneration = 0;
         }
+
+        // another Usb object may be made
         if (existingUsb == this) {
             existingUsb = nullptr;
         }
@@ -304,13 +318,17 @@ public:
         _descriptors.vendorId = (uint16_t)(int)settings->vendorId;
         _descriptors.productId = (uint16_t)(int)settings->productId;
 
-        bool valid = copyText(&settings->manufacturer, DEFAULT_MANUFACTURER, "manufacturer", _descriptors.manufacturer)
-                     && copyText(&settings->product, DEFAULT_PRODUCT, "product", _descriptors.product)
+        bool manufacturerValid = copyText(&settings->manufacturer, DEFAULT_MANUFACTURER, "manufacturer",
+                                          _descriptors.manufacturer);
+        bool productValid = manufacturerValid
+                            && copyText(&settings->product, DEFAULT_PRODUCT, "product", _descriptors.product);
+        bool valid = productValid
                      && copyText(&settings->serialNumber, "", "serialNumber", _descriptors.serialNumber);
         if (!valid) {
             return;
         }
 
+        // this object is the Usb object now, with its own generation
         _generation = ++lastGeneration;
         existingUsb = this;
     }
@@ -324,6 +342,7 @@ public:
         if (!checkDeclaring()) {
             return js::Value();
         }
+
         if (_serialCount >= hal::usb::MAX_SERIALS) {
             return js::fail<js::RangeError>("usb: at most %d serial functions", hal::usb::MAX_SERIALS);
         }
@@ -334,6 +353,7 @@ public:
             return js::Value();
         }
 
+        // tied to this device, kept until the object goes
         created.object->bind(_serialCount, _generation);
         _serials[_serialCount] = created.object;
         _serialValues[_serialCount] = created.value;
@@ -350,25 +370,29 @@ public:
      *    program running until close().
      */
     JS_EXPORT(start) void start() {
+        // open, not started yet, with a function at least
         if (!checkDeclaring()) {
             return;
         }
+
         if (_serialCount == 0) {
             return (void)js::fail("usb: no function: declare one with usb.serial() first");
         }
 
         // 1-2. take the started device over, or start this one
         hal::usb::setHandlers(&onReceived, &onLineChanged);
-        bool same = deviceStarted && startedSerials == _serialCount
-                    && memcmp(&startedDescriptors, &_descriptors, sizeof(_descriptors)) == 0;
+        bool sameFunctions = deviceStarted && startedSerials == _serialCount;
+        bool same = sameFunctions && memcmp(&startedDescriptors, &_descriptors, sizeof(_descriptors)) == 0;
         if (!same) {
             if (deviceStarted) {
                 hal::usb::stop();
                 deviceStarted = false;
             }
+
             if (!hal::usb::start(&_descriptors, _serialCount)) {
                 return (void)js::fail("usb: the hardware refused to start the device");
             }
+
             deviceStarted = true;
             startedDescriptors = _descriptors;
             startedSerials = _serialCount;
@@ -382,6 +406,7 @@ public:
         target.mailbox->retain();
         targetLock.unlock();
 
+        // started by this object; the program stays alive until close()
         _started = true;
         startedGeneration = _generation;
         js::keepAlive(this, true);
@@ -392,6 +417,7 @@ public:
      * for another Usb object. This object can no longer be used.
      */
     JS_EXPORT(close) void close() {
+        // started: no more events, the device stopped
         if (_started) {
             stopEvents();
             hal::usb::stop();
@@ -401,6 +427,7 @@ public:
             js::keepAlive(this, false);
         }
 
+        // closed for good; another Usb object may be made
         _closed = true;
         if (existingUsb == this) {
             existingUsb = nullptr;
@@ -413,14 +440,17 @@ private:
      * false with an error pending.
      */
     bool checkDeclaring() {
+        // open, and not started yet
         if (_closed) {
             js::fail("usb: closed");
             return false;
         }
+
         if (_started) {
             js::fail("usb: already started");
             return false;
         }
+
         return true;
     }
 
@@ -429,6 +459,7 @@ private:
      * called by the finalizer).
      */
     void stopEvents() {
+        // the target cleared (its mailbox released outside the lock)
         targetLock.lock();
         rt::Mailbox *mailbox = target.mailbox;
         target = Target{ nullptr, { -1, 0 } };
@@ -437,6 +468,7 @@ private:
             mailbox->release();
         }
 
+        // then the source
         _loop->removeSource(_source);
         _loop = nullptr;
     }
@@ -445,12 +477,14 @@ private:
      * An event of the device (JS thread): to its serial function.
      */
     static void onMessage(void *opaque, const rt::Message *message) {
+        // its serial function, one this object declared
         Usb *usb = (Usb *)opaque;
         int serial = (int)(message->value & SERIAL_MASK);
         if (serial >= usb->_serialCount) {
             return;
         }
 
+        // bytes, or a line state
         UsbCdc *function = usb->_serials[serial];
         if (message->kind == MESSAGE_DATA) {
             function->deliverData(message->data, message->size);

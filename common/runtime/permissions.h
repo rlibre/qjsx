@@ -27,6 +27,7 @@
 
 namespace rt {
 
+// The kind of a file access.
 enum class Access {
     read,   // read a file, list a folder, stat, exists
     write,  // create, write, rename, delete
@@ -39,6 +40,7 @@ struct PermissionList {
     bool   everything; // granted without limit
 };
 
+// The permissions of one run (see the top of this file).
 class Permissions {
 public:
     /**
@@ -53,97 +55,97 @@ public:
     Permissions(const Permissions &) = delete;
     Permissions &operator=(const Permissions &) = delete;
 
-    // ### Granting (before the run) ##########################################
+    // ### Granting (before the run) ###########################################
 
     /**
      * The program's current folder (process.cwd()), against which fs resolves
      * relative paths ('folder' copied, absolute). nullptr: the system's.
      */
-    void        setWorkingFolder(const char *folder);
+    void           setWorkingFolder(const char *folder);
 
     /**
      * A device without file system: fs fails with ENOSYS, process.cwd() is "/".
      */
-    void        setNoFileSystem();
+    void           setNoFileSystem();
 
     /**
      * Grants every kind without limit (-A).
      */
-    void        allowEverything();
+    void           allowEverything();
 
     /**
      * Grants reading (or writing) under 'folder' (real path taken now, so a
      * link in it is followed once, here). False with errno set if the path
      * cannot be resolved.
      */
-    bool        allowFiles(Access access, const char *folder);
+    bool           allowFiles(Access access, const char *folder);
 
     /**
      * Grants reading (or writing) everywhere.
      */
-    void        allowFilesEverywhere(Access access);
+    void           allowFilesEverywhere(Access access);
 
     /**
      * Grants the network: "host" (every port) or "host:port"; nullptr: every
      * host.
      */
-    void        allowNet(const char *hostPort);
+    void           allowNet(const char *hostPort);
 
     /**
      * Grants an environment variable; nullptr: every variable.
      */
-    void        allowEnv(const char *name);
+    void           allowEnv(const char *name);
 
     /**
      * Grants a serial port ("COM3", "/dev/ttyUSB0"); nullptr: every port.
      */
-    void        allowSerial(const char *port);
+    void           allowSerial(const char *port);
 
     /**
      * The end of the message of a refusal: how to grant it ("allow it in ...").
      * Copied.
      */
-    void        setHint(const char *hint);
+    void           setHint(const char *hint);
 
-    // ### Checking (JS thread of the run) ####################################
+    // ### Checking (JS thread of the run) #####################################
 
     /**
      * The program's current folder; nullptr: the system's.
      */
-    const char *workingFolder() const;
+    const char    *workingFolder() const;
 
     /**
      * False on a device without file system.
      */
-    bool        hasFileSystem() const;
+    bool           hasFileSystem() const;
 
     /**
      * True if 'path' (absolute or relative to the system's current folder)
      * may be accessed: its real path (links followed, see files::realPath)
      * lies under a granted folder. False with errno EACCES otherwise.
      */
-    bool        mayAccess(const char *path, Access access) const;
+    bool           mayAccess(const char *path, Access access) const;
 
     /**
      * True if the program may connect to (or listen on) host:port.
      */
-    bool        mayUseNet(const char *host, int port) const;
+    bool           mayUseNet(const char *host, int port) const;
 
     /**
      * True if the program may read the environment variable 'name'.
      */
-    bool        mayUseEnv(const char *name) const;
+    bool           mayUseEnv(const char *name) const;
 
     /**
      * True if the program may open the serial port 'port'; nullptr: may it
      * list the ports (some port granted).
      */
-    bool        mayUseSerial(const char *port) const;
+    bool           mayUseSerial(const char *port) const;
 
     /**
      * The end of a refusal message ("" if none was set).
      */
-    const char *hint() const;
+    const char    *hint() const;
 
 private:
     char          *_workingFolder;  // owned; nullptr: the system's current folder

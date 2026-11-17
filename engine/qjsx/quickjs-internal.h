@@ -354,6 +354,9 @@ typedef struct JSDebugState {
     /* compile warnings (compiler/debug-info.c) */
     JSCompileWarningHandler *warning_handler;
     void *warning_opaque;
+    /* outline of the modules compiled (compiler/outline.c, engine change W) */
+    JSModuleOutlineCollector *outline_collector;
+    void *outline_opaque;
 } JSDebugState;
 
 struct JSRuntime {
@@ -858,6 +861,29 @@ typedef struct JSGlobalObject {
     JSValue uninitialized_vars; /* hidden object containing the list of uninitialized variables */
 } JSGlobalObject;
 
+/* qjsx: defined before JSAsyncFunctionState, which embeds one (change V) */
+typedef struct JSJobEntry {
+    struct list_head link;
+    JSContext *realm;
+    JSJobFunc *job_func;
+    int argc;            /* qjsx: JS_JOB_ARGC_AWAIT: embedded in an async function state */
+    JSValue argv[0];
+} JSJobEntry;
+
+/* qjsx: engine change V (doc/engine-changes.md). A reaction of a promise
+   that resumes an async function directly: no handler, no resolving
+   functions, embedded in the async function's state (V1). Its first two
+   fields are those of JSPromiseReactionData (builtins/promise.c), whose
+   'awaiter' is NULL: the promise's reaction lists hold both kinds. */
+typedef struct JSAwaitReaction {
+    struct list_head link;                 /* in a promise_reactions[] list, or unlinked */
+    struct JSAsyncFunctionState *awaiter;  /* the state it is embedded in */
+} JSAwaitReaction;
+
+/* qjsx: JSJobEntry.argc of the resume job embedded in an async function
+   state (V1): not allocated, its value in the state */
+#define JS_JOB_ARGC_AWAIT (-1)
+
 typedef struct JSAsyncFunctionState {
     JSGCObjectHeader header;
     JSValue this_val; /* 'this' argument */
@@ -866,6 +892,16 @@ typedef struct JSAsyncFunctionState {
     BOOL is_completed; /* TRUE if the function has returned. The stack
                           frame is no longer valid */
     JSValue resolving_funcs[2]; /* only used in JS async functions */
+    /* qjsx: engine change V, async functions only. An async function has
+       one await at a time: what resumes it lives here, made once per call
+       (V1), and an 'await f()' of an async function needs no promise (V2). */
+    JSAwaitReaction await_reactions[2]; /* fulfill, reject: on the awaited native promise */
+    JSJobEntry await_job;               /* the resume job (argc JS_JOB_ARGC_AWAIT), when queued */
+    JSValue await_value;                /* what the resume job delivers: the value, or the exception */
+    BOOL await_throw;                   /* the resume job throws await_value */
+    BOOL await_inline;                  /* V2: the next await of this function is already arranged */
+    struct JSAsyncFunctionState *awaiter; /* V2: the async function whose 'await' waits for this call
+                                            (no promise was made); one reference */
     JSStackFrame frame;
     /* arg_buf, var_buf, stack_buf and var_refs follow */
 } JSAsyncFunctionState;
@@ -1012,14 +1048,6 @@ struct JSModuleDef {
     JSValue meta_obj; /* for import.meta */
     JSValue private_value; /* private value for C modules */
 };
-
-typedef struct JSJobEntry {
-    struct list_head link;
-    JSContext *realm;
-    JSJobFunc *job_func;
-    int argc;
-    JSValue argv[0];
-} JSJobEntry;
 
 typedef struct JSProperty {
     union {
@@ -1324,6 +1352,9 @@ typedef struct {
 
 #define JS_CALL_FLAG_COPY_ARGV   (1 << 1)
 #define JS_CALL_FLAG_GENERATOR   (1 << 2)
+/* qjsx: engine change V2: the call is 'await f()' in an async function
+   (the next instruction is OP_await); set by the interpreter only */
+#define JS_CALL_FLAG_AWAITED     (1 << 3)
 
 /* argument of OP_special_object */
 typedef enum {

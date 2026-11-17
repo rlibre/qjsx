@@ -24,21 +24,22 @@ enum class PwmKind : uint8_t {
 
 // The output of a FlexPWM submodule (unused for a QuadTimer).
 enum class PwmOutput : uint8_t {
-    x,
-    a,
-    b,
+    x,   // output X (the third one)
+    a,   // output A
+    b,   // output B
 };
 
 // One PWM pin.
 struct PwmPin {
     int8_t    pin;       // the board's number
-    PwmKind   kind;
+    PwmKind   kind;      // what drives it
     uint8_t   module;    // FlexPWM1..4 or QuadTimer TMR1..4: 1 to 4
     uint8_t   unit;      // the submodule (FlexPWM) or the channel (QuadTimer): 0 to 3
     PwmOutput output;    // FlexPWM: A, B or X
     uint8_t   mux;       // the pad's mux value (ALT) that connects the output
 };
 
+// The pins with a PWM output, by number.
 const PwmPin PWM_PINS[] = {
     { 0, PwmKind::flexPwm, 1, 1, PwmOutput::x, 4 },
     { 1, PwmKind::flexPwm, 1, 0, PwmOutput::x, 4 },
@@ -73,6 +74,6 @@ const PwmPin PWM_PINS[] = {
     { 39, PwmKind::flexPwm, 1, 2, PwmOutput::a, 1 },
 };
 
-const int PWM_PIN_COUNT = (int)(sizeof(PWM_PINS) / sizeof(PWM_PINS[0]));
+const int PWM_PIN_COUNT = (int)(sizeof(PWM_PINS) / sizeof(PWM_PINS[0]));   // lines of PWM_PINS
 
 } // namespace board

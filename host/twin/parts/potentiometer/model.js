@@ -25,11 +25,15 @@ export default class Potentiometer extends Part {
      */
     constructor(config, board) {
         super(config, board);
+
+        // the first position, in %
         const position = config.position ?? 50;
-        if (typeof position !== "number" || position < 0 || position > 100) {
+        const isBadPosition = typeof position !== "number" || position < 0 || position > 100;
+        if (isBadPosition) {
             throw new Error('"position" must be 0 to 100 (%)');
         }
 
+        // the wiper on its pin, there
         this._pin = board.pin(parsePin(config.pin));
         this._turn(position);
     }
@@ -38,7 +42,9 @@ export default class Potentiometer extends Part {
      * "set" { position }: the wiper moves.
      */
     onAction(action, args) {
-        if (action === "set" && typeof args?.position === "number") {
+        // "set" with a number: the wiper moves, kept within 0..100 %
+        const isSet = action === "set" && typeof args?.position === "number";
+        if (isSet) {
             this._turn(Math.min(100, Math.max(0, args.position)));
         }
     }

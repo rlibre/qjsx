@@ -56,6 +56,122 @@ declare module "sys/compiler" {
          * libraries built by `qjsx build` / `qjsx mklib`). Default true.
          */
         dynamicImport?: boolean;
+
+        /**
+         * True: also return the outline of a module (`outline` of the
+         * result), what `qjsx build` reads to leave out the declarations that
+         * nothing uses. Default false.
+         */
+        outline?: boolean;
+    }
+
+    /**
+     * One statement at the top level of a module.
+     */
+    export interface OutlineStatement {
+        /**
+         * Byte offset of its first token in the UTF-8 source.
+         */
+        start: number;
+
+        /**
+         * Byte offset just after its last token.
+         */
+        end: number;
+
+        /**
+         * True for a declaration (function, class, var, let, const, an
+         * export of one of them, export default) whose run only creates what
+         * it declares: functions, classes without static field or block,
+         * literals, objects and arrays of them, reads of variables and
+         * properties. Leaving it out changes nothing else.
+         */
+        removable: boolean;
+
+        /**
+         * The names it declares at the top level (`"*default*"` for export
+         * default).
+         */
+        declared: string[];
+
+        /**
+         * The names of variables it reads or writes, in its nested functions
+         * too, each once; an inner variable of the same name counts too.
+         */
+        references: string[];
+    }
+
+    /**
+     * One name imported by an import statement.
+     */
+    export interface OutlineImport {
+        /**
+         * The module, as written after `from`.
+         */
+        module: string;
+
+        /**
+         * Its export; `"*"` for `import * as`.
+         */
+        imported: string;
+
+        /**
+         * The name it takes in the module.
+         */
+        local: string;
+
+        /**
+         * Byte offset of the imported name (of `*`).
+         */
+        position: number;
+    }
+
+    /**
+     * One export of a module.
+     */
+    export interface OutlineExport {
+        /**
+         * The name importers use; null for `export * from`.
+         */
+        exported: string | null;
+
+        /**
+         * The top-level name it exports (`"*default*"` for export default);
+         * for a re-export, the name in `module` (`"*"` for `export * as`).
+         */
+        local: string;
+
+        /**
+         * Null for a name of the module; else the module it re-exports from,
+         * as written.
+         */
+        module: string | null;
+
+        /**
+         * For a name of an export clause (`export { a, b as c }`): its text,
+         * with the comma that follows it, at [start, end). 0 and 0 otherwise.
+         */
+        start: number;
+        end: number;
+    }
+
+    /**
+     * The outline of a module (`outline: true`).
+     */
+    export interface ModuleOutline {
+        /**
+         * Its top-level statements, in source order.
+         */
+        statements: OutlineStatement[];
+
+        imports: OutlineImport[];
+
+        exports: OutlineExport[];
+
+        /**
+         * True when it calls eval() directly: any of its names may be used.
+         */
+        hasEval: boolean;
     }
 
     /**
@@ -243,6 +359,11 @@ declare module "sys/compiler" {
          * The uses of `eval` and `Function` found, in source order.
          */
         warnings: CompileWarning[];
+
+        /**
+         * The outline of a module with `outline: true`, else null.
+         */
+        outline: ModuleOutline | null;
     }
 
     /**

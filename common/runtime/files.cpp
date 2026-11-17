@@ -199,11 +199,13 @@ bool linkStatus(const char *path, Status *status) {
     // the attributes of the entry itself
     stat(path, status);
 
+    // convert the path to UTF-16
     wchar_t *wide = widen(path);
     if (wide == nullptr) {
         return false;
     }
 
+    // the attributes of the entry itself; none: it does not exist
     DWORD attributes = GetFileAttributesW(wide);
     memory::release(wide);
     if (attributes == INVALID_FILE_ATTRIBUTES) {
@@ -244,10 +246,12 @@ FILE *open(const char *path, const char *mode) {
     // the mode, as wide characters
     wchar_t wideMode[8];
     size_t length = 0;
+
     while (mode[length] != 0 && length < 7) {
         wideMode[length] = (wchar_t)mode[length];
         length++;
     }
+
     wideMode[length] = 0;
 
     return openFile(path, wideMode);
@@ -397,7 +401,6 @@ char *currentDirectory() {
     useSlashes(text);
     return text;
 }
-
 
 /**
  * Windows version: the absolute form of 'path' (GetFullPathNameW: relative
@@ -663,7 +666,6 @@ char *currentDirectory() {
     return getcwd(nullptr, 0);
 }
 
-
 /**
  * POSIX version: 'path' joined to the current directory if relative ("."
  * and ".." left for the system: they must be resolved after the links).
@@ -782,7 +784,8 @@ bool makeDirectories(const char *path) {
         // an error if a directory is there after all ("C:", or another process
         // created it in between), but it is when a file is in the way
         bool created = makeDirectory(partial);
-        ok = created || (errno == EEXIST && usableAsDirectory(partial, isLast));
+        bool existsAlready = !created && errno == EEXIST;
+        ok = created || (existsAlready && usableAsDirectory(partial, isLast));
     }
 
     memory::release(partial);
@@ -882,6 +885,7 @@ void useSlashes(char *path) {
             *p = '/';
         }
     }
+
 #else
     (void)path;
 #endif
@@ -903,7 +907,6 @@ bool isAbsolute(const char *path) {
 #endif
     return fromRoot;
 }
-
 
 namespace {
 
@@ -940,13 +943,16 @@ void normalize(char *path) {
 
     // copy the components after the root one by one
     size_t in = root;
+
     while (in < length) {
         // the next component: [in, end)
         size_t end = in;
+
         while (end < length && path[end] != '/') {
             end++;
         }
 
+        // what it is: empty (a repeated '/'), ".", ".." or a name
         size_t size = end - in;
         bool isEmpty = size == 0;
         bool isDot = size == 1 && path[in] == '.';
@@ -987,12 +993,14 @@ void normalize(char *path) {
  */
 size_t parentEnd(const char *path, size_t end, size_t root) {
     size_t position = end;
+
     while (position > root && path[position - 1] != '/') {
         position--;
     }
 
     return position > root ? position - 1 : root;
 }
+
 #endif
 
 } // namespace
@@ -1023,6 +1031,7 @@ char *realPath(const char *path) {
 
     size_t root = rootLength(absolute);
     size_t end = strlen(absolute);
+
     while (end > root && absolute[end - 1] == '/') {
         end--;
     }
@@ -1032,6 +1041,7 @@ char *realPath(const char *path) {
     // the longest existing part: cut one component at a time
     char *existing = nullptr;
     size_t cut = end;
+
     for (;;) {
         // try path[0, cut)
         char saved = absolute[cut];
@@ -1056,6 +1066,7 @@ char *realPath(const char *path) {
     if (cut < end) {
         size_t next = absolute[cut] == '/' ? cut + 1 : cut;
         size_t componentEnd = next;
+
         while (componentEnd < end && absolute[componentEnd] != '/') {
             componentEnd++;
         }

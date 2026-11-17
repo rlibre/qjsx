@@ -47,13 +47,18 @@ function decimalsOf(step: number) {
  * A value of the state as text, with the unit of its control.
  */
 function valueText(value: unknown, control: PartControl) {
+    // a number: the digits of the step (2 without one), then the unit
     if (typeof value === "number") {
         const decimals = control.step !== undefined ? decimalsOf(control.step) : 2;
-        return `${value.toFixed(decimals)}${control.unit ? ` ${control.unit}` : ""}`;
+        const unitText = control.unit ? ` ${control.unit}` : "";
+        return `${value.toFixed(decimals)}${unitText}`;
     }
+
+    // a string as it is, anything else as JSON
     if (typeof value === "string") {
         return value;
     }
+
     return JSON.stringify(value);
 }
 
@@ -61,10 +66,14 @@ function valueText(value: unknown, control: PartControl) {
  * The colors of a "led" control: one [r, g, b], or a list of them.
  */
 function colorsOf(value: unknown): number[][] {
+    // not a list: no color
     if (!Array.isArray(value)) {
         return [];
     }
-    return Array.isArray(value[0]) ? (value as number[][]) : [value as number[]];
+
+    // a list of colors, or a single one
+    const isList = Array.isArray(value[0]);
+    return isList ? (value as number[][]) : [value as number[]];
 }
 
 // ### 1. the state as name / value ###########################################
@@ -77,11 +86,14 @@ class StateList extends VBox {
      */
     setState(state: PartState) {
         for (const [name, value] of Object.entries(state)) {
+            // a field not seen yet: a row of its own, at the end
             if (!this._rows.has(name)) {
                 const row = new Label({ cls: "value", text: "" });
                 this._rows.set(name, row);
                 this.appendContent(new HBox({ cls: "control", content: [new Label({ cls: "name", text: name }), row] }));
             }
+
+            // its value: a string as it is, anything else as JSON
             this._rows.get(name).setText(typeof value === "string" ? value : JSON.stringify(value));
         }
     }
@@ -101,6 +113,7 @@ interface ControlRow {
  * it.
  */
 function sliderControl(part: PartInfo, control: PartControl): ControlRow {
+    // the value shown, the slider that sends it
     const value = new Label({ cls: "value", text: "" });
     const slider: Slider = new Slider({
         min: control.min ?? 0,
@@ -111,6 +124,8 @@ function sliderControl(part: PartInfo, control: PartControl): ControlRow {
         change: () => sendPartAction(part.id, "set", { [control.name]: slider.getValue() }),
     });
 
+    // its row: the name, the slider, the value; a value of the state moves
+    // the slider (a number) and is shown as text
     const row = new HBox({ cls: "control", content: [new Label({ cls: "name", text: control.label ?? control.name }), slider, value] });
     return {
         row,
@@ -118,6 +133,7 @@ function sliderControl(part: PartInfo, control: PartControl): ControlRow {
             if (typeof shown === "number") {
                 slider.setValue(shown);
             }
+
             value.setText(valueText(shown, control));
         },
     };
@@ -129,6 +145,7 @@ function sliderControl(part: PartInfo, control: PartControl): ControlRow {
  * stand side by side.
  */
 function knobControl(part: PartInfo, control: PartControl): ControlRow {
+    // the value shown, the knob that sends it
     const value = new Label({ cls: "value", text: "" });
     const knob: Knob = new Knob({
         min: control.min ?? 0,
@@ -140,6 +157,8 @@ function knobControl(part: PartInfo, control: PartControl): ControlRow {
         change: () => sendPartAction(part.id, "set", { [control.name]: knob.getValue() }),
     });
 
+    // the knob above its value; a value of the state turns the knob (a
+    // number) and is shown as text
     return {
         row: new VBox({ cls: "knob-control", content: [knob, value] }),
         knob: true,
@@ -147,6 +166,7 @@ function knobControl(part: PartInfo, control: PartControl): ControlRow {
             if (typeof shown === "number") {
                 knob.setValue(shown);
             }
+
             value.setText(valueText(shown, control));
         },
     };
@@ -160,6 +180,8 @@ function switchControl(part: PartInfo, control: PartControl): ControlRow {
         label: control.label ?? control.name,
         change: () => sendPartAction(part.id, "set", { [control.name]: box.getCheck() }),
     });
+
+    // only true checks it
     return { row: new HBox({ cls: "control", content: [box] }), show: shown => box.setCheck(shown === true) };
 }
 
@@ -167,12 +189,15 @@ function switchControl(part: PartInfo, control: PartControl): ControlRow {
  * A choice among 'items': sends "set" { name: item }.
  */
 function selectControl(part: PartInfo, control: PartControl): ControlRow {
+    // the list, an item's id its text
     const items = (control.items ?? []).map(item => ({ id: item, text: item }));
     const select: Select = new Select({
         items,
         change: () => sendPartAction(part.id, "set", { [control.name]: select.getValue() }),
     });
-    const row = new HBox({ cls: "control", content: [new Label({ cls: "name", text: control.label ?? control.name }), select] });
+
+    // its row: the name, the list
+    const row =new HBox({ cls: "control", content: [new Label({ cls: "name", text: control.label ?? control.name }), select] });
     return { row, show: shown => select.setValue(String(shown)) };
 }
 
@@ -185,6 +210,8 @@ function buttonControl(part: PartInfo, control: PartControl): ControlRow {
         press: () => sendPartAction(part.id, "set", { [control.name]: true }),
         release: () => sendPartAction(part.id, "set", { [control.name]: false }),
     });
+
+    // the state changes nothing on it
     return { row: new HBox({ cls: "control", content: [button] }), show: () => {} };
 }
 
@@ -192,6 +219,7 @@ function buttonControl(part: PartInfo, control: PartControl): ControlRow {
  * A value shown, nothing to set.
  */
 function valueControl(control: PartControl): ControlRow {
+    // its row: the name, the value as text
     const value = new Label({ cls: "value", text: "" });
     const row = new HBox({ cls: "control", content: [new Label({ cls: "name", text: control.label ?? control.name }), value] });
     return { row, show: shown => value.setText(valueText(shown, control)) };
@@ -202,8 +230,10 @@ function valueControl(control: PartControl): ControlRow {
  * are a strip, drawn as small squares (main.scss).
  */
 function ledControl(): ControlRow {
+    // a line of LEDs, none until the first value
     const line = new HBox({ cls: "control leds" });
     let leds: Led[] = [];
+
     return {
         row: line,
         show: shown => {
@@ -214,6 +244,8 @@ function ledControl(): ControlRow {
                 line.setContent(leds);
                 line.setClass("strip", leds.length > 1);
             }
+
+            // each lit with its color
             colors.forEach((color, index) => leds[index].setColor(color[0], color[1], color[2]));
         },
     };
@@ -231,20 +263,27 @@ class ControlsView extends VBox {
         // the controls, consecutive knobs on one line
         const content: Component[] = [];
         let knobs: HBox = null;
+
         for (const control of part.controls) {
             const made = this._makeControl(part, control);
             this._rows.set(control.name, made);
+
+            // not a knob: a line of its own, which ends a line of knobs
             if (!made.knob) {
                 knobs = null;
                 content.push(made.row);
                 continue;
             }
+
+            // a knob: on the current line of knobs, a new one if none
             if (knobs === null) {
                 knobs = new HBox({ cls: "knobs" });
                 content.push(knobs);
             }
+
             knobs.appendContent(made.row);
         }
+
         this.setContent(content);
     }
 
@@ -252,6 +291,7 @@ class ControlsView extends VBox {
      * Shows the fields of the state its controls show.
      */
     setState(state: PartState) {
+        // a field missing from the state leaves its control as it is
         for (const [name, control] of this._rows) {
             if (name in state) {
                 control.show(state[name]);
@@ -301,6 +341,8 @@ export class PartView extends VBox {
     constructor(props: BoxProps, part: PartInfo) {
         super(props);
 
+        // a view of its own, else its controls, else its state as a list;
+        // each listener shows the states that come
         if (part.view !== null) {
             this._loadView(part);
         } else if (part.controls.length > 0) {
@@ -318,7 +360,9 @@ export class PartView extends VBox {
      * A state the part published.
      */
     setState(state: PartState) {
+        // kept for a view that comes late, then given to every listener
         this._last = state;
+
         for (const listener of this._listeners) {
             listener(state);
         }
@@ -329,6 +373,8 @@ export class PartView extends VBox {
      * why.
      */
     private async _loadView(part: PartInfo) {
+        // what the view gets: a listener it gives is called at once with the
+        // last state, if any
         const handle: PartHandle = {
             id: part.id,
             label: part.label,
@@ -342,6 +388,7 @@ export class PartView extends VBox {
             send: (action, args) => sendPartAction(part.id, action, args),
         };
 
+        // the module loaded, its view built; any failure shown instead
         try {
             const module = (await import(part.view)) as ViewModule;
             this.setContent(module.createView(x4, handle));

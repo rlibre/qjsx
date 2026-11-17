@@ -31,19 +31,54 @@ extern "C" {
 #define PTHREAD_MUTEX_INITIALIZER _PTHREAD_MUTEX_INITIALIZER
 #define PTHREAD_COND_INITIALIZER  _PTHREAD_COND_INITIALIZER
 
+/**
+ * Takes the mutex (created on the first call), waiting as long as needed.
+ * 0, or ENOMEM when its semaphore cannot be created.
+ */
 int pthread_mutex_lock(pthread_mutex_t *mutex);
+
+/**
+ * Releases the mutex. 0, or ENOMEM when its semaphore cannot be created.
+ */
 int pthread_mutex_unlock(pthread_mutex_t *mutex);
 
+/**
+ * Creates the condition (attributes ignored). 0, or ENOMEM.
+ */
 int pthread_cond_init(pthread_cond_t *condition, const pthread_condattr_t *attributes);
+
+/**
+ * Deletes the condition. Always 0.
+ */
 int pthread_cond_destroy(pthread_cond_t *condition);
+
+/**
+ * Releases 'mutex', waits for a signal as long as needed, takes 'mutex'
+ * again. 0, or EINVAL for a condition never created.
+ */
 int pthread_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex);
+
+/**
+ * As pthread_cond_wait, until 'deadline' (clock_gettime's clock). ETIMEDOUT
+ * when it passes first.
+ */
 int pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex, const struct timespec *deadline);
+
+/**
+ * Wakes the waiter of the condition (or the next one to wait). 0, or EINVAL
+ * for a condition never created.
+ */
 int pthread_cond_signal(pthread_cond_t *condition);
 
 /* newlib declares these only with _POSIX_TIMERS */
 #ifndef CLOCK_REALTIME
 #define CLOCK_REALTIME ((clockid_t)1)
 #endif
+
+/**
+ * Time since boot, whatever the clock asked: there is no wall clock yet.
+ * Always 0.
+ */
 int clock_gettime(clockid_t clock, struct timespec *now);
 
 #ifdef __cplusplus

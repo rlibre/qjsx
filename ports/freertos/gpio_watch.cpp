@@ -53,12 +53,16 @@ TickType_t ticksUntilNextDeadline() {
     int64_t now = platform::monotonicMs();
     int64_t nearest = INT64_MAX;
 
+    // the nearest deadline of the delays that run
     watchLock.lock();
+
     for (int pin = 0; pin < watchedPins; pin++) {
-        if (watches[pin].active && watches[pin].pending && watches[pin].deadlineMs < nearest) {
+        bool delayRuns = watches[pin].active && watches[pin].pending;
+        if (delayRuns && watches[pin].deadlineMs < nearest) {
             nearest = watches[pin].deadlineMs;
         }
     }
+
     watchLock.unlock();
 
     // no delay: forever; a deadline passed: at once; else rounded up to a tick
@@ -77,6 +81,7 @@ TickType_t ticksUntilNextDeadline() {
  * A change of 'pin' arrived: its debounce delay starts again.
  */
 void noteChange(int pin) {
+    // a watched pin: its delay (re)starts now; a pin no longer watched: ignored
     watchLock.lock();
     Watch *watch = &watches[pin];
     if (watch->active) {
@@ -138,6 +143,7 @@ void eventTask(void *) {
  * The queue, then the task that empties it (once).
  */
 bool start(int pinCount, ReadPin *readPin) {
+    // started already
     if (changes != nullptr) {
         return true;
     }
@@ -166,6 +172,7 @@ bool start(int pinCount, ReadPin *readPin) {
  * Records the watch; the level now is the reference of the next change.
  */
 bool add(int pin, int debounceMs, hal::gpio::ChangeHandler *handler) {
+    // the handler and the new debounce; a new watch starts from the level now
     watchLock.lock();
     changeHandler = handler;
     bool wasActive = watches[pin].active;

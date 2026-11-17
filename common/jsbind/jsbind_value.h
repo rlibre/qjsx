@@ -50,6 +50,8 @@ struct Constructing {
     InstanceHeader *header;  // header of the object being constructed
 };
 
+// Set while a bound object is constructed (its js::Value members attach to
+// it); nullptr otherwise.
 inline thread_local Constructing *constructing = nullptr;
 
 } // namespace detail
@@ -180,7 +182,7 @@ public:
     /**
      * Frees the reference; the value becomes undefined.
      */
-    void reset() {
+    void                    reset() {
         release();
         _value = JS_UNDEFINED;
     }
@@ -204,7 +206,7 @@ private:
     /**
      * Frees the reference; the value becomes undefined.
      */
-    void release() {
+    void                    release() {
         // through the runtime: works even when the context is gone
         if (_rt != nullptr) {
             JS_FreeValueRT(_rt, _value);
@@ -217,7 +219,7 @@ private:
      * Registers this value in the member list of the object being constructed,
      * if it is one of its members.
      */
-    void attach() {
+    void                    attach() {
         // not a member until proven otherwise
         _owner = nullptr;
         _nextMember = nullptr;
@@ -244,7 +246,7 @@ private:
     /**
      * Unlinks this value from the member list of its owning object, if any.
      */
-    void detach() {
+    void                    detach() {
         // not a member: nothing to unlink
         if (_owner == nullptr) {
             return;
@@ -392,7 +394,7 @@ private:
     /**
      * Gives the text back to QuickJS if it came from JS.
      */
-    void releaseText() {
+    void        releaseText() {
         if (_owned != nullptr) {
             JS_FreeCString(_ctx, _owned);
             _owned = nullptr;
@@ -547,7 +549,7 @@ public:
     /**
      * Stores a value; it becomes present.
      */
-    void set(T value) {
+    void     set(T value) {
         _value = meta::move(value);
         _present = true;
     }

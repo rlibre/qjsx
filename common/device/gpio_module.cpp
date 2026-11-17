@@ -81,11 +81,13 @@ Gpio *owners[MAX_PINS];          // the open Gpio of each pin (JS thread): the t
  * loop of the Gpio watching the pin, if any.
  */
 void onPinChange(int pin, int level) {
+    // the target of the pin, under the lock: the JS thread may stop watching now
     targetLock.lock();
     Target target = targets[pin];
     if (target.mailbox != nullptr) {
         target.mailbox->post(target.source, MESSAGE_CHANGE, nullptr, 0, level);
     }
+
     targetLock.unlock();
 }
 
@@ -100,6 +102,7 @@ public:
      * Finalizer (no JS here): stops watching; the pin keeps its state.
      */
     ~Gpio() {
+        // no more changes; the pin is no longer owned (its state stays)
         stopWatching();
         if (_pin >= 0 && owners[_pin] == this) {
             owners[_pin] = nullptr;
@@ -124,6 +127,7 @@ public:
             return (void)js::fail("gpio: pin %d cannot be configured as asked", number);
         }
 
+        // this object owns the pin
         _pin = number;
         owners[number] = this;
     }
@@ -132,9 +136,12 @@ public:
      * JS: the level of the pin, 0 or 1.
      */
     JS_EXPORT(read) int read() {
+        // closed: no pin
         if (!isOpen()) {
             return js::fail("gpio: closed");
         }
+
+        // its level
         return hal::gpio::read(_pin);
     }
 
@@ -143,9 +150,12 @@ public:
      * condition). The fast path of the module.
      */
     JS_EXPORT(write) void write(js::Value level) {
+        // closed: no pin
         if (!isOpen()) {
             return (void)js::fail("gpio: closed");
         }
+
+        // any value, as a condition: 1 or 0
         int high = JS_ToBool(js::context(), level.get()) > 0 ? 1 : 0;
         hal::gpio::write(_pin, high);
     }
@@ -154,9 +164,12 @@ public:
      * JS: inverts the level of an output.
      */
     JS_EXPORT(toggle) void toggle() {
+        // closed: no pin
         if (!isOpen()) {
             return (void)js::fail("gpio: closed");
         }
+
+        // the output latch inverted
         hal::gpio::toggle(_pin);
     }
 
@@ -166,6 +179,7 @@ public:
      * previous callback. Keeps the program running until close().
      */
     JS_EXPORT(onChange) void onChange(js::Function callback, js::Optional<ChangeOptions> options) {
+        // closed: no pin
         if (!isOpen()) {
             return (void)js::fail("gpio: closed");
         }
@@ -180,6 +194,8 @@ public:
         if (!startWatching()) {
             return (void)js::fail("gpio: cannot watch pin %d", _pin);
         }
+
+        // the program stays alive for the callback
         updateKeepAlive();
     }
 
@@ -188,9 +204,11 @@ public:
      * already), rejected after 'timeout' ms or by close(). One at a time.
      */
     JS_EXPORT(waitFor) js::Promise<js::Value> waitFor(js::Range<int, 0, 1> level, js::Optional<WaitOptions> options) {
+        // an open pin, one wait at a time
         if (!isOpen()) {
             return js::fail("gpio: closed");
         }
+
         if (_waiter.pending()) {
             return js::fail("gpio: a waitFor is already pending on pin %d", _pin);
         }
@@ -216,9 +234,11 @@ public:
         bool hasTimeout = options.has() && options.value().timeout.has();
         if (hasTimeout) {
             int timeoutMs = options.value().timeout.value();
-            _waitTimer = rt::Loop::current()->addTimer(timeoutMs, false, timeoutFunction(), js::Args{ js::context(), 0, nullptr });
+            js::Args noArguments = js::Args{ js::context(), 0, nullptr };
+            _waitTimer = rt::Loop::current()->addTimer(timeoutMs, false, timeoutFunction(), noArguments);
         }
 
+        // the program stays alive for the wait
         updateKeepAlive();
         return promise;
     }
@@ -228,6 +248,7 @@ public:
      * boot. The object can no longer be used.
      */
     JS_EXPORT(close) void close() {
+        // closed already: nothing to do
         if (!isOpen()) {
             return;
         }
@@ -251,10 +272,13 @@ public:
      * The timer of waitFor ran out: rejects the wait (JS thread).
      */
     void waitTimedOut() {
+        // the timer is gone; the wait fails
         _waitTimer = 0;
         if (_waiter.pending()) {
             _waiter.reject("gpio: waitFor timed out");
         }
+
+        // the pin is watched only while something needs it
         stopWatchingIfUnused();
         updateKeepAlive();
     }
@@ -328,12 +352,15 @@ private:
      * finalizer). The changes already queued are dropped with the source.
      */
     void stopWatching() {
+        // not watching: nothing to stop
         if (_loop == nullptr) {
             return;
         }
 
+        // the hal first: no new change from now on
         hal::gpio::unwatch(_pin);
 
+        // then the target (released outside the lock), and the source
         targetLock.lock();
         rt::Mailbox *mailbox = targets[_pin].mailbox;
         targets[_pin] = Target{ nullptr, { -1, 0 } };
@@ -348,7 +375,8 @@ private:
      * Stops watching when neither a callback nor a wait needs it.
      */
     void stopWatchingIfUnused() {
-        if (_changeCallback.isUndefined() && !_waiter.pending()) {
+        bool unused = _changeCallback.isUndefined() && !_waiter.pending();
+        if (unused) {
             stopWatching();
         }
     }
@@ -380,6 +408,7 @@ private:
      * pin (owners), never through a pointer kept by the loop.
      */
     js::Function timeoutFunction() {
+        // a C function whose data is the pin number
         JSContext *ctx = js::context();
         JSValue pinValue = JS_NewInt32(ctx, _pin);
         JSValue function = JS_NewCFunctionData(ctx, &onWaitTimeout, 0, 0, 1, &pinValue);
@@ -391,11 +420,16 @@ private:
      * rejects its wait.
      */
     static JSValue onWaitTimeout(JSContext *ctx, JSValueConst, int, JSValueConst *, int, JSValue *data) {
+        // the pin, kept in the data of the function
         int32_t pin = 0;
         JS_ToInt32(ctx, &pin, data[0]);
-        if (pin >= 0 && pin < MAX_PINS && owners[pin] != nullptr) {
+
+        // its open Gpio, if any, rejects its wait
+        bool owned = pin >= 0 && pin < MAX_PINS && owners[pin] != nullptr;
+        if (owned) {
             owners[pin]->waitTimedOut();
         }
+
         return JS_UNDEFINED;
     }
 
@@ -404,6 +438,7 @@ private:
      * calls the callback if the edge matches.
      */
     static void onMessage(void *opaque, const rt::Message *message) {
+        // the level the hal posted
         Gpio *gpio = (Gpio *)opaque;
         int level = (int)message->value;
 

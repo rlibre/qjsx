@@ -36,7 +36,8 @@ public:
     /**
      * Virtual destructor, for the platform implementations.
      */
-    virtual      ~Link() {}
+    virtual      ~Link() {
+    }
 
     /**
      * Sends whole frames to the host, with the agent mutex held (frames never interleave).
@@ -55,7 +56,8 @@ public:
     /**
      * Virtual destructor, for the platform implementations.
      */
-    virtual      ~Storage() {}
+    virtual      ~Storage() {
+    }
 
     /**
      * Prepares the reception of a package of 'size' bytes (erases the partition, opens a
@@ -93,7 +95,8 @@ public:
     /**
      * Virtual destructor, for the platform implementations.
      */
-    virtual      ~Controller() {}
+    virtual      ~Controller() {
+    }
 
     /**
      * Stops the running program if any, starts the installed package.
@@ -130,6 +133,7 @@ public:
     virtual void jsLoad(int *load, int *peak) = 0;
 };
 
+// What the device says of itself to the host (HELLO answer).
 struct Identity {
     const char *name;       // "qjsx desktop agent", "esp32-s3"...
     const char *engine;     // QuickJS version

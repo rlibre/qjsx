@@ -96,9 +96,10 @@ const overrides = {
     add_export_entry: 'compiler/parser-module.c',
 };
 
-// ---------------------------------------------------------------------------
-// Patches applied before the split.
+// ### Patches applied before the split ########################################
 
+// The JSON parser gets a state of its own (JSONParseState) instead of the
+// parser state of the compiler: these declarations go to builtins/json.c.
 const JSON_DECLARATIONS = `
 /* JSON parser state, independent from the JavaScript parser */
 
@@ -204,8 +205,10 @@ static __attribute__((format(printf, 2, 3))) int json_parse_error(JSONParseState
 }
 `;
 
+// Lines of quickjs.c of the JSON parser (its units are rewritten).
 const JSON_RANGES = [[23154, 23529], [49092, 49467]];
 
+// [pattern, replacement] applied to the text of those units.
 const JSON_REPLACEMENTS = [
     [/\bJSParseState\b/g, 'JSONParseState'],
     [/\bjs_parse_error_pos\(/g, 'json_parse_error_pos('],
@@ -218,7 +221,12 @@ const JSON_REPLACEMENTS = [
 
 const jsonPatch = {
     name: 'JSON parser with its own state',
+    /**
+     * Rewrites the units of the JSON parser for its own state, then adds the
+     * declarations of that state to builtins/json.c.
+     */
     apply({ units, parseUnits, analyzeUnit }) {
+        // the units of the JSON parser use JSONParseState
         const inJsonRange = unit => JSON_RANGES.some(([a, b]) => unit.startLine >= a && unit.startLine <= b);
         for (const unit of units.filter(inJsonRange)) {
             for (const [pattern, replacement] of JSON_REPLACEMENTS) {
@@ -226,6 +234,7 @@ const jsonPatch = {
             }
             analyzeUnit(unit);
         }
+        // the declarations of its state, sorted just before its first unit
         const synthetic = parseUnits(JSON_DECLARATIONS, 0).units;
         synthetic.forEach((unit, k) => {
             unit.synthetic = true;
@@ -237,6 +246,8 @@ const jsonPatch = {
     },
 };
 
+// add_export_entry2() without parser state: usable at run time
+// (JS_AddModuleExport), with no compiler.
 const ADD_EXPORT_ENTRY2 = `static JSExportEntry *add_export_entry2(JSContext *ctx, JSModuleDef *m,
                                        JSAtom local_name, JSAtom export_name,
                                        JSExportTypeEnum export_type)
@@ -261,6 +272,7 @@ const ADD_EXPORT_ENTRY2 = `static JSExportEntry *add_export_entry2(JSContext *ct
     return me;
 }`;
 
+// add_export_entry() of the parser, over add_export_entry2().
 const ADD_EXPORT_ENTRY = `/* same as add_export_entry2() but reports the error with the source position */
 static JSExportEntry *add_export_entry(JSParseState *s, JSModuleDef *m,
                                        JSAtom local_name, JSAtom export_name,
@@ -277,15 +289,22 @@ static JSExportEntry *add_export_entry(JSParseState *s, JSModuleDef *m,
 
 const exportPatch = {
     name: 'module exports without parser state at run time',
+    /**
+     * Replaces add_export_entry2() and add_export_entry(), then fixes the
+     * call of JS_AddModuleExport.
+     */
     apply({ findUnit, analyzeUnit }) {
+        // the run time version, without parser state
         const runtimeVersion = findUnit('add_export_entry2');
         runtimeVersion.text = ADD_EXPORT_ENTRY2;
         analyzeUnit(runtimeVersion);
 
+        // the parser's version, which reports the source position
         const parserVersion = findUnit('add_export_entry');
         parserVersion.text = ADD_EXPORT_ENTRY;
         analyzeUnit(parserVersion);
 
+        // the run time caller loses the parser state argument
         const caller = findUnit('JS_AddModuleExport');
         const before = caller.text;
         caller.text = caller.text.replace('add_export_entry2(ctx, NULL, m,', 'add_export_entry2(ctx, m,');
@@ -296,6 +315,7 @@ const exportPatch = {
     },
 };
 
+// What split.js reads.
 module.exports = {
     version,
     preludeEnd,

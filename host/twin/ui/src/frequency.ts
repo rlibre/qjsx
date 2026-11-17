@@ -13,13 +13,18 @@
  * fits: "50 Hz", "1 kHz", "1.22 kHz", "100 kHz", "3.4 MHz".
  */
 export function frequencyText(hz: number) {
+    // three significant digits (Number drops the exponent toPrecision may write)
     const rounded = Number(hz.toPrecision(3));
+
+    // the largest unit it reaches
     if (rounded >= 1000000) {
         return `${rounded / 1000000} MHz`;
     }
+
     if (rounded >= 1000) {
         return `${rounded / 1000} kHz`;
     }
+
     return `${rounded} Hz`;
 }
 

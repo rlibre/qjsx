@@ -1806,6 +1806,9 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
             do_get_var:
                 emit_source_pos(s, source_ptr);
                 emit_op(s, OP_scope_get_var);
+                /* qjsx: a use for the outline of the module (engine change W);
+                   an assignment to the name starts here too */
+                js_outline_name_used(s, name);
                 emit_u32(s, name);
                 emit_u16(s, s->cur_func->scope_level);
             }

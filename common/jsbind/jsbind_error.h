@@ -362,6 +362,8 @@ inline JSValue makeError(JSContext *ctx, const char *message) {
 typedef void ErrorWriter(const char *text, size_t length);
 
 namespace detail {
+
+// Set by setErrorWriter(); nullptr: stderr.
 inline ErrorWriter *errorWriter = nullptr;
 
 /**
@@ -374,6 +376,7 @@ inline void writeError(const char *text) {
         fputs(text, stderr);
     }
 }
+
 } // namespace detail
 
 /**
@@ -407,6 +410,7 @@ inline void reportException(JSContext *ctx, const char *prefix = "Uncaught") {
     } else {
         snprintf(line, sizeof(line), "%s %s\n", prefix, text);
     }
+
     detail::writeError(line);
     JS_FreeCString(ctx, text);
 
@@ -425,6 +429,7 @@ inline void reportException(JSContext *ctx, const char *prefix = "Uncaught") {
         JS_FreeValue(ctx, stack);
     }
 
+    // done with the exception
     JS_FreeValue(ctx, exception);
 }
 

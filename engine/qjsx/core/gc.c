@@ -528,6 +528,11 @@ static void mark_children(JSRuntime *rt, JSGCObjectHeader *gp,
             }
             JS_MarkValue(rt, s->resolving_funcs[0], mark_func);
             JS_MarkValue(rt, s->resolving_funcs[1], mark_func);
+            /* qjsx: engine change V: the value of the resume job, the
+               awaiting function of 'await f()' (V2) */
+            JS_MarkValue(rt, s->await_value, mark_func);
+            if (s->awaiter)
+                mark_func(rt, &s->awaiter->header);
         }
         break;
     case JS_GC_OBJ_TYPE_SHAPE:

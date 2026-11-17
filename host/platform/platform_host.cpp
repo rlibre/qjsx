@@ -57,6 +57,7 @@ int64_t counterFrequency() {
  * next step, 15.6 ms later.
  */
 int64_t monotonicMs() {
+    // the counter now (its frequency read once)
     static const int64_t frequency = counterFrequency();
     LARGE_INTEGER counter;
     QueryPerformanceCounter(&counter);
@@ -73,6 +74,7 @@ int64_t monotonicMs() {
  */
 void randomBytes(void *buffer, size_t size) {
     uint8_t *next = (uint8_t *)buffer;
+
     while (size > 0) {
         // one piece
         ULONG piece = size > 0xFFFFFFFFu ? 0xFFFFFFFFu : (ULONG)size;
@@ -81,6 +83,7 @@ void randomBytes(void *buffer, size_t size) {
             fatal("the system gave no random bytes (BCryptGenRandom)");
         }
 
+        // the rest
         next += piece;
         size -= piece;
     }
@@ -88,7 +91,7 @@ void randomBytes(void *buffer, size_t size) {
 
 // What Signal::_state points to.
 struct SignalState {
-    CRITICAL_SECTION lock;          // taken by lock() / unlock()
+    CRITICAL_SECTION   lock;        // taken by lock() / unlock()
     CONDITION_VARIABLE condition;   // waited on by wait(), woken by notify()
 };
 
@@ -97,6 +100,7 @@ struct SignalState {
  * the destructor).
  */
 Signal::Signal() {
+    // the state, its lock and its condition
     SignalState *state = (SignalState *)memory::allocate(sizeof(SignalState));
     InitializeCriticalSection(&state->lock);
     InitializeConditionVariable(&state->condition);
@@ -132,6 +136,7 @@ void Signal::unlock() {
  * while waiting). Returns false on timeout (or failure).
  */
 bool Signal::wait(int64_t timeoutMs) {
+    // INFINITE for a negative timeout
     SignalState *state = (SignalState *)_state;
     DWORD timeout = timeoutMs < 0 ? INFINITE : (DWORD)timeoutMs;
     return SleepConditionVariableCS(&state->condition, &state->lock, timeout) != 0;
@@ -147,8 +152,8 @@ void Signal::notify() {
 namespace {
 // What startThread() gives to the new thread (malloc'd, freed by the thread).
 struct ThreadStart {
-    ThreadFunction *run;   // thread function
-    void *argument;        // passed to run
+    ThreadFunction *run;        // thread function
+    void           *argument;   // passed to run
 };
 
 /**
@@ -248,18 +253,24 @@ void randomBytes(void *buffer, size_t size) {
     arc4random_buf(buffer, size);
 #else
     uint8_t *next = (uint8_t *)buffer;
+
     while (size > 0) {
+        // as many as it gives; interrupted: again
         ssize_t got = getrandom(next, size, 0);
         if (got < 0 && errno == EINTR) {
             continue;
         }
+
+        // no answer at all: nothing can go on without random numbers
         if (got <= 0) {
             fatal("the system gave no random bytes (getrandom)");
         }
 
+        // the rest
         next += got;
         size -= (size_t)got;
     }
+
 #endif
 }
 
@@ -274,8 +285,8 @@ int64_t monotonicMs() {
 
 // What Signal::_state points to.
 struct SignalState {
-    pthread_mutex_t lock;       // taken by lock() / unlock()
-    pthread_cond_t condition;   // waited on by wait(), woken by notify()
+    pthread_mutex_t lock;        // taken by lock() / unlock()
+    pthread_cond_t  condition;   // waited on by wait(), woken by notify()
 };
 
 /**
@@ -283,6 +294,7 @@ struct SignalState {
  * the destructor).
  */
 Signal::Signal() {
+    // the state and its mutex
     SignalState *state = (SignalState *)memory::allocate(sizeof(SignalState));
     pthread_mutex_init(&state->lock, nullptr);
 
@@ -369,8 +381,8 @@ void Signal::notify() {
 namespace {
 // What startThread() gives to the new thread (malloc'd, freed by the thread).
 struct ThreadStart {
-    ThreadFunction *run;   // thread function
-    void *argument;        // passed to run
+    ThreadFunction *run;        // thread function
+    void           *argument;   // passed to run
 };
 
 /**

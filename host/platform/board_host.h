@@ -15,18 +15,16 @@
 
 namespace board {
 
-/**
- * Options of the desktop board, given by "qjsx agent".
- */
+// Options of the desktop board, given by "qjsx agent".
 struct HostOptions {
-    const char *host;      // address to listen on
-    int         port;      // TCP port to listen on
-    const char *storage;   // directory of <storage>/app.qjspkg and app.buildid
+    const char *host;       // address to listen on
+    int         port;       // TCP port to listen on
+    const char *storage;    // directory of <storage>/app.qjspkg and app.buildid
     // the digital twin of a board ("qjsx agent --board"): what the agent
     // reports instead of the desktop; nullptr: the desktop
-    const char *chip;      // chip of the board ("ESP32-S3")
-    const char *board;     // name of the board ("YD-ESP32-S3")
-    const char *platform;  // process.platform of the board ("esp32")
+    const char *chip;       // chip of the board ("ESP32-S3")
+    const char *board;      // name of the board ("YD-ESP32-S3")
+    const char *platform;   // process.platform of the board ("esp32")
     size_t      maxMessage; // largest message of the agent's link (board::agentMaxMessage); 0: 64 KB
 };
 

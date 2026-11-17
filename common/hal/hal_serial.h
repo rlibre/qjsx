@@ -45,10 +45,11 @@ struct Settings {
     Parity parity;                  // parity bit
     int    stopBits;                // 1 or 2
     bool   flowControl;             // RTS / CTS hardware flow control
-    int    tx;                      // board: pins of the signals; NO_PIN: not wired
-    int    rx;                      //   (always NO_PIN for a named port)
-    int    rts;
-    int    cts;
+    // board: pins of the signals; NO_PIN: not wired (always for a named port)
+    int    tx;                      // transmitted data
+    int    rx;                      // received data
+    int    rts;                     // request to send
+    int    cts;                     // clear to send
 };
 
 // An open port, owned by the driver (opaque to the module).

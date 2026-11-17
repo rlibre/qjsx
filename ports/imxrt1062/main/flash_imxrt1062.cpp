@@ -96,7 +96,8 @@ bool start() {
  * Erases one sector through the ROM.
  */
 bool eraseSector(uint32_t offset) {
-    if (!started || offset % SECTOR_SIZE != 0) {
+    bool aligned = offset % SECTOR_SIZE == 0;
+    if (!started || !aligned) {
         return false;
     }
 

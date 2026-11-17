@@ -186,6 +186,7 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     REFRESH_DEBUG_DISPATCH();   /* qjsx */
     for(;;) {
         int call_argc;
+        int call_flags;   /* qjsx: engine change V2 */
         JSValue *call_argv;
 
         SWITCH(pc) {
@@ -501,8 +502,11 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             has_call_argc:
                 call_argv = sp - call_argc;
                 sf->cur_pc = pc;
+                /* qjsx: engine change V2: 'await f()' in an async function */
+                call_flags = (unlikely(*pc == OP_await) && b->func_kind == JS_FUNC_ASYNC) ?
+                    JS_CALL_FLAG_AWAITED : 0;
                 ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
-                                          JS_UNDEFINED, call_argc, call_argv, 0);
+                                          JS_UNDEFINED, call_argc, call_argv, call_flags);
                 if (unlikely(JS_IsException(ret_val)))
                     goto exception;
                 if (opcode == OP_tail_call)
@@ -539,8 +543,11 @@ JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 pc += 2;
                 call_argv = sp - call_argc;
                 sf->cur_pc = pc;
+                /* qjsx: engine change V2: 'await obj.f()' in an async function */
+                call_flags = (unlikely(*pc == OP_await) && b->func_kind == JS_FUNC_ASYNC) ?
+                    JS_CALL_FLAG_AWAITED : 0;
                 ret_val = JS_CallInternal(ctx, call_argv[-1], call_argv[-2],
-                                          JS_UNDEFINED, call_argc, call_argv, 0);
+                                          JS_UNDEFINED, call_argc, call_argv, call_flags);
                 if (unlikely(JS_IsException(ret_val)))
                     goto exception;
                 if (opcode == OP_tail_call_method)

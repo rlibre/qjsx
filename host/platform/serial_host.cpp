@@ -63,9 +63,13 @@ bool configurePort(HANDLE handle, const Settings *settings) {
     // speed and character format
     state.BaudRate = (DWORD)settings->baudRate;
     state.ByteSize = (BYTE)settings->dataBits;
-    state.Parity = settings->parity == Parity::even  ? EVENPARITY
-                 : settings->parity == Parity::odd   ? ODDPARITY
-                                                     : NOPARITY;
+    state.Parity = NOPARITY;
+    if (settings->parity == Parity::even) {
+        state.Parity = EVENPARITY;
+    } else if (settings->parity == Parity::odd) {
+        state.Parity = ODDPARITY;
+    }
+
     state.fParity = settings->parity != Parity::none;
     state.StopBits = settings->stopBits == 2 ? TWOSTOPBITS : ONESTOPBIT;
     state.fBinary = TRUE;
@@ -91,7 +95,8 @@ bool configurePort(HANDLE handle, const Settings *settings) {
 Port *openPort(const char *name, int, const Settings *settings, int *error) {
     // add the "\\.\" device prefix if missing ("COM10" and above need it)
     char device[300];
-    snprintf(device, sizeof(device), strncmp(name, "\\\\.\\", 4) == 0 ? "%s" : "\\\\.\\%s", name);
+    bool hasPrefix = strncmp(name, "\\\\.\\", 4) == 0;
+    snprintf(device, sizeof(device), hasPrefix ? "%s" : "\\\\.\\%s", name);
 
     // open it for reading and writing, not shared, for overlapped I/O (reads
     // and writes are then independent, see the top of the file)
@@ -99,7 +104,13 @@ Port *openPort(const char *name, int, const Settings *settings, int *error) {
     HANDLE handle = CreateFileA(device, access, 0, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
         DWORD failure = GetLastError();
-        *error = failure == ERROR_FILE_NOT_FOUND ? ENOENT : failure == ERROR_ACCESS_DENIED ? EBUSY : EIO;
+        *error = EIO;
+        if (failure == ERROR_FILE_NOT_FOUND) {
+            *error = ENOENT;
+        } else if (failure == ERROR_ACCESS_DENIED) {
+            *error = EBUSY;
+        }
+
         return nullptr;
     }
 
@@ -110,6 +121,7 @@ Port *openPort(const char *name, int, const Settings *settings, int *error) {
         return nullptr;
     }
 
+    // the port, owning the handle
     Port *port = (Port *)memory::allocate(sizeof(Port));
     port->handle = handle;
     return port;
@@ -146,6 +158,7 @@ bool endOperation(HANDLE handle, BOOL started, OVERLAPPED *operation, DWORD *tra
  * Reads what is available, waiting 100 ms at most (see configurePort).
  */
 int readPort(Port *port, uint8_t *buffer, size_t size) {
+    // an operation of its own
     OVERLAPPED operation;
     if (!beginOperation(&operation)) {
         return -1;
@@ -166,6 +179,7 @@ int readPort(Port *port, uint8_t *buffer, size_t size) {
  */
 bool writePort(Port *port, const uint8_t *data, size_t size) {
     while (size > 0) {
+        // an operation of its own
         OVERLAPPED operation;
         if (!beginOperation(&operation)) {
             return false;
@@ -174,10 +188,12 @@ bool writePort(Port *port, const uint8_t *data, size_t size) {
         // start the write, then wait until the bytes are taken
         DWORD written = 0;
         BOOL started = WriteFile(port->handle, data, (DWORD)size, nullptr, &operation);
-        if (!endOperation(port->handle, started, &operation, &written) || written == 0) {
+        bool ended = endOperation(port->handle, started, &operation, &written);
+        if (!ended || written == 0) {
             return false;
         }
 
+        // the rest
         data += written;
         size -= written;
     }
@@ -226,12 +242,14 @@ void listPorts(hal::serial::ListHandler *add, void *context) {
             break;
         }
 
+        // a text value: the name of a port
         if (type == REG_SZ) {
             data[dataSize] = 0;
             add(context, data, -1);
         }
     }
 
+    // done with the key
     RegCloseKey(key);
 }
 
@@ -381,6 +399,7 @@ Port *openPort(const char *name, int, const Settings *settings, int *error) {
         return nullptr;
     }
 
+    // the port, owning the descriptor
     Port *port = (Port *)memory::allocate(sizeof(Port));
     port->handle = handle;
     return port;
@@ -406,15 +425,18 @@ int readPort(Port *port, uint8_t *buffer, size_t size) {
  */
 bool writePort(Port *port, const uint8_t *data, size_t size) {
     while (size > 0) {
+        // as many as it takes; interrupted: again
         ssize_t written = write(port->handle, data, size);
         if (written < 0 && errno == EINTR) {
             continue;
         }
 
+        // a failure stops
         if (written <= 0) {
             return false;
         }
 
+        // the rest
         data += written;
         size -= written;
     }
@@ -455,11 +477,13 @@ void listPorts(hal::serial::ListHandler *add, void *context) {
         }
     }
 
+    // done with /dev
     closedir(directory);
 }
 
 #endif
 
+// The driver of the PC's ports (serialDriver).
 const hal::serial::Driver HOST_DRIVER = {
     true,                           // ports named by the system
     &openPort,

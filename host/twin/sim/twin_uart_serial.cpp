@@ -94,8 +94,12 @@ void copyName(char *out, size_t size, const char *text) {
  * 'text' as a JSON string into 'out' (quotes and backslashes escaped).
  */
 void jsonString(char *out, size_t size, const char *text) {
+    // the opening quote
     size_t used = 0;
     out[used++] = '"';
+
+    // each character, escaped if needed, while there is room for an escaped
+    // character, the closing quote and the terminating zero
     for (const char *c = text; *c != 0 && used + 3 < size; c++) {
         if (*c == '"' || *c == '\\') {
             out[used++] = '\\';
@@ -104,6 +108,7 @@ void jsonString(char *out, size_t size, const char *text) {
         out[used++] = *c;
     }
 
+    // the closing quote
     out[used++] = '"';
     out[used] = 0;
 }
@@ -140,7 +145,11 @@ void takeChoice(void *context, JSContext *ctx, JSValueConst choice) {
 
     // the port
     JSValue portValue = JS_GetPropertyStr(ctx, choice, "port");
-    const char *port = JS_IsString(portValue) ? JS_ToCString(ctx, portValue) : nullptr;
+    const char *port = nullptr;
+    if (JS_IsString(portValue)) {
+        port = JS_ToCString(ctx, portValue);
+    }
+
     copyName(link->port, sizeof(link->port), port);
     JS_FreeCString(ctx, port);
     JS_FreeValue(ctx, portValue);
@@ -150,6 +159,7 @@ void takeChoice(void *context, JSContext *ctx, JSValueConst choice) {
     link->connect = JS_ToBool(ctx, connectValue) == 1;
     JS_FreeValue(ctx, connectValue);
 
+    // (real speed when missing)
     JSValue speedValue = JS_GetPropertyStr(ctx, choice, "realSpeed");
     link->realSpeed = JS_IsUndefined(speedValue) || JS_ToBool(ctx, speedValue) == 1;
     JS_FreeValue(ctx, speedValue);
@@ -205,6 +215,8 @@ int64_t lineMs(const hal::serial::Settings *settings, size_t size) {
  * Closes the PC port of a link (owning thread), between two writes.
  */
 void closePcPort(SerialLink *link) {
+    // taken from the link under both locks (no writer uses it then), the
+    // queue dropped
     link->portLock.lock();
     link->lock.lock();
     hal::serial::Port *port = link->open;
@@ -213,6 +225,7 @@ void closePcPort(SerialLink *link) {
     link->lock.unlock();
     link->portLock.unlock();
 
+    // then closed, outside the locks
     if (port != nullptr) {
         pcDriver()->close(port);
     }
@@ -242,7 +255,8 @@ void reconcile(SerialLink *link) {
     link->lock.lock();
     bool wanted = link->connect && link->uartOpen && link->port[0] != 0;
     uint32_t generation = link->generation;
-    bool stale = link->open != nullptr && (!wanted || generation != link->openGeneration);
+    bool outdated = !wanted || generation != link->openGeneration;
+    bool stale = link->open != nullptr && outdated;
     char name[SERIAL_NAME_SIZE];
     copyName(name, sizeof(name), link->port);
     hal::serial::Settings settings = pcSettings(&link->settings);
@@ -253,6 +267,7 @@ void reconcile(SerialLink *link) {
         closePcPort(link);
     }
 
+    // nothing more when not wanted, or open already
     if (!wanted || link->open != nullptr) {
         return;
     }
@@ -265,6 +280,7 @@ void reconcile(SerialLink *link) {
         return;
     }
 
+    // given to the writers, for that generation of the choice
     link->portLock.lock();
     link->lock.lock();
     link->open = port;
@@ -393,17 +409,20 @@ bool setupSerial() {
  * Takes what the page asks; a new port or a new wiring opens the port again.
  */
 void serialRequest(int uart, const char *port, bool connect, bool realSpeed) {
+    // the wiring of a UART of the board (none for the agent's link)
     SerialLink *link = linkAt(uart);
     if (link == nullptr) {
         return;
     }
 
+    // another port or another wiring: the owner opens it again
     link->lock.lock();
     bool newPort = strcmp(link->port, port) != 0 || link->connect != connect;
     if (newPort) {
         link->generation++;
     }
 
+    // the choice taken (a wiring asked again clears the last error), saved
     copyName(link->port, sizeof(link->port), port);
     link->connect = connect;
     link->realSpeed = realSpeed;
@@ -419,12 +438,16 @@ void serialRequest(int uart, const char *port, bool connect, bool realSpeed) {
  * The state of the wiring.
  */
 void serialState(int uart, SerialState *state) {
+    // all 0 without a wiring
     *state = SerialState{};
+
+    // the wiring of a UART of the board (none for the agent's link)
     SerialLink *link = linkAt(uart);
     if (link == nullptr) {
         return;
     }
 
+    // copied under the lock
     link->lock.lock();
     copyName(state->port, sizeof(state->port), link->port);
     state->connect = link->connect;
@@ -439,11 +462,13 @@ void serialState(int uart, SerialState *state) {
  * The UART is open with these settings: a wired port opens again with them.
  */
 void serialUartOpened(int uart, const hal::serial::Settings *settings) {
+    // the wiring of a UART of the board (none for the agent's link)
     SerialLink *link = linkAt(uart);
     if (link == nullptr) {
         return;
     }
 
+    // a new generation: the owning thread opens the port again
     link->lock.lock();
     link->uartOpen = true;
     link->settings = *settings;
@@ -455,11 +480,13 @@ void serialUartOpened(int uart, const hal::serial::Settings *settings) {
  * The UART is closed: the owning thread closes the port.
  */
 void serialUartClosed(int uart) {
+    // the wiring of a UART of the board (none for the agent's link)
     SerialLink *link = linkAt(uart);
     if (link == nullptr) {
         return;
     }
 
+    // the owning thread sees it and closes the port; the queue dropped
     link->lock.lock();
     link->uartOpen = false;
     link->queued = 0;
@@ -472,11 +499,13 @@ void serialUartClosed(int uart) {
  * (what does not fit is lost, said once). Nothing while the port is closed.
  */
 void serialUartWrite(int uart, const uint8_t *data, size_t size) {
+    // the wiring of a UART of the board (none for the agent's link)
     SerialLink *link = linkAt(uart);
     if (link == nullptr) {
         return;
     }
 
+    // the mode and the settings of the line
     link->lock.lock();
     bool realSpeed = link->realSpeed;
     hal::serial::Settings settings = link->settings;
@@ -492,7 +521,9 @@ void serialUartWrite(int uart, const uint8_t *data, size_t size) {
             return;
         }
 
-        int64_t left = lineMs(&settings, size) - (platform::monotonicMs() - start);
+        // the rest of the time of the line
+        int64_t spent = platform::monotonicMs() - start;
+        int64_t left = lineMs(&settings, size) - spent;
         if (left > 0) {
             platform::sleepMs((int)left);
         }
@@ -506,6 +537,8 @@ void serialUartWrite(int uart, const uint8_t *data, size_t size) {
     size_t taken = size < room ? size : room;
     memcpy(link->queue + link->queued, data, taken);
     link->queued += taken;
+
+    // a loss said once; the sending thread woken
     bool lost = link->open != nullptr && taken < size && !link->overflowSaid;
     link->overflowSaid = link->overflowSaid || lost;
     link->lock.notify();

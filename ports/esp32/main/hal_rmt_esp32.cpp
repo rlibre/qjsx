@@ -48,9 +48,9 @@ const int BLOCK_SYMBOLS = SOC_RMT_MEM_WORDS_PER_CHANNEL;
 const int BLOCK_SYMBOLS = 48;
 #endif
 
-const uint32_t MAX_SYMBOL_TICKS = 32767;               // 15 bits per duration in an RMT symbol
-const int EVENT_QUEUE_LENGTH = 16;                     // ends of transmission waiting for the task
-const int TRANSMIT_QUEUE_DEPTH = 4;                    // transmissions the driver may hold
+const uint32_t MAX_SYMBOL_TICKS = 32767;       // 15 bits per duration in an RMT symbol
+const int      EVENT_QUEUE_LENGTH = 16;        // ends of transmission waiting for the task
+const int      TRANSMIT_QUEUE_DEPTH = 4;       // transmissions the driver may hold
 
 // An open channel (JS thread, and the event task under channelLock for
 // 'pending', 'data' and 'reset').
@@ -63,11 +63,11 @@ struct Channel {
     int                  pending;       // transmissions of the send not over yet
 };
 
-Channel channels[CHANNELS];       // by channel number
-platform::Mutex channelLock;      // pending, data, reset of the channels; doneHandler
+Channel channels[CHANNELS];           // by channel number
+platform::Mutex channelLock;          // pending, data, reset of the channels; doneHandler
 DoneHandler *doneHandler = nullptr;   // set by setDoneHandler
-QueueHandle_t ends = nullptr;     // channels whose transmission ended, from the interrupt
-bool started = false;             // queue and event task (JS thread)
+QueueHandle_t ends = nullptr;         // channels whose transmission ended, from the interrupt
+bool started = false;                 // queue and event task (JS thread)
 
 /**
  * End of a transmission (interrupt): queues the channel number for the
@@ -97,8 +97,11 @@ void releaseCopies(Channel *channel) {
  */
 void eventTask(void *) {
     for (;;) {
+        // the next end of transmission, of a channel of the table
         int number = -1;
-        if (xQueueReceive(ends, &number, portMAX_DELAY) != pdTRUE || number < 0 || number >= CHANNELS) {
+        bool received = xQueueReceive(ends, &number, portMAX_DELAY) == pdTRUE;
+        bool valid = received && number >= 0 && number < CHANNELS;
+        if (!valid) {
             continue;
         }
 
@@ -110,9 +113,11 @@ void eventTask(void *) {
             channel->pending--;
             sendOver = channel->pending == 0;
         }
+
         if (sendOver) {
             releaseCopies(channel);
         }
+
         DoneHandler *handler = doneHandler;
         channelLock.unlock();
 
@@ -127,14 +132,18 @@ void eventTask(void *) {
  * Starts, once, the queue and the event task. False if one cannot start.
  */
 bool startEvents() {
+    // started already
     if (started) {
         return true;
     }
 
+    // the queue the interrupt fills
     ends = xQueueCreate(EVENT_QUEUE_LENGTH, sizeof(int));
     if (ends == nullptr) {
         return false;
     }
+
+    // the task that empties it
     if (!platform::startThread(&eventTask, nullptr, platform::defaultThreadOptions("rmt-events"))) {
         return false;
     }
@@ -161,19 +170,25 @@ size_t piecesOf(uint32_t ticks) {
 rmt_symbol_word_t *packPulses(const Pulse *pulses, size_t count, size_t *symbolCount) {
     // count the pieces, then the symbols
     size_t pieces = 0;
+
     for (size_t i = 0; i < count; i++) {
         pieces += piecesOf(pulses[i].ticks);
     }
+
+    // the symbols, zeroed, with one spare
     *symbolCount = (pieces + 1) / 2;
     rmt_symbol_word_t *symbols = (rmt_symbol_word_t *)memory::allocate(sizeof(rmt_symbol_word_t) * (*symbolCount + 1));
     memset(symbols, 0, sizeof(rmt_symbol_word_t) * (*symbolCount + 1));
 
     // write each piece in the first or the second half of a symbol
     size_t piece = 0;
+
     for (size_t i = 0; i < count; i++) {
         uint32_t left = pulses[i].ticks;
         int level = pulses[i].level ? 1 : 0;
+
         do {
+            // the next piece, in the free half of the current symbol
             uint32_t ticks = left > MAX_SYMBOL_TICKS ? MAX_SYMBOL_TICKS : left;
             rmt_symbol_word_t *symbol = &symbols[piece / 2];
             if (piece % 2 == 0) {
@@ -183,10 +198,12 @@ rmt_symbol_word_t *packPulses(const Pulse *pulses, size_t count, size_t *symbolC
                 symbol->duration1 = ticks;
                 symbol->level1 = level;
             }
+
             left -= ticks;
             piece++;
         } while (left > 0);
     }
+
     return symbols;
 }
 
@@ -197,6 +214,7 @@ Channel *openChannel(int number) {
     if (number < 0 || number >= CHANNELS || channels[number].handle == nullptr) {
         return nullptr;
     }
+
     return &channels[number];
 }
 
@@ -205,6 +223,7 @@ Channel *openChannel(int number) {
  * from now on). False, copies freed, if a send is in progress.
  */
 bool beginSend(Channel *channel, void *data, rmt_symbol_word_t *reset, int transmissions) {
+    // under the lock: no send in progress, then this one is
     channelLock.lock();
     bool busy = channel->pending > 0;
     if (!busy) {
@@ -212,12 +231,15 @@ bool beginSend(Channel *channel, void *data, rmt_symbol_word_t *reset, int trans
         channel->reset = reset;
         channel->pending = transmissions;
     }
+
     channelLock.unlock();
 
+    // refused: the copies are dropped here
     if (busy) {
         memory::release(data);
         memory::release(reset);
     }
+
     return !busy;
 }
 
@@ -227,12 +249,14 @@ bool beginSend(Channel *channel, void *data, rmt_symbol_word_t *reset, int trans
  * done: the caller reports the failure).
  */
 void cancelTransmissions(Channel *channel, int notQueued) {
+    // under the lock: fewer transmissions; none left: the send is over
     channelLock.lock();
     channel->pending -= notQueued;
     if (channel->pending <= 0) {
         channel->pending = 0;
         releaseCopies(channel);
     }
+
     channelLock.unlock();
 }
 
@@ -249,18 +273,22 @@ int channelCount() {
  * A free slot, its TX channel on the pin, its two encoders and its callback.
  */
 int open(int pin, uint32_t resolutionHz) {
+    // the queue and the event task, at the first open
     if (!startEvents()) {
         return -1;
     }
 
     // a free slot
     int number = 0;
+
     while (number < CHANNELS && channels[number].handle != nullptr) {
         number++;
     }
+
     if (number == CHANNELS) {
         return -1;
     }
+
     Channel *channel = &channels[number];
 
     // the TX channel: the pin, the resolution, one block of symbols
@@ -289,6 +317,7 @@ int open(int pin, uint32_t resolutionHz) {
         close(number);
         return -1;
     }
+
     return number;
 }
 
@@ -297,21 +326,25 @@ int open(int pin, uint32_t resolutionHz) {
  * dropped, its copies freed.
  */
 void close(int number) {
-    if (number < 0 || number >= CHANNELS || channels[number].handle == nullptr) {
+    // an open channel
+    Channel *channel = openChannel(number);
+    if (channel == nullptr) {
         return;
     }
-    Channel *channel = &channels[number];
 
     // stop the hardware, then free everything
     rmt_disable(channel->handle);
     if (channel->copyEncoder != nullptr) {
         rmt_del_encoder(channel->copyEncoder);
     }
+
     if (channel->bytesEncoder != nullptr) {
         rmt_del_encoder(channel->bytesEncoder);
     }
+
     rmt_del_channel(channel->handle);
 
+    // the copies of a send in progress, then the slot free
     channelLock.lock();
     releaseCopies(channel);
     *channel = Channel{ nullptr, nullptr, nullptr, nullptr, nullptr, 0 };
@@ -331,6 +364,7 @@ void setDoneHandler(DoneHandler *handler) {
  * The pulses as symbols, through the copy encoder.
  */
 bool sendPulses(int number, const Pulse *pulses, size_t count) {
+    // an open channel, something to send
     Channel *channel = openChannel(number);
     if (channel == nullptr || count == 0) {
         return false;
@@ -346,10 +380,12 @@ bool sendPulses(int number, const Pulse *pulses, size_t count) {
     // queue the transmission, low at the end
     rmt_transmit_config_t transmit = {};
     transmit.flags.eot_level = 0;
-    if (rmt_transmit(channel->handle, channel->copyEncoder, symbols, symbolCount * sizeof(rmt_symbol_word_t), &transmit) != ESP_OK) {
+    bool queued = rmt_transmit(channel->handle, channel->copyEncoder, symbols, symbolCount * sizeof(rmt_symbol_word_t), &transmit) == ESP_OK;
+    if (!queued) {
         cancelTransmissions(channel, 1);
         return false;
     }
+
     return true;
 }
 
@@ -358,6 +394,7 @@ bool sendPulses(int number, const Pulse *pulses, size_t count) {
  * reset as low symbols through the copy encoder.
  */
 bool sendBytes(int number, const uint8_t *bytes, size_t size, BitTiming bit0, BitTiming bit1, uint32_t resetTicks) {
+    // an open channel, something to send
     Channel *channel = openChannel(number);
     if (channel == nullptr || size == 0) {
         return false;
@@ -372,6 +409,7 @@ bool sendBytes(int number, const uint8_t *bytes, size_t size, BitTiming bit0, Bi
         return false;
     }
 
+    // each bit: high, then low
     rmt_bytes_encoder_config_t bytesConfig = {};
     bytesConfig.bit0.duration0 = bit0.high;
     bytesConfig.bit0.level0 = 1;
@@ -395,6 +433,8 @@ bool sendBytes(int number, const uint8_t *bytes, size_t size, BitTiming bit0, Bi
         Pulse low = { resetTicks, 0 };
         reset = packPulses(&low, 1, &resetCount);
     }
+
+    // the send: the bytes, and the reset if any
     int transmissions = reset != nullptr ? 2 : 1;
     if (!beginSend(channel, data, reset, transmissions)) {
         return false;
@@ -403,15 +443,20 @@ bool sendBytes(int number, const uint8_t *bytes, size_t size, BitTiming bit0, Bi
     // queue the bytes, then the reset
     rmt_transmit_config_t transmit = {};
     transmit.flags.eot_level = 0;
-    if (rmt_transmit(channel->handle, channel->bytesEncoder, data, size, &transmit) != ESP_OK) {
+    bool bytesQueued = rmt_transmit(channel->handle, channel->bytesEncoder, data, size, &transmit) == ESP_OK;
+    if (!bytesQueued) {
         cancelTransmissions(channel, transmissions);
         return false;
     }
+
+    // the reset failing to queue only shortens the send: the bytes go out
     if (reset != nullptr) {
-        if (rmt_transmit(channel->handle, channel->copyEncoder, reset, resetCount * sizeof(rmt_symbol_word_t), &transmit) != ESP_OK) {
+        bool resetQueued = rmt_transmit(channel->handle, channel->copyEncoder, reset, resetCount * sizeof(rmt_symbol_word_t), &transmit) == ESP_OK;
+        if (!resetQueued) {
             cancelTransmissions(channel, 1);
         }
     }
+
     return true;
 }
 

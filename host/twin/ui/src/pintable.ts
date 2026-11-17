@@ -25,6 +25,7 @@ function forceText(level: number) {
     if (level < 0) {
         return tx.twin.free;
     }
+
     return level === 1 ? tx.twin.force_on : tx.twin.force_off;
 }
 
@@ -42,19 +43,25 @@ function forceTooltip(level: number) {
  * it.
  */
 export function pinMode(state: PinState) {
+    // the uses of the device modules first
     if (state.adc) {
         return `adc ${state.voltage.toFixed(2)} V`;
     }
+
     if (state.pwm !== null) {
         const inverted = state.pwm.invert ? " inv" : "";
         return `pwm ${frequencyText(state.pwm.frequency)} ${percentText(state.pwm.duty)}${inverted}`;
     }
+
     if (state.i2c) {
         return "i2c";
     }
+
     if (state.rmt) {
         return "rmt";
     }
+
+    // else its gpio mode, if the program configured it
     return state.configured ? state.mode : "-";
 }
 
@@ -135,6 +142,8 @@ export class PinTable extends VBox {
      */
     constructor(props: BoxProps, settings: StateProxy<TwinSettings>) {
         super(props);
+
+        // the settings, watched below
         this._settings = settings;
 
         // the columns: their variable, title, first width in px; the part
@@ -162,6 +171,7 @@ export class PinTable extends VBox {
      * Builds the rows of a board's pins (no part on them until setParts).
      */
     setBoard(board: BoardInfo) {
+        // a row per pin, no part, no state yet
         this._partOfPin = new Array(board.pins).fill("");
         this._rows = this._partOfPin.map((_, pin) => new PinRow(pin));
         this.refs.rows.setContent(this._rows);
@@ -174,6 +184,7 @@ export class PinTable extends VBox {
     setParts(parts: PartInfo[]) {
         // the labels of the parts of each pin
         const labels: string[][] = this._partOfPin.map((): string[] => []);
+
         for (const part of parts) {
             for (const pin of part.pins) {
                 labels[pin]?.push(part.label);
@@ -190,9 +201,11 @@ export class PinTable extends VBox {
      * Shows the state of the pins.
      */
     setPins(pins: PinState[]) {
+        // each row, then the rows shown again (a pin may be used now)
         pins.forEach((state, pin) => {
             this._rows[pin]?.update(state);
         });
+
         this._last = pins;
         this._filter();
     }
@@ -201,6 +214,7 @@ export class PinTable extends VBox {
      * Hides the pins nothing uses, when the setting "used pins only" is on.
      */
     private _filter() {
+        // a row shown when the setting is off, or when its pin is used
         const usedOnly = this._settings.usedPinsOnly;
         this._rows.forEach((row, pin) => {
             const shown = !usedOnly || pinInUse(this._last[pin], this._partOfPin[pin] !== "");

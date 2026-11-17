@@ -33,6 +33,7 @@ export class SerialControl extends HBox {
         super({ cls: "serial-control" });
         this._uart = uart;
 
+        // the port, connect, the speed, then what is going on
         this.setContent([
             this.refs.port = new Combobox({
                 cls: "link-field",
@@ -64,7 +65,8 @@ export class SerialControl extends HBox {
      */
     setState(serial: SerialState, ports: string[]) {
         // the list, filled again only when the ports changed
-        const names = ports.includes(serial.port) || serial.port === "" ? ports : [serial.port, ...ports];
+        const isListed = ports.includes(serial.port) || serial.port === "";
+        const names = isListed ? ports : [serial.port, ...ports];
         const key = names.join("\n");
         const listChanged = key !== this._listed;
         if (listChanged) {
@@ -74,7 +76,8 @@ export class SerialControl extends HBox {
         }
 
         // the port chosen, or what the field says without one
-        if (listChanged || serial.port !== this._chosen) {
+        const choiceChanged = listChanged || serial.port !== this._chosen;
+        if (choiceChanged) {
             this._chosen = serial.port;
             const none = names.length === 0 ? tx.twin.serial_none : tx.twin.serial_choose;
             if (serial.port !== NO_PORT) {
@@ -103,6 +106,8 @@ export class SerialControl extends HBox {
         } else if (serial.connect) {
             status = tx.twin.serial_waiting;
         }
+
+        // shown, with a note when the command line or qjsx.json set it
         this.refs.status.setText(serial.fixed ? `${status} (${tx.twin.serial_fixed})` : status);
         this.refs.status.setClass("error", serial.error !== "");
         this.refs.status.setClass("connected", serial.connected);
@@ -113,13 +118,19 @@ export class SerialControl extends HBox {
      * without a port is refused here, with a warning.
      */
     private _request() {
+        // what the user chose
         const port = String(this.refs.port.getSelection() ?? NO_PORT);
         const connect = this.refs.connect.getCheck();
-        if (connect && port === NO_PORT) {
+
+        // connect without a port: unchecked, the user warned
+        const isRefused = connect && port === NO_PORT;
+        if (isRefused) {
             this.refs.connect.setCheck(false);
             warn(tx.twin.serial_port, tx.twin.serial_no_port);
             return;
         }
+
+        // asked to the twin
         wireUart(this._uart, port, connect, this.refs.realSpeed.getCheck());
     }
 }

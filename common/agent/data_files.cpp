@@ -42,6 +42,7 @@ struct Listing {
  * files left out).
  */
 bool addEntry(void *opaque, const char *name) {
+    // the temporary file of an unfinished write is not shown
     Listing *listing = (Listing *)opaque;
     if (isTemporary(name)) {
         return true;
@@ -59,6 +60,7 @@ bool addEntry(void *opaque, const char *name) {
     files::Status status = {};
     files::stat(path, &status);
 
+    // the entry, with a copy of its name
     FileEntry *entry = &listing->entries[listing->count++];
     entry->name = memory::copyText(name, strlen(name));
     entry->isDirectory = status.isDirectory;
@@ -72,6 +74,9 @@ struct Usage {
     uint64_t    used;     // bytes so far
 };
 
+/**
+ * Defined below: addFolderUsage() and addUsage() call each other.
+ */
 bool addUsage(void *opaque, const char *name);
 
 /**
@@ -89,6 +94,8 @@ void addFolderUsage(const char *folder, uint64_t *used) {
  */
 bool addUsage(void *opaque, const char *name) {
     Usage *usage = (Usage *)opaque;
+
+    // its type and size; an entry that vanished meanwhile counts nothing
     char path[MAX_PATH];
     snprintf(path, sizeof(path), "%s/%s", usage->folder, name);
     files::Status status = {};
@@ -96,11 +103,13 @@ bool addUsage(void *opaque, const char *name) {
         return true;
     }
 
+    // a folder: its content, recursively; a file: its size
     if (status.isDirectory) {
         addFolderUsage(path, &usage->used);
     } else {
         usage->used += (uint64_t)status.size;
     }
+
     return true;
 }
 
@@ -127,7 +136,10 @@ DataFiles::~DataFiles() {
  */
 void DataFiles::setFolder(const char *folder) {
     memory::release(_folder);
-    _folder = folder != nullptr ? memory::copyText(folder, strlen(folder)) : nullptr;
+    _folder = nullptr;
+    if (folder != nullptr) {
+        _folder = memory::copyText(folder, strlen(folder));
+    }
 }
 
 /**
@@ -136,6 +148,7 @@ void DataFiles::setFolder(const char *folder) {
  * as a '\' or a ':' (Windows would read them as separators or drives).
  */
 int DataFiles::resolve(const char *relative, size_t length, bool allowRoot, char **out) {
+    // no data folder: no file system
     if (_folder == nullptr) {
         return ENOSYS;
     }
@@ -145,12 +158,15 @@ int DataFiles::resolve(const char *relative, size_t length, bool allowRoot, char
     size_t used = (size_t)snprintf(path, sizeof(path), "%s", _folder);
     size_t start = 0;
     bool anyName = false;
+
     while (start <= length) {
         // the next component: up to '/' or the end
         size_t end = start;
+
         while (end < length && relative[end] != '/') {
             end++;
         }
+
         size_t size = end - start;
         const char *name = relative + start;
         start = end + 1;
@@ -160,11 +176,17 @@ int DataFiles::resolve(const char *relative, size_t length, bool allowRoot, char
         if (skipped) {
             continue;
         }
+
         bool parent = size == 2 && name[0] == '.' && name[1] == '.';
-        bool foreign = memchr(name, '\\', size) != nullptr || memchr(name, ':', size) != nullptr || memchr(name, 0, size) != nullptr;
+        bool hasBackslash = memchr(name, '\\', size) != nullptr;
+        bool hasColon = memchr(name, ':', size) != nullptr;
+        bool hasNull = memchr(name, 0, size) != nullptr;
+        bool foreign = hasBackslash || hasColon || hasNull;
         if (parent || foreign) {
             return EINVAL;
         }
+
+        // room for it, and for the suffix of a temporary file after it
         if (used + 1 + size + sizeof(TEMPORARY_SUFFIX) >= sizeof(path)) {
             return ENAMETOOLONG;
         }
@@ -189,6 +211,7 @@ int DataFiles::resolve(const char *relative, size_t length, bool allowRoot, char
  * The entries of a folder.
  */
 int DataFiles::list(const char *path, size_t length, FileEntry **entries, int *count) {
+    // the absolute path (the data folder itself allowed)
     char *folder = nullptr;
     int error = resolve(path, length, true, &folder);
     if (error != 0) {
@@ -209,6 +232,7 @@ int DataFiles::list(const char *path, size_t length, FileEntry **entries, int *c
         error = errno;
     }
 
+    // on failure, what was gathered is freed; else it goes to the caller
     memory::release(folder);
     if (error != 0) {
         freeEntries(listing.entries, listing.count);
@@ -227,6 +251,7 @@ void DataFiles::freeEntries(FileEntry *entries, int count) {
     for (int index = 0; index < count; index++) {
         memory::release(entries[index].name);
     }
+
     memory::release(entries);
 }
 
@@ -236,6 +261,7 @@ void DataFiles::freeEntries(FileEntry *entries, int count) {
  */
 int DataFiles::read(const char *path, size_t length, int64_t offset, uint8_t *buffer, size_t capacity, size_t *got,
                     int64_t *fileSize) {
+    // the absolute path
     char *file = nullptr;
     int error = resolve(path, length, false, &file);
     if (error != 0) {
@@ -257,12 +283,15 @@ int DataFiles::read(const char *path, size_t length, int64_t offset, uint8_t *bu
     if (error == 0 && opened == nullptr) {
         error = errno;
     }
+
+    // read from 'offset', then closed at once
     if (opened != nullptr) {
         bool positioned = fseek(opened, (long)offset, SEEK_SET) == 0;
         *got = positioned ? fread(buffer, 1, capacity, opened) : 0;
         if (!positioned || ferror(opened)) {
             error = EIO;
         }
+
         fclose(opened);
         *fileSize = status.size;
     }
@@ -275,11 +304,13 @@ int DataFiles::read(const char *path, size_t length, int64_t offset, uint8_t *bu
  * Creates the temporary file next to the target.
  */
 int DataFiles::beginWrite(const char *path, size_t length, int64_t size) {
+    // an unfinished write is dropped; a negative size refused
     abortWrite();
     if (size < 0) {
         return EINVAL;
     }
 
+    // the absolute path of the target
     char *target = nullptr;
     int error = resolve(path, length, false, &target);
     if (error != 0) {
@@ -306,6 +337,7 @@ int DataFiles::beginWrite(const char *path, size_t length, int64_t size) {
         return error;
     }
 
+    // the write in progress
     _writeFile = opened;
     _writeTarget = target;
     _writeTemporary = temporary;
@@ -318,10 +350,14 @@ int DataFiles::beginWrite(const char *path, size_t length, int64_t size) {
  * Appends the bytes, in order, within the announced size.
  */
 int DataFiles::writeChunk(int64_t offset, const uint8_t *data, size_t size) {
-    if (_writeFile == nullptr || offset != _writeReceived || _writeReceived + (int64_t)size > _writeSize) {
+    // a write in progress, the next bytes in order, within the announced size
+    bool inOrder = _writeFile != nullptr && offset == _writeReceived;
+    bool fits = _writeReceived + (int64_t)size <= _writeSize;
+    if (!inOrder || !fits) {
         return EINVAL;
     }
 
+    // appended; a failed write drops the whole file
     if (fwrite(data, 1, size, _writeFile) != size) {
         int error = errno != 0 ? errno : EIO;
         abortWrite();
@@ -337,6 +373,7 @@ int DataFiles::writeChunk(int64_t offset, const uint8_t *data, size_t size) {
  * onto the target.
  */
 int DataFiles::endWrite() {
+    // a write in progress, every byte received
     if (_writeFile == nullptr || _writeReceived != _writeSize) {
         return EINVAL;
     }
@@ -346,16 +383,20 @@ int DataFiles::endWrite() {
     if (fclose(_writeFile) != 0) {
         error = errno != 0 ? errno : EIO;
     }
+
     _writeFile = nullptr;
 
     // in place of the target
     if (error == 0 && !files::rename(_writeTemporary, _writeTarget)) {
         error = errno;
     }
+
+    // a failure leaves no temporary file behind
     if (error != 0) {
         files::removeFile(_writeTemporary);
     }
 
+    // no write in progress any more
     memory::release(_writeTemporary);
     memory::release(_writeTarget);
     _writeTemporary = nullptr;
@@ -367,11 +408,13 @@ int DataFiles::endWrite() {
  * Closes and removes the temporary file.
  */
 void DataFiles::abortWrite() {
+    // the temporary file, if a write is in progress
     if (_writeFile != nullptr) {
         fclose(_writeFile);
         files::removeFile(_writeTemporary);
     }
 
+    // its paths
     memory::release(_writeTemporary);
     memory::release(_writeTarget);
     _writeFile = nullptr;
@@ -383,14 +426,24 @@ void DataFiles::abortWrite() {
  * A file, or an empty folder.
  */
 int DataFiles::remove(const char *path, size_t length) {
+    // the absolute path (never the data folder itself)
     char *target = nullptr;
     int error = resolve(path, length, false, &target);
     if (error != 0) {
         return error;
     }
 
+    // removed as a folder or as a file, by its type
     files::Status status = {};
-    bool removed = files::stat(target, &status) && (status.isDirectory ? files::removeDirectory(target) : files::removeFile(target));
+    bool removed = false;
+    if (files::stat(target, &status)) {
+        if (status.isDirectory) {
+            removed = files::removeDirectory(target);
+        } else {
+            removed = files::removeFile(target);
+        }
+    }
+
     error = removed ? 0 : errno;
     memory::release(target);
     return error;
@@ -415,6 +468,7 @@ int DataFiles::makeDirectory(const char *path, size_t length) {
  * Checks the types of both ends, then renames.
  */
 int DataFiles::rename(const char *from, size_t fromLength, const char *to, size_t toLength) {
+    // the absolute paths of both ends
     char *source = nullptr;
     char *target = nullptr;
     int error = resolve(from, fromLength, false, &source);
@@ -429,6 +483,7 @@ int DataFiles::rename(const char *from, size_t fromLength, const char *to, size_
     if (error == 0 && !files::stat(source, &sourceStatus)) {
         error = errno;
     }
+
     bool targetExists = error == 0 && files::stat(target, &targetStatus);
     if (error == 0 && targetExists && sourceStatus.isDirectory) {
         error = EEXIST;
@@ -450,6 +505,7 @@ int DataFiles::rename(const char *from, size_t fromLength, const char *to, size_
  * The sizes of every file, folders walked.
  */
 int DataFiles::usedBytes(uint64_t *used) {
+    // no data folder: no file system
     if (_folder == nullptr) {
         return ENOSYS;
     }

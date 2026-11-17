@@ -57,8 +57,10 @@ const uint32_t QUADTIMER_MAX_COUNTS = 65534;      // as PJRC's core
 const uint32_t QUADTIMER_LOAD_BASE = 65537;       // LOAD = 65537 - low ticks (PJRC's core)
 const uint16_t QUADTIMER_PCS_IPG = 8;             // primary count source: the IPG clock, + prescale
 const uint16_t QUADTIMER_SET_ON_COMPARE = 6;      // OUTMODE: set on compare, cleared on rollover
+// pad of a PWM output: drive strength, speed
 const uint32_t PAD_OUTPUT = IOMUXC_SW_PAD_CTL_PAD_DSE(6) | IOMUXC_SW_PAD_CTL_PAD_SPEED(2);
 
+// The registers and the clock gates of each module (index: module number - 1).
 PWM_Type *const FLEXPWM[MODULES] = { PWM1, PWM2, PWM3, PWM4 };
 TMR_Type *const QUADTIMER[MODULES] = { TMR1, TMR2, TMR3, TMR4 };
 const clock_ip_name_t FLEXPWM_CLOCKS[MODULES] = { kCLOCK_Pwm1, kCLOCK_Pwm2, kCLOCK_Pwm3, kCLOCK_Pwm4 };
@@ -81,17 +83,17 @@ struct Generator {
 
 // An output; its handle is its pin.
 struct Channel {
-    const board::PwmPin *pwm;      // its line of the board's table; nullptr: not open
-    bool                 invert;   // active low
-    double               duty;     // 0 to 1, as asked last
-    bool                 counting; // QuadTimer: its counter runs and drives the pad (else the pin is a GPIO)
+    const board::PwmPin *pwm;        // its line of the board's table; nullptr: not open
+    bool                 invert;     // active low
+    double               duty;       // 0 to 1, as asked last
+    bool                 counting;   // QuadTimer: its counter runs and drives the pad (else the pin is a GPIO)
 };
 
-Generator flexGenerators[MODULES][UNITS];
-Generator quadGenerators[MODULES][UNITS];
-bool      flexModuleStarted[MODULES];
-bool      quadModuleStarted[MODULES];
-Channel   channels[board::PIN_COUNT];
+Generator flexGenerators[MODULES][UNITS];   // FlexPWM submodules, by module - 1 and submodule
+Generator quadGenerators[MODULES][UNITS];   // QuadTimer channels, by module - 1 and channel
+bool      flexModuleStarted[MODULES];       // its clock is on (startFlexModule)
+bool      quadModuleStarted[MODULES];       // its clock is on (startQuadModule)
+Channel   channels[board::PIN_COUNT];       // the outputs, by pin (= handle)
 
 // ### Helpers #################################################################
 
@@ -104,6 +106,7 @@ const board::PwmPin *findPwm(int pin) {
             return &board::PWM_PINS[i];
         }
     }
+
     return nullptr;
 }
 
@@ -136,13 +139,16 @@ bool settingFor(board::PwmKind kind, uint32_t frequency, Setting *out) {
     uint32_t maxCounts = kind == board::PwmKind::flexPwm ? FLEXPWM_MAX_COUNTS : QUADTIMER_MAX_COUNTS;
     double ticks = (double)clockHz() / frequency;
     int prescale = 0;
+
     while (ticks > maxCounts + 0.5 && prescale < MAX_PRESCALE) {
         ticks /= 2;
         prescale++;
     }
 
+    // too short a period, or too long even at the largest prescale
     uint32_t counts = (uint32_t)lround(ticks);
-    if (counts < MIN_COUNTS || counts > maxCounts) {
+    bool outOfReach = counts < MIN_COUNTS || counts > maxCounts;
+    if (outOfReach) {
         return false;
     }
 
@@ -154,7 +160,14 @@ bool settingFor(board::PwmKind kind, uint32_t frequency, Setting *out) {
  * The duty cycle as ticks of the period, rounded.
  */
 uint32_t dutyTicks(double duty, uint32_t counts) {
-    double clamped = duty < 0 ? 0 : (duty > 1 ? 1 : duty);
+    // the duty cycle brought back into 0..1
+    double clamped = duty;
+    if (duty < 0) {
+        clamped = 0;
+    } else if (duty > 1) {
+        clamped = 1;
+    }
+
     return (uint32_t)lround(clamped * counts);
 }
 
@@ -163,8 +176,17 @@ uint32_t dutyTicks(double duty, uint32_t counts) {
  * GPIO level instead: see the top of the file).
  */
 uint32_t quadHighTicks(uint32_t ticks, uint32_t counts) {
+    // neither load may be 0: 1 to counts - 1 ticks
     uint32_t highest = counts - 1;
-    return ticks < 1 ? 1 : (ticks > highest ? highest : ticks);
+    if (ticks < 1) {
+        return 1;
+    }
+
+    if (ticks > highest) {
+        return highest;
+    }
+
+    return ticks;
 }
 
 /**
@@ -174,14 +196,19 @@ uint32_t madeTicks(const Channel *channel, const Setting *setting) {
     uint32_t ticks = dutyTicks(channel->duty, setting->counts);
     bool fullOrNone = ticks == 0 || ticks == setting->counts;
 
-    if (channel->pwm->kind == board::PwmKind::quadTimer && !fullOrNone) {
+    // a QuadTimer between 0 and 1: its two loads, neither 0
+    bool isQuad = channel->pwm->kind == board::PwmKind::quadTimer;
+    if (isQuad && !fullOrNone) {
         return quadHighTicks(ticks, setting->counts);
     }
 
-    if (channel->pwm->output == board::PwmOutput::x && ticks == setting->counts) {
+    // a FlexPWM X output cannot be fully on
+    bool isX = channel->pwm->output == board::PwmOutput::x;
+    if (isX && ticks == setting->counts) {
         return setting->counts - 1;
     }
 
+    // else exactly the ticks asked (a QuadTimer at 0 or 1: a GPIO level)
     return ticks;
 }
 
@@ -226,11 +253,14 @@ void startFlexModule(int module) {
         return;
     }
 
+    // the clock, then the fault inputs: active when high, flags cleared, no filter
     PWM_Type *flex = FLEXPWM[module - 1];
     CLOCK_EnableClock(FLEXPWM_CLOCKS[module - 1]);
     flex->FCTRL = PWM_FCTRL_FLVL(0xF);
     flex->FSTS = PWM_FSTS_FFLAG(0xF);
     flex->FFILT = 0;
+
+    // no fault disables an output of any submodule
     for (int unit = 0; unit < UNITS; unit++) {
         flex->SM[unit].DISMAP[0] = 0;
     }
@@ -245,6 +275,8 @@ void startFlexModule(int module) {
 void startFlexUnit(const board::PwmPin *pwm) {
     PWM_Type *flex = FLEXPWM[pwm->module - 1];
     int unit = pwm->unit;
+
+    // the buffered values may be written, then every value at rest
     flex->MCTRL |= PWM_MCTRL_CLDOK(1u << unit);
     flex->SM[unit].CTRL2 = PWM_CTRL2_INDEP_MASK | PWM_CTRL2_WAITEN_MASK | PWM_CTRL2_DBGEN_MASK;
     flex->SM[unit].INIT = 0;
@@ -296,6 +328,7 @@ void programFlex(const Channel *channel) {
         enable = PWM_OUTEN_PWMX_EN(mask);
     }
 
+    // the polarity: inverted, or not
     if (channel->invert) {
         flex->SM[unit].OCTRL |= polarity;
     } else {
@@ -315,6 +348,7 @@ void stopFlex(const board::PwmPin *pwm, bool last) {
     PWM_Type *flex = FLEXPWM[pwm->module - 1];
     uint16_t mask = (uint16_t)(1u << pwm->unit);
 
+    // the output off
     if (pwm->output == board::PwmOutput::a) {
         flex->OUTEN &= (uint16_t)~PWM_OUTEN_PWMA_EN(mask);
     } else if (pwm->output == board::PwmOutput::b) {
@@ -323,6 +357,7 @@ void stopFlex(const board::PwmPin *pwm, bool last) {
         flex->OUTEN &= (uint16_t)~PWM_OUTEN_PWMX_EN(mask);
     }
 
+    // its last output: the counter stopped
     if (last) {
         flex->MCTRL &= (uint16_t)~PWM_MCTRL_RUN(mask);
     }
@@ -361,7 +396,8 @@ void programQuad(Channel *channel) {
 
     // 0 or 1: a GPIO level, the counter stopped
     uint32_t ticks = dutyTicks(channel->duty, setting->counts);
-    if (ticks == 0 || ticks == setting->counts) {
+    bool fullOrNone = ticks == 0 || ticks == setting->counts;
+    if (fullOrNone) {
         quad->CHANNEL[unit].CTRL = 0;
         channel->counting = false;
         bool high = ticks != 0;
@@ -421,9 +457,11 @@ void program(Channel *channel) {
  * The channel of a handle, nullptr if it is not open.
  */
 Channel *channelOf(int handle) {
-    if (handle < 0 || handle >= board::PIN_COUNT || channels[handle].pwm == nullptr) {
+    bool inRange = handle >= 0 && handle < board::PIN_COUNT;
+    if (!inRange || channels[handle].pwm == nullptr) {
         return nullptr;
     }
+
     return &channels[handle];
 }
 
@@ -441,6 +479,7 @@ Opened open(int pin, uint32_t frequency, double duty, bool invert) {
     if (pwm == nullptr) {
         return Opened{ -1, EINVAL, {} };
     }
+
     if (channels[pin].pwm != nullptr) {
         return Opened{ -1, EBUSY, {} };
     }
@@ -450,8 +489,10 @@ Opened open(int pin, uint32_t frequency, double duty, bool invert) {
     if (!settingFor(pwm->kind, frequency, &setting)) {
         return Opened{ -1, EINVAL, {} };
     }
+
     Generator *generator = generatorOf(pwm);
-    if (generator->users > 0 && generator->frequency != frequency) {
+    bool takenAtAnotherFrequency = generator->users > 0 && generator->frequency != frequency;
+    if (takenAtAnotherFrequency) {
         return Opened{ -1, EBUSY, {} };
     }
 
@@ -462,6 +503,7 @@ Opened open(int pin, uint32_t frequency, double duty, bool invert) {
     } else {
         startQuadModule(pwm->module);
     }
+
     if (generator->users == 0) {
         generator->frequency = frequency;
         generator->setting = setting;
@@ -469,6 +511,7 @@ Opened open(int pin, uint32_t frequency, double duty, bool invert) {
             startFlexUnit(pwm);
         }
     }
+
     generator->users++;
 
     // the output
@@ -523,7 +566,8 @@ int setFrequency(int handle, uint32_t frequency, Output *out) {
 
     // shared: the other outputs keep their frequency
     Generator *generator = generatorOf(channel->pwm);
-    if (generator->users > 1 && generator->frequency != frequency) {
+    bool sharedAtAnotherFrequency = generator->users > 1 && generator->frequency != frequency;
+    if (sharedAtAnotherFrequency) {
         *out = outputOf(channel);
         return EBUSY;
     }

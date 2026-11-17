@@ -21,6 +21,7 @@ namespace slots {
  * 2. the page buffer of uploads, for good.
  */
 bool SlotStorage::open(const Flash *flash, uintptr_t firmwareEnd) {
+    // asked already: the first answer
     if (_opened || _refused) {
         return _opened;
     }
@@ -66,6 +67,7 @@ bool SlotStorage::beginUpload(size_t size) {
     uint32_t sector = _flash->sectorSize;
     uint32_t erased = (headerSize() + (uint32_t)size + sector - 1) / sector * sector;
     bool ok = true;
+
     for (uint32_t done = 0; done < erased && ok; done += sector) {
         ok = _flash->eraseSector(slotOffset(target) + done);
     }
@@ -84,8 +86,11 @@ bool SlotStorage::beginUpload(size_t size) {
  * Fills the page buffer, programs it each time it is full.
  */
 bool SlotStorage::writeUpload(size_t offset, const uint8_t *data, size_t size) {
+    // an upload going on, this chunk the next one, within the announced size
+    bool uploading = _uploadSlot != NO_SLOT;
     bool inOrder = offset == _uploadNext;
-    if (_uploadSlot == NO_SLOT || !inOrder || offset + size > _uploadSize) {
+    bool fits = offset + size <= _uploadSize;
+    if (!uploading || !inOrder || !fits) {
         return false;
     }
 
@@ -100,7 +105,8 @@ bool SlotStorage::writeUpload(size_t offset, const uint8_t *data, size_t size) {
         size -= taken;
 
         // a full page: program it
-        if (_pageFill == _flash->pageSize && !flushPage()) {
+        bool pageFull = _pageFill == _flash->pageSize;
+        if (pageFull && !flushPage()) {
             return false;
         }
     }
@@ -114,7 +120,10 @@ bool SlotStorage::writeUpload(size_t offset, const uint8_t *data, size_t size) {
  *    header.
  */
 bool SlotStorage::finishUpload(const char *buildId) {
-    if (_uploadSlot == NO_SLOT || _uploadNext != _uploadSize) {
+    // an upload going on, with every byte received
+    bool uploading = _uploadSlot != NO_SLOT;
+    bool complete = _uploadNext == _uploadSize;
+    if (!uploading || !complete) {
         return false;
     }
 
@@ -131,6 +140,7 @@ bool SlotStorage::finishUpload(const char *buildId) {
     header.size = (uint32_t)_uploadSize;
     strncpy(header.buildId, buildId, sizeof(header.buildId) - 1);
 
+    // programmed as one page padded with 0xff; the upload is over either way
     memset(_page, 0xff, _flash->pageSize);
     memcpy(_page, &header, sizeof(header));
     bool ok = _flash->programPage(slotOffset(_uploadSlot), _page);
@@ -149,6 +159,7 @@ void SlotStorage::abortUpload() {
  * Reads the installed slot's header under the lock.
  */
 bool SlotStorage::installed(char *buildId, size_t buildIdSize, size_t *packageSize) {
+    // the installed slot
     SlotHeader header;
     _mutex.lock();
     int slot = findInstalled(&header);
@@ -157,6 +168,7 @@ bool SlotStorage::installed(char *buildId, size_t buildIdSize, size_t *packageSi
         return false;
     }
 
+    // what its header says
     snprintf(buildId, buildIdSize, "%s", header.buildId);
     *packageSize = header.size;
     return true;
@@ -169,10 +181,11 @@ bool SlotStorage::installed(char *buildId, size_t buildIdSize, size_t *packageSi
 const uint8_t *SlotStorage::map(size_t *size) {
     _mutex.lock();
 
-    // the installed slot
+    // the installed slot, unless one is mapped already
     SlotHeader header;
     int slot = findInstalled(&header);
-    if (slot == NO_SLOT || _mappedSlot != NO_SLOT) {
+    bool mappedAlready = _mappedSlot != NO_SLOT;
+    if (slot == NO_SLOT || mappedAlready) {
         _mutex.unlock();
         return nullptr;
     }
@@ -213,10 +226,12 @@ uint32_t SlotStorage::headerSize() const {
  * _uploadNext.
  */
 bool SlotStorage::flushPage() {
+    // the rest of the page padded with 0xff, its place after the header
     size_t pageStart = _uploadNext - _pageFill;
     memset(_page + _pageFill, 0xff, _flash->pageSize - _pageFill);
     uint32_t offset = slotOffset(_uploadSlot) + headerSize() + (uint32_t)pageStart;
 
+    // the buffer is empty again, whatever the result
     _pageFill = 0;
     return _flash->programPage(offset, _page);
 }
@@ -237,6 +252,7 @@ bool SlotStorage::readHeader(int slot, SlotHeader *header) {
  * Reads both headers; the valid one, or the later of two.
  */
 int SlotStorage::findInstalled(SlotHeader *header) {
+    // no flash yet: no slot
     if (!_opened) {
         return NO_SLOT;
     }

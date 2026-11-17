@@ -33,7 +33,14 @@ const ENDINGS = ["", "\n", "\r\n"];
  * The format of a UART as it is usually written: "9600 8E1".
  */
 function formatOf(state: UartState) {
-    const parity = state.parity === "even" ? "E" : state.parity === "odd" ? "O" : "N";
+    // the parity as a letter: E, O, N (none)
+    let parity = "N";
+    if (state.parity === "even") {
+        parity = "E";
+    } else if (state.parity === "odd") {
+        parity = "O";
+    }
+
     return `${state.baudRate} ${state.dataBits}${parity}${state.stopBits}`;
 }
 
@@ -42,7 +49,8 @@ function formatOf(state: UartState) {
  */
 function pinsOf(state: UartState) {
     const pins = [["tx", state.tx], ["rx", state.rx], ["rts", state.rts], ["cts", state.cts]];
-    return pins.filter(([, pin]) => pin !== null).map(([name, pin]) => `${name} ${pin}`).join(" ");
+    const wired = pins.filter(([, pin]) => pin !== null);
+    return wired.map(([name, pin]) => `${name} ${pin}`).join(" ");
 }
 
 /**
@@ -52,13 +60,20 @@ function pinsOf(state: UartState) {
  * "· COM5: no such port".
  */
 export function uartSummary(state: UartState) {
-    const opened = `${formatOf(state)}${state.flowControl ? " rts/cts" : ""} · ${pinsOf(state)}`;
+    // the format and the pins when open
+    const flowControl = state.flowControl ? " rts/cts" : "";
+    const opened = `${formatOf(state)}${flowControl} · ${pinsOf(state)}`;
+
+    // the TCP link, the PC port, each with what failed
     const client = state.tcp.client ? tx.twin.tcp_client : tx.twin.tcp_waiting;
     const tcp = state.tcp.listening ? ` · tcp ${state.tcp.port}, ${client}` : "";
     const tcpError = state.tcp.error !== "" ? ` · tcp: ${state.tcp.error}` : "";
     const serial = state.serial.connected ? ` · ${state.serial.port}` : "";
     const serialError = state.serial.error !== "" ? ` · ${state.serial.port}: ${state.serial.error}` : "";
-    return `${state.open ? opened : tx.twin.uart_closed}${tcp}${tcpError}${serial}${serialError}`;
+
+    // open or closed, then the links
+    const head = state.open ? opened : tx.twin.uart_closed;
+    return `${head}${tcp}${tcpError}${serial}${serialError}`;
 }
 
 /**
@@ -80,6 +95,8 @@ function originOf(source: string) {
  */
 function asText(bytes: number[]) {
     const text = new TextDecoder().decode(new Uint8Array(bytes));
+
+    // each control character (0 to 31, and 127): its usual escape, else \xNN
     const named: Record<string, string> = { "\r": "\\r", "\n": "\\n", "\t": "\\t" };
     return text.replace(/[\x00-\x1f\x7f]/g, char => {
         return named[char] ?? `\\x${char.charCodeAt(0).toString(16).padStart(2, "0")}`;
@@ -98,15 +115,20 @@ function asHex(bytes: number[]) {
  * null if it is not an even count of hexadecimal digits.
  */
 function parseHex(text: string): Uint8Array | null {
+    // the digits without spaces: an even count of hexadecimal digits only
     const digits = text.replace(/\s+/g, "");
-    if (digits.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(digits)) {
+    const isNotHex = digits.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(digits);
+    if (isNotHex) {
         return null;
     }
 
+    // a byte per pair of digits
     const bytes = new Uint8Array(digits.length / 2);
+
     for (let i = 0; i < bytes.length; i++) {
         bytes[i] = parseInt(digits.slice(i * 2, i * 2 + 2), 16);
     }
+
     return bytes;
 }
 
@@ -149,6 +171,7 @@ export class UartPanel extends VBox {
             menu: () => this._linksMenu(),
         });
 
+        // the log, then the line to send
         this.setContent([
             // the log
             this.refs.log = new LogView({ cls: "uart-log" }),
@@ -176,6 +199,7 @@ export class UartPanel extends VBox {
      * if it is open; the page can send only while the program has it open.
      */
     setState(state: UartState, ports: string[]) {
+        // kept for the menu
         this._state = state;
         this._ports = ports;
 
@@ -187,6 +211,8 @@ export class UartPanel extends VBox {
 
         // the menu, while it is open
         this._showLinks();
+
+        // sending only while the program has the UART open
         this.refs.sendBar.enable(state.open);
     }
 
@@ -230,9 +256,12 @@ export class UartPanel extends VBox {
      * opening; those of a closed menu are no longer seen).
      */
     private _showLinks() {
-        if (this._links === null || this._state === null) {
+        // no menu opened yet, or no state yet: nothing to show
+        const isEmpty = this._links === null || this._state === null;
+        if (isEmpty) {
             return;
         }
+
         this._links.tcp.setState(this._state.tcp);
         this._links.serial.setState(this._state.serial, this._ports);
     }
@@ -242,11 +271,13 @@ export class UartPanel extends VBox {
      * user scrolled up (LogView).
      */
     addRecords(records: UartRecord[]) {
-        // the lines, the oldest dropped past MAX_LINES
+        // the lines
         for (const record of records) {
             this._records.push(record);
             this.refs.log.appendContent(this._line(record));
         }
+
+        // the oldest dropped past MAX_LINES
         while (this._records.length > MAX_LINES) {
             this._records.shift();
             this.refs.log.removeChild(this.refs.log.firstChild());
@@ -265,7 +296,8 @@ export class UartPanel extends VBox {
         const origin = originOf(record.source);
         const prefix = fromProgram ? "→" : `← ${origin}`;
         const bytes = this._hexView ? asHex(record.bytes) : asText(record.bytes);
-        return new Label({ cls: `uart-line ${fromProgram ? "out" : "in"}`, text: `${prefix} ${bytes}` });
+        const direction = fromProgram ? "out" : "in";
+        return new Label({ cls: `uart-line ${direction}`, text: `${prefix} ${bytes}` });
     }
 
     /**
@@ -290,7 +322,8 @@ export class UartPanel extends VBox {
      */
     private _onHexInput() {
         const hex = this.refs.hexInput.getCheck();
-        this.refs.input.getInput().setAttribute("placeholder", hex ? tx.twin.uart_hex_placeholder : tx.twin.uart_text_placeholder);
+        const placeholder = hex ? tx.twin.uart_hex_placeholder : tx.twin.uart_text_placeholder;
+        this.refs.input.getInput().setAttribute("placeholder", placeholder);
         this.refs.ending.enable(!hex);
         this.refs.input.removeClass("invalid");
     }
@@ -305,7 +338,8 @@ export class UartPanel extends VBox {
 
         // the bytes
         let bytes: Uint8Array;
-        if (this.refs.hexInput.getCheck()) {
+        const isHex = this.refs.hexInput.getCheck();
+        if (isHex) {
             bytes = parseHex(typed);
         } else {
             bytes = new TextEncoder().encode(typed + String(this.refs.ending.getValue()));
@@ -318,12 +352,13 @@ export class UartPanel extends VBox {
             return;
         }
 
-        // sent
+        // sent (nothing typed: nothing sent), the input emptied
         this.refs.input.removeClass("invalid");
         this.refs.input.setAttribute("title", null);
         if (bytes.length > 0) {
             sendToUart(this._uart, bytes);
         }
+
         this.refs.input.setValue("");
     }
 }

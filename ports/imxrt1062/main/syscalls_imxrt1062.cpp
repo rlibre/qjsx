@@ -32,9 +32,9 @@ namespace {
 
 uint8_t *heapBreak = __qjsx_c_heap_start;   // end of the C heap taken so far
 
-const int STDIN = 0;
-const int STDOUT = 1;
-const int STDERR = 2;
+const int STDIN = 0;    // the console descriptors
+const int STDOUT = 1;   // to the USB serial port
+const int STDERR = 2;   // to the USB serial port
 
 /**
  * True once the scheduler started (running, or suspended by someone: heap_3
@@ -59,7 +59,8 @@ extern "C" uint8_t *qjsxHeapBreak() {
  */
 extern "C" void *_sbrk(ptrdiff_t increment) {
     uint8_t *previous = heapBreak;
-    if (heapBreak + increment > __qjsx_c_heap_end) {
+    bool pastEnd = heapBreak + increment > __qjsx_c_heap_end;
+    if (pastEnd) {
         errno = ENOMEM;
         return (void *)-1;
     }
@@ -93,7 +94,8 @@ extern "C" void __malloc_unlock(struct _reent *) {
  * stdout and stderr go to the USB serial port; other descriptors fail.
  */
 extern "C" int _write(int file, const char *data, int length) {
-    if (file != STDOUT && file != STDERR) {
+    bool isOutput = file == STDOUT || file == STDERR;
+    if (!isOutput) {
         errno = EBADF;
         return -1;
     }
@@ -138,7 +140,8 @@ extern "C" int _lseek(int, int, int) {
  * The console descriptors are character devices (unbuffered by newlib).
  */
 extern "C" int _fstat(int file, struct stat *status) {
-    if (file != STDIN && file != STDOUT && file != STDERR) {
+    bool isConsole = file == STDIN || file == STDOUT || file == STDERR;
+    if (!isConsole) {
         errno = EBADF;
         return -1;
     }

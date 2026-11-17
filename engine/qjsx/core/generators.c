@@ -50,6 +50,9 @@ static JSAsyncFunctionState *async_func_init(JSContext *ctx,
     s->resolving_funcs[0] = JS_UNDEFINED;
     s->resolving_funcs[1] = JS_UNDEFINED;
     s->is_completed = FALSE;
+    /* qjsx: engine change V (memset cleared the rest: no awaiter, nothing
+       queued, nothing linked) */
+    s->await_value = JS_UNDEFINED;
     return s;
 }
 
@@ -114,6 +117,15 @@ void __async_func_free(JSRuntime *rt, JSAsyncFunctionState *s)
 
     JS_FreeValueRT(rt, s->resolving_funcs[0]);
     JS_FreeValueRT(rt, s->resolving_funcs[1]);
+
+    /* qjsx: engine change V: the value of a resume job never run, the
+       reference on the awaiting function (V2). Its await reactions are
+       never linked here: each one holds a reference on the state. */
+    JS_FreeValueRT(rt, s->await_value);
+    if (s->awaiter) {
+        async_func_free(rt, s->awaiter);
+        s->awaiter = NULL;
+    }
 
     remove_gc_object(&s->header);
     if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && js_rc(s)->ref_count != 0) {
@@ -334,26 +346,109 @@ static int js_async_function_resolve_create(JSContext *ctx,
     return 0;
 }
 
+static void js_async_function_resume(JSContext *ctx, JSAsyncFunctionState *s);
+
+/* qjsx: engine change V. Queues the resume job embedded in 's' (one await
+   at a time: it is free): delivers 'value' (owned) to the await of 's', or
+   throws it there when 'is_throw'. The job holds a reference on 's'. */
+void js_async_function_await_enqueue(JSContext *ctx, JSAsyncFunctionState *s,
+                                     JSValue value, BOOL is_throw)
+{
+    JSJobEntry *e = &s->await_job;
+
+    s->await_value = value;
+    s->await_throw = is_throw;
+    e->realm = JS_DupContext(ctx);
+    e->job_func = NULL;
+    e->argc = JS_JOB_ARGC_AWAIT;
+    js_rc(s)->ref_count++;
+    list_add_tail(&e->link, &ctx->rt->job_list);
+}
+
+/* qjsx: engine change V. Runs the resume job of an async function state
+   (JS_ExecutePendingJob), as js_async_function_resolve_call() does: the
+   value of the await, or its exception, then the function goes on. */
+int js_async_function_await_job(JSContext *ctx, JSJobEntry *e)
+{
+    JSAsyncFunctionState *s = list_entry(e, JSAsyncFunctionState, await_job);
+    JSValue value = s->await_value;
+
+    s->await_value = JS_UNDEFINED;
+    s->throw_flag = s->await_throw;
+    if (s->await_throw) {
+        JS_Throw(ctx, value);
+    } else {
+        s->frame.cur_sp[-1] = value;
+    }
+    js_async_function_resume(ctx, s);
+    async_func_free(ctx->rt, s);
+    return 1;
+}
+
+/* qjsx: engine change V. Frees a resume job never run (JS_FreeRuntime). */
+void js_async_function_await_job_free(JSRuntime *rt, JSJobEntry *e)
+{
+    JSAsyncFunctionState *s = list_entry(e, JSAsyncFunctionState, await_job);
+
+    JS_FreeValueRT(rt, s->await_value);
+    s->await_value = JS_UNDEFINED;
+    async_func_free(rt, s);
+}
+
+/* qjsx: engine change V2. The end of an async function call: 'value'
+   (owned) is its result, or its exception when 'is_reject'.
+   - called by 'await f()' (an awaiter, no promise made): the awaiter
+     resumed by its job, one turn of the queue as the promise would give;
+     but a result that is an object may be a thenable, which the standard
+     resolves through extra jobs: the promise is made now, the awaiter
+     waits on it (V1), then it is resolved with the result as usual;
+   - else: its promise resolved or rejected, as QuickJS does. */
+static void js_async_function_settle(JSContext *ctx, JSAsyncFunctionState *s,
+                                     JSValue value, BOOL is_reject)
+{
+    JSValue ret2;
+
+    if (s->awaiter) {
+        JSAsyncFunctionState *awaiter = s->awaiter;
+        s->awaiter = NULL;
+        if (is_reject || !JS_IsObject(value)) {
+            js_async_function_await_enqueue(ctx, awaiter, value, is_reject);
+        } else {
+            JSValue promise = JS_NewPromiseCapability(ctx, s->resolving_funcs);
+            if (JS_IsException(promise)) {
+                js_async_function_await_enqueue(ctx, awaiter, JS_GetException(ctx), TRUE);
+                JS_FreeValue(ctx, value);
+            } else {
+                js_promise_await(ctx, promise, awaiter);
+                JS_FreeValue(ctx, promise);
+                ret2 = JS_Call(ctx, s->resolving_funcs[0], JS_UNDEFINED,
+                               1, (JSValueConst *)&value);
+                JS_FreeValue(ctx, value);
+                JS_FreeValue(ctx, ret2); /* XXX: what to do if exception ? */
+            }
+        }
+        async_func_free(ctx->rt, awaiter);
+        return;
+    }
+
+    ret2 = JS_Call(ctx, s->resolving_funcs[is_reject], JS_UNDEFINED,
+                   1, (JSValueConst *)&value);
+    JS_FreeValue(ctx, value);
+    JS_FreeValue(ctx, ret2); /* XXX: what to do if exception ? */
+}
+
 static void js_async_function_resume(JSContext *ctx, JSAsyncFunctionState *s)
 {
-    JSValue func_ret, ret2;
+    JSValue func_ret;
 
     func_ret = async_func_resume(ctx, s);
     if (s->is_completed) {
         if (JS_IsException(func_ret)) {
-            JSValue error;
         fail:
-            error = JS_GetException(ctx);
-            ret2 = JS_Call(ctx, s->resolving_funcs[1], JS_UNDEFINED,
-                           1, (JSValueConst *)&error);
-            JS_FreeValue(ctx, error);
-            JS_FreeValue(ctx, ret2); /* XXX: what to do if exception ? */
+            js_async_function_settle(ctx, s, JS_GetException(ctx), TRUE);
         } else {
             /* normal return */
-            ret2 = JS_Call(ctx, s->resolving_funcs[0], JS_UNDEFINED,
-                           1, (JSValueConst *)&func_ret);
-            JS_FreeValue(ctx, func_ret);
-            JS_FreeValue(ctx, ret2); /* XXX: what to do if exception ? */
+            js_async_function_settle(ctx, s, func_ret, FALSE);
         }
     } else {
         JSValue value, promise, resolving_funcs[2], resolving_funcs1[2];
@@ -364,8 +459,46 @@ static void js_async_function_resume(JSContext *ctx, JSAsyncFunctionState *s)
 
         /* await */
         JS_FreeValue(ctx, func_ret); /* not used */
-        promise = js_promise_resolve(ctx, ctx->promise_ctor,
-                                     1, (JSValueConst *)&value, 0);
+
+        /* qjsx V2: 'await f()' of an async function: its end resumes this
+           function (already queued if it ended at once); 'value' is only
+           a placeholder */
+        if (s->await_inline) {
+            s->await_inline = FALSE;
+            JS_FreeValue(ctx, value);
+            return;
+        }
+
+        /* qjsx V1: a value that is not an object: the promise the standard
+           makes for it is already fulfilled, its reaction job queued at
+           once: the resume job, queued at once */
+        if (!JS_IsObject(value)) {
+            js_async_function_await_enqueue(ctx, s, value, FALSE);
+            return;
+        }
+
+        /* qjsx V1: a native promise: PromiseResolve() reads its
+           'constructor' (observable); %Promise%: awaited directly, else a
+           new promise resolved with it (what js_promise_resolve() does) */
+        if (JS_GetOpaque(value, JS_CLASS_PROMISE)) {
+            JSValue ctor = JS_GetProperty(ctx, value, JS_ATOM_constructor);
+            BOOL is_same;
+            if (JS_IsException(ctor)) {
+                JS_FreeValue(ctx, value);
+                goto fail;
+            }
+            is_same = js_same_value(ctx, ctor, ctx->promise_ctor);
+            JS_FreeValue(ctx, ctor);
+            if (is_same) {
+                js_promise_await(ctx, value, s);
+                JS_FreeValue(ctx, value);
+                return;
+            }
+            promise = js_promise_resolve_new(ctx, ctx->promise_ctor, value, FALSE);
+        } else {
+            promise = js_promise_resolve(ctx, ctx->promise_ctor,
+                                         1, (JSValueConst *)&value, 0);
+        }
         JS_FreeValue(ctx, value);
         if (JS_IsException(promise))
             goto fail;
@@ -415,16 +548,46 @@ JSValue js_async_function_resolve_call(JSContext *ctx,
     return JS_UNDEFINED;
 }
 
+/* qjsx: engine change V2. The async function whose 'await f()' made this
+   call (JS_CALL_FLAG_AWAITED, set by the interpreter): the state of the
+   calling frame, checked to be an async function's; NULL otherwise. */
+static JSAsyncFunctionState *js_async_function_awaiting_caller(JSContext *ctx, int flags)
+{
+    JSStackFrame *sf = ctx->rt->current_stack_frame;
+    JSFunctionBytecode *b;
+
+    if (!(flags & JS_CALL_FLAG_AWAITED) || !sf || !(sf->js_mode & JS_MODE_ASYNC) ||
+        !JS_IsObject(sf->cur_func))
+        return NULL;
+    b = JS_VALUE_GET_OBJ(sf->cur_func)->u.func.function_bytecode;
+    if (b->func_kind != JS_FUNC_ASYNC)
+        return NULL;
+    return list_entry(sf, JSAsyncFunctionState, frame);
+}
+
 JSValue js_async_function_call(JSContext *ctx, JSValueConst func_obj,
                                       JSValueConst this_obj,
                                       int argc, JSValueConst *argv, int flags)
 {
     JSValue promise;
-    JSAsyncFunctionState *s;
+    JSAsyncFunctionState *s, *caller;
 
     s = async_func_init(ctx, func_obj, this_obj, argc, argv);
     if (!s)
         return JS_EXCEPTION;
+
+    /* qjsx V2: 'await f()' in an async function: no promise; the caller
+       is this call's awaiter (one reference), its next await (the one of
+       this call) is arranged; the value returned is only a placeholder */
+    caller = js_async_function_awaiting_caller(ctx, flags);
+    if (caller) {
+        s->awaiter = caller;
+        js_rc(caller)->ref_count++;
+        caller->await_inline = TRUE;
+        js_async_function_resume(ctx, s);
+        async_func_free(ctx->rt, s);
+        return JS_UNDEFINED;
+    }
 
     promise = JS_NewPromiseCapability(ctx, s->resolving_funcs);
     if (JS_IsException(promise)) {

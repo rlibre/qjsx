@@ -85,10 +85,13 @@ int64_t scopeNowUs() {
  * The state of a pin at rest.
  */
 void scopeSetInitial(int pin, int level, int millivolts) {
-    if (pin < 0 || pin >= MAX_PINS) {
+    // a pin the analyzer knows
+    bool known = pin >= 0 && pin < MAX_PINS;
+    if (!known) {
         return;
     }
 
+    // its state now, nothing recorded
     lock.lock();
     current[pin] = ScopeRecord{ scopeNowUs(), level, millivolts, false, 0, 0, false };
     lock.unlock();
@@ -101,6 +104,7 @@ namespace {
  * counts it. lock held.
  */
 void keepChange(int pin, const ScopeRecord *change) {
+    // a record while there is room, else a count and the time of the last
     ScopeChanges *changes = &filling[pin];
     if (changes->count < SCOPE_RECORDS) {
         changes->records[changes->count] = *change;
@@ -117,10 +121,13 @@ void keepChange(int pin, const ScopeRecord *change) {
  * Records a change of level: the pin's level now, and kept.
  */
 void scopeRecord(int pin, int level, int millivolts) {
-    if (pin < 0 || pin >= MAX_PINS) {
+    // a pin the analyzer knows
+    bool known = pin >= 0 && pin < MAX_PINS;
+    if (!known) {
         return;
     }
 
+    // its level now, and the change kept
     lock.lock();
     ScopeRecord change = { scopeNowUs(), level, millivolts, false, 0, 0, false };
     current[pin] = change;
@@ -132,10 +139,13 @@ void scopeRecord(int pin, int level, int millivolts) {
  * Records a change of the PWM output: the pin's PWM now, and kept.
  */
 void scopeRecordPwm(int pin, int64_t timeUs, double frequency, double duty, bool invert) {
-    if (pin < 0 || pin >= MAX_PINS) {
+    // a pin the analyzer knows
+    bool known = pin >= 0 && pin < MAX_PINS;
+    if (!known) {
         return;
     }
 
+    // its PWM now, and the change kept
     lock.lock();
     ScopeRecord change = { timeUs, 0, 0, true, frequency, duty, invert };
     currentPwm[pin] = change;
@@ -149,16 +159,19 @@ void scopeRecordPwm(int pin, int64_t timeUs, double frequency, double duty, bool
  * 3. empties the set read, for its next turn.
  */
 int64_t scopeRead(int count, ScopeVisitor *visit, void *context) {
+    // at most the pins the analyzer knows
     int pins = count < MAX_PINS ? count : MAX_PINS;
 
     // swap the sets, copy the states
     lock.lock();
     ScopeChanges *full = filling;
     filling = filling == sets[0] ? sets[1] : sets[0];
+
     for (int pin = 0; pin < pins; pin++) {
         readStates[pin] = current[pin];
         readPwm[pin] = currentPwm[pin];
     }
+
     int64_t nowUs = scopeNowUs();
     lock.unlock();
 
@@ -180,6 +193,8 @@ int64_t scopeRead(int count, ScopeVisitor *visit, void *context) {
  * Records an RMT send: a copy of it in the set filled, while there is room.
  */
 void scopeRecordTrain(const ScopeTrain *train) {
+    // kept with a copy of its data while the set has room (at least one
+    // byte allocated: an empty send has no data)
     lock.lock();
     int *count = &trainCounts[fillingTrains];
     if (*count < SCOPE_TRAINS) {
@@ -189,6 +204,7 @@ void scopeRecordTrain(const ScopeTrain *train) {
         memcpy(kept->data, train->data, train->size);
         (*count)++;
     }
+
     lock.unlock();
 }
 
@@ -210,6 +226,8 @@ void scopeReadTrains(TrainVisitor *visit, void *context) {
         visit(context, train);
         memory::release(train->data);
     }
+
+    // the set empty for its next turn
     trainCounts[full] = 0;
 }
 

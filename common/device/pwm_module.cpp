@@ -88,6 +88,7 @@ public:
             return (void)js::failSystem(opened.error, what);
         }
 
+        // opened: what the hardware does, in the fields
         _handle = opened.handle;
         show(&opened.output);
     }
@@ -97,9 +98,11 @@ public:
      * or a RangeError.
      */
     JS_EXPORT(setDuty) void setDuty(double value) {
+        // checked, then given to the hal
         if (!isDuty(value)) {
             return (void)js::fail<js::RangeError>("pwm: duty must be 0 to 1");
         }
+
         applyDuty(value);
     }
 
@@ -109,10 +112,12 @@ public:
      * frequency).
      */
     JS_EXPORT(setFrequency) void setFrequency(Frequency hz) {
+        // closed: no output
         if (!isOpen()) {
             return (void)js::fail("pwm: closed");
         }
 
+        // the hal moves the output to a timer of that frequency, if it can
         hal::pwm::Output output;
         int error = hal::pwm::setFrequency(_handle, (uint32_t)(int)hz, &output);
         if (error != 0) {
@@ -120,6 +125,8 @@ public:
             snprintf(what, sizeof(what), "pwm: %d Hz", (int)hz);
             return (void)js::failSystem(error, what);
         }
+
+        // what the hardware does now, in the fields
         show(&output);
     }
 
@@ -129,10 +136,13 @@ public:
      * RangeError (negative, or longer than the period).
      */
     JS_EXPORT(setPulseWidth) void setPulseWidth(double microseconds) {
+        // the share of the real period (frequency: what the hardware does)
         double value = microseconds * 1e-6 * frequency;
-        if (!(microseconds >= 0.0) || !isDuty(value)) {
+        bool isPositive = microseconds >= 0.0;   // false for NaN too
+        if (!isPositive || !isDuty(value)) {
             return (void)js::fail<js::RangeError>("pwm: the pulse must last 0 to one period");
         }
+
         applyDuty(value);
     }
 
@@ -162,15 +172,19 @@ private:
      * Gives a duty cycle (checked) to the hal; throws if closed.
      */
     void applyDuty(double value) {
+        // closed: no output
         if (!isOpen()) {
             return (void)js::fail("pwm: closed");
         }
 
+        // from the next period
         hal::pwm::Output output;
         int error = hal::pwm::setDuty(_handle, value, &output);
         if (error != 0) {
             return (void)js::failSystem(error, "pwm: setDuty");
         }
+
+        // what the hardware does now, in the fields
         show(&output);
     }
 

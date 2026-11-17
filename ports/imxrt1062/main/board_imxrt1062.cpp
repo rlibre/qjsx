@@ -52,6 +52,7 @@ size_t jsHeapSize = 0;        // bytes of the region (startMemory)
 
 // ### Package storage #########################################################
 
+// The package area of the flash and how to write it (flash_imxrt1062.h).
 const slots::Flash packageFlash = {
     PACKAGES_OFFSET,
     PACKAGES_SIZE,
@@ -88,7 +89,7 @@ public:
     }
 };
 
-UsbLink usbLink;
+UsbLink       usbLink;                 // the agent's link (startLinks)
 agent::Agent *linkedAgent = nullptr;   // set by startLinks, before the reader starts
 
 /**
@@ -101,6 +102,7 @@ void usbReader(void *) {
     uint8_t *buffer = (uint8_t *)memory::allocate(READ_BLOCK);
 
     for (;;) {
+        // bytes arrived, or READ_TIMEOUT_MS passed
         usbserial::waitReceived(READ_TIMEOUT_MS);
 
         // take everything there is
@@ -188,13 +190,16 @@ bool restart() {
  * registers CFG0 and CFG1), high word first, big endian: 8 bytes.
  */
 size_t chipId(uint8_t *out) {
+    // the two fuse words, high word first
     CLOCK_EnableClock(kCLOCK_Ocotp);
     uint32_t words[2] = { OCOTP->CFG1, OCOTP->CFG0 };
 
+    // their bytes, most significant first
     for (int i = 0; i < 8; i++) {
         uint32_t word = words[i / 4];
         out[i] = (uint8_t)(word >> (24 - 8 * (i % 4)));
     }
+
     return 8;
 }
 
@@ -204,7 +209,8 @@ size_t chipId(uint8_t *out) {
  * the other kinds, and when the fuses are blank.
  */
 bool macAddress(MacKind kind, uint8_t *out) {
-    if (kind != MacKind::base && kind != MacKind::ethernet) {
+    bool fromFuses = kind == MacKind::base || kind == MacKind::ethernet;
+    if (!fromFuses) {
         return false;
     }
 
@@ -212,10 +218,12 @@ bool macAddress(MacKind kind, uint8_t *out) {
     CLOCK_EnableClock(kCLOCK_Ocotp);
     uint32_t high = OCOTP->MAC1 & 0xFFFF;
     uint32_t low = OCOTP->MAC0;
-    if (high == 0 && low == 0) {
+    bool blank = high == 0 && low == 0;
+    if (blank) {
         return false;
     }
 
+    // the six bytes, most significant first
     out[0] = (uint8_t)(high >> 8);
     out[1] = (uint8_t)high;
     out[2] = (uint8_t)(low >> 24);
@@ -255,9 +263,11 @@ size_t agentMaxMessage() {
  * region's size.
  */
 bool memoryStatus(MemoryStatus *out) {
+    // free now, and the lowest seen so far
     size_t now = freeCHeap();
     lowestFree = now < lowestFree ? now : lowestFree;
 
+    // the C heap, no PSRAM, the JS region
     out->ramFree = now;
     out->ramLargest = (size_t)(__qjsx_c_heap_end - qjsxHeapBreak());
     out->ramLowest = lowestFree;

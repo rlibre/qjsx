@@ -1,3 +1,4 @@
+
 /*          _
  *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
  * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
@@ -43,6 +44,7 @@ export function readReport(answer) {
  * the device runs, or undefined (then numbers only).
  */
 function describeFrame(frame, report, pkg) {
+    // frame = module index << 16 | function number
     const moduleIndex = frame >>> 16;
     const number = frame & 0xFFFF;
     const module = moduleIndex === NO_MODULE ? "(unknown module)" : report.modules[moduleIndex];
@@ -68,12 +70,15 @@ function describeFrame(frame, report, pkg) {
 export function functionTimes(report, pkg) {
     const rows = new Map();   // key -> row
 
-    // the row of a frame, made on first sight
+    /**
+     * The row of a frame, made on first sight.
+     */
     const rowOf = frame => {
         const { key, name, where } = describeFrame(frame, report, pkg);
         if (!rows.has(key)) {
             rows.set(key, { name, where, self: 0, total: 0 });
         }
+
         return { key, row: rows.get(key) };
     };
 
@@ -85,6 +90,7 @@ export function functionTimes(report, pkg) {
 
         // total: each function once per stack
         const counted = new Set();
+
         for (const frame of stack.frames) {
             const { key, row } = rowOf(frame);
             if (!counted.has(key)) {
@@ -94,6 +100,7 @@ export function functionTimes(report, pkg) {
         }
     }
 
+    // by self time, then by total time
     return [...rows.values()].sort((a, b) => b.self - a.self || b.total - a.total);
 }
 
@@ -112,14 +119,17 @@ export function profileText(report, pkg, top = 20) {
     if (report.overflow > 0) {
         lines.push(`(${report.overflow} samples whose stack did not fit in the table of the device: not counted below)`);
     }
+
     if (pkg === undefined) {
         lines.push("(no debug files of the package the device runs: functions by number; build it in this project)");
     }
 
     // the functions
     lines.push("   self    total  function");
+
     for (const row of functionTimes(report, pkg).slice(0, top)) {
         lines.push(`${share(row.self).padStart(7)}  ${share(row.total).padStart(7)}  ${row.name}  ${row.where}`);
     }
+
     return lines.join("\n");
 }

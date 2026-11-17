@@ -29,14 +29,15 @@ namespace agent {
  */
 struct Agent::Fields {
     struct Field {
-        int64_t key;           // protocol KEY_*
-        cbor::Type type;       // type of the value
-        int64_t integer;       // value if an integer (Unsigned or Negative)
-        const uint8_t *data;   // text or bytes
-        size_t size;           // bytes of 'data'
+        int64_t        key;       // protocol KEY_*
+        cbor::Type     type;      // type of the value
+        int64_t        integer;   // value if an integer (Unsigned or Negative)
+        const uint8_t *data;      // text or bytes
+        size_t         size;      // bytes of 'data'
     };
+
     Field items[16];   // the first 'count' are used
-    int count = 0;     // fields read
+    int   count = 0;   // fields read
 
     /**
      * The field with this key, or nullptr.
@@ -409,16 +410,19 @@ void Agent::handleProfile(int64_t kind, int64_t id, const Fields *fields) {
 
     payload.integer(KEY_MODULES);
     payload.array((uint64_t)report.moduleCount);
+
     for (int i = 0; i < report.moduleCount; i++) {
         payload.text(report.modules[i]);
     }
 
     payload.integer(KEY_STACKS);
     payload.array((uint64_t)report.stackCount);
+
     for (int i = 0; i < report.stackCount; i++) {
         const profiler::Stack *stack = &report.stacks[i];
         payload.array((uint64_t)stack->depth + 1);
         payload.integer(stack->count);
+
         for (int level = 0; level < stack->depth; level++) {
             payload.integer(stack->frames[level]);
         }
@@ -480,6 +484,7 @@ void Agent::handleHello(int64_t id, const Fields *fields) {
     // program that imports another one
     int registered = rt::countNativeModules();
     int nativeCount = 0;
+
     for (int i = 0; i < registered; i++) {
         nativeCount += rt::isDeviceNativeModule(rt::nativeModuleNameAt(i)) ? 1 : 0;
     }
@@ -534,6 +539,7 @@ void Agent::handleInfo(int64_t id) {
         payload.integer((int64_t)used);
         fieldCount++;
     }
+
     if (_dataTotal > 0) {
         payload.integer(KEY_DATA_TOTAL);
         payload.integer((int64_t)_dataTotal);
@@ -675,14 +681,17 @@ void Agent::handleUploadChunk(int64_t id, const Fields *fields) {
     int64_t offset = 0;
     const uint8_t *data = nullptr;
     size_t size = 0;
-    if (!_uploading || !fields->integer(KEY_OFFSET, &offset) || !fields->bytes(KEY_DATA, &data, &size)) {
+    bool hasChunk = fields->integer(KEY_OFFSET, &offset) && fields->bytes(KEY_DATA, &data, &size);
+    if (!_uploading || !hasChunk) {
         respondError(id, "UPLOAD_CHUNK: no upload in progress, or OFFSET / DATA missing");
         return;
     }
 
     // chunks come in order and stay within the announced size (a chunk
     // sent again was answered by the repeat check of onMessage)
-    if ((size_t)offset != _uploadReceived || _uploadReceived + size > _uploadSize) {
+    bool inOrder = (size_t)offset == _uploadReceived;
+    bool fits = _uploadReceived + size <= _uploadSize;
+    if (!inOrder || !fits) {
         respondError(id, "UPLOAD_CHUNK: unexpected offset or size");
         return;
     }
@@ -764,6 +773,7 @@ void Agent::handleFileList(int64_t id, const Fields *fields) {
     cbor::Writer payload;
     payload.integer(KEY_ENTRIES);
     payload.array((uint64_t)count);
+
     for (int index = 0; index < count; index++) {
         payload.array(3);
         payload.text(entries[index].name);
@@ -771,6 +781,7 @@ void Agent::handleFileList(int64_t id, const Fields *fields) {
         payload.boolean(entries[index].isDirectory);
     }
 
+    // the entries are copied: freed before the answer
     DataFiles::freeEntries(entries, count);
     respond(id, &payload, 1);
 }
@@ -779,6 +790,7 @@ void Agent::handleFileList(int64_t id, const Fields *fields) {
  * FILE_READ: PATH, OFFSET -> DATA (FILE_CHUNK bytes at most), SIZE.
  */
 void Agent::handleFileRead(int64_t id, const Fields *fields) {
+    // the file and where to read from
     const char *path = nullptr;
     size_t length = 0;
     int64_t offset = 0;
@@ -798,6 +810,7 @@ void Agent::handleFileRead(int64_t id, const Fields *fields) {
         return;
     }
 
+    // answer the piece and the size of the whole file
     cbor::Writer payload;
     payload.integer(KEY_DATA);
     payload.bytes(buffer, got);
@@ -822,11 +835,13 @@ void Agent::handleFileWrite(int64_t kind, int64_t id, const Fields *fields) {
             return;
         }
 
+        // the temporary file, next to the target
         int error = _files.beginWrite(path, length, size);
         if (error != 0) {
             respondFileError(id, error, path, length);
             return;
         }
+
         respondEmpty(id);
         return;
     }
@@ -841,11 +856,13 @@ void Agent::handleFileWrite(int64_t kind, int64_t id, const Fields *fields) {
             return;
         }
 
+        // appended to the temporary file
         int error = _files.writeChunk(offset, data, size);
         if (error != 0) {
             respondFileError(id, error, "", 0);
             return;
         }
+
         respondEmpty(id);
         return;
     }
@@ -856,6 +873,7 @@ void Agent::handleFileWrite(int64_t kind, int64_t id, const Fields *fields) {
         respondFileError(id, error, "", 0);
         return;
     }
+
     respondEmpty(id);
 }
 
@@ -863,6 +881,7 @@ void Agent::handleFileWrite(int64_t kind, int64_t id, const Fields *fields) {
  * FILE_REMOVE (PATH), FILE_MKDIR (PATH), FILE_RENAME (PATH, TO).
  */
 void Agent::handleFileChange(int64_t kind, int64_t id, const Fields *fields) {
+    // the path every operation needs
     const char *path = nullptr;
     size_t length = 0;
     if (!fields->text(KEY_PATH, &path, &length)) {
@@ -883,13 +902,16 @@ void Agent::handleFileChange(int64_t kind, int64_t id, const Fields *fields) {
             respondError(id, "FILE_RENAME: TO expected");
             return;
         }
+
         error = _files.rename(path, length, to, toLength);
     }
 
+    // answer
     if (error != 0) {
         respondFileError(id, error, path, length);
         return;
     }
+
     respondEmpty(id);
 }
 
@@ -907,6 +929,7 @@ void Agent::respondFileError(int64_t id, int error, const char *path, size_t len
         snprintf(text, sizeof(text), "%s: %s", code, strerror(error));
     }
 
+    // [ERROR, id, {MESSAGE, ERROR_CODE}]
     cbor::Writer message;
     writeHeader(&message, KIND_ERROR, id);
     message.map(2);
@@ -1094,6 +1117,7 @@ bool Agent::sendLog(int stream, const char *text, size_t length) {
         size_t piece = length - offset;
         if (piece > pieceLimit) {
             piece = pieceLimit;
+
             while (piece > 0 && ((uint8_t)text[offset + piece] & 0xC0) == 0x80) {
                 piece--;
             }

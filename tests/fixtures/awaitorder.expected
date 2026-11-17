@@ -1,0 +1,57 @@
+value start
+settled start
+rejected start
+pending start
+subclass start
+getter start
+constructor read
+thenable start
+f() start
+promise() start
+thenable() start
+throwsAtOnce() start
+throwsLater() start
+levels start
+method start
+A tick 1
+value resumed with 5
+settled resumed with settled
+rejected threw rejected
+getter resumed with watched
+B tick 1
+release
+f() 1
+thenable then called
+throwsAtOnce() at once
+method 10
+C tick 1
+A tick 2
+thenable resumed with thenable
+B tick 2
+pending resumed with pending
+thenable() 3
+throwsLater() later
+C tick 2
+A tick 3
+subclass resumed with subclass
+B tick 3
+promise() 2
+C tick 3
+A tick 4
+B tick 4
+levels 42
+C tick 4
+A tick 5
+B tick 5
+C tick 5
+A tick 6
+B tick 6
+C tick 6
+A tick 7
+B tick 7
+C tick 7
+A tick 8
+B tick 8
+C tick 8
+C tick 9
+C tick 10

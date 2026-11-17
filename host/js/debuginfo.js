@@ -43,14 +43,19 @@ const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 // ### Packages ################################################################
 
-// The packages of some folders and files, indexed by build id. Only the
-// manifests are read when indexing; a package is opened when it is asked
-// for. A build id not found makes the index look at its folders again (a
-// package built since).
-//   paths       folders (their *.qjspkg files) and .qjspkg files
-//   sourceRoot  folder the paths of the program modules start from (the
-//               project): gives ScriptInfo.localPath; none: localPath null
+/**
+ * The packages of some folders and files, indexed by build id. Only the
+ * manifests are read when indexing; a package is opened when it is asked
+ * for. A build id not found makes the index look at its folders again (a
+ * package built since).
+ *   paths       folders (their *.qjspkg files) and .qjspkg files
+ *   sourceRoot  folder the paths of the program modules start from (the
+ *               project): gives ScriptInfo.localPath; none: localPath null
+ */
 export class PackageIndex {
+    /**
+     * Indexes the packages of 'paths' at once.
+     */
     constructor(paths, { sourceRoot } = {}) {
         this.paths = paths;
         this.sourceRoot = sourceRoot;
@@ -59,7 +64,9 @@ export class PackageIndex {
         this.scan();
     }
 
-    // Reads the manifest of every package of the paths.
+    /**
+     * Reads the manifest of every package of the paths.
+     */
     scan() {
         for (const file of this.packageFiles()) {
             const buildId = readManifest(file)?.buildId;
@@ -69,27 +76,37 @@ export class PackageIndex {
         }
     }
 
-    // The .qjspkg files of the paths (a missing folder gives none).
+    /**
+     * The .qjspkg files of the paths (a missing folder gives none).
+     */
     packageFiles() {
         const files = [];
+
         for (const path of this.paths) {
             if (!fs.existsSync(path)) {
                 continue;
             }
 
-            if (fs.statSync(path).isFile()) {
+            // a package file given as such
+            const isFile = fs.statSync(path).isFile();
+            if (isFile) {
                 files.push(path);
                 continue;
             }
 
+            // a folder: its packages
             const names = fs.readdirSync(path).filter(name => name.endsWith(PACKAGE_EXTENSION));
             files.push(...names.map(name => join(path, name)));
         }
+
         return files;
     }
 
-    // The package of 'buildId' (opened once), or undefined.
+    /**
+     * The package of 'buildId' (opened once), or undefined.
+     */
     find(buildId) {
+        // opened already
         const opened = this.opened.get(buildId);
         if (opened !== undefined) {
             return opened;
@@ -100,18 +117,22 @@ export class PackageIndex {
             this.scan();
         }
 
+        // unknown build id
         const file = this.files.get(buildId);
         if (file === undefined) {
             return undefined;
         }
 
+        // open it, once
         const pkg = new DebugPackage(file, this.sourceRoot);
         this.opened.set(buildId, pkg);
         return pkg;
     }
 }
 
-// Manifest of a package file, or undefined if it is not a readable package.
+/**
+ * Manifest of a package file, or undefined if it is not a readable package.
+ */
 function readManifest(file) {
     try {
         const entries = readZip(fs.readFileSync(file));
@@ -121,36 +142,51 @@ function readManifest(file) {
     }
 }
 
-// The name the source gives a function the compiler left without one (it
-// names methods and functions stored in a variable only when they run),
-// from the source around its start (a byte offset of 'sourceBytes'):
-//   async _breathe(self) {          -> "_breathe"   (a method, at its start)
-//   const lasts = () => ...         -> "lasts"      (stored in a variable or
-//   this.onData = async (bytes) =>  -> "onData"      a property, before it)
-// undefined when neither applies (a callback given to a call).
+// Patterns of inferFunctionName: a method at the start of a function, a
+// variable or a property before it.
 const METHOD_START = /^(?:async\s+)?(?:static\s+)?(?:get\s+|set\s+)?\*?\s*(#?[A-Za-z_$][\w$]*)\s*\(/;
 const STORED_BEFORE = /([A-Za-z_$][\w$]*)\s*(?<![=!<>])(?:=|:)\s*(?:async\s*)?$/;
 const AROUND = 80;   // bytes looked at on each side of the start
 
+/**
+ * The name the source gives a function the compiler left without one (it
+ * names methods and functions stored in a variable only when they run),
+ * from the source around its start (a byte offset of 'sourceBytes'):
+ *   async _breathe(self) {          -> "_breathe"   (a method, at its start)
+ *   const lasts = () => ...         -> "lasts"      (stored in a variable or
+ *   this.onData = async (bytes) =>  -> "onData"      a property, before it)
+ * undefined when neither applies (a callback given to a call).
+ */
 function inferFunctionName(sourceBytes, start) {
+    // a method: its name at the start ("function" is a keyword, not a name)
     const decoder = new TextDecoder();
     const after = decoder.decode(sourceBytes.subarray(start, start + AROUND));
     const method = METHOD_START.exec(after);
-    if (method !== null && method[1] !== "function") {
+    const isMethod = method !== null && method[1] !== "function";
+    if (isMethod) {
         return method[1];
     }
 
+    // a variable or a property: its name before the start
     const before = decoder.decode(sourceBytes.subarray(Math.max(0, start - AROUND), start));
     const stored = STORED_BEFORE.exec(before);
     return stored === null ? undefined : stored[1];
 }
 
+/**
+ * UTF-8 JSON bytes -> value.
+ */
 function decodeJson(bytes) {
     return JSON.parse(new TextDecoder().decode(bytes));
 }
 
-// An opened package: its manifest and its scripts.
+/**
+ * An opened package: its manifest and its scripts.
+ */
 export class DebugPackage {
+    /**
+     * Reads the package file: its manifest, then each script.
+     */
     constructor(file, sourceRoot) {
         const entries = readZip(fs.readFileSync(file));
         const manifest = decodeJson(entries.get("manifest.json"));
@@ -160,17 +196,23 @@ export class DebugPackage {
         this.main = manifest.main;
         this.manifest = manifest;
         this.scriptsByModule = new Map();
+
         for (const record of manifest.scripts) {
             const script = new ScriptInfo(record, entries, sourceRoot);
             this.scriptsByModule.set(script.module, script);
         }
     }
 
-    // The script of a module name ("src/main.js", "stdlib/path"), or undefined.
+    /**
+     * The script of a module name ("src/main.js", "stdlib/path"), or undefined.
+     */
     script(module) {
         return this.scriptsByModule.get(module);
     }
 
+    /**
+     * Every script of the package.
+     */
     scripts() {
         return [...this.scriptsByModule.values()];
     }
@@ -178,9 +220,16 @@ export class DebugPackage {
 
 // ### Scripts #################################################################
 
-// One module of a package: its source, its sidecar, and the conversions.
+/**
+ * One module of a package: its source, its sidecar, and the conversions.
+ */
 export class ScriptInfo {
+    /**
+     * 'record': the entry of the module in the manifest; 'entries': the
+     * files of the package.
+     */
     constructor(record, entries, sourceRoot) {
+        // the module, its source and its sidecar
         this.module = record.path;
         this.library = record.library ?? null;
         this.record = record;
@@ -193,65 +242,86 @@ export class ScriptInfo {
         const isProgramModule = this.library === null && sourceRoot !== undefined;
         this.localPath = isProgramModule ? join(sourceRoot, record.path) : null;
 
+        // the line starts, for the conversions
         this.lines = new LineTable(this.source);
     }
 
-    // Consistency of the script: [] when all is right, else the problems
-    // (text): source of the package against the manifest, sidecar against
-    // the manifest, local file changed since the build.
+    /**
+     * Consistency of the script: [] when all is right, else the problems
+     * (text): source of the package against the manifest, sidecar against
+     * the manifest, local file changed since the build.
+     */
     check() {
         const problems = [];
-        if (hex(sha256(this.source)) !== this.record.sourceHash) {
+
+        // the source of the package against the manifest
+        const sourceDiffers = hex(sha256(this.source)) !== this.record.sourceHash;
+        if (sourceDiffers) {
             problems.push(`${this.module}: the source in the package does not match the manifest`);
         }
 
+        // the sidecar against the manifest
         if (this.sidecar.buildId !== this.record.buildId) {
             problems.push(`${this.module}: the debug sidecar does not match the bytecode`);
         }
 
+        // the local file against the source of the package
         const localExists = this.localPath !== null && fs.existsSync(this.localPath);
-        if (localExists && fs.readFileSync(this.localPath, "utf8") !== this.source) {
+        const localChanged = localExists && fs.readFileSync(this.localPath, "utf8") !== this.source;
+        if (localChanged) {
             problems.push(`${this.localPath}: the file changed since the package was built`);
         }
+
         return problems;
     }
 
-    // Name shown for a function: its name, "<module>" for the code of the
-    // module, the name its source gives it (see inferFunctionName),
-    // "(anonymous)" otherwise.
+    /**
+     * Name shown for a function: its name, "<module>" for the code of the
+     * module, the name its source gives it (see inferFunctionName),
+     * "(anonymous)" otherwise.
+     */
     functionName(number) {
         const info = this.functions[number];
         if (info === undefined) {
             return "(unknown)";
         }
 
+        // the module function is the last one
         const isModuleCode = number === this.functions.length - 1;
         if (isModuleCode) {
             return "<module>";
         }
+
+        // its own name, else the one the source gives it
         this.sourceBytes ??= new TextEncoder().encode(this.source);   // positions are byte offsets
         return info.name ?? inferFunctionName(this.sourceBytes, info.start) ?? "(anonymous)";
     }
 
-    // Source offset (bytes) of the bytecode offset 'pc' of function
-    // 'number': the last position at or before it. 'exact': the instruction
-    // at 'pc' (level 0 of a pause), and a stop position (statement or
-    // return) at that very pc wins over the expression positions sharing it;
-    // else 'pc' follows a call instruction (a calling frame) and the position
-    // of that call is wanted.
+    /**
+     * Source offset (bytes) of the bytecode offset 'pc' of function
+     * 'number': the last position at or before it. 'exact': the instruction
+     * at 'pc' (level 0 of a pause), and a stop position (statement or
+     * return) at that very pc wins over the expression positions sharing it;
+     * else 'pc' follows a call instruction (a calling frame) and the position
+     * of that call is wanted.
+     */
     offsetAt(number, pc, { exact }) {
         const info = this.functions[number];
         if (info === undefined) {
             return undefined;
         }
 
+        // the positions in pc order, up to the target; the first stop position
+        // at the target itself is kept apart
         const target = exact ? pc : pc - 1;
         let offset = info.start;
         let stopOffset = undefined;
+
         for (const position of positionsOf(info)) {
             if (position.pc > target) {
                 break;
             }
+
             offset = position.offset;
 
             const isStopHere = exact && position.pc === target && position.kind !== POSITION_EXPRESSION;
@@ -259,11 +329,14 @@ export class ScriptInfo {
                 stopOffset = position.offset;
             }
         }
+
         return stopOffset ?? offset;
     }
 
-    // { line, column, offset } of a device position, or undefined if the
-    // function is unknown.
+    /**
+     * { line, column, offset } of a device position, or undefined if the
+     * function is unknown.
+     */
     location(number, pc, { exact = true } = {}) {
         const offset = this.offsetAt(number, pc, { exact });
         if (offset === undefined) {
@@ -274,19 +347,23 @@ export class ScriptInfo {
         return { line, column, offset };
     }
 
-    // Where a breakpoint asked at (line, column) goes: the first stop
-    // position (statement or return) at or after it, in the innermost
-    // function that has one there. A line without statement slides to the
-    // next one, as in V8. null if there is none until the end.
-    //   pcs: every offset of that function at that source position
+    /**
+     * Where a breakpoint asked at (line, column) goes: the first stop
+     * position (statement or return) at or after it, in the innermost
+     * function that has one there. A line without statement slides to the
+     * next one, as in V8. null if there is none until the end.
+     *   pcs: every offset of that function at that source position
+     */
     breakpointAt(line, column = 0) {
         const wanted = this.lines.offset(line, column);
 
         // the first stop position from there, innermost function on a tie
         let best = null;
+
         for (const info of this.functions) {
             for (const position of positionsOf(info)) {
-                if (position.kind === POSITION_EXPRESSION || position.offset < wanted) {
+                const isIgnored = position.kind === POSITION_EXPRESSION || position.offset < wanted;
+                if (isIgnored) {
                     continue;
                 }
 
@@ -310,29 +387,37 @@ export class ScriptInfo {
         return { number: best.info.number, pc: pcs[0], pcs, line: found.line, column: found.column };
     }
 
-    // Where a breakpoint can be in a range of the source: the stop positions
-    // (statement or return) from (startLine, startColumn) included to
-    // (endLine, endColumn) excluded, as [{ line, column }] in source order,
-    // each position once. No end: to the end of the source.
+    /**
+     * Where a breakpoint can be in a range of the source: the stop positions
+     * (statement or return) from (startLine, startColumn) included to
+     * (endLine, endColumn) excluded, as [{ line, column }] in source order,
+     * each position once. No end: to the end of the source.
+     */
     breakableLocations(startLine, startColumn, endLine, endColumn) {
+        // the range in bytes
         const start = this.lines.offset(startLine, startColumn);
         const end = endLine === undefined ? this.lines.byteLength + 1 : this.lines.offset(endLine, endColumn);
 
         // the offsets of every stop position in the range, once each
         const offsets = new Set();
+
         for (const info of this.functions) {
             for (const position of positionsOf(info)) {
                 const inRange = position.offset >= start && position.offset < end;
-                if (position.kind !== POSITION_EXPRESSION && inRange) {
+                const isStopInRange = position.kind !== POSITION_EXPRESSION && inRange;
+                if (isStopInRange) {
                     offsets.add(position.offset);
                 }
             }
         }
 
+        // in source order, as lines and columns
         return [...offsets].sort((a, b) => a - b).map(offset => this.lines.position(offset));
     }
 
-    // Stops of SET_STOPS STATEMENTS: every stop position of every function.
+    /**
+     * Stops of SET_STOPS STATEMENTS: every stop position of every function.
+     */
     statementStops() {
         return this.functions.map(info => ({
             number: info.number,
@@ -340,13 +425,15 @@ export class ScriptInfo {
         }));
     }
 
-    // The variables visible at a device position, by scope, innermost first:
-    //   [{ kind: "block" | "local" | "closure", variables: [{ name, slotKind, index, flags }] }]
-    // "block": the scopes inside the function that contain the position;
-    // "local": the arguments and the variables of the function scope;
-    // "closure": the variables the function takes from enclosing functions
-    // (module variables included). Internal variables ("<ret>"...) and 'this'
-    // are left out (see thisSlot). Empty scopes are left out.
+    /**
+     * The variables visible at a device position, by scope, innermost first:
+     *   [{ kind: "block" | "local" | "closure", variables: [{ name, slotKind, index, flags }] }]
+     * "block": the scopes inside the function that contain the position;
+     * "local": the arguments and the variables of the function scope;
+     * "closure": the variables the function takes from enclosing functions
+     * (module variables included). Internal variables ("<ret>"...) and 'this'
+     * are left out (see thisSlot). Empty scopes are left out.
+     */
     scopesAt(number, pc, { exact = true } = {}) {
         const info = this.functions[number];
         if (info === undefined) {
@@ -370,16 +457,19 @@ export class ScriptInfo {
         // a block scope per containing inner scope, then the function scope
         // with the arguments
         const result = [];
+
         for (const { index } of containing) {
             if (isFunctionScope(index)) {
                 continue;
             }
+
             const variables = slotsOf(info.locals, SLOT_LOCAL).filter(variable => variable.scope === index);
             result.push({ kind: "block", variables });
         }
 
         const functionScope = slotsOf(info.locals, SLOT_LOCAL).filter(variable => isFunctionScope(variable.scope));
         result.push({ kind: "local", variables: [...slotsOf(info.arguments, SLOT_ARGUMENT), ...functionScope] });
+
         // the closure variables, then the constants of the module the
         // compiler replaced by their value (an exported one also has its
         // variable, in the module function: once is enough)
@@ -394,9 +484,11 @@ export class ScriptInfo {
             .filter(entry => entry.variables.length > 0);
     }
 
-    // The constants of the module that have no variable at run time (the
-    // compiler wrote their value where they are read), as variables without
-    // slot: { name, constant, flags }.
+    /**
+     * The constants of the module that have no variable at run time (the
+     * compiler wrote their value where they are read), as variables without
+     * slot: { name, constant, flags }.
+     */
     constants() {
         const flags = VARIABLE_FLAG.LEXICAL | VARIABLE_FLAG.CONST;
         return this.functions
@@ -404,51 +496,67 @@ export class ScriptInfo {
             .map(({ name, value }) => ({ name, constant: value, flags }));
     }
 
-    // The slot of 'this' in a function ({ slotKind, index }), or null: QuickJS
-    // only makes one when the function uses 'this' (a local variable, or a
-    // closure variable in an arrow function).
+    /**
+     * The slot of 'this' in a function ({ slotKind, index }), or null: QuickJS
+     * only makes one when the function uses 'this' (a local variable, or a
+     * closure variable in an arrow function).
+     */
     thisSlot(number) {
         const info = this.functions[number];
         if (info === undefined) {
             return null;
         }
 
+        // a local variable
         const localIndex = info.locals.findIndex(variable => variable.name === "this");
         if (localIndex >= 0) {
             return { slotKind: SLOT_LOCAL, index: localIndex };
         }
 
+        // a closure variable (an arrow function)
         const closureIndex = info.closures.findIndex(variable => variable.name === "this");
         if (closureIndex >= 0) {
             return { slotKind: SLOT_CLOSURE, index: closureIndex };
         }
+
         return null;
     }
 }
 
-// The positions of a sidecar function as records { pc, offset, kind }, sorted
-// by pc (the sidecar has flat triples).
+/**
+ * The positions of a sidecar function as records { pc, offset, kind }, sorted
+ * by pc (the sidecar has flat triples).
+ */
 function positionsOf(info) {
+    // made at the first call, then kept in the function's record
     if (info.positionRecords === undefined) {
         const records = [];
+
         for (let i = 0; i < info.positions.length; i += 3) {
             records.push({ pc: info.positions[i], offset: info.positions[i + 1], kind: info.positions[i + 2] });
         }
+
         info.positionRecords = records;
     }
+
     return info.positionRecords;
 }
 
-// True if function 'inner' is inside function 'outer' (source ranges).
+/**
+ * True if function 'inner' is inside function 'outer' (source ranges).
+ */
 function isInside(inner, outer) {
     const strictlySmaller = inner.end - inner.start < outer.end - outer.start;
     return inner.start >= outer.start && inner.end <= outer.end && strictlySmaller;
 }
 
-// The variables of one slot kind that a user can see, with their slot:
-// { name, slotKind, index, flags, scope }. Internal names (not
-// identifiers: "<ret>", "new.target"...) and 'this' are left out.
+/**
+ * The variables of one slot kind that a user can see, with their slot:
+ * { name, slotKind, index, flags, scope }. Internal names (not
+ * identifiers: "<ret>", "new.target"...) and 'this' are left out.
+ */
 function slotsOf(variables, slotKind) {
+    // the index of a variable in 'variables' is its slot
     const visible = [];
     variables.forEach((variable, index) => {
         const isUserName = typeof variable.name === "string" && IDENTIFIER.test(variable.name) && variable.name !== "this";
@@ -456,49 +564,67 @@ function slotsOf(variables, slotKind) {
             visible.push({ name: variable.name, slotKind, index, flags: variable.flags, scope: variable.scope });
         }
     });
+
     return visible;
 }
 
+/**
+ * A variable of slotsOf() or constants() without its scope number.
+ */
 function withoutScope({ name, slotKind, index, flags, constant }) {
     if (constant !== undefined) {
         return { name, constant, flags };
     }
+
     return { name, slotKind, index, flags };
 }
 
 // ### Lines ###################################################################
 
-// The character at 'index' of 'text': its UTF-8 length ('bytes') and its
-// number of UTF-16 code units ('units': 2 for a pair of surrogates, which is
-// 4 bytes in UTF-8).
+/**
+ * The character at 'index' of 'text': its UTF-8 length ('bytes') and its
+ * number of UTF-16 code units ('units': 2 for a pair of surrogates, which is
+ * 4 bytes in UTF-8).
+ */
 function characterAt(text, index) {
+    // 1 or 2 bytes below U+0800
     const unit = text.charCodeAt(index);
     if (unit < 0x80) {
         return { bytes: 1, units: 1 };
     }
+
     if (unit < 0x800) {
         return { bytes: 2, units: 1 };
     }
 
+    // a pair of surrogates: 4 bytes; any other code unit: 3 bytes
     const isHighSurrogate = unit >= 0xd800 && unit <= 0xdbff;
     const next = text.charCodeAt(index + 1);
     const followedByLow = next >= 0xdc00 && next <= 0xdfff;
     if (isHighSurrogate && followedByLow) {
         return { bytes: 4, units: 2 };
     }
+
     return { bytes: 3, units: 1 };
 }
 
-// Line starts of a source, in bytes (UTF-8) and in UTF-16 code units; lines
-// end at '\n'.
+/**
+ * Line starts of a source, in bytes (UTF-8) and in UTF-16 code units; lines
+ * end at '\n'.
+ */
 export class LineTable {
+    /**
+     * Walks the text once to find the line starts.
+     */
     constructor(text) {
         this.text = text;
         this.byteStarts = [0];
         this.unitStarts = [0];
 
+        // a line starts after each '\n'
         let bytes = 0;
         let unit = 0;
+
         while (unit < text.length) {
             const character = characterAt(text, unit);
             const isNewLine = text.charCodeAt(unit) === 0x0a;
@@ -509,14 +635,18 @@ export class LineTable {
                 this.unitStarts.push(unit);
             }
         }
+
         this.byteLength = bytes;
     }
 
-    // { line, column } of a byte offset (a column in UTF-16 code units).
+    /**
+     * { line, column } of a byte offset (a column in UTF-16 code units).
+     */
     position(offset) {
         // the last line starting at or before the offset (binary search)
         let low = 0;
         let high = this.byteStarts.length - 1;
+
         while (low < high) {
             const middle = (low + high + 1) >> 1;
             if (this.byteStarts[middle] <= offset) {
@@ -529,16 +659,20 @@ export class LineTable {
         // count the code units of the line until the offset
         let bytes = this.byteStarts[low];
         let unit = this.unitStarts[low];
+
         while (bytes < offset && unit < this.text.length) {
             const character = characterAt(this.text, unit);
             bytes += character.bytes;
             unit += character.units;
         }
+
         return { line: low, column: unit - this.unitStarts[low] };
     }
 
-    // Byte offset of (line, column); past the end of a line or of the text,
-    // the nearest end.
+    /**
+     * Byte offset of (line, column); past the end of a line or of the text,
+     * the nearest end.
+     */
     offset(line, column) {
         if (line >= this.byteStarts.length) {
             return this.byteLength;
@@ -549,11 +683,13 @@ export class LineTable {
         const lineEnd = line + 1 < this.unitStarts.length ? this.unitStarts[line + 1] : this.text.length;
         let bytes = this.byteStarts[line];
         let unit = lineStart;
+
         while (unit < lineEnd && unit - lineStart < column) {
             const character = characterAt(this.text, unit);
             bytes += character.bytes;
             unit += character.units;
         }
+
         return bytes;
     }
 }

@@ -40,6 +40,7 @@ export class Section extends VBox<SectionProps> {
         // open or folded, as the browser kept it
         this._state = this.loadPState(`qjsx.twin.section.${props.persist}`, { open: true });
 
+        // the title line (a click on it folds or unfolds), then the body
         this.setContent([
             this.refs.header = new HBox({
                 cls: "section-header",
@@ -55,6 +56,7 @@ export class Section extends VBox<SectionProps> {
             this.refs.body = new VBox({ cls: "section-body", content: props.content }),
         ]);
 
+        // the body shown or hidden as kept
         this._showState();
 
         // dragged by its title line

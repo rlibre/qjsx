@@ -29,11 +29,14 @@ export default class Button extends Part {
      */
     constructor(config, board) {
         super(config, board);
+
+        // its fields: activeLow (true by default), reset (false by default)
         const activeLow = config.activeLow ?? true;
         const reset = config.reset ?? false;
         if (typeof activeLow !== "boolean") {
             throw new Error('"activeLow" must be true or false');
         }
+
         if (typeof reset !== "boolean") {
             throw new Error('"reset" must be true or false');
         }
@@ -49,6 +52,7 @@ export default class Button extends Part {
             return;
         }
 
+        // a button on a pin: the pin pulled to its rest level
         this._pin = board.pin(parsePin(config.pin));
         this._activeLevel = activeLow ? 0 : 1;
         this._pin.pull(activeLow ? "up" : "down");
@@ -60,11 +64,14 @@ export default class Button extends Part {
      * lets it go; the reset button restarts the device when released.
      */
     onAction(action, args) {
-        if (action !== "set" || typeof args?.pressed !== "boolean") {
+        // "set" with a boolean only
+        const isNotSet = action !== "set" || typeof args?.pressed !== "boolean";
+        if (isNotSet) {
             return;
         }
 
-        // released after a press: the reset button restarts the device
+        // released after a press: the reset button restarts the device; a
+        // button on a pin drives it while pressed
         const released = this._pressed && !args.pressed;
         this._pressed = args.pressed;
         if (this._pin === null) {
@@ -74,6 +81,7 @@ export default class Button extends Part {
         } else {
             this._pin.drive(args.pressed ? this._activeLevel : null);
         }
+
         this.publish({ pressed: args.pressed });
     }
 }

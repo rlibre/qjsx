@@ -55,21 +55,30 @@ function wiring(boardParts, projectParts) {
 
     // each entry: an object, an id, a model
     const ids = new Set();
+
     for (const { config, from } of entries) {
-        if (typeof config !== "object" || config === null || Array.isArray(config)) {
+        const isNotObject = typeof config !== "object" || config === null || Array.isArray(config);
+        if (isNotObject) {
             throw new Error(`${from}: each part must be an object`);
         }
-        if (typeof config.id !== "string" || !ID_PATTERN.test(config.id)) {
+
+        const isBadId = typeof config.id !== "string" || !ID_PATTERN.test(config.id);
+        if (isBadId) {
             throw new Error(`${from}: part ${JSON.stringify(config.id)}: "id" must be lower case letters, digits, '-' or '_'`);
         }
+
         if (ids.has(config.id)) {
             throw new Error(`${from}: part "${config.id}": another part has this id`);
         }
-        if (typeof config.model !== "string" || config.model === "") {
+
+        const hasNoModel = typeof config.model !== "string" || config.model === "";
+        if (hasNoModel) {
             throw new Error(`${from}: part "${config.id}": "model" is required`);
         }
+
         ids.add(config.id);
     }
+
     return entries;
 }
 
@@ -83,10 +92,12 @@ async function modelClass(config, projectDir) {
         if (projectDir === undefined) {
             throw new Error(`the model "${config.model}" is a folder of a project, but the twin has none`);
         }
+
         const file = `${modelFolder(projectDir, config.model)}/model.js`;
         if (!fs.existsSync(file)) {
             throw new Error(`no model: ${file} does not exist`);
         }
+
         module = await import(file);
     } else {
         try {
@@ -100,6 +111,7 @@ async function modelClass(config, projectDir) {
     if (typeof module.default !== "function") {
         throw new Error(`the model "${config.model}" exports no default class`);
     }
+
     return module.default;
 }
 
@@ -108,11 +120,14 @@ async function modelClass(config, projectDir) {
  */
 function controlsOf(Model, config) {
     const controls = Model.controls ?? [];
+
     for (const control of controls) {
-        if (typeof control?.name !== "string" || !CONTROL_TYPES.includes(control.type)) {
+        const isBadControl = typeof control?.name !== "string" || !CONTROL_TYPES.includes(control.type);
+        if (isBadControl) {
             throw new Error(`the model "${config.model}" declares a control without a name or of an unknown type`);
         }
     }
+
     return controls;
 }
 
@@ -121,9 +136,13 @@ function controlsOf(Model, config) {
  * (view.js), else none (the page uses its controls, or shows its state).
  */
 function viewOf(config, projectDir) {
-    if (!isProjectModel(config.model) || projectDir === undefined) {
+    // a part of qjsx has no view of its own
+    const isNotOfProject = !isProjectModel(config.model) || projectDir === undefined;
+    if (isNotOfProject) {
         return null;
     }
+
+    // the view.js of its folder, if there is one
     const file = `${modelFolder(projectDir, config.model)}/view.js`;
     return fs.existsSync(file) ? { url: `/parts/${config.id}/view.js`, file } : null;
 }
@@ -147,6 +166,7 @@ export async function loadParts({ boardParts, projectParts, projectDir, hooks })
             const part = new Model(config, board);
             board._currentPart = undefined;
 
+            // what the page gets of it, and the file of its own view
             const view = viewOf(config, projectDir);
             const description = { id: config.id, label: part.label, model: config.model, controls, view: view?.url ?? null };
             parts.push({ part, description, viewFile: view?.file });
@@ -157,8 +177,10 @@ export async function loadParts({ boardParts, projectParts, projectDir, hooks })
 
     // the pins each part took, for the page
     const pinsOfParts = board.pinsOfParts();
+
     for (const { description } of parts) {
         description.pins = pinsOfParts[description.id] ?? [];
     }
+
     return { board, parts };
 }

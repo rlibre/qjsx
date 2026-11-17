@@ -67,9 +67,12 @@ export class StateList {
      * dropped ones left out) when full.
      */
     push(time: number, level: number, millivolts: number) {
+        // full: larger arrays
         if (this._end === this._times.length) {
             this._grow();
         }
+
+        // the state after the newest
         this._times[this._end] = time;
         this._levels[this._end] = level;
         this._millivolts[this._end] = millivolts;
@@ -88,9 +91,11 @@ export class StateList {
      */
     slice(from: number, to: number): StateList {
         const copy = new StateList();
+
         for (let index = from; index < to; index++) {
             copy.push(this.time(index), this.level(index), this.millivolts(index));
         }
+
         return copy;
     }
 
@@ -99,14 +104,19 @@ export class StateList {
      * capacity), those kept copied to their start.
      */
     private _grow() {
+        // the new arrays
         const kept = this.length;
         const capacity = Math.max(FIRST_CAPACITY, kept * 2);
         const times = new Float64Array(capacity);
         const levels = new Uint8Array(capacity);
         const millivolts = new Int16Array(capacity);
+
+        // the states kept, copied to their start
         times.set(this._times.subarray(this._first, this._end));
         levels.set(this._levels.subarray(this._first, this._end));
         millivolts.set(this._millivolts.subarray(this._first, this._end));
+
+        // in use from now on
         this._times = times;
         this._levels = levels;
         this._millivolts = millivolts;
@@ -163,10 +173,14 @@ export interface PinTrace {
  * the reset.
  */
 export function rmtPulseCount(train: RmtTrain): number {
+    // pulses: two numbers each (ticks, level)
     if (train.bytes.length === 0) {
         return train.pulses.length / 2;
     }
-    return train.bytes.length * 16 + (train.reset > 0 ? 1 : 0);
+
+    // bytes: 8 bits of two pulses each, then the reset if any
+    const resetPulses = train.reset > 0 ? 1 : 0;
+    return train.bytes.length * 16 + resetPulses;
 }
 
 /**
@@ -174,6 +188,8 @@ export function rmtPulseCount(train: RmtTrain): number {
  * significant of the first byte).
  */
 function bitTiming(train: RmtTrain, bit: number): number[] {
+    // its byte (bit / 8), then the bit in it (bit % 8), the most significant
+    // first
     const byte = train.bytes[bit >> 3];
     const value = (byte >> (7 - (bit & 7))) & 1;
     return value !== 0 ? train.bit1 : train.bit0;
@@ -187,10 +203,12 @@ export function rmtPulseTicks(train: RmtTrain, index: number): number {
         return train.pulses[index * 2];
     }
 
-    // the reset after the bytes, else the high or low half of a bit
+    // the reset after the bytes, else the high or low half of a bit (pulse
+    // index / 2 is its bit, index % 2 its half)
     if (index >= train.bytes.length * 16) {
         return train.reset;
     }
+
     return bitTiming(train, index >> 1)[index & 1];
 }
 
@@ -199,12 +217,16 @@ export function rmtPulseTicks(train: RmtTrain, index: number): number {
  * bit, low for the reset.
  */
 export function rmtPulseLevel(train: RmtTrain, index: number): number {
+    // pulses: as sent
     if (train.bytes.length === 0) {
         return train.pulses[index * 2 + 1];
     }
+
+    // bytes: the reset low, else the first half of a bit high, the second low
     if (index >= train.bytes.length * 16) {
         return 0;
     }
+
     return (index & 1) === 0 ? 1 : 0;
 }
 
@@ -214,9 +236,11 @@ export function rmtPulseLevel(train: RmtTrain, index: number): number {
 export function rmtTotalTicks(train: RmtTrain): number {
     let ticks = 0;
     const count = rmtPulseCount(train);
+
     for (let index = 0; index < count; index++) {
         ticks += rmtPulseTicks(train, index);
     }
+
     return ticks;
 }
 
@@ -263,7 +287,8 @@ export function pwmFirstChangeAfter(segment: PwmSegment, time: number): number {
     const periodUs = 1000000 / segment.frequency;
     const period = Math.floor((time - segment.from) / periodUs);
     const activeEnd = 2 * period + 1;
-    return pwmChangeTime(segment, activeEnd) > time ? activeEnd : activeEnd + 1;
+    const isActiveEndAfter = pwmChangeTime(segment, activeEnd) > time;
+    return isActiveEndAfter ? activeEnd : activeEnd + 1;
 }
 
 /**
@@ -271,19 +296,24 @@ export function pwmFirstChangeAfter(segment: PwmSegment, time: number): number {
  * end): a change at 'time' itself does not count yet.
  */
 export function pwmLevelBefore(segment: PwmSegment, time: number): number {
+    // a duty cycle of 1 or 0: always active, or always idle
     const active = segment.invert ? 0 : 1;
     if (segment.duty >= 1) {
         return active;
     }
+
     if (segment.duty <= 0) {
         return 1 - active;
     }
 
-    // the last change strictly before 'time' gives it
+    // the last change strictly before 'time' gives it (none: idle, before
+    // the first period)
     let next = pwmFirstChangeAfter(segment, time);
+
     while (next > 0 && pwmChangeTime(segment, next - 1) >= time) {
         next--;
     }
+
     return next === 0 ? 1 - active : pwmChangeLevel(segment, next - 1);
 }
 
@@ -291,10 +321,12 @@ export function pwmLevelBefore(segment: PwmSegment, time: number): number {
  * The level of the pin at 'time' (within the segment).
  */
 export function pwmLevelAt(segment: PwmSegment, time: number): number {
+    // a duty cycle of 1 or 0: always active, or always idle
     const active = segment.invert ? 0 : 1;
     if (segment.duty >= 1) {
         return active;
     }
+
     if (segment.duty <= 0) {
         return 1 - active;
     }
@@ -318,6 +350,9 @@ export interface Recording {
 export function firstStateAfter(states: StateList, time: number): number {
     let low = 0;
     let high = states.length;
+
+    // the first state after 'time' stays in [low, high]; (low + high) >> 1
+    // is their middle, rounded down
     while (low < high) {
         const middle = (low + high) >> 1;
         if (states.time(middle) <= time) {
@@ -326,6 +361,7 @@ export function firstStateAfter(states: StateList, time: number): number {
             high = middle;
         }
     }
+
     return low;
 }
 
@@ -337,6 +373,7 @@ export function firstStateAfter(states: StateList, time: number): number {
  */
 export function copyTraces(traces: PinTrace[], start: number, end: number): PinTrace[] {
     return traces.map(trace => {
+        // the states, busy times, PWM segments and RMT sends of the window
         const from = Math.max(0, firstStateAfter(trace.states, start) - 1);
         const to = firstStateAfter(trace.states, end);
         const busy = trace.busy.filter(interval => interval.to >= start && interval.from <= end);
@@ -359,9 +396,12 @@ function isEdge(edge: TriggerEdge, previous: number, next: number): boolean {
     if (edge === "rising") {
         return previous === 0 && next !== 0;
     }
+
     if (edge === "falling") {
         return previous !== 0 && next === 0;
     }
+
+    // both: any change of level
     return (previous !== 0) !== (next !== 0);
 }
 
@@ -370,11 +410,15 @@ function isEdge(edge: TriggerEdge, previous: number, next: number): boolean {
  * the kind 'edge'; null when none.
  */
 function stateEdgeAfter(states: StateList, edge: TriggerEdge, time: number): number | null {
-    for (let index = Math.max(1, firstStateAfter(states, time)); index < states.length; index++) {
+    // each state after 'time' (from the second: one before it to compare)
+    const first = Math.max(1, firstStateAfter(states, time));
+
+    for (let index = first; index < states.length; index++) {
         if (isEdge(edge, states.level(index - 1), states.level(index))) {
             return states.time(index);
         }
     }
+
     return null;
 }
 
@@ -386,23 +430,28 @@ function stateEdgeAfter(states: StateList, edge: TriggerEdge, time: number): num
  */
 function pwmEdgeAfter(segments: PwmSegment[], edge: TriggerEdge, time: number): number | null {
     for (const segment of segments) {
-        if (segment.to <= time || !pwmToggles(segment)) {
+        // over, or no change at all: no edge in it
+        const hasNoEdge = segment.to <= time || !pwmToggles(segment);
+        if (hasNoEdge) {
             continue;
         }
 
         // its next two changes after 'time' (its start included)
         let change = time < segment.from ? 0 : pwmFirstChangeAfter(segment, time);
+
         for (let tries = 0; tries < 2; tries++, change++) {
             const at = pwmChangeTime(segment, change);
             if (at >= segment.to) {
                 break;
             }
+
             const level = pwmChangeLevel(segment, change);
             if (isEdge(edge, 1 - level, level)) {
                 return at;
             }
         }
     }
+
     return null;
 }
 
@@ -412,26 +461,34 @@ function pwmEdgeAfter(segments: PwmSegment[], edge: TriggerEdge, time: number): 
  */
 function rmtEdgeAfter(trains: RmtTrain[], edge: TriggerEdge, time: number): number | null {
     for (const train of trains) {
+        // over before 'time': no edge in it
         if (train.to <= time) {
             continue;
         }
 
-        // each pulse that changes the level, then the end of the send
+        // each pulse that changes the level
         let at = train.from;
         let previous = 0;
         const count = rmtPulseCount(train);
+
         for (let index = 0; index < count; index++) {
             const level = rmtPulseLevel(train, index);
-            if (at > time && isEdge(edge, previous, level)) {
+            const isTrigger = at > time && isEdge(edge, previous, level);
+            if (isTrigger) {
                 return at;
             }
+
             previous = level;
             at += rmtPulseTicks(train, index) * train.tickUs;
         }
-        if (at > time && isEdge(edge, previous, 0)) {
+
+        // then the end of the send (the pin back low)
+        const isEndTrigger = at > time && isEdge(edge, previous, 0);
+        if (isEndTrigger) {
             return at;
         }
     }
+
     return null;
 }
 
@@ -441,6 +498,7 @@ function rmtEdgeAfter(trains: RmtTrain[], edge: TriggerEdge, time: number): numb
  * none.
  */
 export function firstEdgeAfter(trace: PinTrace, edge: TriggerEdge, time: number): number | null {
+    // the first of each kind, then the earliest of them
     const found = [
         stateEdgeAfter(trace.states, edge, time),
         pwmEdgeAfter(trace.pwm, edge, time),

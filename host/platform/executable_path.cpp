@@ -109,6 +109,7 @@ char *executablePath() {
         return nullptr;
     }
 
+    // terminated: readlink does not do it
     path[length] = 0;
     return path;
 }

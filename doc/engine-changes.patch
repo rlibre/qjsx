@@ -1,5 +1,19 @@
+diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/builtins.h engine/qjsx/builtins/builtins.h
+--- build/qjsx-baseline/builtins/builtins.h	2026-11-17 10:48:11.087253000 +0100
++++ engine/qjsx/builtins/builtins.h	2026-11-17 10:01:25.271056100 +0100
+@@ -206,6 +206,10 @@
+ extern const JSCFunctionListEntry js_generator_proto_funcs[4];
+ JSValue js_promise_resolve(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv, int magic);
++/* qjsx: engine change V1 (promise.c) */
++JSValue js_promise_resolve_new(JSContext *ctx, JSValueConst this_val,
++                               JSValueConst value, BOOL is_reject);
++void js_promise_await(JSContext *ctx, JSValueConst promise, JSAsyncFunctionState *s);
+ __exception int perform_promise_then(JSContext *ctx,
+                                             JSValueConst promise,
+                                             JSValueConst *resolve_reject,
 diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/date.c engine/qjsx/builtins/date.c
---- build/qjsx-baseline/builtins/date.c	2026-11-16 16:31:44.795908700 +0100
+--- build/qjsx-baseline/builtins/date.c	2026-11-17 10:48:11.075254800 +0100
 +++ engine/qjsx/builtins/date.c	2026-11-11 16:04:41.500342200 +0100
 @@ -39,7 +39,9 @@
          }
@@ -13,7 +27,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/date.c engine/qjsx/bu
          struct tm *tm;
          time_t gm_ti, loc_ti;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/math.c engine/qjsx/builtins/math.c
---- build/qjsx-baseline/builtins/math.c	2026-11-16 16:31:44.794897600 +0100
+--- build/qjsx-baseline/builtins/math.c	2026-11-17 10:48:11.074255100 +0100
 +++ engine/qjsx/builtins/math.c	2026-11-13 15:45:47.178657000 +0100
 @@ -469,6 +469,17 @@
          ctx->random_state = 1;
@@ -33,8 +47,154 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/math.c engine/qjsx/bu
  static JSValue js_math_random(JSContext *ctx, JSValueConst this_val,
                                int argc, JSValueConst *argv)
  {
+diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/promise.c engine/qjsx/builtins/promise.c
+--- build/qjsx-baseline/builtins/promise.c	2026-11-17 10:48:11.079254800 +0100
++++ engine/qjsx/builtins/promise.c	2026-11-17 10:01:25.215645400 +0100
+@@ -10,10 +10,29 @@
+ 
+ typedef struct JSPromiseReactionData {
+     struct list_head link; /* not used in promise_reaction_job */
++    /* qjsx: engine change V1: NULL here (allocated with js_mallocz); not
++       NULL: the entry is a JSAwaitReaction embedded in that async function
++       state, and has none of the fields below */
++    struct JSAsyncFunctionState *awaiter;
+     JSValue resolving_funcs[2];
+     JSValue handler;
+ } JSPromiseReactionData;
+ 
++/* qjsx: both kinds of entry share their first two fields */
++_Static_assert(offsetof(JSPromiseReactionData, link) == offsetof(JSAwaitReaction, link),
++               "JSAwaitReaction and JSPromiseReactionData share 'link'");
++_Static_assert(offsetof(JSPromiseReactionData, awaiter) == offsetof(JSAwaitReaction, awaiter),
++               "JSAwaitReaction and JSPromiseReactionData share 'awaiter'");
++
++/* qjsx: unlinks an embedded await reaction and drops the reference it
++   held on its async function state */
++static void await_reaction_unlink(JSRuntime *rt, JSPromiseReactionData *rd)
++{
++    JSAsyncFunctionState *awaiter = rd->awaiter;
++    list_del(&rd->link);
++    async_func_free(rt, awaiter);
++}
++
+ JSPromiseStateEnum JS_PromiseState(JSContext *ctx, JSValue promise)
+ {
+     JSPromiseData *s = JS_GetOpaque(promise, JS_CLASS_PROMISE);
+@@ -114,6 +133,13 @@
+ 
+     list_for_each_safe(el, el1, &s->promise_reactions[is_reject]) {
+         rd = list_entry(el, JSPromiseReactionData, link);
++        /* qjsx V1: an awaiting async function: its own resume job, at the
++           same place in the queue as the reaction job would be */
++        if (rd->awaiter) {
++            js_async_function_await_enqueue(ctx, rd->awaiter, JS_DupValue(ctx, value), is_reject);
++            await_reaction_unlink(ctx->rt, rd);
++            continue;
++        }
+         args[0] = rd->resolving_funcs[0];
+         args[1] = rd->resolving_funcs[1];
+         args[2] = rd->handler;
+@@ -126,11 +152,45 @@
+ 
+     list_for_each_safe(el, el1, &s->promise_reactions[1 - is_reject]) {
+         rd = list_entry(el, JSPromiseReactionData, link);
++        if (rd->awaiter) {   /* qjsx V1: embedded, not freed */
++            await_reaction_unlink(ctx->rt, rd);
++            continue;
++        }
+         list_del(&rd->link);
+         promise_reaction_data_free(ctx->rt, rd);
+     }
+ }
+ 
++/* qjsx: engine change V1. The async function state 's' awaits the native
++   promise 'promise' (whose constructor is %Promise%): as perform_promise_then()
++   with s's resume function as handler, but with the reactions embedded in s
++   and no handler. Pending: both reactions in the promise's lists (each holds
++   a reference on s); settled: s's resume job queued now. */
++void js_promise_await(JSContext *ctx, JSValueConst promise, JSAsyncFunctionState *s)
++{
++    JSPromiseData *pd = JS_GetOpaque(promise, JS_CLASS_PROMISE);
++    int i;
++
++    if (pd->promise_state == JS_PROMISE_PENDING) {
++        for(i = 0; i < 2; i++) {
++            s->await_reactions[i].awaiter = s;
++            js_rc(s)->ref_count++;
++            list_add_tail(&s->await_reactions[i].link, &pd->promise_reactions[i]);
++        }
++    } else {
++        BOOL is_reject = pd->promise_state == JS_PROMISE_REJECTED;
++        if (is_reject && !pd->is_handled) {
++            JSRuntime *rt = ctx->rt;
++            if (rt->host_promise_rejection_tracker) {
++                rt->host_promise_rejection_tracker(ctx, promise, pd->promise_result,
++                                                   TRUE, rt->host_promise_rejection_tracker_opaque);
++            }
++        }
++        js_async_function_await_enqueue(ctx, s, JS_DupValue(ctx, pd->promise_result), is_reject);
++    }
++    pd->is_handled = TRUE;
++}
++
+ static void reject_promise(JSContext *ctx, JSValueConst promise,
+                            JSValueConst value)
+ {
+@@ -300,6 +360,10 @@
+         list_for_each_safe(el, el1, &s->promise_reactions[i]) {
+             JSPromiseReactionData *rd =
+                 list_entry(el, JSPromiseReactionData, link);
++            if (rd->awaiter) {   /* qjsx V1: embedded in its state */
++                await_reaction_unlink(rt, rd);
++                continue;
++            }
+             promise_reaction_data_free(rt, rd);
+         }
+     }
+@@ -320,6 +384,10 @@
+         list_for_each(el, &s->promise_reactions[i]) {
+             JSPromiseReactionData *rd =
+                 list_entry(el, JSPromiseReactionData, link);
++            if (rd->awaiter) {   /* qjsx V1: the awaiting state */
++                mark_func(rt, &rd->awaiter->header);
++                continue;
++            }
+             JS_MarkValue(rt, rd->resolving_funcs[0], mark_func);
+             JS_MarkValue(rt, rd->resolving_funcs[1], mark_func);
+             JS_MarkValue(rt, rd->handler, mark_func);
+@@ -445,7 +513,6 @@
+ JSValue js_promise_resolve(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv, int magic)
+ {
+-    JSValue result_promise, resolving_funcs[2], ret;
+     BOOL is_reject = magic;
+ 
+     if (!JS_IsObject(this_val))
+@@ -461,10 +528,21 @@
+         if (is_same)
+             return JS_DupValue(ctx, argv[0]);
+     }
++    return js_promise_resolve_new(ctx, this_val, argv[0], is_reject);
++}
++
++/* qjsx: the end of js_promise_resolve(), apart for engine change V1 (the
++   await of a native promise reads its 'constructor' once, itself): a new
++   promise of 'this_val', resolved (or rejected) with 'value' */
++JSValue js_promise_resolve_new(JSContext *ctx, JSValueConst this_val,
++                               JSValueConst value, BOOL is_reject)
++{
++    JSValue result_promise, resolving_funcs[2], ret;
++
+     result_promise = js_new_promise_capability(ctx, resolving_funcs, this_val);
+     if (JS_IsException(result_promise))
+         return result_promise;
+-    ret = JS_Call(ctx, resolving_funcs[is_reject], JS_UNDEFINED, 1, argv);
++    ret = JS_Call(ctx, resolving_funcs[is_reject], JS_UNDEFINED, 1, &value);
+     JS_FreeValue(ctx, resolving_funcs[0]);
+     JS_FreeValue(ctx, resolving_funcs[1]);
+     if (JS_IsException(ret)) {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/bytecode/reader.c
---- build/qjsx-baseline/bytecode/reader.c	2026-11-16 16:31:44.790901800 +0100
+--- build/qjsx-baseline/bytecode/reader.c	2026-11-17 10:48:11.068252900 +0100
 +++ engine/qjsx/bytecode/reader.c	2026-11-16 10:58:23.043692600 +0100
 @@ -18,6 +18,7 @@
      BOOL allow_sab : 8;
@@ -141,7 +301,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/
      s->allow_reference = ((flags & JS_READ_OBJ_REFERENCE) != 0);
      if (s->allow_bytecode)
 diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/bytecode/writer.c
---- build/qjsx-baseline/bytecode/writer.c	2026-11-16 16:31:44.790901800 +0100
+--- build/qjsx-baseline/bytecode/writer.c	2026-11-17 10:48:11.068252900 +0100
 +++ engine/qjsx/bytecode/writer.c	2026-11-16 10:52:46.668789800 +0100
 @@ -118,6 +118,7 @@
      BOOL allow_bytecode : 8;
@@ -192,8 +352,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/
      js_object_list_init(&s->object_list);
  
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjsx/compiler/compiler.h
---- build/qjsx-baseline/compiler/compiler.h	2026-11-16 16:31:44.807907700 +0100
-+++ engine/qjsx/compiler/compiler.h	2026-11-16 10:30:25.278518400 +0100
+--- build/qjsx-baseline/compiler/compiler.h	2026-11-17 10:48:11.091252900 +0100
++++ engine/qjsx/compiler/compiler.h	2026-11-17 10:33:15.281396400 +0100
 @@ -123,6 +123,14 @@
      uint8_t is_regular_stmt : 1; /* i.e. not a loop statement */
  } BlockEnv;
@@ -275,16 +435,20 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
      JSModuleDef *module; /* != NULL when parsing a module */
      BOOL has_await; /* TRUE if await is used (used in module eval) */
  } JSFunctionDef;
-@@ -368,6 +412,8 @@
+@@ -368,7 +412,12 @@
      BOOL is_module; /* parsing a module */
      BOOL allow_html_comments;
      BOOL ext_json; /* JSON parsing: true if accepting JSON superset */
 +    /* qjsx: 'import()' is a syntax error (JS_EVAL_FLAG_NO_DYNAMIC_IMPORT) */
 +    BOOL no_dynamic_import;
      GetLineColCache get_line_col_cache;
++    /* qjsx: outline of the module being parsed (compiler/outline.c), NULL
++       when no collector asks for it */
++    struct JSOutlineBuilder *outline;
  } JSParseState;
  
-@@ -463,6 +509,22 @@
+ typedef enum {
+@@ -463,6 +512,32 @@
  void emit_u16(JSParseState *s, uint16_t val);
  void emit_u32(JSParseState *s, uint32_t val);
  void emit_source_pos(JSParseState *s, const uint8_t *source_ptr);
@@ -296,6 +460,16 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
 +void js_debug_info_collect(JSContext *ctx, JSFunctionDef *fd, JSFunctionBytecode *b);
 +void js_compile_warning(JSParseState *s, JSCompileWarningKind kind, const uint8_t *ptr);
 +BOOL js_last_op_is_scope_var(JSFunctionDef *fd, JSAtom name);
++/* qjsx: compiler/outline.c (engine change W) */
++int js_outline_start(JSParseState *s);
++void js_outline_statement_begin(JSParseState *s);
++int js_outline_statement_end(JSParseState *s);
++void js_outline_name_used(JSParseState *s, JSAtom name);
++int js_outline_import_position(JSParseState *s, int import_index, const uint8_t *ptr);
++int js_outline_export_range(JSParseState *s, int export_index, const uint8_t *start, const uint8_t *end);
++void js_outline_eval_seen(JSParseState *s);
++void js_outline_report(JSParseState *s, JSModuleDef *m);
++void js_outline_free(JSParseState *s);
 +/* qjsx: compiler/tdz.c */
 +int remove_useless_tdz_checks(JSContext *ctx, JSFunctionDef *fd);
 +/* qjsx: compiler/fold.c */
@@ -307,7 +481,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
  void emit_op(JSParseState *s, uint8_t val);
  void emit_atom(JSParseState *s, JSAtom name);
  int update_label(JSFunctionDef *s, int label, int delta);
-@@ -531,7 +593,10 @@
+@@ -531,7 +606,10 @@
                               int label_break, int label_cont,
                               int drop_count);
  void pop_break_entry(JSFunctionDef *fd);
@@ -321,8 +495,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjs
  int is_let(JSParseState *s, int decl_mask);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/qjsx/compiler/debug-info.c
 --- build/qjsx-baseline/compiler/debug-info.c	1970-01-01 01:00:00.000000000 +0100
-+++ engine/qjsx/compiler/debug-info.c	2026-11-16 10:33:29.640704200 +0100
-@@ -0,0 +1,267 @@
++++ engine/qjsx/compiler/debug-info.c	2026-11-17 10:34:22.551376300 +0100
+@@ -0,0 +1,270 @@
 +/*          _
 + *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
 + * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
@@ -368,6 +542,9 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/q
 +    JSRuntime *rt = s->ctx->rt;
 +    int line_num, col_num;
 +
++    /* a direct eval may use any name of the module (engine change W) */
++    if (kind == JS_COMPILE_WARNING_EVAL)
++        js_outline_eval_seen(s);
 +    if (!rt->debug.warning_handler)
 +        return;
 +    line_num = get_line_col(&col_num, s->buf_start, ptr - s->buf_start);
@@ -591,8 +768,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/q
 +    js_free(ctx, constants);
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx/compiler/emitter.c
---- build/qjsx-baseline/compiler/emitter.c	2026-11-16 16:31:44.785900400 +0100
-+++ engine/qjsx/compiler/emitter.c	2026-11-11 16:04:41.508343500 +0100
+--- build/qjsx-baseline/compiler/emitter.c	2026-11-17 10:48:11.060691400 +0100
++++ engine/qjsx/compiler/emitter.c	2026-11-17 10:34:22.429916200 +0100
 @@ -57,6 +57,21 @@
      }
  }
@@ -615,7 +792,17 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx
  void emit_op(JSParseState *s, uint8_t val)
  {
      JSFunctionDef *fd = s->cur_func;
-@@ -326,6 +341,9 @@
+@@ -69,6 +84,9 @@
+ void emit_atom(JSParseState *s, JSAtom name)
+ {
+     DynBuf *bc = &s->cur_func->byte_code;
++    /* qjsx: a variable access is a use for the outline of the module */
++    if (s->outline)
++        js_outline_name_used(s, name);
+     if (dbuf_claim(bc, 4))
+         return; /* not enough memory : don't duplicate the atom */
+     put_u32(bc->buf + bc->size, JS_DupAtom(s->ctx, name));
+@@ -326,6 +344,9 @@
          fd->scope_count++;
          fd->scopes[scope].parent = fd->scope_level;
          fd->scopes[scope].first = fd->scope_first;
@@ -625,7 +812,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx
          emit_op(s, OP_enter_scope);
          emit_u16(s, scope);
          return fd->scope_level = scope;
-@@ -351,6 +369,8 @@
+@@ -351,6 +372,8 @@
          int scope = fd->scope_level;
          emit_op(s, OP_leave_scope);
          emit_u16(s, scope);
@@ -635,9 +822,9 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx
          fd->scope_first = get_first_lexical_var(fd, fd->scope_level);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/compiler/eval.c
---- build/qjsx-baseline/compiler/eval.c	2026-11-16 16:31:44.790901800 +0100
-+++ engine/qjsx/compiler/eval.c	2026-11-11 16:04:41.508343500 +0100
-@@ -86,6 +86,8 @@
+--- build/qjsx-baseline/compiler/eval.c	2026-11-17 10:48:11.067254200 +0100
++++ engine/qjsx/compiler/eval.c	2026-11-17 10:34:22.605908300 +0100
+@@ -86,11 +86,20 @@
      }
      s->is_module = (m != NULL);
      s->allow_html_comments = !s->is_module;
@@ -646,7 +833,19 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/co
  
      push_scope(s); /* body scope */
      fd->body_scope = fd->scope_level;
-@@ -107,8 +109,10 @@
+ 
++    /* qjsx: the outline of a module, when a collector asks for it (engine
++       change W): given once the module is parsed, freed whatever the result */
++    if (m != NULL && js_outline_start(s))
++        goto fail;
+     err = js_parse_program(s);
++    if (!err && m != NULL)
++        js_outline_report(s, m);
++    js_outline_free(s);
+     if (err) {
+     fail:
+         free_token(s, &s->token);
+@@ -107,8 +116,10 @@
          goto fail1;
      /* Could add a flag to avoid resolution if necessary */
      if (m) {
@@ -659,7 +858,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/co
          fun_obj = JS_NewModuleValue(ctx, m);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjsx/compiler/finalize.c
---- build/qjsx-baseline/compiler/finalize.c	2026-11-16 16:31:44.789902600 +0100
+--- build/qjsx-baseline/compiler/finalize.c	2026-11-17 10:48:11.066251700 +0100
 +++ engine/qjsx/compiler/finalize.c	2026-11-16 10:30:40.431558300 +0100
 @@ -290,6 +290,12 @@
          for(i = 0; i < fd->global_var_count; i++) {
@@ -1541,7 +1740,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/fold.c engine/qjsx/co
 +    fd->module_const_count = 0;
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx/compiler/funcdef.c
---- build/qjsx-baseline/compiler/funcdef.c	2026-11-16 16:31:44.788900500 +0100
+--- build/qjsx-baseline/compiler/funcdef.c	2026-11-17 10:48:11.065252100 +0100
 +++ engine/qjsx/compiler/funcdef.c	2026-11-16 10:30:25.279520400 +0100
 @@ -59,6 +59,8 @@
      fd->scope_count = 1;
@@ -1581,8 +1780,465 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx
          line_num = find_line_num(ctx, b, -1, &col_num);
          printf("%s:%d:%d: ", str, line_num, col_num);
      }
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/outline.c engine/qjsx/compiler/outline.c
+--- build/qjsx-baseline/compiler/outline.c	1970-01-01 01:00:00.000000000 +0100
++++ engine/qjsx/compiler/outline.c	2026-11-17 10:40:26.895257100 +0100
+@@ -0,0 +1,453 @@
++/*          _
++ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
++ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
++ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
++ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
++ */
++
++/*
++ * QuickJS - compiler/outline.c
++ *
++ * qjsx: outline of a module, given to the collector set by
++ * JS_SetModuleOutlineCollector() (quickjs-debug.h): its top-level statements
++ * (range, names declared, names used, whether it can be left out), its
++ * imports and its exports. 'qjsx build' reads it to leave out of a package
++ * the declarations that nothing uses (engine change W, doc/engine-changes.md).
++ * Not part of upstream QuickJS.
++ *
++ * Flow, while the parser reads a module (js_parse_program):
++ *   1. js_outline_statement_begin() before each top-level statement: notes
++ *      where its bytecode starts, how many top-level variables, imports and
++ *      exports the module has so far;
++ *   2. js_outline_name_used() for each name the parser emits as a variable
++ *      access (emit_atom after an OP_scope_* opcode), in nested functions too;
++ *   3. js_outline_statement_end() after it: the names it declared are the
++ *      top-level variables added since 1; it is removable when it declared
++ *      some, imported nothing, and its bytecode only creates values;
++ *   4. js_outline_report() once the module is parsed: the collector gets
++ *      the statements, the imports and the exports of the module.
++ */
++
++#include "quickjs-internal.h"
++#include "compiler/compiler.h"
++
++/* A statement while it is built: its names are runs of the atom pool. */
++typedef struct OutlineStatement {
++    uint32_t start;              /* offset of its first token */
++    uint32_t end;                /* offset after its last token */
++    BOOL removable;              /* see JSOutlineStatement */
++    int declared_first;          /* first of its declared names in 'atoms' */
++    int declared_count;
++    int references_first;        /* first of its used names in 'atoms' */
++    int reference_count;
++} OutlineStatement;
++
++/* Range of a name of an export clause, by export entry. */
++typedef struct OutlineRange {
++    uint32_t start;
++    uint32_t end;                /* 0: not a name of an export clause */
++} OutlineRange;
++
++typedef struct JSOutlineBuilder {
++    OutlineStatement *statements;
++    int statement_count;
++    int statement_size;
++    /* the names of every statement: its declared names, then its used names */
++    JSAtom *atoms;
++    int atom_count;
++    int atom_size;
++    /* offset of the imported name, by import entry of the module */
++    uint32_t *import_positions;
++    int import_position_size;
++    /* the range of a name of an export clause, by export entry */
++    OutlineRange *export_ranges;
++    int export_range_size;
++    BOOL has_eval;
++    /* the statement being parsed */
++    BOOL in_statement;
++    int bc_start;                /* size of the module's bytecode when it began */
++    int global_var_start;        /* top-level variables of the module when it began */
++    int closure_var_start;       /* imports of the module when it began */
++} JSOutlineBuilder;
++
++void JS_SetModuleOutlineCollector(JSRuntime *rt, JSModuleOutlineCollector *collector,
++                                  void *opaque)
++{
++    rt->debug.outline_collector = collector;
++    rt->debug.outline_opaque = opaque;
++}
++
++/* Starts the outline of the module 's' parses, if a collector asks for it.
++   -1 when out of memory. */
++int js_outline_start(JSParseState *s)
++{
++    JSOutlineBuilder *builder;
++
++    if (!s->ctx->rt->debug.outline_collector)
++        return 0;
++    builder = js_mallocz(s->ctx, sizeof(*builder));
++    if (!builder)
++        return -1;
++    s->outline = builder;
++    return 0;
++}
++
++/* Appends a name to the pool. -1 when out of memory. */
++static int outline_add_atom(JSParseState *s, JSAtom name)
++{
++    JSOutlineBuilder *b = s->outline;
++
++    if (js_resize_array(s->ctx, (void **)&b->atoms, sizeof(b->atoms[0]),
++                        &b->atom_size, b->atom_count + 1))
++        return -1;
++    b->atoms[b->atom_count++] = name;
++    return 0;
++}
++
++/* 1. A top-level statement begins at the current token. */
++void js_outline_statement_begin(JSParseState *s)
++{
++    JSOutlineBuilder *b = s->outline;
++    JSFunctionDef *fd = s->cur_func;
++    OutlineStatement *st;
++
++    if (!b)
++        return;
++    if (js_resize_array(s->ctx, (void **)&b->statements, sizeof(b->statements[0]),
++                        &b->statement_size, b->statement_count + 1))
++        return;   /* out of memory: the statement is not recorded, the parse fails later */
++    st = &b->statements[b->statement_count++];
++    memset(st, 0, sizeof(*st));
++    st->start = s->token.ptr - s->buf_start;
++    st->declared_first = b->atom_count;
++    st->references_first = b->atom_count;
++    b->in_statement = TRUE;
++    b->bc_start = fd->byte_code.size;
++    b->global_var_start = fd->global_var_count;
++    b->closure_var_start = fd->closure_var_count;
++}
++
++/* The name 'name' is declared by the statement (one of its top-level
++   variables). */
++static BOOL outline_is_declared(JSOutlineBuilder *b, const OutlineStatement *st, JSAtom name)
++{
++    int i;
++
++    for(i = 0; i < st->declared_count; i++) {
++        if (b->atoms[st->declared_first + i] == name)
++            return TRUE;
++    }
++    return FALSE;
++}
++
++/* TRUE if the bytecode the statement emitted in the module function only
++   creates values and stores them in its declared names: functions, classes
++   without computed key nor static initializer (they emit a call), literals,
++   objects and arrays of them, reads of variables. */
++static BOOL outline_only_creates(JSOutlineBuilder *b, const OutlineStatement *st,
++                                 JSFunctionDef *fd)
++{
++    const uint8_t *code = fd->byte_code.buf;
++    int pos = b->bc_start;
++    int end = fd->byte_code.size;
++
++    while (pos < end) {
++        int op = code[pos];
++        switch(op) {
++        /* markers */
++        case OP_line_num:
++        case OP_label:
++        case OP_enter_scope:
++        case OP_leave_scope:
++        case OP_nop:
++        /* values */
++        case OP_push_i32:
++        case OP_push_const:
++        case OP_push_atom_value:
++        case OP_push_bigint_i32:
++        case OP_push_empty_string:
++        case OP_undefined:
++        case OP_null:
++        case OP_push_false:
++        case OP_push_true:
++        case OP_fclosure:
++        case OP_object:
++        case OP_array_from:
++        case OP_define_field:
++        case OP_set_name:
++        case OP_set_class_name:
++        /* classes */
++        case OP_define_class:
++        case OP_define_method:
++        case OP_set_home_object:
++        case OP_private_symbol:
++        case OP_add_brand:
++        /* the stack */
++        case OP_dup:
++        case OP_drop:
++        case OP_swap:
++        case OP_nip:
++        /* a read of a variable or of a property (the heritage of a class, an
++           alias, a computed key such as [Symbol.iterator]): taken as without
++           effect, a getter it would run is not run when it is left out */
++        case OP_scope_get_var:
++        case OP_get_field:
++        case OP_to_propkey:
++        case OP_define_method_computed:
++        /* the initialization of a binding the statement creates (its
++           declared names, the inner names of a class): never another one */
++        case OP_scope_put_var_init:
++            break;
++        /* an assignment ('var' with an initializer): only to a name the
++           statement declares */
++        case OP_scope_put_var:
++            if (!outline_is_declared(b, st, get_u32(code + pos + 1)))
++                return FALSE;
++            break;
++        default:
++            return FALSE;
++        }
++        pos += opcode_info[op].size;
++    }
++    return TRUE;
++}
++
++/* 3. The statement ends at the last token read. Its declared names are the
++   top-level variables added since it began; it is removable when it
++   declared some, imported nothing and only creates values. -1 when out of
++   memory. */
++int js_outline_statement_end(JSParseState *s)
++{
++    JSOutlineBuilder *b = s->outline;
++    JSFunctionDef *fd = s->cur_func;
++    OutlineStatement *st;
++    int i, references_count, references_first;
++    JSAtom *references;
++
++    if (!b || !b->in_statement)
++        return 0;
++    b->in_statement = FALSE;
++    st = &b->statements[b->statement_count - 1];
++    st->end = s->last_ptr - s->buf_start;
++
++    /* the used names were pooled while it was parsed: move them after its
++       declared names (copy, then append the declared names, then the used
++       ones again) */
++    references_first = st->references_first;
++    references_count = b->atom_count - references_first;
++    references = NULL;
++    if (references_count > 0) {
++        references = js_malloc(s->ctx, references_count * sizeof(JSAtom));
++        if (!references)
++            return -1;
++        memcpy(references, b->atoms + references_first, references_count * sizeof(JSAtom));
++    }
++    b->atom_count = references_first;
++
++    st->declared_first = b->atom_count;
++    for(i = b->global_var_start; i < fd->global_var_count; i++) {
++        if (outline_add_atom(s, fd->global_vars[i].var_name))
++            goto fail;
++        st->declared_count++;
++    }
++    st->references_first = b->atom_count;
++    for(i = 0; i < references_count; i++) {
++        if (outline_add_atom(s, references[i]))
++            goto fail;
++        st->reference_count++;
++    }
++    js_free(s->ctx, references);
++
++    st->removable = st->declared_count > 0 &&
++        fd->closure_var_count == b->closure_var_start &&
++        outline_only_creates(b, st, fd);
++    return 0;
++ fail:
++    js_free(s->ctx, references);
++    return -1;
++}
++
++/* 2. The parser emits an access to the variable 'name' (emit_atom after an
++   OP_scope_* opcode): a use by the current statement, recorded once. The
++   initialization of a declared name is not a use. */
++void js_outline_name_used(JSParseState *s, JSAtom name)
++{
++    JSOutlineBuilder *b = s->outline;
++    JSFunctionDef *fd = s->cur_func;
++    OutlineStatement *st;
++    int op, i;
++
++    if (!b || !b->in_statement)
++        return;
++
++    /* only the name operand of a variable access */
++    if (fd->last_opcode_pos + 1 != fd->byte_code.size)
++        return;
++    op = fd->byte_code.buf[fd->last_opcode_pos];
++    switch(op) {
++    case OP_scope_get_var_undef:
++    case OP_scope_get_var:
++    case OP_scope_put_var:
++    case OP_scope_delete_var:
++    case OP_scope_make_ref:
++    case OP_scope_get_ref:
++    case OP_scope_get_var_checkthis:
++        break;
++    default:
++        return;
++    }
++
++    /* once per statement */
++    st = &b->statements[b->statement_count - 1];
++    for(i = st->references_first; i < b->atom_count; i++) {
++        if (b->atoms[i] == name)
++            return;
++    }
++    outline_add_atom(s, name);   /* out of memory: the name is not recorded, the parse fails later */
++}
++
++/* The imported name of import entry 'import_index' is at 'ptr'. -1 when
++   out of memory. */
++int js_outline_import_position(JSParseState *s, int import_index, const uint8_t *ptr)
++{
++    JSOutlineBuilder *b = s->outline;
++    int size_before;
++
++    if (!b)
++        return 0;
++    size_before = b->import_position_size;
++    if (js_resize_array(s->ctx, (void **)&b->import_positions, sizeof(b->import_positions[0]),
++                        &b->import_position_size, import_index + 1))
++        return -1;
++    if (b->import_position_size > size_before) {
++        memset(b->import_positions + size_before, 0,
++               (b->import_position_size - size_before) * sizeof(b->import_positions[0]));
++    }
++    b->import_positions[import_index] = ptr - s->buf_start;
++    return 0;
++}
++
++/* Export entry 'export_index' is a name of an export clause, written at
++   [start, end) with the comma that follows it. -1 when out of memory. */
++int js_outline_export_range(JSParseState *s, int export_index, const uint8_t *start,
++                            const uint8_t *end)
++{
++    JSOutlineBuilder *b = s->outline;
++    int size_before;
++
++    if (!b)
++        return 0;
++    size_before = b->export_range_size;
++    if (js_resize_array(s->ctx, (void **)&b->export_ranges, sizeof(b->export_ranges[0]),
++                        &b->export_range_size, export_index + 1))
++        return -1;
++    if (b->export_range_size > size_before) {
++        memset(b->export_ranges + size_before, 0,
++               (b->export_range_size - size_before) * sizeof(b->export_ranges[0]));
++    }
++    b->export_ranges[export_index].start = start - s->buf_start;
++    b->export_ranges[export_index].end = end - s->buf_start;
++    return 0;
++}
++
++/* A direct eval(...) in the module: any of its names may be used. */
++void js_outline_eval_seen(JSParseState *s)
++{
++    if (s->outline)
++        s->outline->has_eval = TRUE;
++}
++
++/* 4. The module is parsed: gives its outline to the collector. Nothing is
++   given when out of memory (the build then keeps every declaration). */
++void js_outline_report(JSParseState *s, JSModuleDef *m)
++{
++    JSContext *ctx = s->ctx;
++    JSOutlineBuilder *b = s->outline;
++    JSFunctionDef *fd = s->cur_func;
++    JSOutlineStatement *statements = NULL;
++    JSOutlineImport *imports = NULL;
++    JSOutlineExport *exports = NULL;
++    JSModuleOutline outline;
++    int i, export_count;
++
++    if (!b)
++        return;
++
++    /* the statements, their names taken from the pool */
++    statements = js_mallocz(ctx, sizeof(statements[0]) * max_int(b->statement_count, 1));
++    if (!statements)
++        goto done;
++    for(i = 0; i < b->statement_count; i++) {
++        const OutlineStatement *st = &b->statements[i];
++        statements[i].start = st->start;
++        statements[i].end = st->end;
++        statements[i].removable = st->removable;
++        statements[i].declared = b->atoms + st->declared_first;
++        statements[i].declared_count = st->declared_count;
++        statements[i].references = b->atoms + st->references_first;
++        statements[i].reference_count = st->reference_count;
++    }
++
++    /* the imports: the local name is the module's closure variable */
++    imports = js_mallocz(ctx, sizeof(imports[0]) * max_int(m->import_entries_count, 1));
++    if (!imports)
++        goto done;
++    for(i = 0; i < m->import_entries_count; i++) {
++        const JSImportEntry *mi = &m->import_entries[i];
++        imports[i].module = m->req_module_entries[mi->req_module_idx].module_name;
++        imports[i].imported = mi->is_star ? JS_ATOM__star_ : mi->import_name;
++        imports[i].local = fd->closure_var[mi->var_idx].var_name;
++        imports[i].position = i < b->import_position_size ? b->import_positions[i] : 0;
++    }
++
++    /* the exports, then the 'export * from' */
++    export_count = m->export_entries_count + m->star_export_entries_count;
++    exports = js_mallocz(ctx, sizeof(exports[0]) * max_int(export_count, 1));
++    if (!exports)
++        goto done;
++    for(i = 0; i < m->export_entries_count; i++) {
++        const JSExportEntry *me = &m->export_entries[i];
++        exports[i].exported = me->export_name;
++        exports[i].local = me->local_name;
++        exports[i].module = me->export_type == JS_EXPORT_TYPE_INDIRECT ?
++            m->req_module_entries[me->u.req_module_idx].module_name : JS_ATOM_NULL;
++        if (i < b->export_range_size) {
++            exports[i].start = b->export_ranges[i].start;
++            exports[i].end = b->export_ranges[i].end;
++        }
++    }
++    for(i = 0; i < m->star_export_entries_count; i++) {
++        JSOutlineExport *e = &exports[m->export_entries_count + i];
++        e->exported = JS_ATOM_NULL;
++        e->local = JS_ATOM__star_;
++        e->module = m->req_module_entries[m->star_export_entries[i].req_module_idx].module_name;
++    }
++
++    outline.statements = statements;
++    outline.statement_count = b->statement_count;
++    outline.imports = imports;
++    outline.import_count = m->import_entries_count;
++    outline.exports = exports;
++    outline.export_count = export_count;
++    outline.has_eval = b->has_eval;
++    ctx->rt->debug.outline_collector(ctx, &outline, ctx->rt->debug.outline_opaque);
++ done:
++    js_free(ctx, statements);
++    js_free(ctx, imports);
++    js_free(ctx, exports);
++}
++
++/* Frees the outline of 's' (after the parse, whatever its result). */
++void js_outline_free(JSParseState *s)
++{
++    JSOutlineBuilder *b = s->outline;
++
++    if (!b)
++        return;
++    js_free(s->ctx, b->statements);
++    js_free(s->ctx, b->atoms);
++    js_free(s->ctx, b->import_positions);
++    js_free(s->ctx, b->export_ranges);
++    js_free(s->ctx, b);
++    s->outline = NULL;
++}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-class.c engine/qjsx/compiler/parser-class.c
---- build/qjsx-baseline/compiler/parser-class.c	2026-11-16 16:31:44.786899700 +0100
+--- build/qjsx-baseline/compiler/parser-class.c	2026-11-17 10:48:11.063252900 +0100
 +++ engine/qjsx/compiler/parser-class.c	2026-11-11 16:04:41.510348300 +0100
 @@ -52,7 +52,7 @@
  
@@ -1603,9 +2259,19 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-class.c engine
      if (!fd->strip_source) {
          js_free(ctx, ctor_fd->source);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/qjsx/compiler/parser-expr.c
---- build/qjsx-baseline/compiler/parser-expr.c	2026-11-16 16:31:44.785900400 +0100
-+++ engine/qjsx/compiler/parser-expr.c	2026-11-11 16:04:41.512350100 +0100
-@@ -1839,6 +1839,11 @@
+--- build/qjsx-baseline/compiler/parser-expr.c	2026-11-17 10:48:11.062247200 +0100
++++ engine/qjsx/compiler/parser-expr.c	2026-11-17 10:36:36.394225100 +0100
+@@ -1806,6 +1806,9 @@
+             do_get_var:
+                 emit_source_pos(s, source_ptr);
+                 emit_op(s, OP_scope_get_var);
++                /* qjsx: a use for the outline of the module (engine change W);
++                   an assignment to the name starts here too */
++                js_outline_name_used(s, name);
+                 emit_u32(s, name);
+                 emit_u16(s, s->cur_func->scope_level);
+             }
+@@ -1839,6 +1842,11 @@
          } else {
              if (js_parse_postfix_expr(s, 0))
                  return -1;
@@ -1617,7 +2283,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
              accept_lparen = TRUE;
              if (s->token.val != '(') {
                  /* new operator on an object */
-@@ -1887,6 +1892,10 @@
+@@ -1887,6 +1895,10 @@
              emit_op(s, OP_special_object);
              emit_u8(s, OP_SPECIAL_OBJECT_IMPORT_META);
          } else {
@@ -1628,7 +2294,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
              if (js_parse_expect(s, '('))
                  return -1;
              if (!accept_lparen)
-@@ -2022,7 +2031,12 @@
+@@ -2022,7 +2034,12 @@
                          if (name == JS_ATOM_eval && call_type == FUNC_CALL_NORMAL && !has_optional_chain) {
                              /* direct 'eval' */
                              opcode = OP_eval;
@@ -1641,7 +2307,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
                              /* verify if function name resolves to a simple
                                 get_loc/get_arg: a function call inside a `with`
                                 statement can resolve to a method call of the
-@@ -2918,7 +2932,7 @@
+@@ -2918,7 +2935,7 @@
              emit_op(s, OP_nip);
              emit_op(s, OP_nip);
              emit_op(s, OP_nip);
@@ -1650,7 +2316,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
  
              /* throw handling */
              emit_label(s, label_throw);
-@@ -2959,7 +2973,7 @@
+@@ -2959,7 +2976,7 @@
                  emit_op(s, OP_await);
              emit_op(s, OP_yield);
              label_next = emit_goto(s, OP_if_false, -1);
@@ -1660,8 +2326,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
          }
          return 0;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/qjsx/compiler/parser-func.c
---- build/qjsx-baseline/compiler/parser-func.c	2026-11-16 16:31:44.789902600 +0100
-+++ engine/qjsx/compiler/parser-func.c	2026-11-11 16:04:41.513349800 +0100
+--- build/qjsx-baseline/compiler/parser-func.c	2026-11-17 10:48:11.067254200 +0100
++++ engine/qjsx/compiler/parser-func.c	2026-11-17 10:34:22.475853800 +0100
 @@ -196,6 +196,7 @@
      int func_idx, lexical_func_idx = -1;
      BOOL has_opt_arg;
@@ -1716,15 +2382,22 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/
      }
   done:
      s->cur_func = fd->parent;
-@@ -786,6 +795,7 @@
+@@ -783,9 +792,14 @@
+     }
+ 
+     while (s->token.val != TOK_EOF) {
++        /* qjsx: each top-level statement goes in the outline of the module */
++        js_outline_statement_begin(s);
          if (js_parse_source_element(s))
              return -1;
++        if (js_outline_statement_end(s))
++            return -1;
      }
 +    fd->source_end = s->buf_end - s->buf_start;   /* qjsx */
  
      if (!s->is_module) {
          /* return the value of the hidden variable eval_ret_idx  */
-@@ -804,9 +814,9 @@
+@@ -804,9 +818,9 @@
              emit_op(s, OP_get_loc);
              emit_u16(s, fd->eval_ret_idx);
          }
@@ -1736,8 +2409,102 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/
      }
  
      return 0;
+diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-module.c engine/qjsx/compiler/parser-module.c
+--- build/qjsx-baseline/compiler/parser-module.c	2026-11-17 10:48:11.064253300 +0100
++++ engine/qjsx/compiler/parser-module.c	2026-11-17 10:34:57.832135500 +0100
+@@ -158,6 +158,9 @@
+     case '{':
+         first_export = m->export_entries_count;
+         while (s->token.val != '}') {
++            /* qjsx: where this name starts, for the outline (engine change W) */
++            const uint8_t *name_start = s->token.ptr;
++            const uint8_t *name_end;
+             if (!token_is_ident(s->token.val)) {
+                 js_parse_error(s, "identifier expected");
+                 return -1;
+@@ -200,6 +203,10 @@
+             JS_FreeAtom(ctx, export_name);
+             if (!me)
+                 return -1;
++            /* qjsx: its text, with the comma that follows it if any */
++            name_end = s->token.val == ',' ? s->token.ptr + 1 : s->last_ptr;
++            if (js_outline_export_range(s, m->export_entries_count - 1, name_start, name_end))
++                return -1;
+             if (s->token.val != ',')
+                 break;
+             if (next_token(s))
+@@ -287,8 +294,11 @@
+     return js_parse_expect_semi(s);
+ }
+ 
++/* qjsx: 'name_ptr' is where the imported name is written (outline, engine
++   change W) */
+ static int add_import(JSParseState *s, JSModuleDef *m,
+-                      JSAtom local_name, JSAtom import_name, BOOL is_star)
++                      JSAtom local_name, JSAtom import_name, BOOL is_star,
++                      const uint8_t *name_ptr)
+ {
+     JSContext *ctx = s->ctx;
+     int i, var_idx;
+@@ -319,7 +329,7 @@
+     mi->import_name = JS_DupAtom(ctx, import_name);
+     mi->var_idx = var_idx;
+     mi->is_star = is_star;
+-    return 0;
++    return js_outline_import_position(s, m->import_entries_count - 1, name_ptr);
+ }
+ 
+ static __exception int js_parse_import(JSParseState *s)
+@@ -355,11 +365,12 @@
+                 return js_parse_error_reserved_identifier(s);
+             }
+             /* "default" import */
++            const uint8_t *name_ptr = s->token.ptr;   /* qjsx */
+             local_name = JS_DupAtom(ctx, s->token.u.ident.atom);
+             import_name = JS_ATOM_default;
+             if (next_token(s))
+                 goto fail;
+-            if (add_import(s, m, local_name, import_name, FALSE))
++            if (add_import(s, m, local_name, import_name, FALSE, name_ptr))
+                 goto fail;
+             JS_FreeAtom(ctx, local_name);
+ 
+@@ -371,6 +382,7 @@
+ 
+         if (s->token.val == '*') {
+             /* name space import */
++            const uint8_t *star_ptr = s->token.ptr;   /* qjsx */
+             if (next_token(s))
+                 return -1;
+             if (!token_is_pseudo_keyword(s, JS_ATOM_as))
+@@ -385,7 +397,7 @@
+             import_name = JS_ATOM__star_;
+             if (next_token(s))
+                 goto fail;
+-            if (add_import(s, m, local_name, import_name, TRUE))
++            if (add_import(s, m, local_name, import_name, TRUE, star_ptr))
+                 goto fail;
+             JS_FreeAtom(ctx, local_name);
+         } else if (s->token.val == '{') {
+@@ -394,6 +406,7 @@
+ 
+             while (s->token.val != '}') {
+                 BOOL is_string;
++                const uint8_t *name_ptr = s->token.ptr;   /* qjsx */
+                 if (s->token.val == TOK_STRING) {
+                     is_string = TRUE;
+                     if (js_string_find_invalid_codepoint(JS_VALUE_GET_STRING(s->token.u.str.str)) >= 0) {
+@@ -434,7 +447,7 @@
+                     }
+                     local_name = JS_DupAtom(ctx, import_name);
+                 }
+-                if (add_import(s, m, local_name, import_name, FALSE))
++                if (add_import(s, m, local_name, import_name, FALSE, name_ptr))
+                     goto fail;
+                 JS_FreeAtom(ctx, local_name);
+                 JS_FreeAtom(ctx, import_name);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/qjsx/compiler/parser-stmt.c
---- build/qjsx-baseline/compiler/parser-stmt.c	2026-11-16 16:31:44.786899700 +0100
+--- build/qjsx-baseline/compiler/parser-stmt.c	2026-11-17 10:48:11.063252900 +0100
 +++ engine/qjsx/compiler/parser-stmt.c	2026-11-11 16:04:41.515348900 +0100
 @@ -83,7 +83,15 @@
  }
@@ -1857,7 +2624,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/
              goto fail;
          if (js_parse_expect_semi(s))
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engine/qjsx/compiler/resolve-labels.c
---- build/qjsx-baseline/compiler/resolve-labels.c	2026-11-16 16:31:44.788900500 +0100
+--- build/qjsx-baseline/compiler/resolve-labels.c	2026-11-17 10:48:11.066251700 +0100
 +++ engine/qjsx/compiler/resolve-labels.c	2026-11-16 10:30:40.432557300 +0100
 @@ -36,7 +36,10 @@
              if (pos_next > s->bc_len)
@@ -2020,7 +2787,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
                      add_pc2line_info(s, bc_out.size, line_num);
                      put_short_code(&bc_out, op + 1, idx);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-vars.c engine/qjsx/compiler/resolve-vars.c
---- build/qjsx-baseline/compiler/resolve-vars.c	2026-11-16 16:31:44.788900500 +0100
+--- build/qjsx-baseline/compiler/resolve-vars.c	2026-11-17 10:48:11.065252100 +0100
 +++ engine/qjsx/compiler/resolve-vars.c	2026-11-16 10:30:40.433558200 +0100
 @@ -498,6 +498,21 @@
          fd = s;
@@ -2303,7 +3070,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/tdz.c engine/qjsx/com
 +    return ret;
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/atoms.c
---- build/qjsx-baseline/core/atoms.c	2026-11-16 16:31:44.775898500 +0100
+--- build/qjsx-baseline/core/atoms.c	2026-11-17 10:48:11.039145800 +0100
 +++ engine/qjsx/core/atoms.c	2026-11-16 10:54:20.892857900 +0100
 @@ -18,15 +18,75 @@
  /* return the max count from the hash size */
@@ -2596,7 +3363,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/
  }
  
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/closures.c engine/qjsx/core/closures.c
---- build/qjsx-baseline/core/closures.c	2026-11-16 16:31:44.782900400 +0100
+--- build/qjsx-baseline/core/closures.c	2026-11-17 10:48:11.057186700 +0100
 +++ engine/qjsx/core/closures.c	2026-11-11 16:38:22.149302500 +0100
 @@ -619,6 +619,7 @@
      rt->current_stack_frame = sf;
@@ -2607,9 +3374,22 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/closures.c engine/qjsx/co
      sf->arg_count = argc;
      arg_buf = argv;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/core.h engine/qjsx/core/core.h
---- build/qjsx-baseline/core/core.h	2026-11-16 16:31:44.802910800 +0100
-+++ engine/qjsx/core/core.h	2026-11-11 17:48:34.850300900 +0100
-@@ -543,4 +543,16 @@
+--- build/qjsx-baseline/core/core.h	2026-11-17 10:48:11.085262900 +0100
++++ engine/qjsx/core/core.h	2026-11-17 10:01:25.324226200 +0100
+@@ -477,6 +477,12 @@
+ JSValue js_async_function_call(JSContext *ctx, JSValueConst func_obj,
+                                       JSValueConst this_obj,
+                                       int argc, JSValueConst *argv, int flags);
++/* qjsx: engine change V (generators.c): the resume job embedded in an
++   async function state */
++void js_async_function_await_enqueue(JSContext *ctx, JSAsyncFunctionState *s,
++                                     JSValue value, BOOL is_throw);
++int js_async_function_await_job(JSContext *ctx, JSJobEntry *e);
++void js_async_function_await_job_free(JSRuntime *rt, JSJobEntry *e);
+ void js_async_generator_finalizer(JSRuntime *rt, JSValue obj);
+ void js_async_generator_mark(JSRuntime *rt, JSValueConst val,
+                                     JS_MarkFunc *mark_func);
+@@ -543,4 +549,16 @@
  #endif
  int JS_AddIntrinsicBasicObjects(JSContext *ctx);
  
@@ -3335,7 +4115,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/debug.c engine/qjsx/core/
 +    return 0;
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core/errors.c
---- build/qjsx-baseline/core/errors.c	2026-11-16 16:31:44.778906600 +0100
+--- build/qjsx-baseline/core/errors.c	2026-11-17 10:48:11.042984700 +0100
 +++ engine/qjsx/core/errors.c	2026-11-16 16:23:22.013907500 +0100
 @@ -30,6 +30,9 @@
      JSRuntime *rt = ctx->rt;
@@ -3377,9 +4157,21 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core
  /* Note: we no longer support '\r' as line terminator */
  int get_line_col(int *pcol_num, const uint8_t *buf, size_t len)
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/gc.c engine/qjsx/core/gc.c
---- build/qjsx-baseline/core/gc.c	2026-11-16 16:31:44.777905300 +0100
-+++ engine/qjsx/core/gc.c	2026-11-13 19:23:32.493715900 +0100
-@@ -1070,6 +1070,11 @@
+--- build/qjsx-baseline/core/gc.c	2026-11-17 10:48:11.041146100 +0100
++++ engine/qjsx/core/gc.c	2026-11-17 10:02:28.350498700 +0100
+@@ -528,6 +528,11 @@
+             }
+             JS_MarkValue(rt, s->resolving_funcs[0], mark_func);
+             JS_MarkValue(rt, s->resolving_funcs[1], mark_func);
++            /* qjsx: engine change V: the value of the resume job, the
++               awaiting function of 'await f()' (V2) */
++            JS_MarkValue(rt, s->await_value, mark_func);
++            if (s->awaiter)
++                mark_func(rt, &s->awaiter->header);
+         }
+         break;
+     case JS_GC_OBJ_TYPE_SHAPE:
+@@ -1070,6 +1075,11 @@
          sizeof(rt->atom_hash[0]) * rt->atom_hash_size;
      for(i = 0; i < rt->atom_size; i++) {
          JSAtomStruct *p = rt->atom_array[i];
@@ -3391,7 +4183,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/gc.c engine/qjsx/core/gc.
          if (!atom_is_free(p)) {
              s->atom_size += (sizeof(*p) + (p->len << p->is_wide_char) +
                               1 - p->is_wide_char);
-@@ -1281,8 +1286,10 @@
+@@ -1281,8 +1291,10 @@
          JS_FreeContext(b->realm);
  
      JS_FreeAtomRT(rt, b->func_name);
@@ -3403,9 +4195,257 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/gc.c engine/qjsx/core/gc.
          js_free_rt(rt, b->debug.pc2line_buf);
          js_free_rt(rt, b->debug.source);
      }
+diff -ruN --strip-trailing-cr build/qjsx-baseline/core/generators.c engine/qjsx/core/generators.c
+--- build/qjsx-baseline/core/generators.c	2026-11-17 10:48:11.059185500 +0100
++++ engine/qjsx/core/generators.c	2026-11-17 10:02:15.987443300 +0100
+@@ -50,6 +50,9 @@
+     s->resolving_funcs[0] = JS_UNDEFINED;
+     s->resolving_funcs[1] = JS_UNDEFINED;
+     s->is_completed = FALSE;
++    /* qjsx: engine change V (memset cleared the rest: no awaiter, nothing
++       queued, nothing linked) */
++    s->await_value = JS_UNDEFINED;
+     return s;
+ }
+ 
+@@ -115,6 +118,15 @@
+     JS_FreeValueRT(rt, s->resolving_funcs[0]);
+     JS_FreeValueRT(rt, s->resolving_funcs[1]);
+ 
++    /* qjsx: engine change V: the value of a resume job never run, the
++       reference on the awaiting function (V2). Its await reactions are
++       never linked here: each one holds a reference on the state. */
++    JS_FreeValueRT(rt, s->await_value);
++    if (s->awaiter) {
++        async_func_free(rt, s->awaiter);
++        s->awaiter = NULL;
++    }
++
+     remove_gc_object(&s->header);
+     if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && js_rc(s)->ref_count != 0) {
+         list_add_tail(&s->header.link, &rt->gc_zero_ref_count_list);
+@@ -334,26 +346,109 @@
+     return 0;
+ }
+ 
++static void js_async_function_resume(JSContext *ctx, JSAsyncFunctionState *s);
++
++/* qjsx: engine change V. Queues the resume job embedded in 's' (one await
++   at a time: it is free): delivers 'value' (owned) to the await of 's', or
++   throws it there when 'is_throw'. The job holds a reference on 's'. */
++void js_async_function_await_enqueue(JSContext *ctx, JSAsyncFunctionState *s,
++                                     JSValue value, BOOL is_throw)
++{
++    JSJobEntry *e = &s->await_job;
++
++    s->await_value = value;
++    s->await_throw = is_throw;
++    e->realm = JS_DupContext(ctx);
++    e->job_func = NULL;
++    e->argc = JS_JOB_ARGC_AWAIT;
++    js_rc(s)->ref_count++;
++    list_add_tail(&e->link, &ctx->rt->job_list);
++}
++
++/* qjsx: engine change V. Runs the resume job of an async function state
++   (JS_ExecutePendingJob), as js_async_function_resolve_call() does: the
++   value of the await, or its exception, then the function goes on. */
++int js_async_function_await_job(JSContext *ctx, JSJobEntry *e)
++{
++    JSAsyncFunctionState *s = list_entry(e, JSAsyncFunctionState, await_job);
++    JSValue value = s->await_value;
++
++    s->await_value = JS_UNDEFINED;
++    s->throw_flag = s->await_throw;
++    if (s->await_throw) {
++        JS_Throw(ctx, value);
++    } else {
++        s->frame.cur_sp[-1] = value;
++    }
++    js_async_function_resume(ctx, s);
++    async_func_free(ctx->rt, s);
++    return 1;
++}
++
++/* qjsx: engine change V. Frees a resume job never run (JS_FreeRuntime). */
++void js_async_function_await_job_free(JSRuntime *rt, JSJobEntry *e)
++{
++    JSAsyncFunctionState *s = list_entry(e, JSAsyncFunctionState, await_job);
++
++    JS_FreeValueRT(rt, s->await_value);
++    s->await_value = JS_UNDEFINED;
++    async_func_free(rt, s);
++}
++
++/* qjsx: engine change V2. The end of an async function call: 'value'
++   (owned) is its result, or its exception when 'is_reject'.
++   - called by 'await f()' (an awaiter, no promise made): the awaiter
++     resumed by its job, one turn of the queue as the promise would give;
++     but a result that is an object may be a thenable, which the standard
++     resolves through extra jobs: the promise is made now, the awaiter
++     waits on it (V1), then it is resolved with the result as usual;
++   - else: its promise resolved or rejected, as QuickJS does. */
++static void js_async_function_settle(JSContext *ctx, JSAsyncFunctionState *s,
++                                     JSValue value, BOOL is_reject)
++{
++    JSValue ret2;
++
++    if (s->awaiter) {
++        JSAsyncFunctionState *awaiter = s->awaiter;
++        s->awaiter = NULL;
++        if (is_reject || !JS_IsObject(value)) {
++            js_async_function_await_enqueue(ctx, awaiter, value, is_reject);
++        } else {
++            JSValue promise = JS_NewPromiseCapability(ctx, s->resolving_funcs);
++            if (JS_IsException(promise)) {
++                js_async_function_await_enqueue(ctx, awaiter, JS_GetException(ctx), TRUE);
++                JS_FreeValue(ctx, value);
++            } else {
++                js_promise_await(ctx, promise, awaiter);
++                JS_FreeValue(ctx, promise);
++                ret2 = JS_Call(ctx, s->resolving_funcs[0], JS_UNDEFINED,
++                               1, (JSValueConst *)&value);
++                JS_FreeValue(ctx, value);
++                JS_FreeValue(ctx, ret2); /* XXX: what to do if exception ? */
++            }
++        }
++        async_func_free(ctx->rt, awaiter);
++        return;
++    }
++
++    ret2 = JS_Call(ctx, s->resolving_funcs[is_reject], JS_UNDEFINED,
++                   1, (JSValueConst *)&value);
++    JS_FreeValue(ctx, value);
++    JS_FreeValue(ctx, ret2); /* XXX: what to do if exception ? */
++}
++
+ static void js_async_function_resume(JSContext *ctx, JSAsyncFunctionState *s)
+ {
+-    JSValue func_ret, ret2;
++    JSValue func_ret;
+ 
+     func_ret = async_func_resume(ctx, s);
+     if (s->is_completed) {
+         if (JS_IsException(func_ret)) {
+-            JSValue error;
+         fail:
+-            error = JS_GetException(ctx);
+-            ret2 = JS_Call(ctx, s->resolving_funcs[1], JS_UNDEFINED,
+-                           1, (JSValueConst *)&error);
+-            JS_FreeValue(ctx, error);
+-            JS_FreeValue(ctx, ret2); /* XXX: what to do if exception ? */
++            js_async_function_settle(ctx, s, JS_GetException(ctx), TRUE);
+         } else {
+             /* normal return */
+-            ret2 = JS_Call(ctx, s->resolving_funcs[0], JS_UNDEFINED,
+-                           1, (JSValueConst *)&func_ret);
+-            JS_FreeValue(ctx, func_ret);
+-            JS_FreeValue(ctx, ret2); /* XXX: what to do if exception ? */
++            js_async_function_settle(ctx, s, func_ret, FALSE);
+         }
+     } else {
+         JSValue value, promise, resolving_funcs[2], resolving_funcs1[2];
+@@ -364,8 +459,46 @@
+ 
+         /* await */
+         JS_FreeValue(ctx, func_ret); /* not used */
+-        promise = js_promise_resolve(ctx, ctx->promise_ctor,
+-                                     1, (JSValueConst *)&value, 0);
++
++        /* qjsx V2: 'await f()' of an async function: its end resumes this
++           function (already queued if it ended at once); 'value' is only
++           a placeholder */
++        if (s->await_inline) {
++            s->await_inline = FALSE;
++            JS_FreeValue(ctx, value);
++            return;
++        }
++
++        /* qjsx V1: a value that is not an object: the promise the standard
++           makes for it is already fulfilled, its reaction job queued at
++           once: the resume job, queued at once */
++        if (!JS_IsObject(value)) {
++            js_async_function_await_enqueue(ctx, s, value, FALSE);
++            return;
++        }
++
++        /* qjsx V1: a native promise: PromiseResolve() reads its
++           'constructor' (observable); %Promise%: awaited directly, else a
++           new promise resolved with it (what js_promise_resolve() does) */
++        if (JS_GetOpaque(value, JS_CLASS_PROMISE)) {
++            JSValue ctor = JS_GetProperty(ctx, value, JS_ATOM_constructor);
++            BOOL is_same;
++            if (JS_IsException(ctor)) {
++                JS_FreeValue(ctx, value);
++                goto fail;
++            }
++            is_same = js_same_value(ctx, ctor, ctx->promise_ctor);
++            JS_FreeValue(ctx, ctor);
++            if (is_same) {
++                js_promise_await(ctx, value, s);
++                JS_FreeValue(ctx, value);
++                return;
++            }
++            promise = js_promise_resolve_new(ctx, ctx->promise_ctor, value, FALSE);
++        } else {
++            promise = js_promise_resolve(ctx, ctx->promise_ctor,
++                                         1, (JSValueConst *)&value, 0);
++        }
+         JS_FreeValue(ctx, value);
+         if (JS_IsException(promise))
+             goto fail;
+@@ -415,17 +548,47 @@
+     return JS_UNDEFINED;
+ }
+ 
++/* qjsx: engine change V2. The async function whose 'await f()' made this
++   call (JS_CALL_FLAG_AWAITED, set by the interpreter): the state of the
++   calling frame, checked to be an async function's; NULL otherwise. */
++static JSAsyncFunctionState *js_async_function_awaiting_caller(JSContext *ctx, int flags)
++{
++    JSStackFrame *sf = ctx->rt->current_stack_frame;
++    JSFunctionBytecode *b;
++
++    if (!(flags & JS_CALL_FLAG_AWAITED) || !sf || !(sf->js_mode & JS_MODE_ASYNC) ||
++        !JS_IsObject(sf->cur_func))
++        return NULL;
++    b = JS_VALUE_GET_OBJ(sf->cur_func)->u.func.function_bytecode;
++    if (b->func_kind != JS_FUNC_ASYNC)
++        return NULL;
++    return list_entry(sf, JSAsyncFunctionState, frame);
++}
++
+ JSValue js_async_function_call(JSContext *ctx, JSValueConst func_obj,
+                                       JSValueConst this_obj,
+                                       int argc, JSValueConst *argv, int flags)
+ {
+     JSValue promise;
+-    JSAsyncFunctionState *s;
++    JSAsyncFunctionState *s, *caller;
+ 
+     s = async_func_init(ctx, func_obj, this_obj, argc, argv);
+     if (!s)
+         return JS_EXCEPTION;
+ 
++    /* qjsx V2: 'await f()' in an async function: no promise; the caller
++       is this call's awaiter (one reference), its next await (the one of
++       this call) is arranged; the value returned is only a placeholder */
++    caller = js_async_function_awaiting_caller(ctx, flags);
++    if (caller) {
++        s->awaiter = caller;
++        js_rc(caller)->ref_count++;
++        caller->await_inline = TRUE;
++        js_async_function_resume(ctx, s);
++        async_func_free(ctx->rt, s);
++        return JS_UNDEFINED;
++    }
++
+     promise = JS_NewPromiseCapability(ctx, s->resolving_funcs);
+     if (JS_IsException(promise)) {
+         async_func_free(ctx->rt, s);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx/core/interpreter.c
---- build/qjsx-baseline/core/interpreter.c	2026-11-16 16:31:44.782900400 +0100
-+++ engine/qjsx/core/interpreter.c	2026-11-12 09:53:07.314645700 +0100
+--- build/qjsx-baseline/core/interpreter.c	2026-11-17 10:48:11.058186600 +0100
++++ engine/qjsx/core/interpreter.c	2026-11-17 10:02:45.627463500 +0100
 @@ -29,8 +29,22 @@
      JSVarRef **var_refs;
      size_t alloca_size;
@@ -3493,15 +4533,31 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
      arg_buf = argv;
      sf->arg_count = argc;
      sf->cur_func = (JSValue)func_obj;
-@@ -142,6 +183,7 @@
+@@ -142,8 +183,10 @@
      ctx = b->realm; /* set the current realm */
  
   restart:
 +    REFRESH_DEBUG_DISPATCH();   /* qjsx */
      for(;;) {
          int call_argc;
++        int call_flags;   /* qjsx: engine change V2 */
          JSValue *call_argv;
-@@ -469,6 +511,7 @@
+ 
+         SWITCH(pc) {
+@@ -459,8 +502,11 @@
+             has_call_argc:
+                 call_argv = sp - call_argc;
+                 sf->cur_pc = pc;
++                /* qjsx: engine change V2: 'await f()' in an async function */
++                call_flags = (unlikely(*pc == OP_await) && b->func_kind == JS_FUNC_ASYNC) ?
++                    JS_CALL_FLAG_AWAITED : 0;
+                 ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
+-                                          JS_UNDEFINED, call_argc, call_argv, 0);
++                                          JS_UNDEFINED, call_argc, call_argv, call_flags);
+                 if (unlikely(JS_IsException(ret_val)))
+                     goto exception;
+                 if (opcode == OP_tail_call)
+@@ -469,6 +515,7 @@
                      JS_FreeValue(ctx, call_argv[i]);
                  sp -= call_argc + 1;
                  *sp++ = ret_val;
@@ -3509,7 +4565,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
              }
              BREAK;
          CASE(OP_call_constructor):
-@@ -486,6 +529,7 @@
+@@ -486,6 +533,7 @@
                      JS_FreeValue(ctx, call_argv[i]);
                  sp -= call_argc + 2;
                  *sp++ = ret_val;
@@ -3517,7 +4573,20 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
              }
              BREAK;
          CASE(OP_call_method):
-@@ -505,6 +549,7 @@
+@@ -495,8 +543,11 @@
+                 pc += 2;
+                 call_argv = sp - call_argc;
+                 sf->cur_pc = pc;
++                /* qjsx: engine change V2: 'await obj.f()' in an async function */
++                call_flags = (unlikely(*pc == OP_await) && b->func_kind == JS_FUNC_ASYNC) ?
++                    JS_CALL_FLAG_AWAITED : 0;
+                 ret_val = JS_CallInternal(ctx, call_argv[-1], call_argv[-2],
+-                                          JS_UNDEFINED, call_argc, call_argv, 0);
++                                          JS_UNDEFINED, call_argc, call_argv, call_flags);
+                 if (unlikely(JS_IsException(ret_val)))
+                     goto exception;
+                 if (opcode == OP_tail_call_method)
+@@ -505,6 +556,7 @@
                      JS_FreeValue(ctx, call_argv[i]);
                  sp -= call_argc + 2;
                  *sp++ = ret_val;
@@ -3525,7 +4594,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
              }
              BREAK;
          CASE(OP_array_from):
-@@ -1092,19 +1137,16 @@
+@@ -1092,19 +1144,16 @@
  
          CASE(OP_goto):
              pc += (int32_t)get_u32(pc);
@@ -3548,7 +4617,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
              BREAK;
  #endif
          CASE(OP_if_true):
-@@ -1123,8 +1165,7 @@
+@@ -1123,8 +1172,7 @@
                  if (res) {
                      pc += (int32_t)get_u32(pc - 4) - 4;
                  }
@@ -3558,7 +4627,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
              }
              BREAK;
          CASE(OP_if_false):
-@@ -1144,8 +1185,7 @@
+@@ -1144,8 +1192,7 @@
                  if (!res) {
                      pc += (int32_t)get_u32(pc - 4) - 4;
                  }
@@ -3568,7 +4637,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
              }
              BREAK;
  #if SHORT_OPCODES
-@@ -1165,8 +1205,7 @@
+@@ -1165,8 +1212,7 @@
                  if (res) {
                      pc += (int8_t)pc[-1] - 1;
                  }
@@ -3578,7 +4647,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
              }
              BREAK;
          CASE(OP_if_false8):
-@@ -1185,8 +1224,7 @@
+@@ -1185,8 +1231,7 @@
                  if (!res) {
                      pc += (int8_t)pc[-1] - 1;
                  }
@@ -3588,7 +4657,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
              }
              BREAK;
  #endif
-@@ -2735,6 +2773,12 @@
+@@ -2735,6 +2780,12 @@
  
          CASE(OP_nop):
              BREAK;
@@ -3601,7 +4670,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
          CASE(OP_is_undefined_or_null):
              if (JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_UNDEFINED ||
                  JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_NULL) {
-@@ -2786,6 +2830,15 @@
+@@ -2786,6 +2837,15 @@
              goto exception;
          }
      }
@@ -3617,7 +4686,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
   exception:
      if (is_backtrace_needed(ctx, rt->current_exception)) {
          /* add the backtrace information now (it is not done
-@@ -2794,6 +2847,10 @@
+@@ -2794,6 +2854,10 @@
          sf->cur_pc = pc;
          build_backtrace(ctx, rt->current_exception, NULL, 0, 0, 0);
      }
@@ -3628,7 +4697,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
      if (!rt->current_exception_is_uncatchable) {
          while (sp > stack_buf) {
              JSValue val = *--sp;
-@@ -2806,6 +2863,9 @@
+@@ -2806,6 +2870,9 @@
                      sp--;
                      JS_IteratorClose(ctx, sp[-1], TRUE);
                  } else {
@@ -3639,7 +4708,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
                      rt->current_exception = JS_UNINITIALIZED;
                      pc = b->byte_code_buf + pos;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/iteration.c engine/qjsx/core/iteration.c
---- build/qjsx-baseline/core/iteration.c	2026-11-16 16:31:44.781898100 +0100
+--- build/qjsx-baseline/core/iteration.c	2026-11-17 10:48:11.057186700 +0100
 +++ engine/qjsx/core/iteration.c	2026-11-11 16:04:41.524857300 +0100
 @@ -25,8 +25,8 @@
                                            JSValueConst this_val)
@@ -3653,7 +4722,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/iteration.c engine/qjsx/c
      return JS_UNDEFINED;
  }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/modules.c engine/qjsx/core/modules.c
---- build/qjsx-baseline/core/modules.c	2026-11-16 16:31:44.787898900 +0100
+--- build/qjsx-baseline/core/modules.c	2026-11-17 10:48:11.064253300 +0100
 +++ engine/qjsx/core/modules.c	2026-11-11 16:04:41.524857300 +0100
 @@ -1206,9 +1206,11 @@
              return JS_ATOM_NULL;
@@ -5627,8 +6696,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/rom-atoms.h engine/qjsx/c
 +
 +#endif
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/core/runtime.c
---- build/qjsx-baseline/core/runtime.c	2026-11-16 16:31:44.776901400 +0100
-+++ engine/qjsx/core/runtime.c	2026-11-16 14:31:16.559898300 +0100
+--- build/qjsx-baseline/core/runtime.c	2026-11-17 10:48:11.040145700 +0100
++++ engine/qjsx/core/runtime.c	2026-11-17 10:02:28.449670300 +0100
 @@ -47,6 +47,43 @@
      512,
  };
@@ -5976,7 +7045,29 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  }
  
  /* use -1 to disable automatic GC */
-@@ -914,6 +1118,7 @@
+@@ -853,6 +1057,21 @@
+     e = list_entry(rt->job_list.next, JSJobEntry, link);
+     list_del(&e->link);
+     ctx = e->realm;
++
++    /* qjsx: engine change V: the resume job embedded in an async function
++       state, not allocated */
++    if (e->argc == JS_JOB_ARGC_AWAIT) {
++        ret = js_async_function_await_job(ctx, e);
++        if (pctx) {
++            if (js_rc(ctx)->ref_count > 1)
++                *pctx = ctx;
++            else
++                *pctx = NULL;
++        }
++        JS_FreeContext(ctx);
++        return ret;
++    }
++
+     res = e->job_func(ctx, e->argc, (JSValueConst *)e->argv);
+     for(i = 0; i < e->argc; i++)
+         JS_FreeValue(ctx, e->argv[i]);
+@@ -914,9 +1133,17 @@
      int i;
  
      JS_FreeValueRT(rt, rt->current_exception);
@@ -5984,7 +7075,17 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  
      list_for_each_safe(el, el1, &rt->job_list) {
          JSJobEntry *e = list_entry(el, JSJobEntry, link);
-@@ -1040,6 +1245,11 @@
++        /* qjsx: engine change V: embedded in an async function state */
++        if (e->argc == JS_JOB_ARGC_AWAIT) {
++            JSContext *realm = e->realm;
++            js_async_function_await_job_free(rt, e);
++            JS_FreeContext(realm);
++            continue;
++        }
+         for(i = 0; i < e->argc; i++)
+             JS_FreeValueRT(rt, e->argv[i]);
+         JS_FreeContext(e->realm);
+@@ -1040,6 +1267,11 @@
      /* free the atoms */
      for(i = 0; i < rt->atom_size; i++) {
          JSAtomStruct *p = rt->atom_array[i];
@@ -5996,7 +7097,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
          if (!atom_is_free(p)) {
  #ifdef DUMP_LEAKS
              list_del(&p->link);
-@@ -1050,6 +1260,10 @@
+@@ -1050,6 +1282,10 @@
      js_free_rt(rt, rt->atom_array);
      js_free_rt(rt, rt->atom_hash);
      js_free_rt(rt, rt->shape_hash);
@@ -6007,7 +7108,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  #ifdef DUMP_LEAKS
      if (!list_empty(&rt->string_list)) {
          if (rt->rt_info) {
-@@ -1090,6 +1304,10 @@
+@@ -1090,6 +1326,10 @@
      }
  #endif
  
@@ -6018,7 +7119,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
      {
          JSMallocState ms = rt->malloc_ctx.malloc_state;
          rt->malloc_ctx.mf.js_free(&ms, rt);
-@@ -1140,7 +1358,12 @@
+@@ -1140,7 +1380,12 @@
  
      if (JS_AddIntrinsicBaseObjects(ctx) ||
          JS_AddIntrinsicDate(ctx) ||
@@ -6032,7 +7133,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
          JS_AddIntrinsicRegExp(ctx) ||
          JS_AddIntrinsicJSON(ctx) ||
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.h
---- build/qjsx-baseline/quickjs.h	2026-11-16 16:31:45.112175100 +0100
+--- build/qjsx-baseline/quickjs.h	2026-11-17 10:48:11.478439700 +0100
 +++ engine/qjsx/quickjs.h	2026-11-16 16:23:21.921863900 +0100
 @@ -47,6 +47,19 @@
  
@@ -6220,8 +7321,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.
  JSValue JS_EvalFunction(JSContext *ctx, JSValue fun_obj);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/quickjs-debug.h
 --- build/qjsx-baseline/quickjs-debug.h	1970-01-01 01:00:00.000000000 +0100
-+++ engine/qjsx/quickjs-debug.h	2026-11-16 16:28:37.985775300 +0100
-@@ -0,0 +1,331 @@
++++ engine/qjsx/quickjs-debug.h	2026-11-17 10:33:03.103635700 +0100
+@@ -0,0 +1,395 @@
 +/*          _
 + *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
 + * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
@@ -6548,14 +7649,78 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/qu
 +void JS_SetCompileWarningHandler(JSRuntime *rt, JSCompileWarningHandler *handler,
 +                                 void *opaque);
 +
++/* Outline of a module (engine change W, compiler/outline.c): what 'qjsx build'
++   needs to leave out of a package the declarations that nothing uses. The
++   collector is called once per module compiled, after its source is parsed
++   (a syntax error calls nothing). Positions are byte offsets in the source.
++   The names are atoms of the context, valid during the call only. */
++
++/* One statement at the top level of the module. */
++typedef struct JSOutlineStatement {
++    uint32_t start;              /* offset of its first token */
++    uint32_t end;                /* offset just after its last token */
++    /* TRUE: a declaration (function, class, var, let, const, export of one
++       of them, export default) whose run only creates what it declares:
++       left out, nothing else changes. Its initializers make functions,
++       classes without computed key nor static field / block, literals,
++       objects and arrays of them, or read variables */
++    int removable;
++    const JSAtom *declared;      /* the names it declares at the top level */
++    int declared_count;
++    /* the names of variables it reads or writes (as written: an inner
++       variable of the same name counts too), in its nested functions too;
++       each one once. The initialization of a declared name is not a use */
++    const JSAtom *references;
++    int reference_count;
++} JSOutlineStatement;
++
++/* One name imported by an import statement. */
++typedef struct JSOutlineImport {
++    JSAtom module;               /* the module, as written after 'from' */
++    JSAtom imported;             /* its export; JS_ATOM__star_ ("*") for 'import * as' */
++    JSAtom local;                /* the name it takes in this module */
++    uint32_t position;           /* offset of the imported name (of '*') */
++} JSOutlineImport;
++
++/* One export of the module. */
++typedef struct JSOutlineExport {
++    /* the name importers use; JS_ATOM_NULL for 'export * from' */
++    JSAtom exported;
++    /* the top-level name it exports ("*default*" for 'export default');
++       for a re-export, the name in 'module' ("*" for 'export * as') */
++    JSAtom local;
++    JSAtom module;               /* JS_ATOM_NULL: a name of this module; else re-exported from it */
++    /* a name of an export clause 'export { a, b as c }': its text, with the
++       comma that follows it if any, at [start, end); 0, 0 otherwise */
++    uint32_t start;
++    uint32_t end;
++} JSOutlineExport;
++
++typedef struct JSModuleOutline {
++    const JSOutlineStatement *statements;   /* in source order */
++    int statement_count;
++    const JSOutlineImport *imports;
++    int import_count;
++    const JSOutlineExport *exports;
++    int export_count;
++    int has_eval;                /* TRUE: a direct eval(...) in the module */
++} JSModuleOutline;
++
++typedef void JSModuleOutlineCollector(JSContext *ctx, const JSModuleOutline *outline,
++                                      void *opaque);
++
++/* Sets the collector (NULL: none). */
++void JS_SetModuleOutlineCollector(JSRuntime *rt, JSModuleOutlineCollector *collector,
++                                  void *opaque);
++
 +#ifdef __cplusplus
 +} /* extern "C" */
 +#endif
 +
 +#endif /* QUICKJS_DEBUG_H */
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx/quickjs-internal.h
---- build/qjsx-baseline/quickjs-internal.h	2026-11-16 16:31:44.806936400 +0100
-+++ engine/qjsx/quickjs-internal.h	2026-11-16 10:52:46.667804400 +0100
+--- build/qjsx-baseline/quickjs-internal.h	2026-11-17 10:48:11.090253200 +0100
++++ engine/qjsx/quickjs-internal.h	2026-11-17 10:33:03.158320200 +0100
 @@ -30,6 +30,7 @@
  #include "cutils.h"
  #include "list.h"
@@ -6622,7 +7787,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
      /* callbacks to the host malloc */
      JSMallocFunctions mf;
      JSMallocState malloc_state;
-@@ -301,6 +332,30 @@
+@@ -301,6 +332,33 @@
  
  /* end JS Malloc */
  
@@ -6648,12 +7813,15 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
 +    /* compile warnings (compiler/debug-info.c) */
 +    JSCompileWarningHandler *warning_handler;
 +    void *warning_opaque;
++    /* outline of the modules compiled (compiler/outline.c, engine change W) */
++    JSModuleOutlineCollector *outline_collector;
++    void *outline_opaque;
 +} JSDebugState;
 +
  struct JSRuntime {
      JSMallocContext malloc_ctx;
      const char *rt_info;
-@@ -312,6 +367,16 @@
+@@ -312,6 +370,16 @@
      uint32_t *atom_hash;
      JSAtomStruct **atom_array;
      int atom_free_index; /* 0 = none */
@@ -6670,7 +7838,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  
      int class_count;    /* size of class_array */
      JSClass *class_array;
-@@ -373,6 +438,7 @@
+@@ -373,6 +441,7 @@
      int shape_hash_count; /* number of hashed shapes */
      JSShape **shape_hash;
      void *user_opaque;
@@ -6678,7 +7846,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  };
  
  struct JSClass {
-@@ -402,6 +468,12 @@
+@@ -402,6 +471,12 @@
      /* only used in generators. Current stack pointer value. NULL if
         the function is running. */
      JSValue *cur_sp;
@@ -6691,7 +7859,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  } JSStackFrame;
  
  typedef enum {
-@@ -565,7 +637,16 @@
+@@ -565,7 +640,16 @@
  #define JS_ATOM_HASH_MASK  ((1 << 30) - 1)
  #define JS_ATOM_HASH_PRIVATE JS_ATOM_HASH_MASK
  
@@ -6709,7 +7877,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
      uint32_t len : 31;
      uint8_t is_wide_char : 1; /* 0 = 8 bits, 1 = 16 bits characters */
      /* for JS_ATOM_TYPE_SYMBOL: hash = weakref_count, atom_type = 3,
-@@ -698,10 +779,21 @@
+@@ -698,10 +782,21 @@
      JSValue *cpool; /* constant pool (self pointer) */
      int cpool_count;
      int closure_var_count;
@@ -6733,7 +7901,79 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
          int pc2line_len;
          uint8_t *pc2line_buf;
          char *source;
-@@ -1349,7 +1441,12 @@
+@@ -766,6 +861,29 @@
+     JSValue uninitialized_vars; /* hidden object containing the list of uninitialized variables */
+ } JSGlobalObject;
+ 
++/* qjsx: defined before JSAsyncFunctionState, which embeds one (change V) */
++typedef struct JSJobEntry {
++    struct list_head link;
++    JSContext *realm;
++    JSJobFunc *job_func;
++    int argc;            /* qjsx: JS_JOB_ARGC_AWAIT: embedded in an async function state */
++    JSValue argv[0];
++} JSJobEntry;
++
++/* qjsx: engine change V (doc/engine-changes.md). A reaction of a promise
++   that resumes an async function directly: no handler, no resolving
++   functions, embedded in the async function's state (V1). Its first two
++   fields are those of JSPromiseReactionData (builtins/promise.c), whose
++   'awaiter' is NULL: the promise's reaction lists hold both kinds. */
++typedef struct JSAwaitReaction {
++    struct list_head link;                 /* in a promise_reactions[] list, or unlinked */
++    struct JSAsyncFunctionState *awaiter;  /* the state it is embedded in */
++} JSAwaitReaction;
++
++/* qjsx: JSJobEntry.argc of the resume job embedded in an async function
++   state (V1): not allocated, its value in the state */
++#define JS_JOB_ARGC_AWAIT (-1)
++
+ typedef struct JSAsyncFunctionState {
+     JSGCObjectHeader header;
+     JSValue this_val; /* 'this' argument */
+@@ -774,6 +892,16 @@
+     BOOL is_completed; /* TRUE if the function has returned. The stack
+                           frame is no longer valid */
+     JSValue resolving_funcs[2]; /* only used in JS async functions */
++    /* qjsx: engine change V, async functions only. An async function has
++       one await at a time: what resumes it lives here, made once per call
++       (V1), and an 'await f()' of an async function needs no promise (V2). */
++    JSAwaitReaction await_reactions[2]; /* fulfill, reject: on the awaited native promise */
++    JSJobEntry await_job;               /* the resume job (argc JS_JOB_ARGC_AWAIT), when queued */
++    JSValue await_value;                /* what the resume job delivers: the value, or the exception */
++    BOOL await_throw;                   /* the resume job throws await_value */
++    BOOL await_inline;                  /* V2: the next await of this function is already arranged */
++    struct JSAsyncFunctionState *awaiter; /* V2: the async function whose 'await' waits for this call
++                                            (no promise was made); one reference */
+     JSStackFrame frame;
+     /* arg_buf, var_buf, stack_buf and var_refs follow */
+ } JSAsyncFunctionState;
+@@ -921,14 +1049,6 @@
+     JSValue private_value; /* private value for C modules */
+ };
+ 
+-typedef struct JSJobEntry {
+-    struct list_head link;
+-    JSContext *realm;
+-    JSJobFunc *job_func;
+-    int argc;
+-    JSValue argv[0];
+-} JSJobEntry;
+-
+ typedef struct JSProperty {
+     union {
+         JSValue value;      /* JS_PROP_NORMAL */
+@@ -1232,6 +1352,9 @@
+ 
+ #define JS_CALL_FLAG_COPY_ARGV   (1 << 1)
+ #define JS_CALL_FLAG_GENERATOR   (1 << 2)
++/* qjsx: engine change V2: the call is 'await f()' in an async function
++   (the next instruction is OP_await); set by the interpreter only */
++#define JS_CALL_FLAG_AWAITED     (1 << 3)
+ 
+ /* argument of OP_special_object */
+ typedef enum {
+@@ -1349,7 +1472,12 @@
      BC_TAG_OBJECT_REFERENCE,
  } BCTagEnum;
  
@@ -6747,7 +7987,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  
  #define JS_NEW_CTOR_NO_GLOBAL   (1 << 0) /* don't create a global binding */
  #define JS_NEW_CTOR_PROTO_CLASS (1 << 1) /* the prototype class is 'class_id' instead of JS_CLASS_OBJECT */
-@@ -1607,9 +1704,27 @@
+@@ -1607,9 +1735,27 @@
      return (JSAtomStruct *)(((uintptr_t)v << 1) | 1);
  }
  
@@ -6775,7 +8015,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
      if (--js_rc(str)->ref_count <= 0) {
          if (str->atom_type) {
              JS_FreeAtomStruct(rt, str);
-@@ -1750,6 +1865,18 @@
+@@ -1750,6 +1896,18 @@
      }
  }
  
@@ -6795,7 +8035,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  static force_inline BOOL can_extend_fast_array(JSObject *p)
  {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-opcode.h engine/qjsx/quickjs-opcode.h
---- build/qjsx-baseline/quickjs-opcode.h	2026-11-16 16:31:45.159018800 +0100
+--- build/qjsx-baseline/quickjs-opcode.h	2026-11-17 10:48:11.533206000 +0100
 +++ engine/qjsx/quickjs-opcode.h	2026-11-11 16:04:41.534423300 +0100
 @@ -256,6 +256,8 @@
  DEF(is_undefined_or_null, 1, 1, 1, none)

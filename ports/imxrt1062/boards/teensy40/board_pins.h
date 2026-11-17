@@ -30,6 +30,7 @@ struct PinMap {
 // a pin from its port, bit and pad name
 #define QJSX_PIN(port, bit, pad) { port, bit, kIOMUXC_SW_MUX_CTL_PAD_##pad, kIOMUXC_SW_PAD_CTL_PAD_##pad }
 
+// The pins, by their number on the board.
 const PinMap PINS[] = {
     QJSX_PIN(6, 3, GPIO_AD_B0_03),    // 0
     QJSX_PIN(6, 2, GPIO_AD_B0_02),    // 1
@@ -75,6 +76,6 @@ const PinMap PINS[] = {
 
 #undef QJSX_PIN
 
-const int PIN_COUNT = (int)(sizeof(PINS) / sizeof(PINS[0]));
+const int PIN_COUNT = (int)(sizeof(PINS) / sizeof(PINS[0]));   // pins 0 to PIN_COUNT - 1
 
 } // namespace board

@@ -53,10 +53,12 @@ int64_t durationMs(uint64_t ticks, uint32_t resolutionHz) {
  */
 void runChannels(void *) {
     channelLock.lock();
+
     for (;;) {
         // the earliest send in progress
         int64_t now = platform::monotonicMs();
         int next = -1;
+
         for (int i = 0; i < CHANNELS; i++) {
             bool earlier = next < 0 || channels[i].endMs < channels[next].endMs;
             if (channels[i].busy && earlier) {
@@ -93,7 +95,9 @@ void runChannels(void *) {
  * not open or busy. Starts the thread at the first send.
  */
 bool startSend(int channel, uint64_t ticks) {
-    if (channel < 0 || channel >= CHANNELS) {
+    // a channel of the twin
+    bool known = channel >= 0 && channel < CHANNELS;
+    if (!known) {
         return false;
     }
 
@@ -134,13 +138,16 @@ int channelCount() {
  * Takes a free channel for 'pin'.
  */
 int open(int pin, uint32_t resolutionHz) {
-    if (pin < 0 || pin >= twin::pinCount() || resolutionHz == 0) {
+    // a pin of the board, a resolution
+    bool boardPin = pin >= 0 && pin < twin::pinCount();
+    if (!boardPin || resolutionHz == 0) {
         return -1;
     }
 
     // the first free channel
     channelLock.lock();
     int found = -1;
+
     for (int i = 0; i < CHANNELS && found < 0; i++) {
         if (!channels[i].open) {
             found = i;
@@ -165,7 +172,9 @@ int open(int pin, uint32_t resolutionHz) {
  * Frees the channel; a send in progress is dropped (no done).
  */
 void close(int channel) {
-    if (channel < 0 || channel >= CHANNELS) {
+    // a channel of the twin
+    bool known = channel >= 0 && channel < CHANNELS;
+    if (!known) {
         return;
     }
 
@@ -187,6 +196,7 @@ void close(int channel) {
  * The handler of the ends of sends.
  */
 void setDoneHandler(DoneHandler *handler) {
+    // read by the "twin rmt" thread: under the lock
     channelLock.lock();
     doneHandler = handler;
     channelLock.unlock();
@@ -199,6 +209,7 @@ void setDoneHandler(DoneHandler *handler) {
 bool sendPulses(int channel, const Pulse *pulses, size_t count) {
     // their total duration
     uint64_t ticks = 0;
+
     for (size_t i = 0; i < count; i++) {
         ticks += pulses[i].ticks;
     }
@@ -207,24 +218,31 @@ bool sendPulses(int channel, const Pulse *pulses, size_t count) {
     if (!startSend(channel, ticks)) {
         return false;
     }
+
     int64_t startUs = twin::scopeNowUs();
 
-    // the pulses, packed, for the analyzer and the components watching that
-    // pin
+    // the pin and the resolution of the channel
     channelLock.lock();
     int pin = channels[channel].pin;
     uint32_t resolutionHz = channels[channel].resolutionHz;
     channelLock.unlock();
+
+    // the pulses packed, 5 bytes each: ticks u32 LE, then level 0 or 1 (at
+    // least one byte allocated: no pulse, no data)
     size_t size = count * 5;
     uint8_t *packed = (uint8_t *)memory::allocate(size > 0 ? size : 1);
+
     for (size_t i = 0; i < count; i++) {
         uint8_t *entry = packed + i * 5;
+
         for (int byte = 0; byte < 4; byte++) {
             entry[byte] = (uint8_t)(pulses[i].ticks >> (8 * byte));
         }
+
         entry[4] = (uint8_t)(pulses[i].level != 0 ? 1 : 0);
     }
 
+    // to the analyzer and to the components watching that pin
     twin::ScopeTrain train = { pin, startUs, resolutionHz, false, {}, {}, 0, packed, size };
     twin::scopeRecordTrain(&train);
     twin::bridgePost(twin::BridgeEvent::rmtPulses, pin, packed, size);
@@ -238,9 +256,11 @@ bool sendPulses(int channel, const Pulse *pulses, size_t count) {
 bool sendBytes(int channel, const uint8_t *bytes, size_t size, BitTiming bit0, BitTiming bit1, uint32_t resetTicks) {
     // the duration: every bit, then the reset
     uint64_t ticks = resetTicks;
+
     for (size_t i = 0; i < size; i++) {
         for (int bit = 7; bit >= 0; bit--) {
-            BitTiming timing = (bytes[i] >> bit) & 1 ? bit1 : bit0;
+            bool isOne = (bytes[i] >> bit) & 1;
+            BitTiming timing = isOne ? bit1 : bit0;
             ticks += (uint64_t)timing.high + timing.low;
         }
     }
@@ -249,14 +269,17 @@ bool sendBytes(int channel, const uint8_t *bytes, size_t size, BitTiming bit0, B
     if (!startSend(channel, ticks)) {
         return false;
     }
+
     int64_t startUs = twin::scopeNowUs();
 
-    // the bytes, for the analyzer (with the timing of their bits) and the
-    // components watching that pin (a WS2812 decodes them)
+    // the pin and the resolution of the channel
     channelLock.lock();
     int pin = channels[channel].pin;
     uint32_t resolutionHz = channels[channel].resolutionHz;
     channelLock.unlock();
+
+    // the bytes, for the analyzer (with the timing of their bits) and the
+    // components watching that pin (a WS2812 decodes them)
     // (the bytes are only copied by scopeRecordTrain, never written: the cast
     // drops a const the struct cannot hold, its kept copies being owned)
     twin::ScopeTrain train = { pin, startUs, resolutionHz, true, bit0, bit1, resetTicks, (uint8_t *)bytes, size };

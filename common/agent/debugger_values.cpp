@@ -342,7 +342,8 @@ char *Debugger::objectClassName(JSValueConst object, const JSDebugObjectInfo *in
     }
 
     // no name (or an empty one): the class name of the engine
-    if (name == nullptr || name[0] == 0) {
+    bool isUnnamed = name == nullptr || name[0] == 0;
+    if (isUnnamed) {
         memory::release(name);
         const char *className = JS_AtomToCString(_ctx, info->class_name);
         name = copyString(orEmpty(className));
@@ -414,8 +415,15 @@ char *Debugger::describeObject(JSValueConst object, const JSDebugObjectInfo *inf
             // script may have replaced them: writeObject() guards this call)
             JSValue source = JS_GetPropertyStr(_ctx, object, "source");
             JSValue flags = JS_GetPropertyStr(_ctx, object, "flags");
-            const char *sourceText = JS_IsString(source) ? JS_ToCString(_ctx, source) : nullptr;
-            const char *flagsText = JS_IsString(flags) ? JS_ToCString(_ctx, flags) : nullptr;
+            const char *sourceText = nullptr;
+            if (JS_IsString(source)) {
+                sourceText = JS_ToCString(_ctx, source);
+            }
+
+            const char *flagsText = nullptr;
+            if (JS_IsString(flags)) {
+                flagsText = JS_ToCString(_ctx, flags);
+            }
 
             // "/source/flags"
             size_t size = strlen(orEmpty(sourceText)) + strlen(orEmpty(flagsText)) + 4;
@@ -460,7 +468,10 @@ void Debugger::writeObject(cbor::Writer *writer, JSValueConst object, int group)
     _requestDepth--;
 
     // the size of an array is its "length"
-    int64_t size = info.kind == JS_DEBUG_OBJECT_ARRAY ? arrayLength(object) : info.size;
+    int64_t size = info.size;
+    if (info.kind == JS_DEBUG_OBJECT_ARRAY) {
+        size = arrayLength(object);
+    }
 
     // the fields up to the size; the object gets a handle in 'group'
     writer->array(7);
@@ -595,9 +606,10 @@ void Debugger::writeInternals(cbor::Writer *writer, JSValueConst object, int gro
     // collect (name, new reference) pairs; a proxy gives its target and
     // handler instead of its prototype (getPrototypeOf would run its trap)
     struct Internal {
-        const char *name;   // "[[Prototype]]"..., static string
-        JSValue value;      // owned (new reference)
+        const char *name;    // "[[Prototype]]"..., static string
+        JSValue     value;   // owned (new reference)
     };
+
     Internal internals[6];   // at most 4 are used
     int count = 0;
     if (info.kind == JS_DEBUG_OBJECT_PROXY) {
@@ -627,8 +639,13 @@ void Debugger::writeInternals(cbor::Writer *writer, JSValueConst object, int gro
     // the state of a promise, and its result once settled
     if (info.kind == JS_DEBUG_OBJECT_PROMISE) {
         JSPromiseStateEnum state = JS_PromiseState(_ctx, object);
-        const char *stateName = state == JS_PROMISE_PENDING ? "pending"
-                              : state == JS_PROMISE_FULFILLED ? "fulfilled" : "rejected";
+        const char *stateName = "rejected";
+        if (state == JS_PROMISE_PENDING) {
+            stateName = "pending";
+        } else if (state == JS_PROMISE_FULFILLED) {
+            stateName = "fulfilled";
+        }
+
         internals[count++] = { "[[PromiseState]]", JS_NewString(_ctx, stateName) };
         if (state != JS_PROMISE_PENDING) {
             internals[count++] = { "[[PromiseResult]]", JS_PromiseResult(_ctx, object) };
@@ -689,7 +706,11 @@ bool Debugger::readValue(cbor::Reader *reader, JSValue *value) {
             const char *text = nullptr;
             size_t length = 0;
             bool ok = reader->text(&text, &length);
-            *value = ok ? JS_NewStringLen(_ctx, text, length) : JS_UNDEFINED;
+            *value = JS_UNDEFINED;
+            if (ok) {
+                *value = JS_NewStringLen(_ctx, text, length);
+            }
+
             return ok;
         }
         case cbor::Type::Array: {

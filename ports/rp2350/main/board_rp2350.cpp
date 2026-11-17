@@ -127,6 +127,7 @@ public:
      * False otherwise, after saying so.
      */
     bool open() {
+        // checked already
         if (_opened) {
             return true;
         }
@@ -171,6 +172,7 @@ public:
         // the slot is now empty
         uint32_t erased = (HEADER_SIZE + (uint32_t)size + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE * FLASH_SECTOR_SIZE;
         bool ok = true;
+
         for (uint32_t done = 0; done < erased && ok; done += FLASH_SECTOR_SIZE) {
             ok = eraseSector(slotOffset(target) + done);
         }
@@ -190,13 +192,17 @@ public:
      * order; full pages are programmed, the rest waits in the page buffer.
      */
     bool writeUpload(size_t offset, const uint8_t *data, size_t size) override {
+        // an upload going on, this chunk the next one, within the announced size
+        bool uploading = _uploadSlot != NO_SLOT;
         bool inOrder = offset == _uploadNext;
-        if (_uploadSlot == NO_SLOT || !inOrder || offset + size > _uploadSize) {
+        bool fits = offset + size <= _uploadSize;
+        if (!uploading || !inOrder || !fits) {
             return false;
         }
 
         // fill the page buffer, program it each time it is full
         while (size > 0) {
+            // into the buffer
             size_t room = FLASH_PAGE_SIZE - _pageFill;
             size_t taken = size < room ? size : room;
             memcpy(_page + _pageFill, data, taken);
@@ -205,7 +211,9 @@ public:
             data += taken;
             size -= taken;
 
-            if (_pageFill == FLASH_PAGE_SIZE && !flushPage()) {
+            // a full page: program it
+            bool pageFull = _pageFill == FLASH_PAGE_SIZE;
+            if (pageFull && !flushPage()) {
                 return false;
             }
         }
@@ -219,7 +227,10 @@ public:
      * highest).
      */
     bool finishUpload(const char *buildId) override {
-        if (_uploadSlot == NO_SLOT || _uploadNext != _uploadSize) {
+        // an upload going on, with every byte received
+        bool uploading = _uploadSlot != NO_SLOT;
+        bool complete = _uploadNext == _uploadSize;
+        if (!uploading || !complete) {
             return false;
         }
 
@@ -255,6 +266,7 @@ public:
      * Build id and size of the installed package. False if none.
      */
     bool installed(char *buildId, size_t buildIdSize, size_t *packageSize) override {
+        // the installed slot
         SlotHeader header;
         _mutex.lock();
         int slot = findInstalled(&header);
@@ -263,6 +275,7 @@ public:
             return false;
         }
 
+        // what its header says
         snprintf(buildId, buildIdSize, "%s", header.buildId);
         *packageSize = header.size;
         return true;
@@ -275,10 +288,11 @@ public:
     const uint8_t *map(size_t *size) {
         _mutex.lock();
 
-        // the installed slot, if any
+        // the installed slot, if any and if none is mapped already
         SlotHeader header;
         int slot = findInstalled(&header);
-        if (slot == NO_SLOT || _mappedSlot != NO_SLOT) {
+        bool mappedAlready = _mappedSlot != NO_SLOT;
+        if (slot == NO_SLOT || mappedAlready) {
             _mutex.unlock();
             return nullptr;
         }
@@ -326,6 +340,7 @@ private:
         memset(_page + _pageFill, 0xff, FLASH_PAGE_SIZE - _pageFill);
         uint32_t offset = slotOffset(_uploadSlot) + HEADER_SIZE + (uint32_t)pageStart;
 
+        // the buffer is empty again, whatever the result
         _pageFill = 0;
         return programPage(offset, _page);
     }
@@ -348,6 +363,7 @@ private:
      * header, or NO_SLOT. _mutex held.
      */
     int findInstalled(SlotHeader *header) {
+        // no package area: no slot
         if (!_opened) {
             return NO_SLOT;
         }
@@ -385,11 +401,11 @@ private:
     int             _mappedSlot = NO_SLOT;    // slot returned by map() (JS task)
 };
 
-FlashStorage storage;
+FlashStorage storage;   // the package storage of the board
 
 // ### Link to the host over USB ###############################################
 
-const size_t READ_BLOCK = 256;            // bytes read at once by the reader task
+const size_t   READ_BLOCK = 256;          // bytes read at once by the reader task
 const uint32_t READ_TIMEOUT_MS = 20;      // the reader looks again after that much silence
 const uint32_t RESTART_FLUSH_MS = 100;    // restart() lets the USB send the answer that long
 
@@ -408,7 +424,7 @@ public:
     }
 };
 
-UsbLink usbLink;
+UsbLink usbLink;                       // the agent's link
 agent::Agent *linkedAgent = nullptr;   // set by startLinks, before the reader starts
 semaphore_t received;                  // released by the USB stack when bytes arrive
 
@@ -430,6 +446,7 @@ void usbReader(void *) {
     uint8_t *buffer = (uint8_t *)memory::allocate(READ_BLOCK);
 
     for (;;) {
+        // woken by the USB stack, or after READ_TIMEOUT_MS anyway
         sem_acquire_timeout_ms(&received, READ_TIMEOUT_MS);
 
         // take everything there is, without waiting
@@ -452,10 +469,12 @@ void usbReader(void *) {
  * 2. the heap over all of it.
  */
 void startMemory() {
+    // the JS heap kept in SRAM for a measure
 #if QJSX_JS_HEAP_IN_SRAM
     return;
 #endif
 
+    // no PSRAM on this board
     if (PSRAM_SIZE == 0) {
         return;
     }
@@ -476,12 +495,14 @@ void startMemory() {
  * none or if it did not answer).
  */
 void identity(Identity *identity) {
+    // the chip, from the pico-sdk board
 #if PICO_RP2350A
     const char *chip = "RP2350A";
 #else
     const char *chip = "RP2350B";
 #endif
 
+    // the PSRAM counts only once it answered
     uint32_t psramSize = psramReady ? (uint32_t)PSRAM_SIZE : 0;
     *identity = Identity{ chip, BOARD_NAME, (uint32_t)PICO_FLASH_SIZE_BYTES, psramSize };
 }
@@ -514,8 +535,11 @@ const char *dataDirectory() {
  * and come back.
  */
 bool restart() {
+    // the pending output to the USB, then a little time for it to leave
     stdio_flush();
     vTaskDelay(pdMS_TO_TICKS(RESTART_FLUSH_MS));
+
+    // the watchdog restarts the chip at once; wait for it
     watchdog_reboot(0, 0, 0);
 
     for (;;) {
@@ -528,6 +552,7 @@ bool restart() {
  * default allocator (SRAM).
  */
 const JSMallocFunctions *jsAllocator() {
+    // no PSRAM: nullptr asks for QuickJS's own allocator
     if (!psramReady) {
         return nullptr;
     }
@@ -578,6 +603,7 @@ agent::Storage *packageStorage() {
  * The installed package, read in place from the flash.
  */
 const uint8_t *openPackage(size_t *size) {
+    // the package area checked, then the installed slot
     if (!storage.open()) {
         return nullptr;
     }
@@ -613,8 +639,11 @@ bool startLinks(agent::Agent *agent) {
         return false;
     }
 
+    // the console reaches the host now: listening, and a PSRAM that did not
+    // answer at boot
     printf("qjsx agent: listening on USB\n");
-    if (PSRAM_SIZE > 0 && !psramReady && !QJSX_JS_HEAP_IN_SRAM) {
+    bool psramMissing = PSRAM_SIZE > 0 && !psramReady && !QJSX_JS_HEAP_IN_SRAM;
+    if (psramMissing) {
         printf("qjsx: the PSRAM did not answer: JS heap in SRAM\n");
     }
 

@@ -49,7 +49,8 @@ hal::pwm::TimerSetting settings[hal::pwm::MAX_TIMERS];   // how each timer in us
  */
 bool readNumber(JSContext *ctx, JSValueConst object, const char *name, double low, double high, double *out) {
     JSValue value = JS_GetPropertyStr(ctx, object, name);
-    bool valid = JS_IsNumber(value) && JS_ToFloat64(ctx, out, value) == 0 && *out >= low && *out <= high;
+    bool isNumber = JS_IsNumber(value) && JS_ToFloat64(ctx, out, value) == 0;
+    bool valid = isNumber && *out >= low && *out <= high;
     JS_FreeValue(ctx, value);
     return valid;
 }
@@ -58,9 +59,11 @@ bool readNumber(JSContext *ctx, JSValueConst object, const char *name, double lo
  * An open output by its handle; nullptr if there is none.
  */
 Channel *channelOf(int handle) {
-    if (handle < 0 || handle >= outputCount || !channels[handle].used) {
+    bool inTable = handle >= 0 && handle < outputCount;
+    if (!inTable || !channels[handle].used) {
         return nullptr;
     }
+
     return &channels[handle];
 }
 
@@ -90,6 +93,7 @@ namespace twin {
  * Reads "pwm" of the description: its four numbers, all required.
  */
 bool pwmRead(JSContext *ctx, JSValueConst description, const char *path) {
+    // no "pwm": the board has no PWM output
     JSValue pwm = JS_GetPropertyStr(ctx, description, "pwm");
     if (JS_IsUndefined(pwm)) {
         return true;
@@ -134,20 +138,25 @@ namespace pwm {
 Opened open(int pin, uint32_t frequency, double duty, bool invert) {
     // a pin of the board, a frequency the timers can make
     TimerSetting setting = timerSetting(clockHz, frequency, timerBits);
-    if (outputCount == 0 || pin < 0 || pin >= twin::pinCount() || setting.bits == 0) {
+    bool boardPin = pin >= 0 && pin < twin::pinCount();
+    bool possible = outputCount != 0 && boardPin && setting.bits != 0;
+    if (!possible) {
         return Opened{ -1, EINVAL, {} };
     }
 
     // the pin free, a free output
     int free = -1;
+
     for (int i = 0; i < outputCount; i++) {
         if (channels[i].used && channels[i].pin == pin) {
             return Opened{ -1, EBUSY, {} };
         }
+
         if (!channels[i].used && free < 0) {
             free = i;
         }
     }
+
     if (free < 0) {
         return Opened{ -1, EBUSY, {} };
     }
@@ -158,6 +167,8 @@ Opened open(int pin, uint32_t frequency, double duty, bool invert) {
     if (timer < 0) {
         return Opened{ -1, EBUSY, {} };
     }
+
+    // a timer just taken runs at that frequency
     if (fresh) {
         settings[timer] = setting;
     }
@@ -177,6 +188,7 @@ void close(int handle) {
         return;
     }
 
+    // the pin at its idle level, the timer left, the output free
     twin::pwmStop(channel->pin, channel->invert);
     timerLeave(&timers, channel->timer);
     *channel = Channel{};
@@ -213,6 +225,8 @@ int setFrequency(int handle, uint32_t frequency, Output *out) {
         *out = outputOf(handle);
         return EBUSY;
     }
+
+    // a timer just taken runs at that frequency
     if (fresh) {
         settings[timer] = setting;
     }
@@ -233,6 +247,7 @@ int setDuty(int handle, double duty, Output *out) {
         return EINVAL;
     }
 
+    // kept, its pin told
     channel->duty = duty;
     showOnPin(handle);
     *out = outputOf(handle);

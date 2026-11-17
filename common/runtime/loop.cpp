@@ -13,12 +13,14 @@
 namespace rt {
 
 namespace {
-// Loop of the JS thread (Loop::current()).
-thread_local Loop *currentLoop = nullptr;
-// Timer being run, so that clearInterval() from its own callback works.
-thread_local int runningTimerId = 0;
-thread_local bool runningTimerCleared = false;
-}
+
+// State of each JS thread. The running timer is known so that clearInterval()
+// from its own callback works.
+thread_local Loop *currentLoop = nullptr;        // loop of the JS thread (Loop::current())
+thread_local int   runningTimerId = 0;           // id of the timer whose callback runs; 0: none
+thread_local bool  runningTimerCleared = false;  // that timer was cleared by its callback
+
+} // namespace
 
 // ### Mailbox #################################################################
 
@@ -147,20 +149,22 @@ void Mailbox::close() {
 
 // ### Loop ####################################################################
 
+// A timer of setTimeout / setInterval, in the list sorted by deadline.
 struct Loop::Timer {
-    int id;            // > 0, returned by addTimer()
-    int64_t deadline;  // ms, platform::monotonicMs()
-    int64_t interval;  // < 0: not repeating
-    JSValue callback;  // owned
-    int argc;          // number of values in argv
-    JSValue *argv;     // malloc'd; values owned
-    Timer *next;       // next by deadline; nullptr: last
+    int      id;         // > 0, returned by addTimer()
+    int64_t  deadline;   // ms, platform::monotonicMs()
+    int64_t  interval;   // < 0: not repeating
+    JSValue  callback;   // owned
+    int      argc;       // number of values in argv
+    JSValue *argv;       // malloc'd; values owned
+    Timer   *next;       // next by deadline; nullptr: last
 };
 
+// A promise rejected without handler, not reported yet.
 struct Loop::Rejection {
-    JSValue promise;  // owned
-    JSValue reason;   // owned
-    Rejection *next;  // older rejection; nullptr: last
+    JSValue    promise;  // owned
+    JSValue    reason;   // owned
+    Rejection *next;     // older rejection; nullptr: last
 };
 
 /**
@@ -377,10 +381,12 @@ int Loop::addTimer(int64_t delayMs, bool repeat, js::Function callback, js::Args
     Timer *timer = (Timer *)memory::allocate(sizeof(Timer));
     timer->id = _nextTimerId++;
     timer->deadline = platform::monotonicMs() + delayMs;
-    timer->interval = repeat ? (delayMs > 0 ? delayMs : 1) : -1;
+    int64_t repeatInterval = delayMs > 0 ? delayMs : 1;
+    timer->interval = repeat ? repeatInterval : -1;
     timer->callback = callback.dup();
     timer->argc = arguments.count;
-    timer->argv = (JSValue *)memory::allocate(sizeof(JSValue) * (arguments.count > 0 ? arguments.count : 1));
+    int argumentSlots = arguments.count > 0 ? arguments.count : 1;
+    timer->argv = (JSValue *)memory::allocate(sizeof(JSValue) * argumentSlots);
 
     // keep a reference to each argument (freeTimer() releases them)
     for (int i = 0; i < arguments.count; i++) {
@@ -480,6 +486,7 @@ int64_t Loop::nextTimerDelay() {
  * a job that throws is reported as uncaught and the others still run.
  */
 void Loop::runJobs() {
+    // the jobs are queued in the runtime
     JSRuntime *rt = JS_GetRuntime(_ctx);
 
     for (;;) {
@@ -554,13 +561,14 @@ void Loop::reportRejections() {
     // (an object, or null: what the engine throws out of memory)
     JSValue lastReason = JS_UNDEFINED;
     bool hasLast = false;
+
     while (_firstRejection != nullptr) {
         // unlink it
         Rejection *rejection = _firstRejection;
         _firstRejection = rejection->next;
 
         // throw its reason again so that js::reportException() prints it
-        // (not the same reason twice in a row), then free it
+        // (not the same reason twice in a row)
         bool shared = JS_IsObject(rejection->reason) || JS_IsNull(rejection->reason);
         bool repeated = hasLast && shared && JS_StrictEq(_ctx, lastReason, rejection->reason);
         if (!repeated) {
@@ -568,6 +576,7 @@ void Loop::reportRejections() {
             js::reportException(_ctx, "Uncaught (in promise)");
         }
 
+        // remember its reason for the next one, then free it
         JS_FreeValue(_ctx, lastReason);
         lastReason = JS_DupValue(_ctx, rejection->reason);
         hasLast = true;
@@ -598,6 +607,7 @@ void Loop::reportUncaught() {
         return;
     }
 
+    // print it; with exitOnUncaught, stop with code 1
     js::reportException(_ctx);
     if (_exitOnUncaught) {
         exit(1);
@@ -619,8 +629,12 @@ void Loop::exit(int code) {
  * promise job, a timer, a JS object kept alive (pending I/O) or a hold.
  */
 bool Loop::hasWork() {
+    bool messages = !_mailbox->empty();
     bool jobs = JS_IsJobPending(JS_GetRuntime(_ctx)) != 0;
-    return !_mailbox->empty() || jobs || _firstTimer != nullptr || js::keptAliveCount() > 0 || _holds > 0;
+    bool timers = _firstTimer != nullptr;
+    bool keptAlive = js::keptAliveCount() > 0;
+    bool held = _holds > 0;
+    return messages || jobs || timers || keptAlive || held;
 }
 
 /**
@@ -727,9 +741,11 @@ void LoadMeter::waitBegins(int64_t nowMs) {
  * The loop woke up: work from now.
  */
 void LoadMeter::waitEnds(int64_t nowMs) {
+    // the work starts now, in the slot of now
     advance(nowMs);
     _workSince = nowMs;
 
+    // the profiler's samples are no longer idle
     if (_published != nullptr) {
         __atomic_store_n(&_published->working, 1, __ATOMIC_RELAXED);
     }
@@ -739,9 +755,13 @@ void LoadMeter::waitEnds(int64_t nowMs) {
  * The load now, counting the work in progress (the caller is working).
  */
 LoadStats LoadMeter::stats(int64_t nowMs) {
+    // the work in progress, not counted in the slots yet
     advance(nowMs);
     int64_t working = _workSince >= 0 ? nowMs - _workSince : 0;
-    return LoadStats{ windowLoad(working, nowMs), _peak, _busyMs + working, nowMs - _startMs };
+
+    // the window's load with it, the peak, the totals
+    double load = windowLoad(working, nowMs);
+    return LoadStats{ load, _peak, _busyMs + working, nowMs - _startMs };
 }
 
 /**
@@ -749,6 +769,7 @@ LoadStats LoadMeter::stats(int64_t nowMs) {
  * second without a wait or a check, all of them.
  */
 void LoadMeter::advance(int64_t nowMs) {
+    // the whole slots passed since the current one started
     int64_t passed = (nowMs - _slotStartMs) / SLOT_MS;
     if (passed <= 0) {
         return;
@@ -756,6 +777,7 @@ void LoadMeter::advance(int64_t nowMs) {
 
     // the slots passed, emptied
     int emptied = passed < SLOTS ? (int)passed : SLOTS;
+
     for (int i = 0; i < emptied; i++) {
         _current = (_current + 1) % SLOTS;
         _slots[_current] = 0;
@@ -771,15 +793,18 @@ void LoadMeter::advance(int64_t nowMs) {
 double LoadMeter::windowLoad(int64_t workingMs, int64_t nowMs) const {
     // the work of the window
     int64_t worked = workingMs;
+
     for (int i = 0; i < SLOTS; i++) {
         worked += _slots[i];
     }
 
     // over the window, or the time since the start (at least 1 ms)
     int64_t window = SLOTS * SLOT_MS;
-    int64_t span = nowMs - _startMs < window ? nowMs - _startMs : window;
+    int64_t sinceStart = nowMs - _startMs;
+    int64_t span = sinceStart < window ? sinceStart : window;
     span = span > 0 ? span : 1;
 
+    // their ratio, capped at 1
     double load = (double)worked / (double)span;
     return load < 1 ? load : 1;
 }

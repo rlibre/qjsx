@@ -68,7 +68,8 @@ void release(void *block) {
  */
 extern "C" void *qjsxThreadPointer(void) {
     // the task's own block
-    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+    bool schedulerStarted = xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED;
+    if (schedulerStarted) {
         void *own = pvTaskGetThreadLocalStoragePointer(nullptr, tls::TLS_INDEX);
         if (own != nullptr) {
             return own;
@@ -79,5 +80,6 @@ extern "C" void *qjsxThreadPointer(void) {
     if (defaultBlock == nullptr) {
         defaultBlock = tls::create();
     }
+
     return defaultBlock;
 }

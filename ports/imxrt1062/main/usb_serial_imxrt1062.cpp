@@ -148,8 +148,9 @@ USB_DMA_INIT_DATA_ALIGN(USB_DATA_ALIGN_SIZE) uint8_t manufacturerString[2 + 2 * 
 USB_DMA_INIT_DATA_ALIGN(USB_DATA_ALIGN_SIZE) uint8_t productString[2 + 2 * MAX_STRING_CHARS];
 USB_DMA_INIT_DATA_ALIGN(USB_DATA_ALIGN_SIZE) uint8_t serialString[2 + 2 * MAX_STRING_CHARS];
 
-// ### What the class driver needs ############################################
+// ### What the class driver needs #############################################
 
+// The endpoints of each interface (sizes and interval patched by applySpeed).
 usb_device_endpoint_struct_t notifyEndpoints[] = {
     { NOTIFY_ENDPOINT, USB_ENDPOINT_INTERRUPT, NOTIFY_PACKET, HIGH_SPEED_NOTIFY_INTERVAL },
 };
@@ -157,6 +158,8 @@ usb_device_endpoint_struct_t dataEndpoints[] = {
     { DATA_IN_ENDPOINT, USB_ENDPOINT_BULK, HIGH_SPEED_PACKET, 0 },
     { DATA_OUT_ENDPOINT, USB_ENDPOINT_BULK, HIGH_SPEED_PACKET, 0 },
 };
+
+// The two interfaces of the CDC function, then the function itself.
 usb_device_interface_struct_t commInterface[] = {
     { 0, { 1, notifyEndpoints }, nullptr },
 };
@@ -172,6 +175,8 @@ usb_device_interface_list_t interfaceLists[] = {
 };
 usb_device_class_struct_t cdcClass = { interfaceLists, kUSB_DeviceClassTypeCdc, 1 };
 
+// The callbacks of the stack (defined below), then the configuration given to
+// USB_DeviceClassInit.
 usb_status_t onClassEvent(class_handle_t handle, uint32_t event, void *param);
 usb_status_t onDeviceEvent(usb_device_handle handle, uint32_t event, void *param);
 
@@ -293,6 +298,7 @@ void onSent(const usb_device_endpoint_callback_message_struct_t *message) {
         if (USB_DeviceCdcAcmSend(cdcHandle(), DATA_ENDPOINT_NUMBER, nullptr, 0) == kStatus_USB_Success) {
             sending = true;
         }
+
         return;
     }
 
@@ -327,16 +333,21 @@ void armReceiving() {
  */
 void onReceived(const usb_device_endpoint_callback_message_struct_t *message) {
     receiving = false;
-    if (message->length == USB_CANCELLED_TRANSFER_LENGTH || !configured) {
+
+    // cancelled (bus reset, deconfiguration): nothing more
+    bool cancelled = message->length == USB_CANCELLED_TRANSFER_LENGTH;
+    if (cancelled || !configured) {
         return;
     }
 
     // the bytes (armReceiving left room for a whole packet)
     size_t head = receiveHead;
+
     for (uint32_t i = 0; i < message->length; i++) {
         receiveRing[head] = message->buffer[i];
         head = (head + 1) & (RECEIVE_RING_SIZE - 1);
     }
+
     storeIndex(&receiveHead, head);
 
     // wake the reader
@@ -356,6 +367,7 @@ void onReceived(const usb_device_endpoint_callback_message_struct_t *message) {
  * host chose, in the descriptors and in what the class driver opens.
  */
 void applySpeed(uint8_t speed) {
+    // the packet size and the notification interval of that speed
     bool high = speed == USB_SPEED_HIGH;
     bulkPacket = high ? HIGH_SPEED_PACKET : FULL_SPEED_PACKET;
     uint8_t interval = high ? HIGH_SPEED_NOTIFY_INTERVAL : FULL_SPEED_NOTIFY_INTERVAL;
@@ -412,6 +424,7 @@ usb_status_t onClassEvent(class_handle_t, uint32_t event, void *param) {
             if (rate == LOADER_BAUD_RATE) {
                 loader::enterSoon();
             }
+
             return kStatus_USB_Success;
         }
 
@@ -479,6 +492,7 @@ usb_status_t onDeviceEvent(usb_device_handle, uint32_t event, void *param) {
             if (USB_DeviceClassGetSpeed(kUSB_ControllerEhci0, &speed) == kStatus_USB_Success) {
                 applySpeed(speed);
             }
+
             return kStatus_USB_Success;
         }
 
@@ -529,6 +543,7 @@ usb_status_t onDeviceEvent(usb_device_handle, uint32_t event, void *param) {
             if (string == nullptr) {
                 return kStatus_USB_InvalidRequest;
             }
+
             return giveDescriptor(param, string, string[0]);
         }
 
@@ -550,6 +565,7 @@ void makeString(uint8_t *descriptor, const char *text) {
 
     descriptor[0] = (uint8_t)(2 + 2 * length);
     descriptor[1] = USB_DESCRIPTOR_TYPE_STRING;
+
     for (size_t i = 0; i < length; i++) {
         descriptor[2 + 2 * i] = (uint8_t)text[i];
         descriptor[3 + 2 * i] = 0;
@@ -567,10 +583,12 @@ void makeSerialString() {
     // as hexadecimal text
     const char *digits = "0123456789ABCDEF";
     char text[2 * board::MAX_CHIP_ID + 1];
+
     for (size_t i = 0; i < length; i++) {
         text[2 * i] = digits[id[i] >> 4];
         text[2 * i + 1] = digits[id[i] & 0xF];
     }
+
     text[2 * length] = 0;
 
     makeString(serialString, text);
@@ -628,10 +646,12 @@ size_t read(uint8_t *buffer, size_t size) {
     size_t tail = receiveTail;
     size_t used = ringUsed(head, tail, RECEIVE_RING_SIZE);
     size_t taken = used < size ? used : size;
+
     for (size_t i = 0; i < taken; i++) {
         buffer[i] = receiveRing[tail];
         tail = (tail + 1) & (RECEIVE_RING_SIZE - 1);
     }
+
     storeIndex(&receiveTail, tail);
 
     // the next transfer, if it waited
@@ -658,8 +678,10 @@ bool waitReceived(uint32_t timeoutMs) {
  * 3. without a host: drop at once.
  */
 bool write(const uint8_t *data, size_t size) {
+    // one writer at a time, for the whole call
     writeLock.lock();
 
+    // before the scheduler runs, no waiting for the host
     int64_t lastProgress = platform::monotonicMs();
     bool schedulerRunning = xTaskGetSchedulerState() == taskSCHEDULER_RUNNING;
     bool complete = true;
@@ -675,10 +697,12 @@ bool write(const uint8_t *data, size_t size) {
         size_t head = sendHead;
         size_t room = ringFree(head, loadIndex(&sendTail), SEND_RING_SIZE);
         size_t taken = size < room ? size : room;
+
         for (size_t i = 0; i < taken; i++) {
             sendRing[head] = data[i];
             head = (head + 1) & (SEND_RING_SIZE - 1);
         }
+
         storeIndex(&sendHead, head);
         data += taken;
         size -= taken;
@@ -690,9 +714,10 @@ bool write(const uint8_t *data, size_t size) {
 
         // progress, or wait for the host (give up after WRITE_TIMEOUT_MS)
         int64_t now = platform::monotonicMs();
+        bool givingUp = now - lastProgress > WRITE_TIMEOUT_MS || !schedulerRunning;
         if (taken > 0) {
             lastProgress = now;
-        } else if (now - lastProgress > WRITE_TIMEOUT_MS || !schedulerRunning) {
+        } else if (givingUp) {
             complete = false;
             break;
         } else {
@@ -712,11 +737,15 @@ void flush(uint32_t timeoutMs) {
     bool schedulerRunning = xTaskGetSchedulerState() == taskSCHEDULER_RUNNING;
 
     for (;;) {
+        // everything sent, no host any more, or too late: done
         bool empty = ringUsed(loadIndex(&sendHead), loadIndex(&sendTail), SEND_RING_SIZE) == 0;
-        if ((empty && !sending) || !configured || platform::monotonicMs() > deadline) {
+        bool drained = empty && !sending;
+        bool late = platform::monotonicMs() > deadline;
+        if (drained || !configured || late) {
             return;
         }
 
+        // let the interrupt send (a busy wait before the scheduler runs)
         if (schedulerRunning) {
             vTaskDelay(1);
         }

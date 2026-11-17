@@ -811,6 +811,120 @@ with `QJSX_PROFILER`: on the PC by default, `idf.py -DQJSX_PROFILER=ON` for a fi
   the debugger only, it walks `rt->current_stack_frame`: the interrupt handler calls it.
 - Bytecode unchanged; nothing runs unless the profiler asks. Bellard's tests 7/7.
 
+## V. The await of async functions without allocation (V1) and without promise (V2)
+
+2026-11-17, agreed with the user (an async function has one await at a time: what
+resumes it is kept with it, "un stock d'await" made once per call; and `await f()` of an
+async function needs no promise). The programs of a board are tasks that wait: before V,
+each `await` of a native promise made two function objects ("resume" on fulfillment and
+on rejection), two reaction records and a job, freed at once after; each call of an async
+function made its result promise, its two resolving functions and their shared data,
+even when the caller only awaited it.
+
+- **V1, the await kept in the state** (`JSAsyncFunctionState`, `quickjs-internal.h`): two
+  embedded reactions (`JSAwaitReaction`: a list link and the state; the promise's
+  reaction lists hold them next to the `JSPromiseReactionData`, whose new second field
+  `awaiter` is NULL), one embedded job (`await_job`, `argc` = `JS_JOB_ARGC_AWAIT`), the
+  value or the exception it delivers (`await_value`, `await_throw`).
+  - `await` of a native promise whose `constructor` is `%Promise%` (read once, as
+    `PromiseResolve` does): `js_promise_await()` (`builtins/promise.c`) links the embedded
+    reactions (each holds a reference on the state) or, the promise settled, queues the
+    embedded job at once; at settlement `fulfill_or_reject_promise` queues it where the
+    reaction job would be. `await` of a value that is not an object: the job queued at
+    once (the promise the standard makes is already fulfilled: one turn). Any other
+    object (a thenable, a subclass of `Promise`): QuickJS's path, unchanged
+    (`js_promise_resolve_new()`: the end of `js_promise_resolve()`, so that the
+    `constructor` of a native promise of another constructor is not read twice).
+  - `JS_ExecutePendingJob` runs an embedded job with `js_async_function_await_job()`
+    (`core/generators.c`, what `js_async_function_resolve_call` did) and does not free it;
+    `JS_FreeRuntime` frees what one still holds. The promise finalizer and the cycle
+    collector unlink the embedded reactions, never the state (whose memory stays valid
+    while a reaction references it); the promise's mark function marks the state; the
+    state marks `await_value`.
+- **V2, `await f()` without promise.** The interpreter passes `JS_CALL_FLAG_AWAITED`
+  (`quickjs-internal.h`) to `OP_call` / `OP_call_method` when the next instruction is
+  `OP_await` in an async function (the compiler always emits them side by side; bound
+  functions, `apply`, `new`, `call` from C do not pass it on). `js_async_function_call`,
+  when the calling frame is an async function's, makes no promise: the callee keeps its
+  caller as `awaiter` (one reference), the caller's `await_inline` says that its next
+  await is already arranged, and the call returns a placeholder. At its end the callee
+  (`js_async_function_settle()`) queues the caller's embedded job with its result or its
+  exception: one turn of the queue, as the promise gave. A result that is an object may
+  be a thenable, which the standard resolves through extra jobs: the promise is made then,
+  the caller awaits it (V1), it is resolved with the result as before. The callee marks
+  and frees its `awaiter`.
+- What the program sees does not change: the order of the resumptions is upstream's
+  (`tests/fixtures/awaitorder.js`, its output compared in `tests/run-tests.sh` with
+  `awaitorder.expected`, written by `qjs-original`: values, settled / pending / rejected
+  promises, a subclass, a `constructor` getter read once, thenables, `await f()`
+  returning at once, a promise, a thenable, throwing at once or later, three levels, a
+  method). A synchronous throw of an awaited callee no longer goes through the rejection
+  tracker (before: reported "unhandled", then "handled" at the await: nothing printed
+  either way). Async generators keep QuickJS's path. Bytecode unchanged: no BC_VERSION
+  bump.
+- Measured 2026-11-17 with `temp/awaitbench` (JS heap of tasks waiting at an `await` in a
+  chain of async calls; time of an `await f()`; one turn handed between two tasks), on the
+  PC (YD twin, Release) and on the Teensy 4.0; a pending promise alone is unchanged (373 B
+  on the PC, 244 B on the Teensy):
+
+  | | PC before | PC after | Teensy before | Teensy after |
+  |---|---:|---:|---:|---:|
+  | RAM per task waiting, depth 1 | 1040 B | 783 B | 731 B | 557 B |
+  | RAM per task waiting, depth 3 | 3326 B | 1571 B | 2175 B | 989 B |
+  | `await f()`, f returns at once | 0.60 us | 0.10 us | 48.75 us | 16.75 us |
+  | `await g()`, g awaits f | 1.25 us | 0.15 us | 87.15 us | 25.20 us |
+  | hand-over between two tasks | 1.35 us | 0.50 us | 86.85 us | 37.10 us |
+
+## W. Outline of a module, to leave out what nothing uses
+
+2026-11-17, agreed with the user. On a device each function costs RAM when its module
+is loaded, called or not (measured on the Teensy 4.0: about 275 bytes, 150 of them its
+bytecode object, the rest its function object; a class method about 207 bytes), and
+`qjsx build` copied every library module whole. The compiler now describes each module
+it parses; the tool (`host/js/prune.js`) leaves out of the package the top-level
+declarations that nothing uses and checks the imported names. Compiler only: nothing
+changes on the devices, the bytecode format neither.
+
+- **API** (`quickjs-debug.h`): `JS_SetModuleOutlineCollector(rt, collector, opaque)`;
+  the collector gets a `JSModuleOutline` once the module is parsed (nothing on a syntax
+  error): the top-level statements (`JSOutlineStatement`: byte range, `removable`, the
+  names declared, the names used), the imports (`JSOutlineImport`: module, imported name,
+  local name, position of the imported name), the exports (`JSOutlineExport`: exported
+  name, local name, module of a re-export, range of a name of an export clause with its
+  comma) and `has_eval`. Host: option `outline: true` of `compile()` (sys/compiler).
+- **Collection** (`compiler/outline.c`, new; `JSParseState.outline`):
+  - `js_parse_program` calls `js_outline_statement_begin` / `_end` around each top-level
+    statement of a module; `__JS_EvalInternal` (`compiler/eval.c`) starts the outline,
+    reports it after a parse without error, frees it whatever the result;
+  - names used: every variable access the parser emits (`emit_atom` after an
+    `OP_scope_*` opcode, `emit_u32` of an identifier in `parser-expr.c`), in nested
+    functions too, each once per statement; the name is taken as written (an inner
+    variable of the same name counts: more is kept, never less). The initialization of a
+    declared name (`OP_scope_put_var_init`) is not a use;
+  - names declared: the module's top-level variables (`fd->global_vars`) added by the
+    statement;
+  - removable: it declared names, imported nothing, and the bytecode it emitted in the
+    module function only creates values (`outline_only_creates`: literals, functions,
+    objects, arrays, classes, reads of variables and properties, initializations, and
+    assignments to its own names only). A call, `new`, an assignment to another name, a
+    computed key that calls, a static field or block (a call of their initializer) make
+    it kept. Accepted: a getter that a left-out declaration would have run (key of a
+    computed method, property read) is not run;
+  - imports: `add_import` (`parser-module.c`) gets the position of the imported name;
+    exports: the range of each name of an export clause, with its comma;
+  - a direct `eval` (`js_compile_warning`, kind EVAL) sets `has_eval`.
+- **In the tool**: see `doc/architecture.md` 4.5 and `host/js/prune.js`: the names used are
+  followed from every statement that is kept, through imports, re-exports and
+  `export * from`; `import * as ns` uses every export of the module; a module with
+  `eval` keeps everything. What is unused is replaced by spaces (line ends kept: same
+  positions), the module compiled again; the package keeps the original source.
+- **Measured** on the Teensy 4.0 (`temp/deadfn`, JS heap after start): 99 unused
+  functions and a class of 20 methods 98,696 -> 65,344 bytes (the same bytecode as the
+  source without them); `import { Mutex } from "stdlib/tasks"` 82,320 -> 67,016 bytes.
+- Tests: `tests/prune.test.js` (outline, what the build leaves out, the check of the
+  imports), `tests/fixtures/prune` run from its sources and from its package (with and
+  without compiler) in `tests/run-tests.sh`.
+
 ## Limits and items not done
 
 - **"Uncaught" prediction**: done statically (section M), not with the planned
@@ -856,6 +970,7 @@ Measurements of 2026-11-10:
 | + temporal dead zone checks removed (N), 2026-11-12 | 4,642.8 | 4,449.0 | −4.2% |
 | + names in read-only memory (P), 2026-11-13 | 4,641.7 | 4,571.0 | −1.5% |
 | + constant folding, constants of a module (R), 2026-11-16 | 4,638.5 | 4,532.7 | −2.3% |
+| + the await without allocation, `await f()` without promise (V), 2026-11-17 | 4,636.6 | 4,451.6 | −4.0% |
 
 - The final version costs about 2% more than the version without markers. Part of this
   difference stays within the noise from one pass to the next: `regexp_replace`, purely in C,
@@ -901,3 +1016,5 @@ Measurements of 2026-11-10:
 | `core/package-atoms.c` (new), `quickjs.h`, `quickjs-internal.h`, `core/atoms.c`, `bytecode/reader.c`, `bytecode/writer.c` (also) | names of a package, bytecode with fixed atom indexes read in place, `JSString` layout, `BC_VERSION` 0x46 (S) |
 | `compiler/fold.c` (new), `compiler/compiler.h`, `compiler/finalize.c`, `compiler/funcdef.c`, `compiler/resolve-vars.c`, `compiler/resolve-labels.c`, `compiler/debug-info.c`, `quickjs-debug.h` (also) | constant folding, constants of a module replaced by their value (R) |
 | `quickjs-internal.h`, `core/runtime.c` (also) | arenas of the allocator tuned for a small heap, arenas kept (Q); `quickjs.h`, `quickjs-internal.h`, `core/runtime.c`: measure of the block sizes (`QJSX_ALLOC_HISTOGRAM`) |
+| `quickjs-internal.h`, `builtins/promise.c`, `builtins/builtins.h`, `core/generators.c`, `core/core.h`, `core/gc.c`, `core/runtime.c`, `core/interpreter.c` (also) | the await kept in the state of an async function, `await f()` without promise (V) |
+| `compiler/outline.c` (new), `quickjs-debug.h`, `quickjs-internal.h`, `compiler/compiler.h`, `compiler/eval.c`, `compiler/emitter.c`, `compiler/parser-func.c`, `compiler/parser-expr.c`, `compiler/parser-module.c`, `compiler/debug-info.c` (also) | outline of a module: statements, names declared and used, imports, exports (W) |

@@ -58,47 +58,47 @@ public:
      * gives its handlers. 'persisted': its choices are saved (false for a
      * group the command line set).
      */
-    void     setup(const char *key, bool persisted, TcpDataHandler *onData, TcpClientHandler *onClient,
-                   void *context);
+    void              setup(const char *key, bool persisted, TcpDataHandler *onData,
+                            TcpClientHandler *onClient, void *context);
 
     /**
      * Asks for 'port' (1 to 65535) and listening on or off; the "twin tcp"
      * thread applies it, then saves the choices if the link is persisted.
      */
-    void     request(int port, bool listen);
+    void              request(int port, bool listen);
 
     /**
      * Active (the default) or not: an inactive link does not listen (its
      * client is dropped), whatever was asked.
      */
-    void     setActive(bool active);
+    void              setActive(bool active);
 
     /**
      * Sends bytes to the client; dropped without one.
      */
-    void     send(const uint8_t *data, size_t size);
+    void              send(const uint8_t *data, size_t size);
 
     /**
      * True while a client is connected.
      */
-    bool     hasClient();
+    bool              hasClient();
 
     /**
      * The state of the link now.
      */
-    TcpState state();
+    TcpState          state();
 
     /**
      * The key of the link.
      */
-    const char *key() const {
+    const char       *key() const {
         return _key;
     }
 
     /**
      * True if its choices are saved.
      */
-    bool     persisted() const {
+    bool              persisted() const {
         return _persisted;
     }
 
@@ -106,19 +106,19 @@ public:
      * One look ("twin tcp" thread): applies what was asked, accepts a
      * client, reads it. True if the choices changed and must be saved.
      */
-    bool     poll(const char *host);
+    bool              poll(const char *host);
 
 private:
     /**
      * Closes the client, if any. Lock held.
      */
-    void     dropClient();
+    void              dropClient();
 
     /**
      * Brings the listener in line with what is asked: closes it, or opens it
      * (a failure turns the listening off and sets the error). Lock held.
      */
-    void     reconcile(const char *host);
+    void              reconcile(const char *host);
 
     const char       *_key = "";             // "uart1", "usb0" (static)
     bool              _persisted = true;     // its choices are saved
@@ -131,9 +131,9 @@ private:
     bool              _active = true;        // the USB device is started (always for a UART)
     bool              _changed = false;      // a request not applied yet
     int               _listenedPort = 0;     // the port the listener is on
-    sockets::Socket   _listener = sockets::invalidSocket;
-    sockets::Socket   _client = sockets::invalidSocket;
-    char              _error[TCP_ERROR_SIZE] = "";
+    sockets::Socket   _listener = sockets::invalidSocket;   // listening socket of _listenedPort
+    sockets::Socket   _client = sockets::invalidSocket;     // the connected client, if any
+    char              _error[TCP_ERROR_SIZE] = "";          // why the last listening failed
 };
 
 /**

@@ -33,6 +33,7 @@
 
 namespace {
 
+// What the producer threads post to the JS thread (Message::kind).
 enum MessageKind {
     MESSAGE_DATA = 1,
     MESSAGE_CLOSED,
@@ -50,11 +51,11 @@ const int CLOSING_CHECK_MS = 100;
 // thread never calls recv() / accept() on a closed descriptor whose number
 // the system may already have given to another file.
 struct SocketState {
-    sockets::Socket socket;   // owned: closed by the last owner (releaseSocketState)
-    int closing;              // atomic; set by the JS side: the thread stops
-    int references;           // atomic; 2 owners: the JS object and the thread
-    rt::Mailbox *mailbox;     // retained until the state is freed
-    rt::SourceId source;      // message source the thread posts to
+    sockets::Socket socket;       // owned: closed by the last owner (releaseSocketState)
+    int             closing;      // atomic; set by the JS side: the thread stops
+    int             references;   // atomic; 2 owners: the JS object and the thread
+    rt::Mailbox    *mailbox;      // retained until the state is freed
+    rt::SourceId    source;       // message source the thread posts to
 };
 
 /**
@@ -75,10 +76,12 @@ SocketState *newSocketState(sockets::Socket socket, rt::SourceId source) {
  * the mailbox and frees the state. Any thread.
  */
 void releaseSocketState(SocketState *state) {
+    // another owner still holds it
     if (platform::atomicDecrement(&state->references) > 0) {
         return;
     }
 
+    // the last one: socket closed, mailbox released, state freed
     sockets::closeSocket(state->socket);
     state->mailbox->release();
     memory::release(state);
@@ -210,9 +213,9 @@ bool startSocketThread(platform::ThreadFunction *run, SocketState *state, const 
 // outgoingData().
 struct OutgoingData {
     const uint8_t *data;   // borrowed: points into text or buffer
-    size_t size;           // bytes
-    const char *text;      // to free with JS_FreeCString
-    JSValue buffer;        // to free with JS_FreeValue
+    size_t         size;   // bytes
+    const char    *text;   // to free with JS_FreeCString
+    JSValue        buffer; // to free with JS_FreeValue
 };
 
 /**
@@ -262,6 +265,7 @@ public:
      * then dropped.
      */
     ~Connection() {
+        // the reader thread asked to stop, the source removed
         closeSocket();
         if (_loop != nullptr) {
             _loop->removeSource(_source);
@@ -410,14 +414,14 @@ private:
         callback();
     }
 
-    SocketState *_state = nullptr;                      // this side's share of the socket; nullptr once let go
-    rt::Loop *_loop = nullptr;                          // loop of the JS thread; nullptr before start()
-    rt::SourceId _source = { -1, 0 };                   // message source of the reader thread
-    bool _open = false;                                 // true from start() until the close message
-    char _remoteAddress[64] = "";                       // peer IPv4 address; "" if unknown
-    int _remotePort = 0;                                // peer port; 0 if unknown
-    js::Function _dataCallback;                         // onData callback; empty: none
-    js::Function _closeCallback;                        // onClose callback; empty: none
+    SocketState  *_state = nullptr;                     // this side's share of the socket; nullptr once let go
+    rt::Loop     *_loop = nullptr;                      // loop of the JS thread; nullptr before start()
+    rt::SourceId  _source = { -1, 0 };                  // message source of the reader thread
+    bool          _open = false;                        // true from start() until the close message
+    char          _remoteAddress[64] = "";              // peer IPv4 address; "" if unknown
+    int           _remotePort = 0;                      // peer port; 0 if unknown
+    js::Function  _dataCallback;                        // onData callback; empty: none
+    js::Function  _closeCallback;                       // onClose callback; empty: none
 };
 
 /**
@@ -436,6 +440,7 @@ public:
      * then dropped.
      */
     ~Server() {
+        // the accept thread asked to stop, the source removed
         closeSocket();
         if (_loop != nullptr) {
             _loop->removeSource(_source);
@@ -538,16 +543,17 @@ private:
         server->_onConnection(connection.value);
     }
 
-    SocketState *_state = nullptr;                      // this side's share of the listening socket; nullptr once let go
-    int _port = 0;                                      // port listened on
-    rt::Loop *_loop = nullptr;                          // loop of the JS thread; nullptr before start()
-    rt::SourceId _source = { -1, 0 };                   // message source of the accept thread
-    js::Function _onConnection;                         // called with each new Connection
+    SocketState  *_state = nullptr;                     // this side's share of the listening socket; nullptr once let go
+    int           _port = 0;                            // port listened on
+    rt::Loop     *_loop = nullptr;                      // loop of the JS thread; nullptr before start()
+    rt::SourceId  _source = { -1, 0 };                  // message source of the accept thread
+    js::Function  _onConnection;                        // called with each new Connection
 };
 
+// The options of listen() (JS_STRUCT: unknown fields are refused).
 struct ListenOptions {
-    js::Optional<js::Str> host;   // default: 127.0.0.1 (not reachable from the network)
-    int port = 0;                 // 0: any free port, see server.port()
+    js::Optional<js::Str> host;       // default: 127.0.0.1 (not reachable from the network)
+    int                   port = 0;   // 0: any free port, see server.port()
 };
 JS_STRUCT(ListenOptions, host, port);
 
@@ -565,8 +571,8 @@ bool netAllowed(const char *host, int port) {
     // refused
     char what[300];
     const char *hint = permissions->hint();
-    snprintf(what, sizeof(what), "net access to \"%s:%d\" is not allowed%s%s", host, port, hint[0] != 0 ? ": " : "",
-             hint);
+    const char *separator = hint[0] != 0 ? ": " : "";
+    snprintf(what, sizeof(what), "net access to \"%s:%d\" is not allowed%s%s", host, port, separator, hint);
     js::failSystem(EACCES, what);
     return false;
 }
@@ -597,24 +603,25 @@ js::Value netListen(ListenOptions options, js::Function onConnection) {
     return server.value;
 }
 
+// The options of connect() (JS_STRUCT: unknown fields are refused).
 struct ConnectOptions {
-    js::Optional<js::Str> host;   // default: 127.0.0.1
-    int port = 0;                 // port to connect to
+    js::Optional<js::Str> host;       // default: 127.0.0.1
+    int                   port = 0;   // port to connect to
 };
 JS_STRUCT(ConnectOptions, host, port);
 
 // A connection being established by a thread.
 struct PendingConnect {
-    rt::Loop *loop;                     // loop of the JS thread, held until the answer
-    rt::SourceId source;                // one-shot message source (connectDone)
+    rt::Loop               *loop;       // loop of the JS thread, held until the answer
+    rt::SourceId            source;     // one-shot message source (connectDone)
     js::Resolver<js::Value> resolver;   // settles the promise of connect()
 };
 
 // What the connect thread needs (malloc'd, owned by the thread): a copy of
 // the host name, since the JS string does not outlive the call.
 struct ConnectRequest {
-    char host[256];         // host name or address, NUL-terminated
-    int port;               // port to connect to
+    char         host[256]; // host name or address, NUL-terminated
+    int          port;      // port to connect to
     rt::Mailbox *mailbox;   // retained for the thread
     rt::SourceId source;    // message source of the PendingConnect
 };
@@ -675,6 +682,7 @@ void settleConnected(PendingConnect *pending, sockets::Socket socket) {
         return;
     }
 
+    // started: the promise resolved with it
     pending->resolver.resolve(connection.value);
 }
 
@@ -737,6 +745,7 @@ js::Promise<js::Value> netConnect(ConnectOptions options) {
         return js::fail("net: cannot start a thread");
     }
 
+    // settled later by connectDone()
     return promise;
 }
 

@@ -38,9 +38,13 @@ class TwinApp extends Application {
      * answers again.
      */
     private _onLost() {
+        // shown in the header
         this._view.showDisconnected();
+
+        // asked again and again; the twin back: the page reloaded
         this.setInterval("retry", RETRY_MS, async () => {
-            if (await twinModel.isReachable()) {
+            const isBack = await twinModel.isReachable();
+            if (isBack) {
                 window.location.reload();
             }
         });

@@ -48,7 +48,7 @@ struct Timer {
 
 // The timers of a PWM.
 struct TimerTable {
-    Timer timers[MAX_TIMERS];
+    Timer timers[MAX_TIMERS];    // the first 'count' exist
     int   count;                 // timers the hardware has (at most MAX_TIMERS)
 };
 
@@ -65,9 +65,11 @@ inline TimerSetting timerSetting(uint32_t clock, uint32_t frequency, int maxBits
 
     // the highest resolution: frequency * 2^bits must not pass the clock
     int bits = maxBits;
+
     while (bits > 0 && ((uint64_t)frequency << bits) > clock) {
         bits--;
     }
+
     if (bits == 0) {
         return outOfReach;
     }
@@ -108,6 +110,7 @@ inline int timerTake(TimerTable *table, uint32_t frequency, bool *fresh) {
             return i;
         }
     }
+
     return -1;
 }
 
@@ -115,10 +118,13 @@ inline int timerTake(TimerTable *table, uint32_t frequency, bool *fresh) {
  * An output leaves timer 'index'; true when nobody uses it any more.
  */
 inline bool timerLeave(TimerTable *table, int index) {
-    if (index < 0 || index >= table->count || table->timers[index].users == 0) {
+    // a timer that exists and has users
+    bool inTable = index >= 0 && index < table->count;
+    if (!inTable || table->timers[index].users == 0) {
         return false;
     }
 
+    // one user less
     table->timers[index].users--;
     return table->timers[index].users == 0;
 }
@@ -158,6 +164,7 @@ inline int timerMove(TimerTable *table, int from, uint32_t frequency, bool *fres
             return i;
         }
     }
+
     return -1;
 }
 

@@ -17,7 +17,7 @@
 
 #define MAX_ATOMS 4096           // more than the names of a new context
 
-// ### Names ####################################################################
+// ### Names ###################################################################
 
 // One name of the table.
 typedef struct Name {
@@ -38,7 +38,9 @@ static int nameCount;            // generated indexes 0 .. nameCount - 1
  * cannot be in read-only memory (a wide string, a symbol not predefined).
  */
 static void collectNames(JSRuntime *rt) {
+    // the predefined atoms keep the first indexes
     nameCount = JS_ATOM_END;
+
     for (int i = 1; i < rt->atom_size; i++) {
         JSAtomStruct *p = rt->atom_array[i];
         if (atom_is_free(p)) {
@@ -46,7 +48,13 @@ static void collectNames(JSRuntime *rt) {
         }
 
         // where it goes: its own index if predefined, else the next one
-        uint32_t index = i < JS_ATOM_END ? (uint32_t)i : (uint32_t)nameCount++;
+        bool predefined = i < JS_ATOM_END;
+        uint32_t index = (uint32_t)i;
+        if (!predefined) {
+            index = (uint32_t)nameCount;
+            nameCount++;
+        }
+
         if (nameCount > MAX_ATOMS) {
             fprintf(stderr, "generate: more than %d names\n", MAX_ATOMS);
             exit(1);
@@ -56,14 +64,18 @@ static void collectNames(JSRuntime *rt) {
         Name *name = &names[index];
         name->index = index;
         name->isSymbol = p->atom_type != JS_ATOM_TYPE_STRING;
-        if (name->isSymbol && i >= JS_ATOM_END) {
+        bool symbolNotPredefined = name->isSymbol && i >= JS_ATOM_END;
+        if (symbolNotPredefined) {
             fprintf(stderr, "generate: atom %d is a symbol that is not predefined\n", i);
             exit(1);
         }
+
         if (p->is_wide_char) {
             fprintf(stderr, "generate: atom %d is a wide string\n", i);
             exit(1);
         }
+
+        // its hash, its length, its text (kept in the runtime's atom)
         name->hash = p->hash;
         name->length = p->len;
         name->text = p->u.str8;
@@ -76,19 +88,23 @@ static void collectNames(JSRuntime *rt) {
  * package made with another table is refused (JS_SetPackageAtoms).
  */
 static uint32_t fingerprintOfNames(void) {
+    // FNV-1a: offset basis 2166136261, prime 16777619
     uint32_t hash = 2166136261u;
+
     for (int i = 0; i < nameCount; i++) {
         // the index (its low byte), the kind, the characters
         hash = (hash ^ (uint8_t)i) * 16777619u;
         hash = (hash ^ (uint8_t)names[i].isSymbol) * 16777619u;
+
         for (uint32_t k = 0; k < names[i].length; k++) {
             hash = (hash ^ names[i].text[k]) * 16777619u;
         }
     }
+
     return hash;
 }
 
-// ### Output ###################################################################
+// ### Output ##################################################################
 
 static const char *FILE_HEADER =
     "/*          _\n"
@@ -107,16 +123,22 @@ static const char *FILE_HEADER =
  */
 static void writeLiteral(FILE *out, const uint8_t *text, uint32_t length) {
     fputc('"', out);
+
     for (uint32_t i = 0; i < length; i++) {
+        // a quote or a backslash escaped; printable ASCII as is ('?' escaped:
+        // no trigraph); the rest in octal
         int c = text[i];
-        if (c == '"' || c == '\\') {
+        bool needsBackslash = c == '"' || c == '\\';
+        bool printable = c >= 0x20 && c < 0x7f && c != '?';
+        if (needsBackslash) {
             fprintf(out, "\\%c", c);
-        } else if (c >= 0x20 && c < 0x7f && c != '?') {
+        } else if (printable) {
             fputc(c, out);
         } else {
             fprintf(out, "\\%03o", c);
         }
     }
+
     fputc('"', out);
 }
 
@@ -131,6 +153,7 @@ static FILE *openOutput(const char *folder, const char *file) {
         fprintf(stderr, "generate: cannot write %s\n", path);
         exit(1);
     }
+
     return out;
 }
 
@@ -140,6 +163,7 @@ static FILE *openOutput(const char *folder, const char *file) {
  * allocated by QuickJS: block header, JSString, characters) and the tables.
  */
 static void writeHeader(const char *folder, uint32_t hashSize) {
+    // the file, its header and guard, the constants
     FILE *out = openOutput(folder, "rom-atoms.h");
     fputs(FILE_HEADER, out);
     fputs("\n#ifndef QJSX_ROM_ATOMS_H\n#define QJSX_ROM_ATOMS_H\n\n", out);
@@ -154,13 +178,16 @@ static void writeHeader(const char *folder, uint32_t hashSize) {
     // the block: one member per string name
     fputs("/* the names, each as QuickJS allocates an atom string */\n", out);
     fputs("typedef struct QJSXRomAtoms {\n", out);
+
     for (int i = 1; i < nameCount; i++) {
         if (names[i].isSymbol) {
             continue;
         }
+
         fprintf(out, "    struct { JSMallocBlockHeader header; JSString string; uint8_t text[%u]; } a%d;\n",
             names[i].length + 1, i);
     }
+
     fputs("} QJSXRomAtoms;\n\n", out);
 
     // the tables
@@ -181,6 +208,7 @@ static void writeHeader(const char *folder, uint32_t hashSize) {
  * atom index in hash_next), the string of each index and the hash table.
  */
 static void writeSource(const char *folder, const uint16_t *hashTable, uint32_t hashSize) {
+    // the file, its header, the layout check
     FILE *out = openOutput(folder, "rom-atoms.c");
     fputs(FILE_HEADER, out);
     fputs("\n#include \"quickjs-internal.h\"\n\n#if QJSX_ROM_ATOMS\n\n", out);
@@ -190,38 +218,47 @@ static void writeSource(const char *folder, const uint16_t *hashTable, uint32_t 
 
     // the block of names
     fputs("const QJSXRomAtoms qjsx_rom_atoms = {\n", out);
+
     for (int i = 1; i < nameCount; i++) {
         const Name *name = &names[i];
         if (name->isSymbol) {
             continue;
         }
+
         fprintf(out, "    .a%d = { .header = { .ref_count = JS_REF_COUNT_IMMORTAL }, .string = { .len = %u, "
             ".hash = 0x%08x, .atom_type = JS_ATOM_TYPE_STRING, .hash_next = %d }, .text = ",
             i, name->length, name->hash, i);
         writeLiteral(out, name->text, name->length);
         fputs(" },\n", out);
     }
+
     fputs("};\n\n", out);
 
     // the string of each index
     fputs("const JSAtomStruct *const qjsx_rom_atom_ptr[QJSX_ROM_ATOM_COUNT] = {\n", out);
+
     for (int i = 1; i < nameCount; i++) {
         if (!names[i].isSymbol) {
             fprintf(out, "    [%d] = &qjsx_rom_atoms.a%d.string,\n", i, i);
         }
     }
+
     fputs("};\n\n", out);
 
     // the hash table, 16 slots per line
     fputs("const uint16_t qjsx_rom_atom_hash[QJSX_ROM_ATOM_HASH_SIZE] = {\n", out);
+
     for (uint32_t slot = 0; slot < hashSize; slot++) {
-        fprintf(out, "%s%u,%s", slot % 16 == 0 ? "    " : " ", hashTable[slot], slot % 16 == 15 ? "\n" : "");
+        const char *before = slot % 16 == 0 ? "    " : " ";
+        const char *after = slot % 16 == 15 ? "\n" : "";
+        fprintf(out, "%s%u,%s", before, hashTable[slot], after);
     }
+
     fputs("};\n\n#endif\n", out);
     fclose(out);
 }
 
-// ### Main #####################################################################
+// ### Main ####################################################################
 
 /**
  * Makes a runtime and a full context as qjsx does (JS_NewContext), collects
@@ -229,6 +266,7 @@ static void writeSource(const char *folder, const uint16_t *hashTable, uint32_t 
  * linear probing) and writes the two files.
  */
 int main(int argc, char **argv) {
+    // one argument: the output folder
     if (argc != 2) {
         fprintf(stderr, "usage: generate <output folder>\n");
         return 1;
@@ -241,18 +279,25 @@ int main(int argc, char **argv) {
 
     // the hash table of the string names
     uint32_t hashSize = 1;
+
     while (hashSize < 2 * (uint32_t)nameCount) {
         hashSize *= 2;
     }
+
+    // each string name in the first free slot from its hash (linear probing)
     uint16_t *hashTable = calloc(hashSize, sizeof(uint16_t));
+
     for (int i = 1; i < nameCount; i++) {
         if (names[i].isSymbol) {
             continue;
         }
+
         uint32_t slot = names[i].hash & (hashSize - 1);
+
         while (hashTable[slot] != 0) {
             slot = (slot + 1) & (hashSize - 1);
         }
+
         hashTable[slot] = (uint16_t)i;
     }
 
@@ -261,6 +306,7 @@ int main(int argc, char **argv) {
     writeSource(argv[1], hashTable, hashSize);
     printf("generate: %d names (%d predefined), hash table of %u slots\n", nameCount - 1, JS_ATOM_END - 1, hashSize);
 
+    // done
     free(hashTable);
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);

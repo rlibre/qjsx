@@ -14,6 +14,7 @@
 
 namespace rt {
 
+// What a restart request calls (see requestRestart() for its threads).
 typedef void RestartHandler(void *opaque);
 
 /**

@@ -96,6 +96,7 @@ bool grant(rt::Permissions *permissions, Kind kind, const char *item) {
                 return true;
             }
 
+            // a folder, by its real path
             if (!permissions->allowFiles(access, item)) {
                 fprintf(stderr, "qjsx: cannot grant %s access to %s: %s\n", rt::accessName(access), item,
                         strerror(errno));
@@ -135,16 +136,20 @@ bool grantList(rt::Permissions *permissions, Kind kind, const char *list) {
     char *copy = memory::copyText(list, strlen(list));
     bool ok = true;
     char *item = copy;
+
     while (ok && item != nullptr) {
+        // the item ends at the next comma
         char *comma = strchr(item, ',');
         if (comma != nullptr) {
             *comma = 0;
         }
 
+        // granted, unless empty
         if (item[0] != 0) {
             ok = grant(permissions, kind, item);
         }
 
+        // the next one, after the comma
         item = comma != nullptr ? comma + 1 : nullptr;
     }
 
@@ -157,19 +162,23 @@ bool grantList(rt::Permissions *permissions, Kind kind, const char *list) {
  * nullptr.
  */
 const char *optionValue(const char *word, const char *name) {
+    // no such name (an option without a short name)
     if (name == nullptr) {
         return nullptr;
     }
 
+    // 'word' starts with the name
     size_t length = strlen(name);
     if (strncmp(word, name, length) != 0) {
         return nullptr;
     }
 
+    // the name alone: no value
     if (word[length] == 0) {
         return "";
     }
 
+    // "name=value": the value; anything else is another option
     return word[length] == '=' ? word + length + 1 : nullptr;
 }
 
@@ -191,6 +200,7 @@ bool isFileSystemRoot(const char *path) {
         return false;
     }
 
+    // the server, then the share, then nothing
     const char *server = strchr(path + 2, '/');
     return server == nullptr || strchr(server + 1, '/') == nullptr;
 }
@@ -222,10 +232,12 @@ char *resolveRoot(const char *given) {
  * variable (malloc'd), else nullptr.
  */
 char *launchRoot(const char *rootOption) {
+    // the option wins
     if (rootOption != nullptr) {
         return memory::copyText(rootOption, strlen(rootOption));
     }
 
+    // else the environment variable, if set
     return files::environmentValue(ROOT_VARIABLE);
 }
 
@@ -251,17 +263,28 @@ char *userAppDataFolder(const char *name) {
     char *base = files::environmentValue("APPDATA");
 #elif defined(__APPLE__)
     char *home = files::environmentValue("HOME");
-    char *base = home != nullptr ? join(home, "/Library/Application Support") : nullptr;
+    char *base = nullptr;
+    if (home != nullptr) {
+        base = join(home, "/Library/Application Support");
+    }
+
     memory::release(home);
 #else
     char *base = files::environmentValue("XDG_DATA_HOME");
     if (base == nullptr || !files::isAbsolute(base)) {
         memory::release(base);
         char *home = files::environmentValue("HOME");
-        base = home != nullptr ? join(home, "/.local/share") : nullptr;
+        base = nullptr;
+        if (home != nullptr) {
+            base = join(home, "/.local/share");
+        }
+
         memory::release(home);
     }
+
 #endif
+
+    // the environment does not tell
     if (base == nullptr) {
         return nullptr;
     }
@@ -295,7 +318,8 @@ char *expand(const char *text, const Variables *variables, const char *where) {
     // the variable, followed by nothing or by '/'
     const char *close = strchr(text, '}');
     const char *rest = close != nullptr ? close + 1 : nullptr;
-    if (rest == nullptr || (rest[0] != 0 && rest[0] != '/')) {
+    bool endsWell = rest != nullptr && (rest[0] == 0 || rest[0] == '/');
+    if (!endsWell) {
         fprintf(stderr, "qjsx: %s: \"%s\": a variable is followed by '/' or ends the path\n", where, text);
         return nullptr;
     }
@@ -317,12 +341,14 @@ char *expand(const char *text, const Variables *variables, const char *where) {
         known = false;
     }
 
+    // unknown, or without a value in this run
     if (!known || value == nullptr) {
         const char *reason = known ? "has no value here" : "is unknown";
         fprintf(stderr, "qjsx: %s: the variable in \"%s\" %s\n", where, text, reason);
         return nullptr;
     }
 
+    // the value, then the rest of the path
     return join(value, rest);
 }
 
@@ -332,8 +358,16 @@ char *expand(const char *text, const Variables *variables, const char *where) {
  */
 char *stringProperty(JSContext *ctx, JSValueConst object, const char *name) {
     JSValue value = JS_GetPropertyStr(ctx, object, name);
-    const char *text = JS_IsString(value) ? JS_ToCString(ctx, value) : nullptr;
-    char *copy = text != nullptr ? memory::copyText(text, strlen(text)) : nullptr;
+    const char *text = nullptr;
+    if (JS_IsString(value)) {
+        text = JS_ToCString(ctx, value);
+    }
+
+    char *copy = nullptr;
+    if (text != nullptr) {
+        copy = memory::copyText(text, strlen(text));
+    }
+
     JS_FreeCString(ctx, text);
     JS_FreeValue(ctx, value);
     return copy;
@@ -361,20 +395,34 @@ bool grantManifestKind(JSContext *ctx, JSValueConst value, const ManifestKind *k
     // each item: a path to expand (files) or a name
     bool isFiles = kind->kind == Kind::read || kind->kind == Kind::write;
     bool ok = true;
+
     for (uint32_t i = 0; ok; i++) {
+        // the next item; the end of the list stops
         JSValue item = JS_GetPropertyUint32(ctx, value, i);
         if (JS_IsUndefined(item)) {
             break;
         }
 
-        const char *text = JS_IsString(item) ? JS_ToCString(ctx, item) : nullptr;
+        // a string
+        const char *text = nullptr;
+        if (JS_IsString(item)) {
+            text = JS_ToCString(ctx, item);
+        }
+
         JS_FreeValue(ctx, item);
         if (text == nullptr) {
             fprintf(stderr, "qjsx: %s must hold strings only\n", where);
             return false;
         }
 
-        char *expanded = isFiles ? expand(text, variables, where) : memory::copyText(text, strlen(text));
+        // granted, a path once expanded
+        char *expanded = nullptr;
+        if (isFiles) {
+            expanded = expand(text, variables, where);
+        } else {
+            expanded = memory::copyText(text, strlen(text));
+        }
+
         JS_FreeCString(ctx, text);
         ok = expanded != nullptr && grant(permissions, kind->kind, expanded);
         memory::release(expanded);
@@ -388,6 +436,7 @@ bool grantManifestKind(JSContext *ctx, JSValueConst value, const ManifestKind *k
  * why.
  */
 bool grantManifest(JSContext *ctx, JSValueConst granted, const Variables *variables, rt::Permissions *permissions) {
+    // an object
     if (!JS_IsObject(granted)) {
         fprintf(stderr, "qjsx: desktop.permissions must be an object\n");
         return false;
@@ -395,6 +444,7 @@ bool grantManifest(JSContext *ctx, JSValueConst granted, const Variables *variab
 
     // each kind present
     bool ok = true;
+
     for (const ManifestKind &kind : MANIFEST_KINDS) {
         JSValue value = JS_GetPropertyStr(ctx, granted, kind.key);
         if (!JS_IsUndefined(value)) {
@@ -445,7 +495,11 @@ bool packageRoot(JSContext *ctx, JSValueConst desktop, const Variables *variable
 JSValue parseManifest(JSContext *ctx, const uint8_t *package, size_t size) {
     // find manifest.json in the package
     package::Reader reader;
-    const package::Entry *entry = reader.open(package, size) ? reader.find("manifest.json") : nullptr;
+    const package::Entry *entry = nullptr;
+    if (reader.open(package, size)) {
+        entry = reader.find("manifest.json");
+    }
+
     if (entry == nullptr) {
         fprintf(stderr, "qjsx: invalid package: no manifest.json\n");
         return JS_EXCEPTION;
@@ -494,6 +548,7 @@ bool readRunOption(const char *word, rt::Permissions *permissions, const char **
             continue;
         }
 
+        // known; -A takes no value, the others a list
         *known = true;
         if (option.kind == Kind::all && value[0] != 0) {
             fprintf(stderr, "qjsx: %s takes no value\n", option.longName);
@@ -503,6 +558,7 @@ bool readRunOption(const char *word, rt::Permissions *permissions, const char **
         return grantList(permissions, option.kind, value);
     }
 
+    // not an option of qjsx run
     *known = false;
     return false;
 }
@@ -521,17 +577,30 @@ bool applyDesktopSection(const uint8_t *package, size_t size, const char *progra
     JSRuntime *runtime = JS_NewRuntime();
     JSContext *ctx = JS_NewContext(runtime);
     JSValue manifest = parseManifest(ctx, package, size);
-    JSValue desktop = JS_IsException(manifest) ? JS_UNDEFINED : JS_GetPropertyStr(ctx, manifest, "desktop");
+    JSValue desktop = JS_UNDEFINED;
     bool ok = !JS_IsException(manifest);
+    if (ok) {
+        desktop = JS_GetPropertyStr(ctx, manifest, "desktop");
+    }
+
     if (ok && JS_IsUndefined(desktop)) {
         desktop = JS_NewObject(ctx);
     }
 
     // the variables
-    char *name = ok ? stringProperty(ctx, manifest, "name") : nullptr;
+    char *name = nullptr;
+    if (ok) {
+        name = stringProperty(ctx, manifest, "name");
+    }
+
+    char *appDataFolder = nullptr;
+    if (name != nullptr) {
+        appDataFolder = userAppDataFolder(name);
+    }
+
     Variables variables = {
         memory::copyText(programFolder, strlen(programFolder)),
-        name != nullptr ? userAppDataFolder(name) : nullptr,
+        appDataFolder,
         files::currentDirectory(),
         nullptr,
     };
@@ -545,7 +614,11 @@ bool applyDesktopSection(const uint8_t *package, size_t size, const char *progra
     }
 
     // the granted kinds; without them, a root may be read
-    JSValue granted = ok ? JS_GetPropertyStr(ctx, desktop, "permissions") : JS_UNDEFINED;
+    JSValue granted = JS_UNDEFINED;
+    if (ok) {
+        granted = JS_GetPropertyStr(ctx, desktop, "permissions");
+    }
+
     if (ok && !JS_IsUndefined(granted)) {
         ok = grantManifest(ctx, granted, &variables, permissions);
     } else if (ok && root != nullptr) {
@@ -579,12 +652,14 @@ bool applyScriptRoot(const char *rootOption, rt::Permissions *permissions) {
         return true;
     }
 
+    // its real path, not a whole disk
     char *root = resolveRoot(given);
     memory::release(given);
     if (root == nullptr) {
         return false;
     }
 
+    // the program's process.cwd()
     permissions->setWorkingFolder(root);
     memory::release(root);
     return true;
@@ -606,6 +681,7 @@ char *folderOf(const char *path) {
         return real;
     }
 
+    // the slash of a root stays (cut after it), any other is cut
     bool isRootSlash = slash == real || (slash == real + 2 && real[1] == ':');
     slash[isRootSlash ? 1 : 0] = 0;
     return real;

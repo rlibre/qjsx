@@ -324,6 +324,70 @@ typedef void JSCompileWarningHandler(JSContext *ctx, JSCompileWarningKind kind,
 void JS_SetCompileWarningHandler(JSRuntime *rt, JSCompileWarningHandler *handler,
                                  void *opaque);
 
+/* Outline of a module (engine change W, compiler/outline.c): what 'qjsx build'
+   needs to leave out of a package the declarations that nothing uses. The
+   collector is called once per module compiled, after its source is parsed
+   (a syntax error calls nothing). Positions are byte offsets in the source.
+   The names are atoms of the context, valid during the call only. */
+
+/* One statement at the top level of the module. */
+typedef struct JSOutlineStatement {
+    uint32_t start;              /* offset of its first token */
+    uint32_t end;                /* offset just after its last token */
+    /* TRUE: a declaration (function, class, var, let, const, export of one
+       of them, export default) whose run only creates what it declares:
+       left out, nothing else changes. Its initializers make functions,
+       classes without computed key nor static field / block, literals,
+       objects and arrays of them, or read variables */
+    int removable;
+    const JSAtom *declared;      /* the names it declares at the top level */
+    int declared_count;
+    /* the names of variables it reads or writes (as written: an inner
+       variable of the same name counts too), in its nested functions too;
+       each one once. The initialization of a declared name is not a use */
+    const JSAtom *references;
+    int reference_count;
+} JSOutlineStatement;
+
+/* One name imported by an import statement. */
+typedef struct JSOutlineImport {
+    JSAtom module;               /* the module, as written after 'from' */
+    JSAtom imported;             /* its export; JS_ATOM__star_ ("*") for 'import * as' */
+    JSAtom local;                /* the name it takes in this module */
+    uint32_t position;           /* offset of the imported name (of '*') */
+} JSOutlineImport;
+
+/* One export of the module. */
+typedef struct JSOutlineExport {
+    /* the name importers use; JS_ATOM_NULL for 'export * from' */
+    JSAtom exported;
+    /* the top-level name it exports ("*default*" for 'export default');
+       for a re-export, the name in 'module' ("*" for 'export * as') */
+    JSAtom local;
+    JSAtom module;               /* JS_ATOM_NULL: a name of this module; else re-exported from it */
+    /* a name of an export clause 'export { a, b as c }': its text, with the
+       comma that follows it if any, at [start, end); 0, 0 otherwise */
+    uint32_t start;
+    uint32_t end;
+} JSOutlineExport;
+
+typedef struct JSModuleOutline {
+    const JSOutlineStatement *statements;   /* in source order */
+    int statement_count;
+    const JSOutlineImport *imports;
+    int import_count;
+    const JSOutlineExport *exports;
+    int export_count;
+    int has_eval;                /* TRUE: a direct eval(...) in the module */
+} JSModuleOutline;
+
+typedef void JSModuleOutlineCollector(JSContext *ctx, const JSModuleOutline *outline,
+                                      void *opaque);
+
+/* Sets the collector (NULL: none). */
+void JS_SetModuleOutlineCollector(JSRuntime *rt, JSModuleOutlineCollector *collector,
+                                  void *opaque);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

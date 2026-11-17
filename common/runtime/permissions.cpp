@@ -49,6 +49,7 @@ void freeList(PermissionList *list) {
  */
 bool sameText(const char *a, const char *b, size_t length) {
 #if defined(_WIN32)
+
     for (size_t i = 0; i < length; i++) {
         if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i])) {
             return false;
@@ -67,7 +68,8 @@ bool sameText(const char *a, const char *b, size_t length) {
 bool isUnder(const char *path, const char *folder) {
     // the folder must be a prefix of the path
     size_t length = strlen(folder);
-    if (strlen(path) < length || !sameText(path, folder, length)) {
+    bool isPrefix = strlen(path) >= length && sameText(path, folder, length);
+    if (!isPrefix) {
         return false;
     }
 
@@ -117,7 +119,7 @@ bool netEntryCovers(const char *entry, const char *host, int port) {
 
 } // namespace
 
-// ### Permissions ##############################################################
+// ### Permissions #############################################################
 
 /**
  * Nothing allowed.
@@ -176,6 +178,7 @@ bool Permissions::allowFiles(Access access, const char *folder) {
         return false;
     }
 
+    // into the list of that access
     addItem(access == Access::read ? &_read : &_write, real);
     memory::release(real);
     return true;
@@ -193,11 +196,13 @@ void Permissions::allowFilesEverywhere(Access access) {
  * A host, or every host.
  */
 void Permissions::allowNet(const char *hostPort) {
+    // nullptr: every host
     if (hostPort == nullptr) {
         _net.everything = true;
         return;
     }
 
+    // else that one
     addItem(&_net, hostPort);
 }
 
@@ -205,11 +210,13 @@ void Permissions::allowNet(const char *hostPort) {
  * A variable, or every variable.
  */
 void Permissions::allowEnv(const char *name) {
+    // nullptr: every variable
     if (name == nullptr) {
         _env.everything = true;
         return;
     }
 
+    // else that one
     addItem(&_env, name);
 }
 
@@ -217,11 +224,13 @@ void Permissions::allowEnv(const char *name) {
  * A port, or every port.
  */
 void Permissions::allowSerial(const char *port) {
+    // nullptr: every port
     if (port == nullptr) {
         _serial.everything = true;
         return;
     }
 
+    // else that one
     addItem(&_serial, port);
 }
 
@@ -268,10 +277,12 @@ bool Permissions::mayAccess(const char *path, Access access) const {
 
     // under a granted folder
     bool allowed = false;
+
     for (int i = 0; i < list->count && !allowed; i++) {
         allowed = isUnder(real, list->items[i]);
     }
 
+    // refused: EACCES
     memory::release(real);
     if (!allowed) {
         errno = EACCES;
@@ -284,10 +295,12 @@ bool Permissions::mayAccess(const char *path, Access access) const {
  * A granted host (and port).
  */
 bool Permissions::mayUseNet(const char *host, int port) const {
+    // every host
     if (_net.everything) {
         return true;
     }
 
+    // a granted entry that covers host:port
     for (int i = 0; i < _net.count; i++) {
         if (netEntryCovers(_net.items[i], host, port)) {
             return true;
@@ -302,13 +315,17 @@ bool Permissions::mayUseNet(const char *host, int port) const {
  * their case).
  */
 bool Permissions::mayUseEnv(const char *name) const {
+    // every variable
     if (_env.everything) {
         return true;
     }
 
+    // a granted name, whole
     size_t length = strlen(name);
+
     for (int i = 0; i < _env.count; i++) {
-        if (strlen(_env.items[i]) == length && sameText(_env.items[i], name, length)) {
+        bool sameName = strlen(_env.items[i]) == length && sameText(_env.items[i], name, length);
+        if (sameName) {
             return true;
         }
     }
@@ -320,17 +337,22 @@ bool Permissions::mayUseEnv(const char *name) const {
  * A granted port; nullptr: some port granted.
  */
 bool Permissions::mayUseSerial(const char *port) const {
+    // every port
     if (_serial.everything) {
         return true;
     }
 
+    // listing the ports: some port granted
     if (port == nullptr) {
         return _serial.count > 0;
     }
 
+    // a granted name, whole
     size_t length = strlen(port);
+
     for (int i = 0; i < _serial.count; i++) {
-        if (strlen(_serial.items[i]) == length && sameText(_serial.items[i], port, length)) {
+        bool sameName = strlen(_serial.items[i]) == length && sameText(_serial.items[i], port, length);
+        if (sameName) {
             return true;
         }
     }
@@ -345,7 +367,7 @@ const char *Permissions::hint() const {
     return _hint != nullptr ? _hint : "";
 }
 
-// ### The thread's run #########################################################
+// ### The thread's run ########################################################
 
 /**
  * The permissions of this thread's run.

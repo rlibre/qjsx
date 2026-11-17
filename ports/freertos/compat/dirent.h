@@ -25,8 +25,19 @@ struct dirent {
     char d_name[256];   /* name of the entry */
 };
 
+/**
+ * No file system: always nullptr, errno ENOSYS.
+ */
 DIR           *opendir(const char *path);
+
+/**
+ * Never called (opendir never succeeds): nullptr, errno EBADF.
+ */
 struct dirent *readdir(DIR *directory);
+
+/**
+ * Never called (opendir never succeeds): -1, errno EBADF.
+ */
 int            closedir(DIR *directory);
 
 #ifdef __cplusplus

@@ -93,21 +93,28 @@ commands:
 targets: tcp:<host>:<port>   serial:<port>[@<baud rate>]   e.g. serial:COM3, tcp:esp.local:5555
          twin: the twin of the project on this PC (port "twin.ports.agent", 5555)`;
 
-// '--name value' options and '--flag' flags; everything else is positional.
+/**
+ * '--name value' options and '--flag' flags; everything else is positional.
+ */
 function parseArguments(args, { values = [], flags = [] }) {
     const options = {};
     const positional = [];
+
     for (let i = 0; i < args.length; i++) {
+        // not an option: positional
         const arg = args[i];
         if (!arg.startsWith("--")) {
             positional.push(arg);
             continue;
         }
+
+        // an option with a value (the next argument, skipped), or a flag
         const name = arg.slice(2);
         if (values.includes(name)) {
             if (i + 1 >= args.length) {
                 throw new Error(`${arg} needs a value`);
             }
+
             options[name] = args[++i];
         } else if (flags.includes(name)) {
             options[name] = true;
@@ -115,9 +122,13 @@ function parseArguments(args, { values = [], flags = [] }) {
             throw new Error(`unknown option ${arg}`);
         }
     }
+
     return { options, positional };
 }
 
+/**
+ * The project of the current folder, or undefined when it has no qjsx.json.
+ */
 function currentProject() {
     return fs.existsSync(PROJECT_FILE) ? loadProject(".") : undefined;
 }
@@ -125,35 +136,49 @@ function currentProject() {
 // The port of the agent of a twin when its project does not give one.
 const TWIN_AGENT_PORT = 5555;
 
-// The target of a command: --target, else "target" of qjsx.json. "twin" is
-// the twin of the project on this PC ("qjsx agent" in its folder), on the
-// port "twin.ports.agent" of qjsx.json, 5555 by default.
+/**
+ * The target of a command: --target, else "target" of qjsx.json. "twin" is
+ * the twin of the project on this PC ("qjsx agent" in its folder), on the
+ * port "twin.ports.agent" of qjsx.json, 5555 by default.
+ */
 function targetOf(options, project) {
     const target = options.target ?? project?.target;
     if (target === undefined) {
         throw new Error(`no target: use --target or set "target" in ${PROJECT_FILE}`);
     }
+
+    // "twin": the agent of the twin on this PC
     if (target === "twin") {
         return `tcp:127.0.0.1:${project?.twin?.ports?.agent ?? TWIN_AGENT_PORT}`;
     }
+
     return target;
 }
 
+/**
+ * A status message of the tool, on stderr.
+ */
 function status(text) {
     console.error(`qjsx: ${text}`);
 }
 
-// A warning that must not be missed, framed with '*' (ASCII: readable in any
-// console and log), its text cut into lines of 70 characters at most; 'fix'
-// (optional) is a text to copy, on its own line, never cut.
+// Width of the frame of visibleWarning, in characters.
 const FRAME_WIDTH = 74;
 
+/**
+ * A warning that must not be missed, framed with '*' (ASCII: readable in any
+ * console and log), its text cut into lines of 70 characters at most; 'fix'
+ * (optional) is a text to copy, on its own line, never cut.
+ */
 function visibleWarning(text, fix) {
     // the words of the text, gathered into lines
     const lines = [];
     let line = "WARNING:";
+
     for (const word of text.split(/\s+/)) {
-        if (line.length + 1 + word.length > FRAME_WIDTH - 4) {
+        // "* " before and room at the end: 4 characters of the frame
+        const isLineFull = line.length + 1 + word.length > FRAME_WIDTH - 4;
+        if (isLineFull) {
             lines.push(line);
             line = word;
         } else {
@@ -161,7 +186,10 @@ function visibleWarning(text, fix) {
         }
     }
     lines.push(line);
-    if (fix !== undefined && fix !== null) {
+
+    // the fix on its own line, between blank lines
+    const hasFix = fix !== undefined && fix !== null;
+    if (hasFix) {
         lines.push("");
         lines.push(`    ${fix}`);
         lines.push("");
@@ -171,6 +199,7 @@ function visibleWarning(text, fix) {
     const border = "*".repeat(FRAME_WIDTH);
     console.error("");
     status(border);
+
     for (const content of lines) {
         status(`* ${content}`.trimEnd());
     }
@@ -178,24 +207,39 @@ function visibleWarning(text, fix) {
     console.error("");
 }
 
-// Opens the device and the session. 'monitor' gets the program output.
+/**
+ * Opens the device and the session. 'monitor' gets the program output.
+ */
 async function openDevice(target, token, monitor) {
+    // open the link, then the session
     const device = await Device.open(target, monitor);
     const info = await device.hello(token);
+
+    // say what answered
     const firmware = device.version === undefined ? "" : `qjsx ${device.version}, `;
     status(`connected to ${info.get(KEY.AGENT)} (${firmware}QuickJS ${info.get(KEY.ENGINE)}) on ${target}`);
     return device;
 }
 
-// Program output to stdout / stderr, and the end of the program. With
-// 'afterStart', only an end that follows a start counts: a deployment first
-// stops the program already running, whose end must not end the wait.
+/**
+ * Program output to stdout / stderr, and the end of the program. With
+ * 'afterStart', only an end that follows a start counts: a deployment first
+ * stops the program already running, whose end must not end the wait.
+ */
 function monitorHandlers(afterStart = false) {
+    // the end of the program settles 'exited'
     let started = !afterStart;
     let onExit = () => {};
-    const exited = new Promise(resolve => { onExit = resolve; });
+    const exited = new Promise(resolve => {
+        onExit = resolve;
+    });
+
+    // the handlers of the device
     const decoder = new TextDecoder();
     const handlers = {
+        /**
+         * Output of the program, to the same stream on the PC.
+         */
         onLog(stream, text) {
             if (stream === STREAM.STDERR) {
                 process.stderr.write(text);
@@ -203,9 +247,15 @@ function monitorHandlers(afterStart = false) {
                 process.stdout.write(text);
             }
         },
+        /**
+         * Text of the link outside the messages (a serial console): to stdout.
+         */
         onText(bytes) {
             process.stdout.write(decoder.decode(bytes));
         },
+        /**
+         * The program started or ended.
+         */
         onEvent(kind, payload) {
             if (kind === KIND.EXITED) {
                 status(`program ended (code ${payload.get(KEY.CODE)})`);
@@ -217,31 +267,43 @@ function monitorHandlers(afterStart = false) {
                 status(`program started (build ${String(payload.get(KEY.BUILD_ID)).slice(0, 12)})`);
             }
         },
+        /**
+         * The link closed: the wait ends with code 1.
+         */
         onClose() {
             status("connection closed");
             onExit(1);
         },
     };
+
     return { handlers, exited };
 }
 
-// The latest package of the project, or the one given; throws without one.
+/**
+ * The latest package of the project, or the one given; throws without one.
+ */
 function packageToSend(positional, project) {
     const packagePath = positional[0] ?? (project && latestPackage(join(project.directory, project.output), project.name));
     if (packagePath === undefined) {
         throw new Error("no package: give its path or run 'qjsx build' first");
     }
+
     return packagePath;
 }
 
-// Sends a package to an open device, in flash or in RAM, and says so. A
-// firmware of another qjsx version may not run it as the tool expects: said,
-// not refused (the bytecode number is what must match).
+/**
+ * Sends a package to an open device, in flash or in RAM, and says so. A
+ * firmware of another qjsx version may not run it as the tool expects: said,
+ * not refused (the bytecode number is what must match).
+ */
 async function sendPackage(device, packagePath, ram) {
-    if (device.version !== undefined && device.version !== qjsxVersion) {
+    // another version of qjsx on the device: said, not refused
+    const isOtherVersion = device.version !== undefined && device.version !== qjsxVersion;
+    if (isOtherVersion) {
         status(`warning: the device runs qjsx ${device.version}, this tool is qjsx ${qjsxVersion}`);
     }
 
+    // send it, then say where it went
     const bytes = fs.readFileSync(packagePath);
     const buildId = await upload(device, bytes, { ram });
     const sent = `${reducePackage(bytes).length} bytes sent, build ${buildId.slice(0, 12)}`;
@@ -253,21 +315,27 @@ async function sendPackage(device, packagePath, ram) {
     }
 }
 
-// qjsx deploy: sends the package, then starts it (RUN), or restarts the
-// device, which starts it at boot (--reset), or nothing (--no-run).
+/**
+ * qjsx deploy: sends the package, then starts it (RUN), or restarts the
+ * device, which starts it at boot (--reset), or nothing (--no-run).
+ */
 async function deployCommand(args) {
     const { options, positional } = parseArguments(args, {
         values: ["target", "token"],
         flags: ["no-run", "monitor", "until-exit", "ram", "reset", "data"],
     });
+
     if (options.ram && options.reset) {
         throw new Error("--ram and --reset do not go together: a restart loses the package loaded in RAM");
     }
 
+    // what to send where (the data folder checked before anything is sent)
     const project = currentProject();
     const dataFolder = options.data ? projectDataFolder(project) : undefined;
     const target = targetOf(options, project);
     const packagePath = packageToSend(positional, project);
+
+    // open the device, send the package
     let monitor = monitorHandlers(true);
     let device = await openDevice(target, options.token, monitor.handlers);
     await sendPackage(device, packagePath, options.ram === true);
@@ -277,6 +345,8 @@ async function deployCommand(args) {
         const count = await sendFolder(device, dataFolder, (path, size) => status(`wrote ${path} (${formatSize(size)})`));
         status(`${count} file(s) of ${dataFolder} written to the data folder of the device`);
     }
+
+    // --no-run: done
     if (options["no-run"]) {
         device.close();
         return 0;
@@ -292,38 +362,50 @@ async function deployCommand(args) {
         await device.request(KIND.RUN);
     }
 
+    // then show its output, or close
     if (!options.monitor) {
         device.close();
         return 0;
     }
+
     return waitForExit(device, monitor, options["until-exit"]);
 }
 
-// The folder of the project whose files "deploy --data" sends ("data" of
-// qjsx.json, from the project's folder); an error without one.
+/**
+ * The folder of the project whose files "deploy --data" sends ("data" of
+ * qjsx.json, from the project's folder); an error without one.
+ */
 function projectDataFolder(project) {
     if (project?.data === undefined) {
         throw new Error(`--data: no "data" folder in ${PROJECT_FILE} (e.g. "data": "data")`);
     }
+
+    // it must be a folder
     const folder = join(project.directory, project.data);
-    if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) {
+    const isNotFolder = !fs.existsSync(folder) || !fs.statSync(folder).isDirectory();
+    if (isNotFolder) {
         throw new Error(`--data: ${folder} is not a folder`);
     }
+
     return folder;
 }
 
-// Sends RESET to an open device, then waits for it to come back (its link may
-// go away meanwhile: native USB port) and opens the session again. With
-// 'monitored', the device returned carries the monitor of its output in
-// 'monitor'.
+/**
+ * Sends RESET to an open device, then waits for it to come back (its link may
+ * go away meanwhile: native USB port) and opens the session again. With
+ * 'monitored', the device returned carries the monitor of its output in
+ * 'monitor'.
+ */
 async function restartDevice(device, target, token, monitored) {
     status("restarting the device");
+
     // the answer may be lost with the link: the device restarts anyway; this
     // connection ends here on purpose (its handlers are not told)
     await device.request(KIND.RESET, {}, { attempts: 1 }).catch(() => {});
     device.handlers = {};
     device.close();
 
+    // wait for it, open the session again
     const monitor = monitored ? monitorHandlers(false) : undefined;
     const again = await Device.reopen(target, monitor?.handlers ?? {}, token);
     again.monitor = monitor;
@@ -331,30 +413,44 @@ async function restartDevice(device, target, token, monitored) {
     return again;
 }
 
+/**
+ * Shows the program output until Ctrl+C or the connection closes, or with
+ * 'untilExit' until the program ends. Returns its exit code.
+ */
 async function waitForExit(device, monitor, untilExit) {
     if (!untilExit) {
         await new Promise(() => {});   // until Ctrl+C or the connection closes
     }
+
     const code = await monitor.exited;
     device.close();
     return code;
 }
 
+/**
+ * qjsx monitor: shows the output of the program on a device.
+ */
 async function monitorCommand(args) {
     const { options } = parseArguments(args, { values: ["target", "token"], flags: ["until-exit"] });
+
+    // open the device with the handlers of its output, then wait
     const monitor = monitorHandlers();
     const device = await openDevice(targetOf(options, currentProject()), options.token, monitor.handlers);
     return waitForExit(device, monitor, options["until-exit"]);
 }
 
-// The size of 'bytes' in a short form: "512 B", "12.4 KB", "1.9 MB".
+/**
+ * The size of 'bytes' in a short form: "512 B", "12.4 KB", "1.9 MB".
+ */
 function formatSize(bytes) {
     if (bytes < 1024) {
         return `${bytes} B`;
     }
+
     if (bytes < 1024 * 1024) {
         return `${(bytes / 1024).toFixed(1)} KB`;
     }
+
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
@@ -372,8 +468,11 @@ const DEVICE_ARGUMENTS = {
     ls: [0, 1], read: [1, 2], write: [1, 2], rm: [1, 1], mkdir: [1, 1], mv: [2, 2],
 };
 
-// qjsx device info: the firmware, the program, the data folder, the memory.
+/**
+ * qjsx device info: the firmware, the program, the data folder, the memory.
+ */
 async function deviceInfo(device) {
+    // the firmware, the program and its package
     const answer = await device.request(KIND.INFO);
     const where = answer.get(KEY.VOLATILE) === true ? ", in RAM: lost at the next restart" : "";
     console.log(`firmware: qjsx ${device.version ?? "(unknown: older firmware)"}`);
@@ -418,6 +517,7 @@ async function deviceInfo(device) {
         console.log(`RAM:      ${formatSize(ramFree)} free, largest block ${formatSize(answer.get(KEY.RAM_LARGEST))}, `
             + `lowest ${formatSize(answer.get(KEY.RAM_LOWEST))} since the boot`);
     }
+
     const psramFree = answer.get(KEY.PSRAM_FREE);
     if (psramFree !== undefined) {
         console.log(`PSRAM:    ${formatSize(psramFree)} free, largest block ${formatSize(answer.get(KEY.PSRAM_LARGEST))}`);
@@ -427,9 +527,12 @@ async function deviceInfo(device) {
     console.log(`messages: ${formatSize(device.maxMessage)} at most`);
 }
 
-// qjsx device ls [folder]: one line per entry, folders with a '/'.
+/**
+ * qjsx device ls [folder]: one line per entry, folders with a '/'.
+ */
 async function deviceList(device, folder) {
     const entries = await listFiles(device, folder ?? "");
+
     for (const entry of entries) {
         const size = entry.isDirectory ? "" : formatSize(entry.size);
         const name = entry.isDirectory ? `${entry.name}/` : entry.name;
@@ -437,19 +540,26 @@ async function deviceList(device, folder) {
     }
 }
 
-// qjsx device read <file> [local]: to a file of the PC, or shown as text.
+/**
+ * qjsx device read <file> [local]: to a file of the PC, or shown as text.
+ */
 async function deviceRead(device, file, local) {
     const bytes = await readFile(device, file);
+
+    // no local file: shown
     if (local === undefined) {
         process.stdout.write(new TextDecoder().decode(bytes));
         return;
     }
+
     fs.writeFileSync(local, bytes);
     status(`read ${file} into ${local} (${formatSize(bytes.length)})`);
 }
 
-// qjsx device write <local> [file]: the file of the PC, under its own name
-// when no file is given.
+/**
+ * qjsx device write <local> [file]: the file of the PC, under its own name
+ * when no file is given.
+ */
 async function deviceWrite(device, local, file) {
     const bytes = fs.readFileSync(local);
     const target = file ?? basename(local);
@@ -457,15 +567,21 @@ async function deviceWrite(device, local, file) {
     status(`wrote ${target} (${formatSize(bytes.length)})`);
 }
 
+/**
+ * qjsx device <action>: the actions on a device and on its data folder.
+ */
 async function deviceCommand(args) {
+    // a known action with the number of arguments it takes
     const { options, positional } = parseArguments(args, { values: ["target", "token"] });
     const action = positional[0];
     const operands = positional.slice(1);
     const counts = DEVICE_ARGUMENTS[action];
-    if (counts === undefined || operands.length < counts[0] || operands.length > counts[1]) {
+    const isBadUsage = counts === undefined || operands.length < counts[0] || operands.length > counts[1];
+    if (isBadUsage) {
         throw new Error(DEVICE_USAGE);
     }
 
+    // run it on the device, closed in any case
     const device = await openDevice(targetOf(options, currentProject()), options.token, {});
     try {
         switch (action) {
@@ -501,6 +617,7 @@ async function deviceCommand(args) {
                 break;
             }
             default: {
+                // run, stop, reset: one request each
                 const requests = { run: KIND.RUN, stop: KIND.STOP, reset: KIND.RESET };
                 await device.request(requests[action]);
                 status(`${kindName(requests[action]).toLowerCase()} done`);
@@ -510,29 +627,39 @@ async function deviceCommand(args) {
     } finally {
         device.close();
     }
+
     return 0;
 }
 
+/**
+ * qjsx targets: lists the serial ports.
+ */
 function targetsCommand() {
     const ports = listSerialPorts();
     if (ports.length === 0) {
         console.log("no serial port found");
     }
+
     for (const port of ports) {
         console.log(`serial:${port}`);
     }
+
     return 0;
 }
 
-// Compile warnings on stderr, like a compiler: "file:line:column: warning: text".
-// They do not make the command fail.
+/**
+ * Compile warnings on stderr, like a compiler: "file:line:column: warning: text".
+ * They do not make the command fail.
+ */
 function printWarnings(warnings) {
     for (const warning of warnings) {
         console.error(`${warning.file}:${warning.line}:${warning.column}: warning: ${warningText(warning)}`);
     }
 }
 
-// qjsx build: the package of the project.
+/**
+ * qjsx build: the package of the project.
+ */
 function buildCommand(args) {
     const { positional } = parseArguments(args, {});
     if (positional.length > 1) {
@@ -549,6 +676,7 @@ function buildCommand(args) {
         if (typings.configWritten !== null) {
             status(`wrote ${typings.configWritten} (VS Code: the typings of qjsx, no DOM names)`);
         }
+
         if (typings.warning !== null) {
             visibleWarning(`VS Code will not see the typings of qjsx: ${typings.warning}`, typings.fix);
         }
@@ -559,19 +687,25 @@ function buildCommand(args) {
     // the package
     const result = build(directory);
     printWarnings(result.warnings);
+
     for (const note of result.notes) {
         status(note);
     }
+
     console.log(`built ${result.file}`);
     console.log(`  ${result.scriptCount} module(s), ${result.size} bytes, build ${result.buildId.slice(0, 12)}`);
     return 0;
 }
 
+/**
+ * qjsx mklib: the .qjslib of a library project.
+ */
 function mklibCommand(args) {
     const { options, positional } = parseArguments(args, { values: ["output"] });
     if (positional.length > 1) {
         throw new Error("usage: qjsx mklib [directory] [--output <file>]");
     }
+
     const result = makeLibrary(positional[0] ?? ".", options.output);
     printWarnings(result.warnings);
     console.log(`built ${result.file}`);
@@ -579,18 +713,23 @@ function mklibCommand(args) {
     return 0;
 }
 
-// qjsx debug: the debugger server (CDP) of the project's device, for VS Code.
-// First loads the latest package of the project in the RAM of the device
-// (nothing written to the flash; --no-upload: debug what the device has) and
-// starts it, or, with --restart, stops what runs: the program starts when VS
-// Code attaches. Runs until Ctrl+C or until the device goes away.
+/**
+ * qjsx debug: the debugger server (CDP) of the project's device, for VS Code.
+ * First loads the latest package of the project in the RAM of the device
+ * (nothing written to the flash; --no-upload: debug what the device has) and
+ * starts it, or, with --restart, stops what runs: the program starts when VS
+ * Code attaches. Runs until Ctrl+C or until the device goes away.
+ */
 async function debugCommand(args) {
     const { options, positional } = parseArguments(args, {
         values: ["target", "token", "port", "host"],
         flags: ["restart", "no-upload"],
     });
+
+    // in a project folder, without positional argument
     const project = currentProject();
-    if (project === undefined || positional.length > 0) {
+    const isBadUsage = project === undefined || positional.length > 0;
+    if (isBadUsage) {
         throw new Error(`usage: qjsx debug [--target <target>] [--port <port>] [--restart] [--no-upload], in a project folder (${PROJECT_FILE})`);
     }
 
@@ -604,6 +743,7 @@ async function debugCommand(args) {
     const closed = new Promise(resolve => {
         deviceClosed = resolve;
     });
+
     const handlers = {
         onLog: (stream, text) => server?.output(stream, text),
         onClose: () => deviceClosed(),
@@ -637,24 +777,31 @@ async function debugCommand(args) {
     return 1;
 }
 
-// Hidden command "twin-ui --host h --port p [--project folder] [--ui-dir folder]": the web page
-// of the digital twin, started by "qjsx agent --board" on a thread of its
-// own (host/agent_command.cpp); --project: the project whose parts are
-// wired on the board; --ui-dir serves the page from a folder instead of the
-// embedded one. Imported on demand: its native module
-// "qjsx:twinboard" exists only in such an agent.
+/**
+ * Hidden command "twin-ui --host h --port p [--project folder] [--ui-dir folder]": the web page
+ * of the digital twin, started by "qjsx agent --board" on a thread of its
+ * own (host/agent_command.cpp); --project: the project whose parts are
+ * wired on the board; --ui-dir serves the page from a folder instead of the
+ * embedded one. Imported on demand: its native module
+ * "qjsx:twinboard" exists only in such an agent.
+ */
 async function twinUiCommand(args) {
     const { options } = parseArguments(args, { values: ["host", "port", "project", "ui-dir"] });
+
+    // the server of the page, until the agent ends
     const { serveTwin } = await import("qjsx:twin/server");
     await serveTwin({ host: options.host, port: Number(options.port), projectDir: options.project, uiDir: options["ui-dir"] });
     return 0;
 }
 
-// qjsx profile: samples the JS thread of the device for a while (the
-// profiler of its agent), then prints the functions that take its time,
-// named with the debug files of the package it runs when this project has
-// it.
+/**
+ * qjsx profile: samples the JS thread of the device for a while (the
+ * profiler of its agent), then prints the functions that take its time,
+ * named with the debug files of the package it runs when this project has
+ * it.
+ */
 async function profileCommand(args) {
+    // the options: a duration > 0, whole numbers >= 1 for the others
     const { options, positional } = parseArguments(args, { values: ["target", "token", "duration", "interval", "top"] });
     const duration = Number(options.duration ?? 5);
     const interval = Number(options.interval ?? 1);
@@ -664,6 +811,7 @@ async function profileCommand(args) {
         throw new Error("usage: qjsx profile [--target <target>] [--token <token>] [--duration <s>] [--interval <ms>] [--top <n>]");
     }
 
+    // open the device, closed in any case
     const project = currentProject();
     const device = await openDevice(targetOf(options, project), options.token, {});
     try {
@@ -671,7 +819,8 @@ async function profileCommand(args) {
         const info = await device.request(KIND.INFO);
         const buildId = info.get(KEY.BUILD_ID);
         let pkg = undefined;
-        if (project !== undefined && buildId !== undefined) {
+        const canFindPackage = project !== undefined && buildId !== undefined;
+        if (canFindPackage) {
             const index = new PackageIndex([join(project.directory, project.output)], { sourceRoot: project.directory });
             pkg = index.find(buildId);
         }
@@ -682,12 +831,14 @@ async function profileCommand(args) {
         await new Promise(resolve => setTimeout(resolve, duration * 1000));
         const answer = await device.request(KIND.PROFILE_STOP);
 
+        // the report, functions named from the package when found
         console.log(profileText(readReport(answer), pkg, top));
     } finally {
         device.close();
     }
 }
 
+// The commands written in JS, by name.
 const COMMANDS = {
     "twin-ui": twinUiCommand,
     debug: debugCommand,
@@ -700,25 +851,35 @@ const COMMANDS = {
     targets: targetsCommand,
 };
 
+/**
+ * Runs the command of 'args' (the arguments after 'qjsx') and exits with its code.
+ */
 export async function main(args) {
+    // no command, or help: the help
     const [command, ...rest] = args;
-    if (command === undefined || command === "help" || command === "--help") {
+    const wantsHelp = command === undefined || command === "help" || command === "--help";
+    if (wantsHelp) {
         console.log(HELP);
         return;
     }
+
+    // run the command; any error ends the tool with code 1
     try {
         const run = COMMANDS[command];
         if (run === undefined) {
             throw new Error(`unknown command '${command}' (see 'qjsx help')`);
         }
+
         const code = await run(rest);
         process.exit(code ?? 0);
     } catch (error) {
         console.error(`qjsx: ${error.message}`);
+
         // A syntax error of a compiled module: the stack gives file:line:column.
         if (error instanceof SyntaxError && error.stack) {
             console.error(error.stack.trimEnd());
         }
+
         process.exit(1);
     }
 }

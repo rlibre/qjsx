@@ -81,10 +81,12 @@ public:
      */
     bool writeUpload(size_t offset, const uint8_t *data, size_t size) override {
         // the chunk must fit in the open upload
-        if (_upload == nullptr || offset + size > _uploadSize) {
+        bool fits = _upload != nullptr && offset + size <= _uploadSize;
+        if (!fits) {
             return false;
         }
 
+        // copied at its place
         memcpy(_upload + offset, data, size);
         return true;
     }
@@ -145,7 +147,8 @@ public:
     bool installed(char *buildId, size_t buildIdSize, size_t *packageSize) override {
         // the package file must exist
         files::Status status;
-        if (!files::stat(_packagePath, &status) || !status.isFile) {
+        bool isFile = files::stat(_packagePath, &status) && status.isFile;
+        if (!isFile) {
             return false;
         }
 
@@ -177,7 +180,8 @@ public:
     /**
      * Wraps an accepted socket (closed by the reader thread, not here).
      */
-    explicit TcpLink(sockets::Socket socket) : _socket(socket) {}
+    explicit TcpLink(sockets::Socket socket) : _socket(socket) {
+    }
 
     /**
      * The socket of the host.
@@ -191,6 +195,7 @@ public:
      * host is gone.
      */
     bool send(const uint8_t *data, size_t size) override {
+        // the error itself does not matter: the reader thread sees the host go
         int error = 0;
         return sockets::sendAll(_socket, data, size, &error);
     }
@@ -218,7 +223,7 @@ struct HostState {
     char        *dataDirectory = nullptr;  // absolute "<storage>/data", malloc'd by configureHost()
 };
 
-HostState state;
+HostState state;                           // the board of this process
 
 /**
  * End of a link (its reader thread stopped, or never started): detaches it
@@ -259,6 +264,7 @@ void readerThread(void *argument) {
     // socket fails, or acceptThread shuts the socket down because a new host
     // replaced this one
     while (reading) {
+        // the next block, straight to the agent
         int received = recv(link->socket(), (char *)buffer, (int)sockets::RECEIVE_BLOCK, 0);
         reading = received > 0;
         if (reading) {
@@ -266,9 +272,8 @@ void readerThread(void *argument) {
         }
     }
 
+    // the buffer freed; then detach, close and delete the link
     memory::release(buffer);
-
-    // detach, close and delete the link
     endLink(link, "host disconnected");
 }
 
@@ -324,7 +329,8 @@ char *absoluteDataDirectory(const char *storage) {
     }
 
     // "<base>/<storage>/data", or "<storage>/data"
-    size_t size = (base != nullptr ? strlen(base) + 1 : 0) + strlen(storage) + sizeof("/data");
+    size_t baseLength = base != nullptr ? strlen(base) + 1 : 0;
+    size_t size = baseLength + strlen(storage) + sizeof("/data");
     char *directory = (char *)memory::allocate(size);
     if (base != nullptr) {
         snprintf(directory, size, "%s/%s/data", base, storage);
@@ -332,6 +338,7 @@ char *absoluteDataDirectory(const char *storage) {
         snprintf(directory, size, "%s/data", storage);
     }
 
+    // '/' separators, as every path given to JS
     memory::release(base);
     files::useSlashes(directory);
     return directory;
@@ -359,7 +366,8 @@ memory::RegionHeap *makeTestJsHeap() {
     }
 
     int megabytes = atoi(setting);
-    if (megabytes < 1 || megabytes > LARGEST_JS_HEAP_MB) {
+    bool validSize = megabytes >= 1 && megabytes <= LARGEST_JS_HEAP_MB;
+    if (!validSize) {
         fprintf(stderr, "qjsx: %s must be a size in MB from 1 to %d: ignored\n", JS_HEAP_VARIABLE, LARGEST_JS_HEAP_MB);
         return nullptr;
     }
@@ -384,10 +392,12 @@ const size_t MALLOC_OVERHEAD = 8;
  * The usable size of a malloc'd block (0 for nullptr).
  */
 size_t systemUsableSize(const void *block) {
+    // nothing allocated
     if (block == nullptr) {
         return 0;
     }
 
+    // what the system allocator says
 #if defined(_WIN32)
     return _msize((void *)block);
 #elif defined(__APPLE__)
@@ -421,10 +431,12 @@ void *systemMalloc(JSMallocState *state, size_t size) {
  * QuickJS free (nullptr: nothing), counted.
  */
 void systemFree(JSMallocState *state, void *block) {
+    // nothing to free
     if (block == nullptr) {
         return;
     }
 
+    // uncounted, then freed
     state->malloc_count--;
     state->malloc_size -= systemUsableSize(block) + MALLOC_OVERHEAD;
     free(block);
@@ -462,6 +474,7 @@ void *systemRealloc(JSMallocState *state, void *block, size_t size) {
     return resized;
 }
 
+// The allocator of the desktop's JS heaps (see jsAllocator).
 const JSMallocFunctions systemAllocator = { &systemMalloc, &systemFree, &systemRealloc, &systemUsableSize };
 
 } // namespace
@@ -505,8 +518,11 @@ const char *dataDirectory() {
  */
 void identity(Identity *identity) {
     bool twin = state.options.board != nullptr;
-    *identity = twin ? Identity{ state.options.chip, state.options.board, 0, 0 }
-                     : Identity{ "desktop", "qjsx agent", 0, 0 };
+    if (twin) {
+        *identity = Identity{ state.options.chip, state.options.board, 0, 0 };
+    } else {
+        *identity = Identity{ "desktop", "qjsx agent", 0, 0 };
+    }
 }
 
 /**
@@ -571,12 +587,14 @@ void baseMac(uint8_t *out) {
     size_t size = 0;
     uint8_t *text = files::readAll(path, &size);
     bool valid = text != nullptr && size >= BASE_MAC_SIZE * 2;
+
     for (size_t index = 0; valid && index < BASE_MAC_SIZE; index++) {
         unsigned int value = 0;
         char digits[3] = { (char)text[index * 2], (char)text[index * 2 + 1], 0 };
         valid = sscanf(digits, "%2x", &value) == 1;
         out[index] = (uint8_t)value;
     }
+
     memory::release(text);
     if (valid) {
         return;
@@ -584,11 +602,16 @@ void baseMac(uint8_t *out) {
 
     // a new one, saved for the next times
     platform::randomBytes(out, BASE_MAC_SIZE);
+    // bit 0 clear: unicast; bit 1 set: locally administered
     out[0] = (uint8_t)((out[0] & 0xFE) | 0x02);
+
+    // as 12 hexadecimal digits and a line end
     char saved[BASE_MAC_SIZE * 2 + 2];
+
     for (size_t index = 0; index < BASE_MAC_SIZE; index++) {
         snprintf(saved + index * 2, 3, "%02X", out[index]);
     }
+
     saved[BASE_MAC_SIZE * 2] = '\n';
     if (!files::writeAll(path, saved, BASE_MAC_SIZE * 2 + 1)) {
         fprintf(stderr, "qjsx agent: cannot write %s: %s (the board id changes at each start)\n", path, strerror(errno));
@@ -628,6 +651,7 @@ bool macAddress(MacKind kind, uint8_t *out) {
         out[index] = (uint8_t)sum;
         offset = sum >> 8;
     }
+
     return true;
 }
 
@@ -673,6 +697,7 @@ size_t jsHeapLimit() {
  * 64 KB, or what "qjsx agent --max-message" asks (as a board without PSRAM).
  */
 size_t agentMaxMessage() {
+    // the option, when given
     if (state.options.maxMessage > 0) {
         return state.options.maxMessage;
     }
