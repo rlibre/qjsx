@@ -16,8 +16,18 @@
       inutilisées 98,7 → 65,3 Ko ; `Mutex` seul de `stdlib/tasks` 82,3 → 67,0 Ko.
       `tests/prune.test.js` + fixture `prune` (paquet = sources). Pas d'option pour le
       couper.
-- [ ] **Profileur C sur la Teensy** (`QJSX_NATIVE_PROFILER`, accordé 2026-11-17) puis
-      trouver pourquoi un `await` y coûte ×167 le PC quand le reste coûte ×30-40.
+- [x] **Profileur C sur la Teensy** (`QJSX_NATIVE_PROFILER`, 2026-11-17) : le ×167 des
+      `await` venait du cache d'instructions de 32 Ko de la flash (16,75 / 6,20 / 3,50 µs
+      selon la disposition du code). Expérience ITCM en place, gardée pour l'instant
+      (utilisateur) ; à décider : placement guidé par profil.
+- [x] **Règles de codage** appliquées par 9 agents (C, C++, JS, TS ; pas les tests) ;
+      ce qu'ils ont vu sans corriger : `doc/known-bugs.md`.
+- [x] **Stock d'états de fonctions async (moteur X)**, 2026-11-17 : 8 entrées, 2 Ko,
+      taille exacte, vidé quand une grosse allocation échoue ; cartes à petit tas
+      seulement. Teensy : `await f()` 3,50 → 2,80 µs. Suite Debug (réglages petit tas)
+      et tests de Bellard OK. Carte cliente : `await f()` 10,25 → 7,20 µs, `await g()`
+      19,70 → 13,80 µs, passage entre tâches 192 → 133 µs (−30 %). Son programme n'est
+      plus installé (remplacé par les bancs).
 - [ ] **Chargement paresseux du bytecode des fonctions** (« delay-load », idée de
       l'utilisateur, accordée pour plus tard) : ≈ 150 o par fonction jamais appelée ;
       après l'étape 3 de S (tables des variables lues en place).

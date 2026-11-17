@@ -875,6 +875,14 @@ even when the caller only awaited it.
   | `await g()`, g awaits f | 1.25 us | 0.15 us | 87.15 us | 25.20 us |
   | hand-over between two tasks | 1.35 us | 0.50 us | 86.85 us | 37.10 us |
 
+  On the YD-ESP32-S3 (JS heap in PSRAM), firmware of the board before (of an unknown older
+  date: the gain adds V and what changed since) and after: `await f()` 233.2 -> 7.75 us,
+  `await g()` 299.6 -> 14.70 us, hand-over 502.2 -> 224.6 us, RAM per task waiting 667 ->
+  501 bytes (depth 1), 2103 -> 1028 bytes (depth 3). The times of the Teensy move with the
+  layout of the code in its instruction cache (`doc/known-bugs.md`, "Speed of the Teensy
+  4.0"): 6.20 us for `await f()` after the coding rules pass, 3.50 us with the path in the
+  ITCM.
+
 ## W. Outline of a module, to leave out what nothing uses
 
 2026-11-17, agreed with the user. On a device each function costs RAM when its module
@@ -924,6 +932,42 @@ changes on the devices, the bytecode format neither.
 - Tests: `tests/prune.test.js` (outline, what the build leaves out, the check of the
   imports), `tests/fixtures/prune` run from its sources and from its package (with and
   without compiler) in `tests/run-tests.sh`.
+
+## X. A stock of states of async functions
+
+2026-11-17, agreed with the user (points 1 to 7, 8 entries, 2 KB). Each call of an async
+function allocates its state (the `JSAsyncFunctionState` and its frame) and frees it when
+the function ends. On a board with a small heap, the state is above the 128 bytes of the
+arenas (Q): the board's heap, a `memset`, then the free. The native profiler of the Teensy
+put this at about 20 % of an `await f()` with the code in the ITCM, about 45 % from the
+flash.
+
+- Options (`quickjs-internal.h`): `JS_ASYNC_STATE_CACHE` (entries; 0: QuickJS's original,
+  the default) and `JS_ASYNC_STATE_CACHE_BYTES` (2048). Set by `QJSX_SMALL_HEAP_DEFINES`
+  (`ports/cmake/qjsx.cmake`): 8 entries, 2 KB: the boards without PSRAM (Teensy 4.0, an
+  ESP32 without PSRAM). A board with PSRAM keeps QuickJS's arenas up to 512 bytes, which
+  hold the state already.
+- `core/generators.c`: `async_state_alloc()` takes the newest kept state of the exact size
+  (`JSAsyncFunctionState.alloc_size`: the size only depends on the function and its
+  argument count, so a loop of awaits finds its blocks again), else allocates;
+  `async_state_release()` (in `__async_func_free`) keeps the block when it fits in the
+  table, the oldest going back to the heap first, else frees it;
+  `js_async_state_cache_flush()` gives them all back. The table is in the runtime
+  (`async_state_cache`, oldest first).
+- Given back: when a large allocation fails (`js_malloc_large`, then one more try, as the
+  arenas kept by Q; the runtime is found from its first member, `malloc_ctx`) and in
+  `JS_FreeRuntime` after its last GC. The kept blocks count in the JS heap (they are taken).
+- What the program sees does not change. Generators use the same states and the same stock.
+- Tests: the Debug suite with the settings of a small heap (`CFLAGS` with the options, JS
+  heap in a `RegionHeap`: `QJSX_JS_HEAP_MB=64`): 115 OK; Bellard's tests with the same
+  options: OK. Not built on the PC by default.
+- Measured on the Teensy 4.0 (same layout, the ITCM experiment of `doc/known-bugs.md` in
+  place): `await f()` 3.50 -> 2.80 us, `await g()` 6.65 -> 5.10 us; `RegionHeap` gone from
+  the profile. On the client board (ESP32-S3 without PSRAM, JS heap in a 248 KB region),
+  the same firmware without then with X (`temp/awaitbench-small`: 30 tasks instead of 100,
+  which do not fit in the region): `await f()` 10.25 -> 7.20 us, `await g()` 19.70 ->
+  13.80 us, hand-over between two tasks 192 -> 133 us (-30 % each); the RAM per waiting
+  task is unchanged (the kept states are at most 2 KB in all).
 
 ## Limits and items not done
 
@@ -1017,4 +1061,5 @@ Measurements of 2026-11-10:
 | `compiler/fold.c` (new), `compiler/compiler.h`, `compiler/finalize.c`, `compiler/funcdef.c`, `compiler/resolve-vars.c`, `compiler/resolve-labels.c`, `compiler/debug-info.c`, `quickjs-debug.h` (also) | constant folding, constants of a module replaced by their value (R) |
 | `quickjs-internal.h`, `core/runtime.c` (also) | arenas of the allocator tuned for a small heap, arenas kept (Q); `quickjs.h`, `quickjs-internal.h`, `core/runtime.c`: measure of the block sizes (`QJSX_ALLOC_HISTOGRAM`) |
 | `quickjs-internal.h`, `builtins/promise.c`, `builtins/builtins.h`, `core/generators.c`, `core/core.h`, `core/gc.c`, `core/runtime.c`, `core/interpreter.c` (also) | the await kept in the state of an async function, `await f()` without promise (V) |
+| `quickjs-internal.h`, `core/generators.c`, `core/core.h`, `core/runtime.c` (also) | stock of states of async functions (X) |
 | `compiler/outline.c` (new), `quickjs-debug.h`, `quickjs-internal.h`, `compiler/compiler.h`, `compiler/eval.c`, `compiler/emitter.c`, `compiler/parser-func.c`, `compiler/parser-expr.c`, `compiler/parser-module.c`, `compiler/debug-info.c` (also) | outline of a module: statements, names declared and used, imports, exports (W) |

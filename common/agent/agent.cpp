@@ -216,6 +216,17 @@ Agent::~Agent() {
 }
 
 /**
+ * Forgets the last answers of the agent and of the debugger (a new host or a
+ * new session: their request numbers start again). Any thread.
+ */
+void Agent::forgetAnswers() {
+    _mutex.lock();
+    forgetAnswer(&_agentAnswer);
+    forgetAnswer(&_debuggerAnswer);
+    _mutex.unlock();
+}
+
+/**
  * A host connected (link) or disconnected (nullptr).
  */
 void Agent::attach(Link *link) {
@@ -224,9 +235,8 @@ void Agent::attach(Link *link) {
     _mutex.lock();
     _link = link;
     _session = false;
-    forgetAnswer(&_agentAnswer);
-    forgetAnswer(&_debuggerAnswer);
     _mutex.unlock();
+    forgetAnswers();
 
     // a debugger session belongs to the host that opened it: end it
     if (_debugger != nullptr) {
@@ -269,9 +279,18 @@ void Agent::onMessage(void *opaque, const uint8_t *message, size_t size) {
         return;
     }
 
+    // a HELLO opens a new session: the answers kept for the previous one are
+    // forgotten, its request numbers mean nothing now (each session of the
+    // host numbers its requests from 1; on a USB link the agent outlives the
+    // sessions). Doing a repeated HELLO again is harmless
+    bool isHello = kind == KIND_HELLO;
+    if (isHello) {
+        agent->forgetAnswers();
+    }
+
     // same id as a last answered request: the host did not get the answer;
     // it is sent again, without doing the request again
-    if (agent->resendAnswer(id)) {
+    if (!isHello && agent->resendAnswer(id)) {
         return;
     }
 

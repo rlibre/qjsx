@@ -223,6 +223,15 @@ static no_inline void *js_malloc_large(JSMallocContext *s, size_t size)
         b = s->mf.js_malloc(&s->malloc_state, sizeof(JSMallocLargeBlockHeader) + size);
     }
 #endif
+#if JS_ASYNC_STATE_CACHE > 0
+    /* qjsx: engine change X: no room: give the kept states of async
+       functions back (the context is the first member of its runtime),
+       then try once more */
+    if (!b && container_of(s, JSRuntime, malloc_ctx)->async_state_cache_count > 0) {
+        js_async_state_cache_flush(container_of(s, JSRuntime, malloc_ctx));
+        b = s->mf.js_malloc(&s->malloc_state, sizeof(JSMallocLargeBlockHeader) + size);
+    }
+#endif
     if (!b)
         return NULL;
     b->header.u.block_idx = FREE_NIL;
@@ -1154,6 +1163,9 @@ void JS_FreeRuntime(JSRuntime *rt)
     /* don't remove the weak objects to avoid create new jobs with
        FinalizationRegistry */
     JS_RunGCInternal(rt, FALSE);
+
+    /* qjsx: engine change X: the states of async functions kept */
+    js_async_state_cache_flush(rt);
 
 #ifdef DUMP_LEAKS
     /* leaking objects */

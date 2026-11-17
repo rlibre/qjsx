@@ -25,7 +25,7 @@
 
 namespace {
 
-const uint32_t GPT_CLOCK_HZ = 150000000;          // ipg_clk (clock_imxrt1062.c), source 1 of the GPT
+const uint32_t GPT_CLOCK_HZ = 24000000;           // source 1 of the GPT: the 24 MHz PERCLK (measured)
 const uint32_t PROFILER_INTERRUPT_PRIORITY = 2;   // above what FreeRTOS masks: samples critical sections too
 const int STACKED_PC = 6;                         // words before the PC in an exception frame (r0-r3, r12, lr)
 

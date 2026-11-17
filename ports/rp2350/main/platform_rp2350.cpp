@@ -12,12 +12,14 @@
 #include "memory.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
 #include "hardware/timer.h"
 #include "hardware/watchdog.h"
 #include "pico/stdio.h"
+#include "pico/rand.h"
 
 namespace platform {
 
@@ -62,6 +64,11 @@ int64_t monotonicMs() {
  * the watchdog.
  */
 void fatal(const char *message) {
+#ifdef QJSX_FLASH_TRACE
+    // measure (temporary): the restart of the watchdog came from here
+    watchdog_hw->scratch[1] = 99;
+#endif
+
     // the message, pushed to the USB
     fprintf(stderr, "qjsx: fatal: %s\n", message);
     fflush(stderr);
@@ -102,6 +109,24 @@ bool startThread(ThreadFunction *run, void *argument, ThreadOptions options) {
     }
 
     return true;
+}
+
+/**
+ * Random bytes from pico_rand, which the SDK seeds from the RP2350's true
+ * random number generator (TRNG). Any thread: pico_rand takes its own lock.
+ */
+void randomBytes(void *buffer, size_t size) {
+    uint8_t *bytes = (uint8_t *)buffer;
+    size_t done = 0;
+
+    // 8 bytes per draw, the last draw cut to what is left
+    while (done < size) {
+        uint64_t value = get_rand_64();
+        size_t left = size - done;
+        size_t count = left < sizeof(value) ? left : sizeof(value);
+        memcpy(bytes + done, &value, count);
+        done += count;
+    }
 }
 
 } // namespace platform

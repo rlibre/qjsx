@@ -248,6 +248,17 @@ typedef enum OPCodeEnum OPCodeEnum;
 #ifndef JS_MALLOC_ARENA_CACHE
 #define JS_MALLOC_ARENA_CACHE 0
 #endif
+/* qjsx: engine change X: the states of async functions that ended are kept
+   for the next call that needs a state of the same size (at most
+   JS_ASYNC_STATE_CACHE of them, JS_ASYNC_STATE_CACHE_BYTES bytes in all; the
+   oldest goes back to the heap first). A loop of awaits then allocates and
+   frees no state. 0: QuickJS's original allocation and free per call. */
+#ifndef JS_ASYNC_STATE_CACHE
+#define JS_ASYNC_STATE_CACHE 0
+#endif
+#ifndef JS_ASYNC_STATE_CACHE_BYTES
+#define JS_ASYNC_STATE_CACHE_BYTES 2048
+#endif
 #if defined(__SANITIZE_ADDRESS__) || defined(QJSX_ALLOC_HISTOGRAM)
 /* use the host malloc() for all allocations */
 /* qjsx: also while measuring the sizes of the allocations (QJSX_ALLOC_HISTOGRAM,
@@ -360,8 +371,14 @@ typedef struct JSDebugState {
 } JSDebugState;
 
 struct JSRuntime {
-    JSMallocContext malloc_ctx;
+    JSMallocContext malloc_ctx; /* qjsx: first member: js_malloc_large finds the runtime from it */
     const char *rt_info;
+#if JS_ASYNC_STATE_CACHE > 0
+    /* qjsx: engine change X: states of async functions kept, oldest first */
+    struct JSAsyncFunctionState *async_state_cache[JS_ASYNC_STATE_CACHE];
+    int async_state_cache_count;
+    size_t async_state_cache_bytes;   /* their alloc_size summed */
+#endif
 
     int atom_hash_size; /* power of two */
     int atom_count;
@@ -902,6 +919,9 @@ typedef struct JSAsyncFunctionState {
     BOOL await_inline;                  /* V2: the next await of this function is already arranged */
     struct JSAsyncFunctionState *awaiter; /* V2: the async function whose 'await' waits for this call
                                             (no promise was made); one reference */
+#if JS_ASYNC_STATE_CACHE > 0
+    uint32_t alloc_size;                /* qjsx X: bytes of the block (the state and its frame) */
+#endif
     JSStackFrame frame;
     /* arg_buf, var_buf, stack_buf and var_refs follow */
 } JSAsyncFunctionState;

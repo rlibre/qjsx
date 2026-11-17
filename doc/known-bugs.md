@@ -191,6 +191,70 @@ behaviour as it is. Nothing fixed.
   `common/runtime/permissions.h` says a device program has no limit, but the desktop
   agent and the twin confine files (`confineFiles`).
 
+### Speed of the Teensy 4.0: code run from the flash (2026-11-17)
+
+- **What**: the times of a path that leaves the interpreter (`JS_CallInternal`, in the ITCM)
+  depend on where its functions land in the 32 KB instruction cache of the flash. The same
+  `await f()` measured 16.75 us, then 6.20 us after a change of layout only (the coding
+  rules pass), then 3.50 us with its path in the ITCM (PC: 0.10 us, so x35, the ratio of
+  the rest of the engine). The native profiler showed it: `RegionHeap::release` (O(1)) and
+  `js_malloc_large` (a wrapper) took 17-18 % of the time each, from the flash.
+- **State**: an EXPERIMENT is in the sources (`ports/imxrt1062/CMakeLists.txt`,
+  `QJSX_ITCM_FUNCTIONS`: the engine's async path; `main/imxrt1062.ld`: `region_heap.cpp`
+  and `memset`), marked `EXPERIMENT 2026-11-17`. With it, the hand-over between two tasks
+  went from 44 to 91 us: the misses moved to other functions. To decide: a placement chosen
+  from profiles (the ITCM has 128 KB, 40 KB used), and fewer functions on the hot paths
+  (stock of async states, engine change X).
+- The ESP32-S3 has a 16 KB cache for a 25 KB `JS_CallInternal`: the same effect is likely
+  there (not measured: the native profiler exists on the Teensy only).
+
+### Found by the coding rules pass (2026-11-17), not fixed
+
+Seen by the agents that applied `doc/coding-rules.md`; they changed no behaviour.
+
+- **jsbind** (`jsbind_convert.h`): the `from()` of a `JS_ENUM` when `JS_ToCStringLen` fails,
+  and `rejectUnknownFields` when `JS_AtomToCString` fails, throw a new TypeError over the
+  pending exception instead of passing it on.
+- **`device/rmt`** (`rmt_module.cpp`): `init()` calls `hal::rmt::close(-1)` when the open
+  fails; `send()` has no upper bound on the pulse count (a huge array: an allocation that
+  fails is fatal on a board). I2C caps its transfers.
+- **`device/serial`** (`serial_module.cpp`, board path): `JS_ToFloat64` runs on any
+  argument, so an object's `valueOf` can run.
+- **ESP32 `device/pwm`** (`hal_pwm_esp32.cpp` `setFrequency`): the result of `setUpTimer()`
+  is ignored for a new timer: a refused frequency leaves the channel on a timer not set up.
+- **ESP32 `device/adc`** (`hal_adc_esp32.cpp`): `deleteCalibration` assumes the curve
+  scheme (true on the S3); a channel whose configuration fails leaves its unit with no user
+  (reused later, no leak).
+- **RP2350**: `board::confineFiles()` returns false, while the boards confine their files
+  (no effect while `dataDirectory()` is nullptr).
+- **Teensy 4.0**: the default `thread_local` block (`tls_imxrt1062.cpp`) is made without a
+  lock (tasks without a block of their own could race at their first access); the GPIO
+  functions other than `configure` / `reset` do not check the pin number (the common code
+  does); `board::restart()` has no `return` (fine: `NVIC_SystemReset` does not return).
+- **Desktop agent** (`board_host.cpp` `writeUpload`): `offset + size <= _uploadSize` can
+  wrap around on an overflow of `size_t`.
+- **Twin**: `Registers._write` (`twin.js`) does not wrap the register index (a part with
+  fewer than 256 registers in "pairs" mode); `i2cTrace(after = 0xFFFFFFFF)` wraps
+  (`twin_i2c.cpp`); `applyProject` (`agent_command.cpp`) leaks small allocations when the
+  command line wins; `registerTcpLink` drops links past 16 silently.
+- **Debugger** (`cdp.js`): `hitBreakpoints` compares lines only (two breakpoints on one
+  line both reported); `bindBreakpoint` writes the source of every library module of the
+  package into the cache folder, even never loaded ones. `LineTable.offset`
+  (`debuginfo.js`): a column past the end of a line gives the start of the next one.
+- **Stack**: arrays of more than 256 bytes remain on the stack (`char[512]` in `js::fail`,
+  `failSystem`, `reportException`, `Resolver::reject`; `char path[MAX_PATH]` in
+  `data_files.cpp`, recursive in `addUsage`; 320 bytes in `sha1.h`).
+- **References in the user-facing API of jsbind** (`Optional::value()`, `Buffer::value()`,
+  `Promise::value()`, `Resolver::resolve(const T &)`, `ModuleBuilder &` of `JS_MODULE`):
+  against the rules, changing them touches every module.
+- **`tools/style.pl`**: it adds a blank line before an `#endif` that follows a closed
+  block, turns a `//` comment above data declared with a macro attribute (or above a
+  `JS_EXPORT` field) into a `/** */` block, and misaligns the initializer list of
+  `ClassBuilder` (`jsbind_class.h`): the agents put them back by hand, a new run redoes
+  them.
+- **Section 7 of `doc/coding-rules.md`**: its one-line check (perl) takes a `/*` inside a
+  `//` comment for the start of a block (it hid 20 lines of `board_esp32.cpp`).
+
 ## Minor and differences with Node or the web
 
 The local fixes of this section were made on 2026-11-11 (`history.md`); the ones left

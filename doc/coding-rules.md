@@ -399,6 +399,11 @@ diff <(strip avant.cpp) <(strip apres.cpp)
 
 The result must be empty.
 
+This one-liner does not read strings: a `/*` inside a `//` comment (`// partitions/*.csv`) is
+taken for the start of a block and hides the code that follows, and a `//` inside a string
+(`"file://..."`) cuts the line. When a file has such text, use a check that reads strings,
+characters and comments in source order.
+
 ## 8. Summary
 
 | Topic | Rule |

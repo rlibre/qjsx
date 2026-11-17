@@ -245,6 +245,12 @@ public:
     bool            resendAnswer(int64_t id);
 
     /**
+     * Forgets the last answers of the agent and of the debugger: a new host or
+     * a new session (HELLO) numbers its requests from 1 again. Any thread.
+     */
+    void            forgetAnswers();
+
+    /**
      * Event 'kind' (id 0), from any thread; only sent during a session.
      * 'payload' holds 'fieldCount' encoded key/value pairs.
      */

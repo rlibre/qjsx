@@ -9,6 +9,76 @@
 #include "quickjs-internal.h"
 
 /* JSAsyncFunctionState (used by generator and async functions) */
+/* qjsx: engine change X. A block of 'size' bytes for the state of an async
+   function: the newest kept state of that very size, else a new block. NULL
+   when out of memory. */
+static JSAsyncFunctionState *async_state_alloc(JSContext *ctx, size_t size)
+{
+#if JS_ASYNC_STATE_CACHE > 0
+    JSRuntime *rt = ctx->rt;
+    int i;
+
+    for(i = rt->async_state_cache_count - 1; i >= 0; i--) {
+        JSAsyncFunctionState *kept = rt->async_state_cache[i];
+        if (kept->alloc_size == size) {
+            /* out of the table, the ones after it move down one place (none
+               when it is the newest, the usual case) */
+            int after = rt->async_state_cache_count - i - 1;
+            if (after > 0) {
+                memmove(&rt->async_state_cache[i], &rt->async_state_cache[i + 1],
+                        after * sizeof(rt->async_state_cache[0]));
+            }
+            rt->async_state_cache_count--;
+            rt->async_state_cache_bytes -= size;
+            return kept;
+        }
+    }
+#endif
+    return js_malloc(ctx, size);
+}
+
+/* qjsx: engine change X. The block of a state no longer used: kept for a
+   next call when it fits in the table (the oldest kept ones go back to the
+   heap to make room), else freed. */
+static void async_state_release(JSRuntime *rt, JSAsyncFunctionState *s)
+{
+#if JS_ASYNC_STATE_CACHE > 0
+    size_t size = s->alloc_size;
+
+    if (size <= JS_ASYNC_STATE_CACHE_BYTES) {
+        /* room in the table: the oldest go back to the heap */
+        while (rt->async_state_cache_count == JS_ASYNC_STATE_CACHE ||
+               rt->async_state_cache_bytes + size > JS_ASYNC_STATE_CACHE_BYTES) {
+            JSAsyncFunctionState *oldest = rt->async_state_cache[0];
+            rt->async_state_cache_count--;
+            rt->async_state_cache_bytes -= oldest->alloc_size;
+            memmove(&rt->async_state_cache[0], &rt->async_state_cache[1],
+                    rt->async_state_cache_count * sizeof(rt->async_state_cache[0]));
+            js_free_rt(rt, oldest);
+        }
+
+        /* the newest at the end */
+        rt->async_state_cache[rt->async_state_cache_count++] = s;
+        rt->async_state_cache_bytes += size;
+        return;
+    }
+#endif
+    js_free_rt(rt, s);
+}
+
+/* qjsx: engine change X. Gives every kept state back to the heap (a large
+   allocation failed, the runtime is freed). */
+void js_async_state_cache_flush(JSRuntime *rt)
+{
+#if JS_ASYNC_STATE_CACHE > 0
+    while (rt->async_state_cache_count > 0) {
+        rt->async_state_cache_count--;
+        js_free_rt(rt, rt->async_state_cache[rt->async_state_cache_count]);
+    }
+    rt->async_state_cache_bytes = 0;
+#endif
+}
+
 static JSAsyncFunctionState *async_func_init(JSContext *ctx,
                                              JSValueConst func_obj, JSValueConst this_obj,
                                              int argc, JSValueConst *argv)
@@ -18,14 +88,19 @@ static JSAsyncFunctionState *async_func_init(JSContext *ctx,
     JSFunctionBytecode *b;
     JSStackFrame *sf;
     int i, arg_buf_len, n;
+    size_t size;
 
     p = JS_VALUE_GET_OBJ(func_obj);
     b = p->u.func.function_bytecode;
     arg_buf_len = max_int(b->arg_count, argc);
-    s = js_malloc(ctx, sizeof(*s) + sizeof(JSValue) * (arg_buf_len + b->var_count + b->stack_size) + sizeof(JSVarRef *) * b->var_ref_count);
+    size = sizeof(*s) + sizeof(JSValue) * (arg_buf_len + b->var_count + b->stack_size) + sizeof(JSVarRef *) * b->var_ref_count;
+    s = async_state_alloc(ctx, size);   /* qjsx: engine change X */
     if (!s)
         return NULL;
     memset(s, 0, sizeof(*s));
+#if JS_ASYNC_STATE_CACHE > 0
+    s->alloc_size = size;
+#endif
     js_rc(s)->ref_count = 1;
     add_gc_object(ctx->rt, &s->header, JS_GC_OBJ_TYPE_ASYNC_FUNCTION);
 
@@ -131,7 +206,7 @@ void __async_func_free(JSRuntime *rt, JSAsyncFunctionState *s)
     if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && js_rc(s)->ref_count != 0) {
         list_add_tail(&s->header.link, &rt->gc_zero_ref_count_list);
     } else {
-        js_free_rt(rt, s);
+        async_state_release(rt, s);   /* qjsx: engine change X */
     }
 }
 

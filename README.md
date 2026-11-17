@@ -101,7 +101,9 @@ the board does not have.
   their own USB port). Each one receives programs and runs them.
 - **Libraries**: the standard library (`stdlib`) comes with the tool, and you can make your
   own with `qjsx mklib`. Only the modules a program really imports go to the board (see
-  below).
+  below), and inside them only what it uses: `qjsx build` leaves out the functions, classes
+  and constants that nothing calls (each one would cost about 200 to 300 bytes of RAM on the
+  board), and says which.
 - **What it takes to write native modules**: a small C++ library that exposes C++ code to
   JavaScript without the usual pain.
 - **The foundations of a debugger**: breakpoints, stepping, pause, reading and changing
@@ -112,8 +114,13 @@ What `qjsx build` produces, and what of it reaches the board:
 ![qjsx build follows the imports and writes a package: manifest, names and bytecode go to the board; debug info and sources stay on the PC](doc/images/package.svg)
 
 A few safety nets are already there: the tool warns when a program uses `eval()`, which does
-not exist on the board, and the board refuses a program prepared for another version of the
-engine instead of crashing.
+not exist on the board, refuses an import of a name that the module does not export (with
+its line and column, instead of an error on the board), and the board refuses a program
+prepared for another version of the engine instead of crashing.
+
+Programs of a board are tasks that wait (`await`): the engine waits without allocating
+memory, so an `await` of an async function costs a few microseconds on an ESP32-S3 or a
+Teensy 4.0.
 
 ## A digital twin of the board
 

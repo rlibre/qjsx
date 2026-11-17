@@ -1,5 +1,5 @@
 diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/builtins.h engine/qjsx/builtins/builtins.h
---- build/qjsx-baseline/builtins/builtins.h	2026-11-17 10:48:11.087253000 +0100
+--- build/qjsx-baseline/builtins/builtins.h	2026-11-17 11:26:46.036458300 +0100
 +++ engine/qjsx/builtins/builtins.h	2026-11-17 10:01:25.271056100 +0100
 @@ -206,6 +206,10 @@
  extern const JSCFunctionListEntry js_generator_proto_funcs[4];
@@ -13,7 +13,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/builtins.h engine/qjs
                                              JSValueConst promise,
                                              JSValueConst *resolve_reject,
 diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/date.c engine/qjsx/builtins/date.c
---- build/qjsx-baseline/builtins/date.c	2026-11-17 10:48:11.075254800 +0100
+--- build/qjsx-baseline/builtins/date.c	2026-11-17 11:26:46.024946200 +0100
 +++ engine/qjsx/builtins/date.c	2026-11-11 16:04:41.500342200 +0100
 @@ -39,7 +39,9 @@
          }
@@ -27,7 +27,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/date.c engine/qjsx/bu
          struct tm *tm;
          time_t gm_ti, loc_ti;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/math.c engine/qjsx/builtins/math.c
---- build/qjsx-baseline/builtins/math.c	2026-11-17 10:48:11.074255100 +0100
+--- build/qjsx-baseline/builtins/math.c	2026-11-17 11:26:46.023944900 +0100
 +++ engine/qjsx/builtins/math.c	2026-11-13 15:45:47.178657000 +0100
 @@ -469,6 +469,17 @@
          ctx->random_state = 1;
@@ -48,7 +48,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/math.c engine/qjsx/bu
                                int argc, JSValueConst *argv)
  {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/promise.c engine/qjsx/builtins/promise.c
---- build/qjsx-baseline/builtins/promise.c	2026-11-17 10:48:11.079254800 +0100
+--- build/qjsx-baseline/builtins/promise.c	2026-11-17 11:26:46.028944500 +0100
 +++ engine/qjsx/builtins/promise.c	2026-11-17 10:01:25.215645400 +0100
 @@ -10,10 +10,29 @@
  
@@ -194,7 +194,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/builtins/promise.c engine/qjsx
      JS_FreeValue(ctx, resolving_funcs[1]);
      if (JS_IsException(ret)) {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/bytecode/reader.c
---- build/qjsx-baseline/bytecode/reader.c	2026-11-17 10:48:11.068252900 +0100
+--- build/qjsx-baseline/bytecode/reader.c	2026-11-17 11:26:46.016940300 +0100
 +++ engine/qjsx/bytecode/reader.c	2026-11-16 10:58:23.043692600 +0100
 @@ -18,6 +18,7 @@
      BOOL allow_sab : 8;
@@ -301,7 +301,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/reader.c engine/qjsx/
      s->allow_reference = ((flags & JS_READ_OBJ_REFERENCE) != 0);
      if (s->allow_bytecode)
 diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/bytecode/writer.c
---- build/qjsx-baseline/bytecode/writer.c	2026-11-17 10:48:11.068252900 +0100
+--- build/qjsx-baseline/bytecode/writer.c	2026-11-17 11:26:46.016940300 +0100
 +++ engine/qjsx/bytecode/writer.c	2026-11-16 10:52:46.668789800 +0100
 @@ -118,6 +118,7 @@
      BOOL allow_bytecode : 8;
@@ -352,7 +352,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/bytecode/writer.c engine/qjsx/
      js_object_list_init(&s->object_list);
  
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/compiler.h engine/qjsx/compiler/compiler.h
---- build/qjsx-baseline/compiler/compiler.h	2026-11-17 10:48:11.091252900 +0100
+--- build/qjsx-baseline/compiler/compiler.h	2026-11-17 11:26:46.039457600 +0100
 +++ engine/qjsx/compiler/compiler.h	2026-11-17 10:33:15.281396400 +0100
 @@ -123,6 +123,14 @@
      uint8_t is_regular_stmt : 1; /* i.e. not a loop statement */
@@ -768,7 +768,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/debug-info.c engine/q
 +    js_free(ctx, constants);
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx/compiler/emitter.c
---- build/qjsx-baseline/compiler/emitter.c	2026-11-17 10:48:11.060691400 +0100
+--- build/qjsx-baseline/compiler/emitter.c	2026-11-17 11:26:46.009939400 +0100
 +++ engine/qjsx/compiler/emitter.c	2026-11-17 10:34:22.429916200 +0100
 @@ -57,6 +57,21 @@
      }
@@ -822,7 +822,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/emitter.c engine/qjsx
          fd->scope_first = get_first_lexical_var(fd, fd->scope_level);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/compiler/eval.c
---- build/qjsx-baseline/compiler/eval.c	2026-11-17 10:48:11.067254200 +0100
+--- build/qjsx-baseline/compiler/eval.c	2026-11-17 11:26:46.015940400 +0100
 +++ engine/qjsx/compiler/eval.c	2026-11-17 10:34:22.605908300 +0100
 @@ -86,11 +86,20 @@
      }
@@ -858,7 +858,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/eval.c engine/qjsx/co
          fun_obj = JS_NewModuleValue(ctx, m);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/finalize.c engine/qjsx/compiler/finalize.c
---- build/qjsx-baseline/compiler/finalize.c	2026-11-17 10:48:11.066251700 +0100
+--- build/qjsx-baseline/compiler/finalize.c	2026-11-17 11:26:46.014939600 +0100
 +++ engine/qjsx/compiler/finalize.c	2026-11-16 10:30:40.431558300 +0100
 @@ -290,6 +290,12 @@
          for(i = 0; i < fd->global_var_count; i++) {
@@ -1740,7 +1740,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/fold.c engine/qjsx/co
 +    fd->module_const_count = 0;
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/funcdef.c engine/qjsx/compiler/funcdef.c
---- build/qjsx-baseline/compiler/funcdef.c	2026-11-17 10:48:11.065252100 +0100
+--- build/qjsx-baseline/compiler/funcdef.c	2026-11-17 11:26:46.012942500 +0100
 +++ engine/qjsx/compiler/funcdef.c	2026-11-16 10:30:25.279520400 +0100
 @@ -59,6 +59,8 @@
      fd->scope_count = 1;
@@ -2238,7 +2238,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/outline.c engine/qjsx
 +    s->outline = NULL;
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-class.c engine/qjsx/compiler/parser-class.c
---- build/qjsx-baseline/compiler/parser-class.c	2026-11-17 10:48:11.063252900 +0100
+--- build/qjsx-baseline/compiler/parser-class.c	2026-11-17 11:26:46.010939700 +0100
 +++ engine/qjsx/compiler/parser-class.c	2026-11-11 16:04:41.510348300 +0100
 @@ -52,7 +52,7 @@
  
@@ -2259,7 +2259,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-class.c engine
      if (!fd->strip_source) {
          js_free(ctx, ctor_fd->source);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/qjsx/compiler/parser-expr.c
---- build/qjsx-baseline/compiler/parser-expr.c	2026-11-17 10:48:11.062247200 +0100
+--- build/qjsx-baseline/compiler/parser-expr.c	2026-11-17 11:26:46.009939400 +0100
 +++ engine/qjsx/compiler/parser-expr.c	2026-11-17 10:36:36.394225100 +0100
 @@ -1806,6 +1806,9 @@
              do_get_var:
@@ -2326,7 +2326,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-expr.c engine/
          }
          return 0;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/qjsx/compiler/parser-func.c
---- build/qjsx-baseline/compiler/parser-func.c	2026-11-17 10:48:11.067254200 +0100
+--- build/qjsx-baseline/compiler/parser-func.c	2026-11-17 11:26:46.015940400 +0100
 +++ engine/qjsx/compiler/parser-func.c	2026-11-17 10:34:22.475853800 +0100
 @@ -196,6 +196,7 @@
      int func_idx, lexical_func_idx = -1;
@@ -2410,7 +2410,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-func.c engine/
  
      return 0;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-module.c engine/qjsx/compiler/parser-module.c
---- build/qjsx-baseline/compiler/parser-module.c	2026-11-17 10:48:11.064253300 +0100
+--- build/qjsx-baseline/compiler/parser-module.c	2026-11-17 11:26:46.012942500 +0100
 +++ engine/qjsx/compiler/parser-module.c	2026-11-17 10:34:57.832135500 +0100
 @@ -158,6 +158,9 @@
      case '{':
@@ -2504,7 +2504,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-module.c engin
                  JS_FreeAtom(ctx, local_name);
                  JS_FreeAtom(ctx, import_name);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/qjsx/compiler/parser-stmt.c
---- build/qjsx-baseline/compiler/parser-stmt.c	2026-11-17 10:48:11.063252900 +0100
+--- build/qjsx-baseline/compiler/parser-stmt.c	2026-11-17 11:26:46.010939700 +0100
 +++ engine/qjsx/compiler/parser-stmt.c	2026-11-11 16:04:41.515348900 +0100
 @@ -83,7 +83,15 @@
  }
@@ -2624,7 +2624,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/parser-stmt.c engine/
              goto fail;
          if (js_parse_expect_semi(s))
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engine/qjsx/compiler/resolve-labels.c
---- build/qjsx-baseline/compiler/resolve-labels.c	2026-11-17 10:48:11.066251700 +0100
+--- build/qjsx-baseline/compiler/resolve-labels.c	2026-11-17 11:26:46.014939600 +0100
 +++ engine/qjsx/compiler/resolve-labels.c	2026-11-16 10:30:40.432557300 +0100
 @@ -36,7 +36,10 @@
              if (pos_next > s->bc_len)
@@ -2787,7 +2787,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-labels.c engi
                      add_pc2line_info(s, bc_out.size, line_num);
                      put_short_code(&bc_out, op + 1, idx);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/resolve-vars.c engine/qjsx/compiler/resolve-vars.c
---- build/qjsx-baseline/compiler/resolve-vars.c	2026-11-17 10:48:11.065252100 +0100
+--- build/qjsx-baseline/compiler/resolve-vars.c	2026-11-17 11:26:46.013939800 +0100
 +++ engine/qjsx/compiler/resolve-vars.c	2026-11-16 10:30:40.433558200 +0100
 @@ -498,6 +498,21 @@
          fd = s;
@@ -3070,7 +3070,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/compiler/tdz.c engine/qjsx/com
 +    return ret;
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/atoms.c
---- build/qjsx-baseline/core/atoms.c	2026-11-17 10:48:11.039145800 +0100
+--- build/qjsx-baseline/core/atoms.c	2026-11-17 11:26:45.988782300 +0100
 +++ engine/qjsx/core/atoms.c	2026-11-16 10:54:20.892857900 +0100
 @@ -18,15 +18,75 @@
  /* return the max count from the hash size */
@@ -3363,7 +3363,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/atoms.c engine/qjsx/core/
  }
  
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/closures.c engine/qjsx/core/closures.c
---- build/qjsx-baseline/core/closures.c	2026-11-17 10:48:11.057186700 +0100
+--- build/qjsx-baseline/core/closures.c	2026-11-17 11:26:46.005940100 +0100
 +++ engine/qjsx/core/closures.c	2026-11-11 16:38:22.149302500 +0100
 @@ -619,6 +619,7 @@
      rt->current_stack_frame = sf;
@@ -3374,9 +3374,9 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/closures.c engine/qjsx/co
      sf->arg_count = argc;
      arg_buf = argv;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/core.h engine/qjsx/core/core.h
---- build/qjsx-baseline/core/core.h	2026-11-17 10:48:11.085262900 +0100
-+++ engine/qjsx/core/core.h	2026-11-17 10:01:25.324226200 +0100
-@@ -477,6 +477,12 @@
+--- build/qjsx-baseline/core/core.h	2026-11-17 11:26:46.034947400 +0100
++++ engine/qjsx/core/core.h	2026-11-17 11:22:23.473513000 +0100
+@@ -477,6 +477,13 @@
  JSValue js_async_function_call(JSContext *ctx, JSValueConst func_obj,
                                        JSValueConst this_obj,
                                        int argc, JSValueConst *argv, int flags);
@@ -3386,10 +3386,11 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/core.h engine/qjsx/core/c
 +                                     JSValue value, BOOL is_throw);
 +int js_async_function_await_job(JSContext *ctx, JSJobEntry *e);
 +void js_async_function_await_job_free(JSRuntime *rt, JSJobEntry *e);
++void js_async_state_cache_flush(JSRuntime *rt);   /* qjsx: engine change X */
  void js_async_generator_finalizer(JSRuntime *rt, JSValue obj);
  void js_async_generator_mark(JSRuntime *rt, JSValueConst val,
                                      JS_MarkFunc *mark_func);
-@@ -543,4 +549,16 @@
+@@ -543,4 +550,16 @@
  #endif
  int JS_AddIntrinsicBasicObjects(JSContext *ctx);
  
@@ -4115,7 +4116,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/debug.c engine/qjsx/core/
 +    return 0;
 +}
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core/errors.c
---- build/qjsx-baseline/core/errors.c	2026-11-17 10:48:11.042984700 +0100
+--- build/qjsx-baseline/core/errors.c	2026-11-17 11:26:45.992782500 +0100
 +++ engine/qjsx/core/errors.c	2026-11-16 16:23:22.013907500 +0100
 @@ -30,6 +30,9 @@
      JSRuntime *rt = ctx->rt;
@@ -4157,7 +4158,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/errors.c engine/qjsx/core
  /* Note: we no longer support '\r' as line terminator */
  int get_line_col(int *pcol_num, const uint8_t *buf, size_t len)
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/gc.c engine/qjsx/core/gc.c
---- build/qjsx-baseline/core/gc.c	2026-11-17 10:48:11.041146100 +0100
+--- build/qjsx-baseline/core/gc.c	2026-11-17 11:26:45.991782400 +0100
 +++ engine/qjsx/core/gc.c	2026-11-17 10:02:28.350498700 +0100
 @@ -528,6 +528,11 @@
              }
@@ -4196,9 +4197,107 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/gc.c engine/qjsx/core/gc.
          js_free_rt(rt, b->debug.source);
      }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/generators.c engine/qjsx/core/generators.c
---- build/qjsx-baseline/core/generators.c	2026-11-17 10:48:11.059185500 +0100
-+++ engine/qjsx/core/generators.c	2026-11-17 10:02:15.987443300 +0100
-@@ -50,6 +50,9 @@
+--- build/qjsx-baseline/core/generators.c	2026-11-17 11:26:46.007939400 +0100
++++ engine/qjsx/core/generators.c	2026-11-17 11:25:08.355116400 +0100
+@@ -9,6 +9,76 @@
+ #include "quickjs-internal.h"
+ 
+ /* JSAsyncFunctionState (used by generator and async functions) */
++/* qjsx: engine change X. A block of 'size' bytes for the state of an async
++   function: the newest kept state of that very size, else a new block. NULL
++   when out of memory. */
++static JSAsyncFunctionState *async_state_alloc(JSContext *ctx, size_t size)
++{
++#if JS_ASYNC_STATE_CACHE > 0
++    JSRuntime *rt = ctx->rt;
++    int i;
++
++    for(i = rt->async_state_cache_count - 1; i >= 0; i--) {
++        JSAsyncFunctionState *kept = rt->async_state_cache[i];
++        if (kept->alloc_size == size) {
++            /* out of the table, the ones after it move down one place (none
++               when it is the newest, the usual case) */
++            int after = rt->async_state_cache_count - i - 1;
++            if (after > 0) {
++                memmove(&rt->async_state_cache[i], &rt->async_state_cache[i + 1],
++                        after * sizeof(rt->async_state_cache[0]));
++            }
++            rt->async_state_cache_count--;
++            rt->async_state_cache_bytes -= size;
++            return kept;
++        }
++    }
++#endif
++    return js_malloc(ctx, size);
++}
++
++/* qjsx: engine change X. The block of a state no longer used: kept for a
++   next call when it fits in the table (the oldest kept ones go back to the
++   heap to make room), else freed. */
++static void async_state_release(JSRuntime *rt, JSAsyncFunctionState *s)
++{
++#if JS_ASYNC_STATE_CACHE > 0
++    size_t size = s->alloc_size;
++
++    if (size <= JS_ASYNC_STATE_CACHE_BYTES) {
++        /* room in the table: the oldest go back to the heap */
++        while (rt->async_state_cache_count == JS_ASYNC_STATE_CACHE ||
++               rt->async_state_cache_bytes + size > JS_ASYNC_STATE_CACHE_BYTES) {
++            JSAsyncFunctionState *oldest = rt->async_state_cache[0];
++            rt->async_state_cache_count--;
++            rt->async_state_cache_bytes -= oldest->alloc_size;
++            memmove(&rt->async_state_cache[0], &rt->async_state_cache[1],
++                    rt->async_state_cache_count * sizeof(rt->async_state_cache[0]));
++            js_free_rt(rt, oldest);
++        }
++
++        /* the newest at the end */
++        rt->async_state_cache[rt->async_state_cache_count++] = s;
++        rt->async_state_cache_bytes += size;
++        return;
++    }
++#endif
++    js_free_rt(rt, s);
++}
++
++/* qjsx: engine change X. Gives every kept state back to the heap (a large
++   allocation failed, the runtime is freed). */
++void js_async_state_cache_flush(JSRuntime *rt)
++{
++#if JS_ASYNC_STATE_CACHE > 0
++    while (rt->async_state_cache_count > 0) {
++        rt->async_state_cache_count--;
++        js_free_rt(rt, rt->async_state_cache[rt->async_state_cache_count]);
++    }
++    rt->async_state_cache_bytes = 0;
++#endif
++}
++
+ static JSAsyncFunctionState *async_func_init(JSContext *ctx,
+                                              JSValueConst func_obj, JSValueConst this_obj,
+                                              int argc, JSValueConst *argv)
+@@ -18,14 +88,19 @@
+     JSFunctionBytecode *b;
+     JSStackFrame *sf;
+     int i, arg_buf_len, n;
++    size_t size;
+ 
+     p = JS_VALUE_GET_OBJ(func_obj);
+     b = p->u.func.function_bytecode;
+     arg_buf_len = max_int(b->arg_count, argc);
+-    s = js_malloc(ctx, sizeof(*s) + sizeof(JSValue) * (arg_buf_len + b->var_count + b->stack_size) + sizeof(JSVarRef *) * b->var_ref_count);
++    size = sizeof(*s) + sizeof(JSValue) * (arg_buf_len + b->var_count + b->stack_size) + sizeof(JSVarRef *) * b->var_ref_count;
++    s = async_state_alloc(ctx, size);   /* qjsx: engine change X */
+     if (!s)
+         return NULL;
+     memset(s, 0, sizeof(*s));
++#if JS_ASYNC_STATE_CACHE > 0
++    s->alloc_size = size;
++#endif
+     js_rc(s)->ref_count = 1;
+     add_gc_object(ctx->rt, &s->header, JS_GC_OBJ_TYPE_ASYNC_FUNCTION);
+ 
+@@ -50,6 +125,9 @@
      s->resolving_funcs[0] = JS_UNDEFINED;
      s->resolving_funcs[1] = JS_UNDEFINED;
      s->is_completed = FALSE;
@@ -4208,7 +4307,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/generators.c engine/qjsx/
      return s;
  }
  
-@@ -115,6 +118,15 @@
+@@ -115,11 +193,20 @@
      JS_FreeValueRT(rt, s->resolving_funcs[0]);
      JS_FreeValueRT(rt, s->resolving_funcs[1]);
  
@@ -4224,7 +4323,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/generators.c engine/qjsx/
      remove_gc_object(&s->header);
      if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && js_rc(s)->ref_count != 0) {
          list_add_tail(&s->header.link, &rt->gc_zero_ref_count_list);
-@@ -334,26 +346,109 @@
+     } else {
+-        js_free_rt(rt, s);
++        async_state_release(rt, s);   /* qjsx: engine change X */
+     }
+ }
+ 
+@@ -334,26 +421,109 @@
      return 0;
  }
  
@@ -4345,7 +4450,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/generators.c engine/qjsx/
          }
      } else {
          JSValue value, promise, resolving_funcs[2], resolving_funcs1[2];
-@@ -364,8 +459,46 @@
+@@ -364,8 +534,46 @@
  
          /* await */
          JS_FreeValue(ctx, func_ret); /* not used */
@@ -4394,7 +4499,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/generators.c engine/qjsx/
          JS_FreeValue(ctx, value);
          if (JS_IsException(promise))
              goto fail;
-@@ -415,17 +548,47 @@
+@@ -415,17 +623,47 @@
      return JS_UNDEFINED;
  }
  
@@ -4444,7 +4549,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/generators.c engine/qjsx/
      if (JS_IsException(promise)) {
          async_func_free(ctx->rt, s);
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx/core/interpreter.c
---- build/qjsx-baseline/core/interpreter.c	2026-11-17 10:48:11.058186600 +0100
+--- build/qjsx-baseline/core/interpreter.c	2026-11-17 11:26:46.006940100 +0100
 +++ engine/qjsx/core/interpreter.c	2026-11-17 10:02:45.627463500 +0100
 @@ -29,8 +29,22 @@
      JSVarRef **var_refs;
@@ -4708,7 +4813,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/interpreter.c engine/qjsx
                      rt->current_exception = JS_UNINITIALIZED;
                      pc = b->byte_code_buf + pos;
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/iteration.c engine/qjsx/core/iteration.c
---- build/qjsx-baseline/core/iteration.c	2026-11-17 10:48:11.057186700 +0100
+--- build/qjsx-baseline/core/iteration.c	2026-11-17 11:26:46.005940100 +0100
 +++ engine/qjsx/core/iteration.c	2026-11-11 16:04:41.524857300 +0100
 @@ -25,8 +25,8 @@
                                            JSValueConst this_val)
@@ -4722,7 +4827,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/iteration.c engine/qjsx/c
      return JS_UNDEFINED;
  }
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/modules.c engine/qjsx/core/modules.c
---- build/qjsx-baseline/core/modules.c	2026-11-17 10:48:11.064253300 +0100
+--- build/qjsx-baseline/core/modules.c	2026-11-17 11:26:46.011942800 +0100
 +++ engine/qjsx/core/modules.c	2026-11-11 16:04:41.524857300 +0100
 @@ -1206,9 +1206,11 @@
              return JS_ATOM_NULL;
@@ -6696,8 +6801,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/rom-atoms.h engine/qjsx/c
 +
 +#endif
 diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/core/runtime.c
---- build/qjsx-baseline/core/runtime.c	2026-11-17 10:48:11.040145700 +0100
-+++ engine/qjsx/core/runtime.c	2026-11-17 10:02:28.449670300 +0100
+--- build/qjsx-baseline/core/runtime.c	2026-11-17 11:26:45.989782100 +0100
++++ engine/qjsx/core/runtime.c	2026-11-17 11:22:23.869397700 +0100
 @@ -47,6 +47,43 @@
      512,
  };
@@ -6829,7 +6934,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
      
      /* add to the head */
      list_add(&ar->link, &s->arena_list[block_size_idx]);
-@@ -128,6 +216,13 @@
+@@ -128,6 +216,22 @@
  {
      JSMallocLargeBlockHeader *b;
      b = s->mf.js_malloc(&s->malloc_state, sizeof(JSMallocLargeBlockHeader) + size);
@@ -6840,10 +6945,19 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
 +        b = s->mf.js_malloc(&s->malloc_state, sizeof(JSMallocLargeBlockHeader) + size);
 +    }
 +#endif
++#if JS_ASYNC_STATE_CACHE > 0
++    /* qjsx: engine change X: no room: give the kept states of async
++       functions back (the context is the first member of its runtime),
++       then try once more */
++    if (!b && container_of(s, JSRuntime, malloc_ctx)->async_state_cache_count > 0) {
++        js_async_state_cache_flush(container_of(s, JSRuntime, malloc_ctx));
++        b = s->mf.js_malloc(&s->malloc_state, sizeof(JSMallocLargeBlockHeader) + size);
++    }
++#endif
      if (!b)
          return NULL;
      b->header.u.block_idx = FREE_NIL;
-@@ -135,6 +230,9 @@
+@@ -135,6 +239,9 @@
  #ifdef JS_MALLOC_USE_ITER
      list_add_tail(&b->link, &s->large_block_list);
  #endif
@@ -6853,7 +6967,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
      return b->header.user_data;
  }
  
-@@ -167,8 +265,20 @@
+@@ -167,8 +274,20 @@
                  ar = list_entry(el, JSMallocArena, free_link);
              }
              block_idx = ar->first_free_block;
@@ -6874,7 +6988,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
              b->u.block_idx = block_idx;
              ar->n_used_blocks++;
              if (unlikely(ar->n_used_blocks == ar->n_blocks)) {
-@@ -200,6 +310,9 @@
+@@ -200,6 +319,9 @@
  #ifdef JS_MALLOC_USE_ITER
              list_del(&lb->link);
  #endif
@@ -6884,7 +6998,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
              s->mf.js_free(&s->malloc_state, lb);
          }
      } else {
-@@ -220,6 +333,15 @@
+@@ -220,6 +342,15 @@
          if (unlikely(ar->n_used_blocks == 0)) {
              list_del(&ar->link);
              list_del(&ar->free_link);
@@ -6900,7 +7014,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
              s->mf.js_free(&s->malloc_state, ar);
          }
      }
-@@ -244,8 +366,19 @@
+@@ -244,8 +375,19 @@
  #ifdef JS_MALLOC_USE_ITER
              list_del(&lb->link);
  #endif
@@ -6920,7 +7034,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  #ifdef JS_MALLOC_USE_ITER
                  /* add again in the list */
                  list_add_tail(&lb->link, &s->large_block_list);
-@@ -254,6 +387,9 @@
+@@ -254,6 +396,9 @@
              }
              new_lb->header.u.block_idx = FREE_NIL;
              new_lb->header.block_size_idx = 0xff; /* fail safe */
@@ -6930,7 +7044,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  #ifdef JS_MALLOC_USE_ITER
              list_add_tail(&new_lb->link, &s->large_block_list);
  #endif
-@@ -316,6 +452,43 @@
+@@ -316,6 +461,43 @@
      }
  }
  
@@ -6974,7 +7088,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  static __maybe_unused void js_malloc_dump_arenas(JSMallocContext *s)
  {
      struct list_head *el;
-@@ -369,6 +542,23 @@
+@@ -369,6 +551,23 @@
  
  /* end JS malloc */
  
@@ -6998,7 +7112,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  void js_trigger_gc(JSRuntime *rt, size_t size)
  {
      BOOL force_gc;
-@@ -384,8 +574,8 @@
+@@ -384,8 +583,8 @@
                 (uint64_t)rt->malloc_ctx.malloc_state.malloc_size);
  #endif
          JS_RunGC(rt);
@@ -7009,7 +7123,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
      }
  }
  
-@@ -617,6 +807,7 @@
+@@ -617,6 +816,7 @@
      rt->malloc_ctx.mf = *mf;
      rt->malloc_ctx.malloc_state = ms;
      rt->malloc_gc_threshold = 256 * 1024;
@@ -7017,7 +7131,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  
      init_list_head(&rt->context_list);
      init_list_head(&rt->gc_obj_list);
-@@ -680,6 +871,11 @@
+@@ -680,6 +880,11 @@
      return 0;
  #elif defined(__linux__) || defined(__GLIBC__)
      return malloc_usable_size((void *)ptr);
@@ -7029,7 +7143,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  #else
      /* change this to `return 0;` if compilation fails */
      return malloc_usable_size((void *)ptr);
-@@ -756,7 +952,15 @@
+@@ -756,7 +961,15 @@
  
  void JS_SetMemoryLimit(JSRuntime *rt, size_t limit)
  {
@@ -7045,7 +7159,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  }
  
  /* use -1 to disable automatic GC */
-@@ -853,6 +1057,21 @@
+@@ -853,6 +1066,21 @@
      e = list_entry(rt->job_list.next, JSJobEntry, link);
      list_del(&e->link);
      ctx = e->realm;
@@ -7067,7 +7181,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
      res = e->job_func(ctx, e->argc, (JSValueConst *)e->argv);
      for(i = 0; i < e->argc; i++)
          JS_FreeValue(ctx, e->argv[i]);
-@@ -914,9 +1133,17 @@
+@@ -914,9 +1142,17 @@
      int i;
  
      JS_FreeValueRT(rt, rt->current_exception);
@@ -7085,7 +7199,17 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
          for(i = 0; i < e->argc; i++)
              JS_FreeValueRT(rt, e->argv[i]);
          JS_FreeContext(e->realm);
-@@ -1040,6 +1267,11 @@
+@@ -928,6 +1164,9 @@
+        FinalizationRegistry */
+     JS_RunGCInternal(rt, FALSE);
+ 
++    /* qjsx: engine change X: the states of async functions kept */
++    js_async_state_cache_flush(rt);
++
+ #ifdef DUMP_LEAKS
+     /* leaking objects */
+     {
+@@ -1040,6 +1279,11 @@
      /* free the atoms */
      for(i = 0; i < rt->atom_size; i++) {
          JSAtomStruct *p = rt->atom_array[i];
@@ -7097,7 +7221,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
          if (!atom_is_free(p)) {
  #ifdef DUMP_LEAKS
              list_del(&p->link);
-@@ -1050,6 +1282,10 @@
+@@ -1050,6 +1294,10 @@
      js_free_rt(rt, rt->atom_array);
      js_free_rt(rt, rt->atom_hash);
      js_free_rt(rt, rt->shape_hash);
@@ -7108,7 +7232,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
  #ifdef DUMP_LEAKS
      if (!list_empty(&rt->string_list)) {
          if (rt->rt_info) {
-@@ -1090,6 +1326,10 @@
+@@ -1090,6 +1338,10 @@
      }
  #endif
  
@@ -7119,7 +7243,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
      {
          JSMallocState ms = rt->malloc_ctx.malloc_state;
          rt->malloc_ctx.mf.js_free(&ms, rt);
-@@ -1140,7 +1380,12 @@
+@@ -1140,7 +1392,12 @@
  
      if (JS_AddIntrinsicBaseObjects(ctx) ||
          JS_AddIntrinsicDate(ctx) ||
@@ -7133,7 +7257,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/core/runtime.c engine/qjsx/cor
          JS_AddIntrinsicRegExp(ctx) ||
          JS_AddIntrinsicJSON(ctx) ||
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs.h engine/qjsx/quickjs.h
---- build/qjsx-baseline/quickjs.h	2026-11-17 10:48:11.478439700 +0100
+--- build/qjsx-baseline/quickjs.h	2026-11-17 11:26:46.428793400 +0100
 +++ engine/qjsx/quickjs.h	2026-11-16 16:23:21.921863900 +0100
 @@ -47,6 +47,19 @@
  
@@ -7719,8 +7843,8 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-debug.h engine/qjsx/qu
 +
 +#endif /* QUICKJS_DEBUG_H */
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx/quickjs-internal.h
---- build/qjsx-baseline/quickjs-internal.h	2026-11-17 10:48:11.090253200 +0100
-+++ engine/qjsx/quickjs-internal.h	2026-11-17 10:33:03.158320200 +0100
+--- build/qjsx-baseline/quickjs-internal.h	2026-11-17 11:26:46.038457500 +0100
++++ engine/qjsx/quickjs-internal.h	2026-11-17 11:22:23.025020800 +0100
 @@ -30,6 +30,7 @@
  #include "cutils.h"
  #include "list.h"
@@ -7729,7 +7853,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  #include "libregexp.h"
  #include "libunicode.h"
  #include "dtoa.h"
-@@ -226,12 +227,31 @@
+@@ -226,12 +227,42 @@
  /* JS malloc */
  
  #define JS_MALLOC_ALIGN 8
@@ -7755,6 +7879,17 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
 +#ifndef JS_MALLOC_ARENA_CACHE
 +#define JS_MALLOC_ARENA_CACHE 0
 +#endif
++/* qjsx: engine change X: the states of async functions that ended are kept
++   for the next call that needs a state of the same size (at most
++   JS_ASYNC_STATE_CACHE of them, JS_ASYNC_STATE_CACHE_BYTES bytes in all; the
++   oldest goes back to the heap first). A loop of awaits then allocates and
++   frees no state. 0: QuickJS's original allocation and free per call. */
++#ifndef JS_ASYNC_STATE_CACHE
++#define JS_ASYNC_STATE_CACHE 0
++#endif
++#ifndef JS_ASYNC_STATE_CACHE_BYTES
++#define JS_ASYNC_STATE_CACHE_BYTES 2048
++#endif
 +#if defined(__SANITIZE_ADDRESS__) || defined(QJSX_ALLOC_HISTOGRAM)
  /* use the host malloc() for all allocations */
 +/* qjsx: also while measuring the sizes of the allocations (QJSX_ALLOC_HISTOGRAM,
@@ -7762,7 +7897,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  #define JS_MALLOC_LARGE_BLOCKS_ONLY 1
  #else
  #define JS_MALLOC_LARGE_BLOCKS_ONLY 0
-@@ -275,6 +295,11 @@
+@@ -275,6 +306,11 @@
      struct list_head free_link;
      struct list_head link;
      uint8_t block_size_idx;
@@ -7774,7 +7909,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
      uint16_t n_used_blocks; /* number of allocated blocks */
      uint16_t n_blocks; /* total number of blocks */
      uint16_t first_free_block; /* FREE_NIL if none */
-@@ -294,6 +319,12 @@
+@@ -294,6 +330,12 @@
  #endif
      __attribute__((aligned(JS_MALLOC_ALIGN))) uint8_t zero_size_block[sizeof(JSMallocBlockHeader)];
  
@@ -7787,7 +7922,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
      /* callbacks to the host malloc */
      JSMallocFunctions mf;
      JSMallocState malloc_state;
-@@ -301,6 +332,33 @@
+@@ -301,9 +343,42 @@
  
  /* end JS Malloc */
  
@@ -7819,9 +7954,19 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
 +} JSDebugState;
 +
  struct JSRuntime {
-     JSMallocContext malloc_ctx;
+-    JSMallocContext malloc_ctx;
++    JSMallocContext malloc_ctx; /* qjsx: first member: js_malloc_large finds the runtime from it */
      const char *rt_info;
-@@ -312,6 +370,16 @@
++#if JS_ASYNC_STATE_CACHE > 0
++    /* qjsx: engine change X: states of async functions kept, oldest first */
++    struct JSAsyncFunctionState *async_state_cache[JS_ASYNC_STATE_CACHE];
++    int async_state_cache_count;
++    size_t async_state_cache_bytes;   /* their alloc_size summed */
++#endif
+ 
+     int atom_hash_size; /* power of two */
+     int atom_count;
+@@ -312,6 +387,16 @@
      uint32_t *atom_hash;
      JSAtomStruct **atom_array;
      int atom_free_index; /* 0 = none */
@@ -7838,7 +7983,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  
      int class_count;    /* size of class_array */
      JSClass *class_array;
-@@ -373,6 +441,7 @@
+@@ -373,6 +458,7 @@
      int shape_hash_count; /* number of hashed shapes */
      JSShape **shape_hash;
      void *user_opaque;
@@ -7846,7 +7991,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  };
  
  struct JSClass {
-@@ -402,6 +471,12 @@
+@@ -402,6 +488,12 @@
      /* only used in generators. Current stack pointer value. NULL if
         the function is running. */
      JSValue *cur_sp;
@@ -7859,7 +8004,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  } JSStackFrame;
  
  typedef enum {
-@@ -565,7 +640,16 @@
+@@ -565,7 +657,16 @@
  #define JS_ATOM_HASH_MASK  ((1 << 30) - 1)
  #define JS_ATOM_HASH_PRIVATE JS_ATOM_HASH_MASK
  
@@ -7877,7 +8022,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
      uint32_t len : 31;
      uint8_t is_wide_char : 1; /* 0 = 8 bits, 1 = 16 bits characters */
      /* for JS_ATOM_TYPE_SYMBOL: hash = weakref_count, atom_type = 3,
-@@ -698,10 +782,21 @@
+@@ -698,10 +799,21 @@
      JSValue *cpool; /* constant pool (self pointer) */
      int cpool_count;
      int closure_var_count;
@@ -7901,7 +8046,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
          int pc2line_len;
          uint8_t *pc2line_buf;
          char *source;
-@@ -766,6 +861,29 @@
+@@ -766,6 +878,29 @@
      JSValue uninitialized_vars; /* hidden object containing the list of uninitialized variables */
  } JSGlobalObject;
  
@@ -7931,7 +8076,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  typedef struct JSAsyncFunctionState {
      JSGCObjectHeader header;
      JSValue this_val; /* 'this' argument */
-@@ -774,6 +892,16 @@
+@@ -774,6 +909,19 @@
      BOOL is_completed; /* TRUE if the function has returned. The stack
                            frame is no longer valid */
      JSValue resolving_funcs[2]; /* only used in JS async functions */
@@ -7945,10 +8090,13 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
 +    BOOL await_inline;                  /* V2: the next await of this function is already arranged */
 +    struct JSAsyncFunctionState *awaiter; /* V2: the async function whose 'await' waits for this call
 +                                            (no promise was made); one reference */
++#if JS_ASYNC_STATE_CACHE > 0
++    uint32_t alloc_size;                /* qjsx X: bytes of the block (the state and its frame) */
++#endif
      JSStackFrame frame;
      /* arg_buf, var_buf, stack_buf and var_refs follow */
  } JSAsyncFunctionState;
-@@ -921,14 +1049,6 @@
+@@ -921,14 +1069,6 @@
      JSValue private_value; /* private value for C modules */
  };
  
@@ -7963,7 +8111,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  typedef struct JSProperty {
      union {
          JSValue value;      /* JS_PROP_NORMAL */
-@@ -1232,6 +1352,9 @@
+@@ -1232,6 +1372,9 @@
  
  #define JS_CALL_FLAG_COPY_ARGV   (1 << 1)
  #define JS_CALL_FLAG_GENERATOR   (1 << 2)
@@ -7973,7 +8121,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  
  /* argument of OP_special_object */
  typedef enum {
-@@ -1349,7 +1472,12 @@
+@@ -1349,7 +1492,12 @@
      BC_TAG_OBJECT_REFERENCE,
  } BCTagEnum;
  
@@ -7987,7 +8135,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  
  #define JS_NEW_CTOR_NO_GLOBAL   (1 << 0) /* don't create a global binding */
  #define JS_NEW_CTOR_PROTO_CLASS (1 << 1) /* the prototype class is 'class_id' instead of JS_CLASS_OBJECT */
-@@ -1607,9 +1735,27 @@
+@@ -1607,9 +1755,27 @@
      return (JSAtomStruct *)(((uintptr_t)v << 1) | 1);
  }
  
@@ -8015,7 +8163,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
      if (--js_rc(str)->ref_count <= 0) {
          if (str->atom_type) {
              JS_FreeAtomStruct(rt, str);
-@@ -1750,6 +1896,18 @@
+@@ -1750,6 +1916,18 @@
      }
  }
  
@@ -8035,7 +8183,7 @@ diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-internal.h engine/qjsx
  static force_inline BOOL can_extend_fast_array(JSObject *p)
  {
 diff -ruN --strip-trailing-cr build/qjsx-baseline/quickjs-opcode.h engine/qjsx/quickjs-opcode.h
---- build/qjsx-baseline/quickjs-opcode.h	2026-11-17 10:48:11.533206000 +0100
+--- build/qjsx-baseline/quickjs-opcode.h	2026-11-17 11:26:46.479806100 +0100
 +++ engine/qjsx/quickjs-opcode.h	2026-11-11 16:04:41.534423300 +0100
 @@ -256,6 +256,8 @@
  DEF(is_undefined_or_null, 1, 1, 1, none)

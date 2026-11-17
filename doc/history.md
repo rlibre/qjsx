@@ -3,6 +3,66 @@
 A fixed defect leaves `known-bugs.md` and arrives here, with what was done. The most recent
 one comes first.
 
+## 2026-11-17
+
+### A request of a new session answered with an answer of the previous one (USB links)
+
+- **Defect.** The agent keeps its last answer (and the debugger's) with the number of its
+  request, to send it again when the same number comes back (an answer lost on the way).
+  It forgot them only when a new host connected (`Agent::attach`). On a USB link (RP2350,
+  Teensy 4.0) the link outlives the sessions of the tool, and every session numbers its
+  requests from 1: a request of the next session that fell on a kept number got the old
+  answer and was not run. Found on the RP2350: after a session HELLO (1), DEBUG_ATTACH (2),
+  DEBUG_DETACH (3), the UPLOAD_BEGIN (3) of the next session got the answer of
+  DEBUG_DETACH, and UPLOAD_CHUNK answered "no upload in progress". The ESP32 escaped it:
+  opening its serial port restarts the chip.
+- **Fix.** A HELLO opens a session: `Agent::onMessage` forgets the kept answers
+  (`Agent::forgetAnswers`, under the agent's mutex) before the check for a repeated
+  request, and a HELLO is always run (running a repeated HELLO again is harmless).
+  `common/agent/agent.cpp`, `agent.h`. Checked on the RP2350: a debugger session, then the
+  proxy suite: 33/33.
+
+### The RP2350 hung after a few uploads (pico_sync interop of the FreeRTOS port)
+
+- **Defect.** After a random number of sessions (4 to 6 uploads, or a debugger session
+  then two others) the board stopped: no answer, USB port stuck on the PC. Measured with a
+  firmware built with `QJSX_FLASH_TRACE` (watchdog of 3 s fed by a task of core 0, records
+  kept across its restart): every flash operation had completed (`flash_safe_execute`
+  returned 0), no hard fault, no stack overflow (USB reader 636 words free of 1024, JS task
+  11131 of 12288), the USB reader was waiting; when the feeder stopped, core 0 ran its idle
+  task although the feeder was ready, and core 1 ran the FreeRTOS timer task ("Tmr Svc")
+  for more than 2 s: the scheduler stayed suspended.
+- **Cause.** With `configSUPPORT_PICO_SYNC_INTEROP` (FreeRTOS-Kernel V11.3.3, community
+  port `GCC/RP2350_ARM_NTZ`, `port.c`), every pico_sync object of the SDK shares one event
+  group, and a release from an interrupt (`vPortLockInternalSpinUnlockWithNotify` ->
+  `xEventGroupSetBitsFromISR`) is deferred to the timer task. Our USB callback released a
+  pico_sync semaphore from the USB interrupt at each received block; the SDK's stdio also
+  uses pico_sync. The exact place where the timer task blocks was not found; the path is
+  the port's. REPRODUCED outside qjsx (`temp/freertos-repro/`, about 200 lines: ISR
+  `sem_release` + task `sem_acquire_timeout_ms` + `stdio_get_until` on core 0, `printf`
+  on core 1, `flash_safe_execute` in a loop, host sending): hangs in 2-3 s with the
+  interop; no hang without the flash loop, without host traffic, or with the interop off
+  and task notifications. Draft issue for FreeRTOS-Kernel-Community-Supported-Ports:
+  `temp/freertos-port-issue.md` (not posted).
+- **Fix.** `ports/rp2350/main/board_rp2350.cpp`: the USB callback wakes the reader by a
+  FreeRTOS task notification (`vTaskNotifyGiveFromISR`, `ulTaskNotifyTake` with the same
+  20 ms); `FreeRTOSConfig.h`: `configSUPPORT_PICO_SYNC_INTEROP` 0 (the SDK's mutexes wait
+  actively, briefly). Checked: 24 proxy suites in a row, then debugger / proxy / cdp twice
+  without restart (72/72, 33/33, 53/53), then 8 proxy suites on the normal firmware.
+- **Kept**: the measure `QJSX_FLASH_TRACE` (CMake option of the RP2350 port, OFF): watchdog,
+  last flash step, USB reader phase, hard fault PC / LR, least free stacks, tasks running
+  on each core when the feeder stopped, printed after the restart.
+
+### The RP2350 firmware did not build
+
+- **Defect.** `RESTART_FLUSH_MS` was defined both by `common/board/board.h` (since
+  `device/board`, 2026-11-13) and by `board_rp2350.cpp`; `board::dataCapacity()` and
+  `platform::randomBytes()` were missing.
+- **Fix.** The port's constant renamed `USB_FLUSH_DELAY_MS` (100 ms, unchanged);
+  `dataCapacity()` returns 0 (no file system); `randomBytes()` draws from `pico_rand`
+  (seeded by the TRNG of the RP2350; `pico_rand` linked). Flashed: debugger 72/72, proxy
+  33/33, cdp 53/53 on a board just restarted.
+
 ## 2026-11-16
 
 ### Unclear report of an out of memory, and errors reported twice

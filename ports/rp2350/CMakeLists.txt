@@ -127,6 +127,11 @@ target_compile_definitions(qjsx PRIVATE
 
 # measures only: the JS heap in SRAM even when the board has PSRAM, to compare
 # the speed of JS with and without it (-D QJSX_JS_HEAP_IN_SRAM=ON)
+option(QJSX_FLASH_TRACE "watchdog + trace of the flash operations of a hung board (measure, temporary)" OFF)
+if(QJSX_FLASH_TRACE)
+    target_compile_definitions(qjsx PRIVATE QJSX_FLASH_TRACE=1)
+endif()
+
 option(QJSX_JS_HEAP_IN_SRAM "JS heap in SRAM, PSRAM left unused (measures)" OFF)
 if(QJSX_JS_HEAP_IN_SRAM)
     target_compile_definitions(qjsx PRIVATE QJSX_JS_HEAP_IN_SRAM=1)
@@ -135,6 +140,7 @@ endif()
 target_link_libraries(qjsx
     qjsx-engine-target
     pico_stdlib
+    pico_rand
     pico_flash
     hardware_flash
     hardware_watchdog

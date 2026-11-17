@@ -95,11 +95,15 @@ set(QJSX_DEFINES
 # for a board whose JS heap is small (no PSRAM): QuickJS's arenas of small
 # blocks are 1 KB instead of 4 KB and hold the blocks up to 128 bytes instead
 # of 512 (an arena per block size in use: 4 KB ones left half of the heap
-# empty); 4 empty arenas are kept for the next request (engine-changes.md Q)
+# empty); 4 empty arenas are kept for the next request (engine-changes.md Q);
+# the states of async functions (above 128 bytes: the heap of the board, not
+# the arenas) are kept for the next call, 8 of them, 2 KB in all (X)
 set(QJSX_SMALL_HEAP_DEFINES
     "JS_MALLOC_ARENA_SIZE=1024"
     "JS_MALLOC_MAX_SMALL_SIZE=128"
-    "JS_MALLOC_ARENA_CACHE=4")
+    "JS_MALLOC_ARENA_CACHE=4"
+    "JS_ASYNC_STATE_CACHE=8"
+    "JS_ASYNC_STATE_CACHE_BYTES=2048")
 
 # measure (temporary, 2026-11-13): sizes of the blocks of the JS heap, global
 # __allocHistogram(); idf.py -DQJSX_ALLOC_HISTOGRAM=ON (stays in the CMake cache)

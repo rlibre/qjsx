@@ -46,8 +46,12 @@
 #define configNUM_THREAD_LOCAL_STORAGE_POINTERS 5
 #define configUSE_TASK_NOTIFICATIONS            1
 
-// pico-sdk mutexes / semaphores / sleeps block the FreeRTOS task, not the core
-#define configSUPPORT_PICO_SYNC_INTEROP         1
+// pico-sdk sleeps block the FreeRTOS task, not the core. The pico_sync interop
+// is OFF (2026-11-17): it makes every pico_sync object of the SDK (stdio's
+// mutex...) share one event group, and defers a release from an interrupt to
+// the timer task: the board hung there (doc/history.md). Without it the SDK's
+// mutexes wait actively, briefly; our own code uses FreeRTOS primitives
+#define configSUPPORT_PICO_SYNC_INTEROP         0
 #define configSUPPORT_PICO_TIME_INTEROP         1
 
 // ### Memory ##################################################################

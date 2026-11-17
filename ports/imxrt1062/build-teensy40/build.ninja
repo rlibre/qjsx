@@ -50,7 +50,7 @@ cmake_ninja_workdir = C$:/Sandbox/espjs/ports/imxrt1062/build-teensy40/
 build cmake_object_order_depends_target_qjsx-engine-target: phony || CMakeFiles/qjsx-engine-target.dir
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/array.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/array.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\array.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -58,7 +58,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/ar
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/arraybuffer.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/arraybuffer.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\arraybuffer.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -66,7 +66,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/ar
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/atomics.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/atomics.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\atomics.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -74,7 +74,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/at
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/base64.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/base64.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\base64.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -82,7 +82,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/ba
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/bigint.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/bigint.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\bigint.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -90,7 +90,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/bi
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/dataview.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/dataview.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\dataview.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -98,7 +98,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/da
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/date.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/date.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\date.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -106,7 +106,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/da
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/function.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/function.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\function.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -114,7 +114,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/fu
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/global.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/global.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\global.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -122,7 +122,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/gl
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/iterator.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/iterator.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\iterator.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -130,7 +130,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/it
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/json.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/json.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\json.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -138,7 +138,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/js
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/mapset.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/mapset.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\mapset.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -146,7 +146,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/ma
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/math.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/math.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\math.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -154,7 +154,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/ma
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/number.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/number.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\number.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -162,7 +162,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/nu
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/object.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/object.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\object.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -170,7 +170,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/ob
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/promise.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/promise.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\promise.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -178,7 +178,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/pr
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/proxy.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/proxy.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\proxy.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -186,7 +186,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/pr
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/regexp.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/regexp.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\regexp.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -194,7 +194,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/re
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/string.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/string.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\string.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -202,7 +202,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/st
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/symbol.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/symbol.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\symbol.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -210,7 +210,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/sy
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/typedarray.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/typedarray.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\typedarray.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -218,7 +218,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/ty
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/weakref.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/builtins/weakref.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins\weakref.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -226,7 +226,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/builtins/we
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\builtins
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/bytecode/opcodes.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/bytecode/opcodes.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\bytecode\opcodes.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -234,7 +234,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/bytecode/op
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\bytecode
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/bytecode/reader.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/bytecode/reader.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\bytecode\reader.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -242,7 +242,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/bytecode/re
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\bytecode
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/bytecode/writer.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/bytecode/writer.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\bytecode\writer.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -250,7 +250,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/bytecode/wr
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\bytecode
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/atoms.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/atoms.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\atoms.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -258,7 +258,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/atoms.
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/bigint-arith.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/bigint-arith.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\bigint-arith.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -266,7 +266,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/bigint
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/cfunc.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/cfunc.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\cfunc.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -274,7 +274,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/cfunc.
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/closures.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/closures.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\closures.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -282,7 +282,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/closur
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/conversions.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/conversions.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\conversions.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -290,7 +290,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/conver
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/debug.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/debug.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\debug.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -298,7 +298,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/debug.
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/errors.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/errors.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\errors.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -306,7 +306,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/errors
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/gc.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/gc.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\gc.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -314,7 +314,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/gc.c.o
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/generators.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/generators.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\generators.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -322,7 +322,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/genera
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/interpreter.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/interpreter.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\interpreter.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno -fira-region=one
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -330,7 +330,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/interp
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/intrinsics.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/intrinsics.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\intrinsics.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -338,7 +338,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/intrin
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/iteration.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/iteration.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\iteration.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -346,7 +346,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/iterat
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/modules.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/modules.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\modules.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -354,7 +354,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/module
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/objects.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/objects.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\objects.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -362,7 +362,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/object
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/operators.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/operators.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\operators.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -370,7 +370,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/operat
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/package-atoms.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/package-atoms.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\package-atoms.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -378,7 +378,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/packag
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/print.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/print.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\print.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -386,7 +386,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/print.
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/properties.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/properties.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\properties.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -394,7 +394,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/proper
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/rom-atoms.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/rom-atoms.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\rom-atoms.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -402,7 +402,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/rom-at
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/runtime.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/runtime.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\runtime.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -410,7 +410,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/runtim
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/strings.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/core/strings.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core\strings.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -418,7 +418,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/core/string
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\core
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/cutils.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/cutils.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\cutils.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -426,7 +426,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/cutils.c.ob
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/dtoa.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/dtoa.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\dtoa.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -434,7 +434,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/dtoa.c.obj:
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/libregexp.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/libregexp.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\libregexp.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx
@@ -442,7 +442,7 @@ build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/libregexp.c
   OBJECT_FILE_DIR = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx
 
 build CMakeFiles/qjsx-engine-target.dir/C_/Sandbox/espjs/engine/qjsx/libunicode.c.obj: C_COMPILER__qjsx-engine-target_unscanned_Release C$:/Sandbox/espjs/engine/qjsx/libunicode.c || cmake_object_order_depends_target_qjsx-engine-target
-  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
+  DEFINES = -DCONFIG_VERSION=\"2026-06-04\" -DCPU_MIMXRT1062DVL6A -DJS_ASYNC_STATE_CACHE=8 -DJS_ASYNC_STATE_CACHE_BYTES=2048 -DJS_MALLOC_ARENA_CACHE=4 -DJS_MALLOC_ARENA_SIZE=1024 -DJS_MALLOC_MAX_SMALL_SIZE=128 -DQJSX_NATIVE_PROFILER -DQJSX_NO_COMPILER -DXIP_BOOT_HEADER_ENABLE=0 -DXIP_EXTERNAL_FLASH=1 -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_NONCACHEDATA -D__STARTUP_INITIALIZE_RAMFUNCTION
   DEP_FILE = CMakeFiles\qjsx-engine-target.dir\C_\Sandbox\espjs\engine\qjsx\libunicode.c.obj.d
   FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -O3 -DNDEBUG -std=gnu11 -std=gnu11 -Wno-incompatible-pointer-types -Wno-format -D_GNU_SOURCE -fwrapv -Wno-array-bounds -Wno-format-truncation -Wno-infinite-recursion -Wno-error -O2 -ffunction-sections -fdata-sections -fno-math-errno
   INCLUDES = -IC:/Sandbox/espjs/ports/freertos/compat -IC:/Sandbox/espjs/engine/qjsx

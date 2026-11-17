@@ -483,6 +483,7 @@ void js_async_function_await_enqueue(JSContext *ctx, JSAsyncFunctionState *s,
                                      JSValue value, BOOL is_throw);
 int js_async_function_await_job(JSContext *ctx, JSJobEntry *e);
 void js_async_function_await_job_free(JSRuntime *rt, JSJobEntry *e);
+void js_async_state_cache_flush(JSRuntime *rt);   /* qjsx: engine change X */
 void js_async_generator_finalizer(JSRuntime *rt, JSValue obj);
 void js_async_generator_mark(JSRuntime *rt, JSValueConst val,
                                     JS_MarkFunc *mark_func);

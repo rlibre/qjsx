@@ -754,6 +754,37 @@ keeps the old name: `C:\Sandbox\espjs`.
   taken as without effect. Measured on the Teensy: 99 functions + a class unused 98.7 ->
   65.3 KB; `import { Mutex } from "stdlib/tasks"` 82.3 -> 67.0 KB. No option to turn it
   off. Delay-load of functions (user's idea, point 4): after this and step 3 of S.
+  On the YD (2026-11-17): 99 functions + a class unused 175.6 -> 146.8 KB; Mutex alone
+  156.8 -> 146.8 KB. V on the YD: `await f()` 233 -> 7.75 us (old firmware of unknown
+  date), depth 3 2103 -> 1028 B.
+- Native profiler (agreed by the user 2026-11-17, DONE the same day, Teensy only):
+  `QJSX_NATIVE_PROFILER` (ports/cmake/qjsx.cmake; `tools/teensy.ps1 configure
+  -DQJSX_NATIVE_PROFILER=ON`, stays in the CMake cache: ON on the Teensy at the moment),
+  globals `__nativeProfileStart(intervalUs, capacity)` / `__nativeProfileStop()` ->
+  bytes of a Uint32Array of PCs (markers 0xFFFFFFF0 another task, 0xFFFFFFF1 an
+  interrupt); `platform::nativeProfileStart/Stop` (platform.h);
+  `ports/imxrt1062/main/native_profiler_imxrt1062.cpp` (GPT1, PC stacked on the JS
+  task's PSP when RETTOBASE). Names: `temp/awaitprofile/resolve.js` with the linker map
+  `build-teensy40/qjsx.map` (nothing read outside the project). FOUND with it: the ×167
+  of the await on the Teensy was the 32 KB instruction cache of the flash (16.75 / 6.20 /
+  3.50 us depending on the layout; `doc/known-bugs.md` "Speed of the Teensy 4.0"); an
+  EXPERIMENT (async path, region_heap.cpp, memset in the ITCM) is in the sources, marked;
+  the user keeps it for now.
+- Stock of states of async functions (engine change X, agreed by the user 2026-11-17,
+  DONE the same day): `JS_ASYNC_STATE_CACHE` 8 / `JS_ASYNC_STATE_CACHE_BYTES` 2048 in
+  `QJSX_SMALL_HEAP_DEFINES` (boards without PSRAM; 0 = QuickJS's original, PC default);
+  reuse by exact size, oldest out first, flushed when a large allocation fails and in
+  JS_FreeRuntime. Teensy: `await f()` 3.50 -> 2.80 us. Tested on the PC by building the
+  engine with `CFLAGS="-DJS_ASYNC_STATE_CACHE=8 -DJS_MALLOC_ARENA_SIZE=1024
+  -DJS_MALLOC_MAX_SMALL_SIZE=128 -DJS_MALLOC_ARENA_CACHE=4"` (delete the engine's obj
+  folder before and after) and `QJSX_JS_HEAP_MB=64`. Client board (2026-11-17, same
+  firmware without / with X, `temp/awaitbench-small`): `await f()` 10.25 -> 7.20 us,
+  `await g()` 19.70 -> 13.80 us, hand-over 192 -> 133 us. Its own program was replaced by
+  the benchmarks (allowed, not restored).
+- Coding rules pass (user, 2026-11-17): `doc/coding-rules.md` (now C / C++ / JS / TS; the
+  French copy at the root removed) applied by 9 agents to common/, host/, ports/, the tool
+  JS, stdlib, the twin (JS and TS), not tests/; behaviour unchanged (strip comparison);
+  what they found and did not fix: `doc/known-bugs.md` "Found by the coding rules pass".
 - `stdlib/tasks` (agreed by the user 2026-11-16, IMPLEMENTED the same day; goal: write the
   small tasks of a board as sequential code that waits, not state machines called by
   timers): `task(name, async self => ...)` -> Task (`name`, `stopped`, `stop()` asks and
@@ -1114,7 +1145,15 @@ in the include path (no two headers share a name; keep it so).
   architecture.md 5.5): builds (740 KB); FLASHED and TRIED 2026-11-12 (COM13 on the user's PC;
   the board had CircuitPython 9.2.2, overwritten with the user's agreement, no backup): deploy,
   run in place, 4 MB buffer in PSRAM, debugger 72/72, proxy 30/30, cdp 53/53. SLOW: 10^6 loop
-  turns 4 s, 20,000 objects 3 s (known-bugs.md "RP2350 port"):
+  turns 4 s, 20,000 objects 3 s (known-bugs.md "RP2350 port").
+  2026-11-17 (doc/history.md): builds again (`USB_FLUSH_DELAY_MS`, `dataCapacity()` 0,
+  `randomBytes()` via `pico_rand`); HUNG after a few uploads: FreeRTOS port's pico_sync
+  interop (one event group, ISR releases deferred to the timer task) -> USB reader woken by
+  a task notification and `configSUPPORT_PICO_SYNC_INTEROP` 0 (NEVER use pico_sync
+  objects in our RP2350 code); measure option `QJSX_FLASH_TRACE` (CMake, OFF: watchdog +
+  records kept across its restart); agent: a HELLO forgets the kept answers (USB links).
+  Then debugger 72/72, proxy 33/33, cdp 53/53, 24 uploads in a row. Not done: device/board,
+  /data, X off (PSRAM board):
   - toolchain installed BY HAND in `C:\tools\pico` (user's choice; not the VS Code Pico
     extension): pico-sdk 2.x (+ TinyUSB), FreeRTOS-Kernel with the RP2350 Cortex-M33 port,
     Arm GNU Toolchain (arm-none-eabi-gcc), ninja, picotool; each download asked first;

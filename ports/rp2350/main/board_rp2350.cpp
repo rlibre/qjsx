@@ -30,8 +30,8 @@
 #include "hardware/flash.h"
 #include "hardware/watchdog.h"
 #include "pico/flash.h"
-#include "pico/sem.h"
 #include "pico/stdio.h"
+#include "pico/time.h"
 
 // end of the firmware in the flash (address), from the pico-sdk's linker script
 extern "C" char __flash_binary_end;
@@ -59,6 +59,25 @@ bool psramReady = false;        // startMemory() set it up
 // between two sectors.
 const uint32_t FLASH_TIMEOUT_MS = 1000;   // to hold the other core
 
+#ifdef QJSX_FLASH_TRACE
+// Measure (temporary, QJSX_FLASH_TRACE): where a flash operation stops when
+// the board hangs. The scratch registers of the watchdog survive the restart
+// it makes (main.cpp prints them): 0 the operation count, 1 the step (10 + n:
+// erase, 20 + n: program; n = 0 entering flash_safe_execute, 1 in the
+// operation, 2 operation done, 3 back from flash_safe_execute), 2 the last
+// result of flash_safe_execute.
+const int TRACE_COUNT = 0;
+const int TRACE_STEP = 1;
+const int TRACE_RESULT = 2;
+
+/**
+ * Records a step (a plain register write: allowed from RAM, interrupts off).
+ */
+inline void __not_in_flash_func(traceStep)(uint32_t step) {
+    watchdog_hw->scratch[TRACE_STEP] = step;
+}
+#endif
+
 // One erase (data nullptr) or program, run by flash_safe_execute().
 struct FlashOperation {
     uint32_t       offset;   // from the start of the flash
@@ -71,11 +90,35 @@ struct FlashOperation {
  */
 void __no_inline_not_in_flash_func(runFlashOperation)(void *parameter) {
     FlashOperation *operation = (FlashOperation *)parameter;
+#ifdef QJSX_FLASH_TRACE
+    uint32_t base = operation->data == nullptr ? 10 : 20;
+    traceStep(base + 1);
+#endif
     if (operation->data == nullptr) {
         flash_range_erase(operation->offset, operation->size);
     } else {
         flash_range_program(operation->offset, operation->data, operation->size);
     }
+#ifdef QJSX_FLASH_TRACE
+    traceStep(base + 2);
+#endif
+}
+
+/**
+ * Runs one FlashOperation through flash_safe_execute(); PICO_OK when done.
+ */
+int safeFlashOperation(FlashOperation *operation) {
+#ifdef QJSX_FLASH_TRACE
+    uint32_t base = operation->data == nullptr ? 10 : 20;
+    watchdog_hw->scratch[TRACE_COUNT] = watchdog_hw->scratch[TRACE_COUNT] + 1;
+    traceStep(base);
+#endif
+    int result = flash_safe_execute(&runFlashOperation, operation, FLASH_TIMEOUT_MS);
+#ifdef QJSX_FLASH_TRACE
+    watchdog_hw->scratch[TRACE_RESULT] = (uint32_t)result;
+    traceStep(base + 3);
+#endif
+    return result;
 }
 
 /**
@@ -83,7 +126,7 @@ void __no_inline_not_in_flash_func(runFlashOperation)(void *parameter) {
  */
 bool eraseSector(uint32_t offset) {
     FlashOperation operation = { offset, nullptr, FLASH_SECTOR_SIZE };
-    return flash_safe_execute(&runFlashOperation, &operation, FLASH_TIMEOUT_MS) == PICO_OK;
+    return safeFlashOperation(&operation) == PICO_OK;
 }
 
 /**
@@ -91,7 +134,7 @@ bool eraseSector(uint32_t offset) {
  */
 bool programPage(uint32_t offset, const uint8_t *page) {
     FlashOperation operation = { offset, page, FLASH_PAGE_SIZE };
-    return flash_safe_execute(&runFlashOperation, &operation, FLASH_TIMEOUT_MS) == PICO_OK;
+    return safeFlashOperation(&operation) == PICO_OK;
 }
 
 // ### Package storage #########################################################
@@ -407,7 +450,7 @@ FlashStorage storage;   // the package storage of the board
 
 const size_t   READ_BLOCK = 256;          // bytes read at once by the reader task
 const uint32_t READ_TIMEOUT_MS = 20;      // the reader looks again after that much silence
-const uint32_t RESTART_FLUSH_MS = 100;    // restart() lets the USB send the answer that long
+const uint32_t USB_FLUSH_DELAY_MS = 100;  // restart() lets the USB send the answer that long
 
 // agent::Link over the USB CDC port. The console (printf) shares it: every
 // write goes through stdio_put_string(), which holds the stdout lock for the
@@ -426,14 +469,32 @@ public:
 
 UsbLink usbLink;                       // the agent's link
 agent::Agent *linkedAgent = nullptr;   // set by startLinks, before the reader starts
-semaphore_t received;                  // released by the USB stack when bytes arrive
+// The reader task, set by itself when it starts; the USB callback notifies it.
+// A FreeRTOS notification, not a pico_sync semaphore: the port's pico_sync
+// interop defers a release from an interrupt to the timer task, through one
+// event group shared by every pico_sync object, which hung the board
+// (doc/history.md, 2026-11-17).
+TaskHandle_t volatile readerTask = nullptr;
 
 /**
  * Called by the USB stack (interrupt or task) when bytes arrive: wakes the
- * reader.
+ * reader, once it runs (it reads at its start anyway).
  */
 void onCharsAvailable(void *) {
-    sem_release(&received);
+    TaskHandle_t reader = readerTask;
+    if (reader == nullptr) {
+        return;
+    }
+
+    // from an interrupt: the ISR variant, and a switch if the reader should run
+    if (portCHECK_IF_IN_ISR()) {
+        BaseType_t higherPriorityWoken = pdFALSE;
+        vTaskNotifyGiveFromISR(reader, &higherPriorityWoken);
+        portYIELD_FROM_ISR(higherPriorityWoken);
+        return;
+    }
+
+    xTaskNotifyGive(reader);
 }
 
 /**
@@ -445,17 +506,29 @@ void usbReader(void *) {
     // on the heap: task stacks are small
     uint8_t *buffer = (uint8_t *)memory::allocate(READ_BLOCK);
 
+    // from now on the USB callback wakes this task
+    readerTask = xTaskGetCurrentTaskHandle();
+
     for (;;) {
         // woken by the USB stack, or after READ_TIMEOUT_MS anyway
-        sem_acquire_timeout_ms(&received, READ_TIMEOUT_MS);
+#ifdef QJSX_FLASH_TRACE
+        watchdog_hw->scratch[3] = 1;   // measure: waiting
+#endif
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(READ_TIMEOUT_MS));
 
         // take everything there is, without waiting
         for (;;) {
+#ifdef QJSX_FLASH_TRACE
+            watchdog_hw->scratch[3] = 2;   // measure: reading the USB
+#endif
             int got = stdio_get_until((char *)buffer, (int)READ_BLOCK, get_absolute_time());
             if (got <= 0) {
                 break;
             }
 
+#ifdef QJSX_FLASH_TRACE
+            watchdog_hw->scratch[3] = 3;   // measure: the agent handles it
+#endif
             linkedAgent->receive(buffer, (size_t)got);
         }
     }
@@ -530,6 +603,13 @@ const char *dataDirectory() {
 }
 
 /**
+ * No file system yet: no capacity to report.
+ */
+uint64_t dataCapacity() {
+    return 0;
+}
+
+/**
  * Restarts the chip: does not return. The answer to RESET was only queued
  * for the USB: let it leave first. The host then sees the USB port go away
  * and come back.
@@ -537,7 +617,7 @@ const char *dataDirectory() {
 bool restart() {
     // the pending output to the USB, then a little time for it to leave
     stdio_flush();
-    vTaskDelay(pdMS_TO_TICKS(RESTART_FLUSH_MS));
+    vTaskDelay(pdMS_TO_TICKS(USB_FLUSH_DELAY_MS));
 
     // the watchdog restarts the chip at once; wait for it
     watchdog_reboot(0, 0, 0);
@@ -623,8 +703,7 @@ void closePackage(const uint8_t *) {
  * (the port stays, even when no host has it open), its reader task on core 0.
  */
 bool startLinks(agent::Agent *agent) {
-    // the wake-up of the reader, set before the USB stack may call it
-    sem_init(&received, 0, 1);
+    // the wake-up of the reader (it does nothing until the reader runs)
     stdio_set_chars_available_callback(&onCharsAvailable, nullptr);
 
     // the agent talks through it from now on
