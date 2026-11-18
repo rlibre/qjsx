@@ -195,6 +195,9 @@ inline const char *errnoName(int error) {
         case ENXIO: {
             return "ENXIO";
         }
+        case ENODEV: {
+            return "ENODEV";
+        }
         case EBADF: {
             return "EBADF";
         }

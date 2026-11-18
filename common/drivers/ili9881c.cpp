@@ -1,0 +1,293 @@
+/*          _
+ *  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+ * / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
+ * \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+ *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+ */
+
+// The ILI9881C (ili9881c.h): the tables of its panels, and its set-up.
+#include "ili9881c.h"
+
+#include "platform.h"
+
+namespace drivers {
+namespace ili9881c {
+
+namespace {
+
+// Commands every such controller has (MIPI DCS).
+const uint8_t SLEEP_OUT = 0x11;
+const uint8_t DISPLAY_ON = 0x29;
+const uint8_t MEMORY_ACCESS = 0x36;
+const uint8_t PIXEL_FORMAT = 0x3A;
+
+const uint8_t PIXEL_FORMAT_16_BITS = 0x55;  // 5 bits of red, 6 of green, 5 of blue
+const int     AFTER_SLEEP_OUT_MS = 120;     // the controller wakes up
+const int     AFTER_DISPLAY_ON_MS = 20;
+
+} // namespace
+
+/*
+ * The table of the panel of the M5Stack Tab5 (first version, ILI9881C).
+ *
+ * Its values are taken as they are from M5Stack's code for the Tab5:
+ * https://github.com/m5stack/M5Tab5-UserDemo, file
+ * platforms/tab5/components/m5stack_tab5/include/bsp/ili9881_init_data.c
+ * (table tab5_lcd_ili9881c_specific_init_code_default), read 2026-11-18.
+ * That component is under the Apache License, Version 2.0 (its LICENSE
+ * file; https://www.apache.org/licenses/LICENSE-2.0); its files carry
+ * "SPDX-FileCopyrightText: 2024 Espressif Systems (Shanghai) CO LTD". Only
+ * the values are reused, written here in the form of this file; they set up
+ * the glass of that panel (power, timings, gamma) and cannot be derived from
+ * the controller's datasheet. Changed: nothing (the commands without
+ * parameters of the end, 0x35, 0xFE and 0x29, were sent without data there
+ * too).
+ */
+const Command TAB5_COMMANDS[] = {
+    // page 1: 2 lanes
+    { 0xFF, 3, { 0x98, 0x81, 0x01 } },
+    { 0xB7, 1, { 0x03 } },
+
+    // page 3
+    { 0xFF, 3, { 0x98, 0x81, 0x03 } },
+    { 0x01, 1, { 0x00 } },
+    { 0x02, 1, { 0x00 } },
+    { 0x03, 1, { 0x73 } },
+    { 0x04, 1, { 0x00 } },
+    { 0x05, 1, { 0x00 } },
+    { 0x06, 1, { 0x08 } },
+    { 0x07, 1, { 0x00 } },
+    { 0x08, 1, { 0x00 } },
+    { 0x09, 1, { 0x1B } },
+    { 0x0A, 1, { 0x01 } },
+    { 0x0B, 1, { 0x01 } },
+    { 0x0C, 1, { 0x0D } },
+    { 0x0D, 1, { 0x01 } },
+    { 0x0E, 1, { 0x01 } },
+    { 0x0F, 1, { 0x26 } },
+    { 0x10, 1, { 0x26 } },
+    { 0x11, 1, { 0x00 } },
+    { 0x12, 1, { 0x00 } },
+    { 0x13, 1, { 0x02 } },
+    { 0x14, 1, { 0x00 } },
+    { 0x15, 1, { 0x00 } },
+    { 0x16, 1, { 0x00 } },
+    { 0x17, 1, { 0x00 } },
+    { 0x18, 1, { 0x00 } },
+    { 0x19, 1, { 0x00 } },
+    { 0x1A, 1, { 0x00 } },
+    { 0x1B, 1, { 0x00 } },
+    { 0x1C, 1, { 0x00 } },
+    { 0x1D, 1, { 0x00 } },
+    { 0x1E, 1, { 0x40 } },
+    { 0x1F, 1, { 0x00 } },
+    { 0x20, 1, { 0x06 } },
+    { 0x21, 1, { 0x01 } },
+    { 0x22, 1, { 0x00 } },
+    { 0x23, 1, { 0x00 } },
+    { 0x24, 1, { 0x00 } },
+    { 0x25, 1, { 0x00 } },
+    { 0x26, 1, { 0x00 } },
+    { 0x27, 1, { 0x00 } },
+    { 0x28, 1, { 0x33 } },
+    { 0x29, 1, { 0x03 } },
+    { 0x2A, 1, { 0x00 } },
+    { 0x2B, 1, { 0x00 } },
+    { 0x2C, 1, { 0x00 } },
+    { 0x2D, 1, { 0x00 } },
+    { 0x2E, 1, { 0x00 } },
+    { 0x2F, 1, { 0x00 } },
+    { 0x30, 1, { 0x00 } },
+    { 0x31, 1, { 0x00 } },
+    { 0x32, 1, { 0x00 } },
+    { 0x33, 1, { 0x00 } },
+    { 0x34, 1, { 0x00 } },
+    { 0x35, 1, { 0x00 } },
+    { 0x36, 1, { 0x00 } },
+    { 0x37, 1, { 0x00 } },
+    { 0x38, 1, { 0x00 } },
+    { 0x39, 1, { 0x00 } },
+    { 0x3A, 1, { 0x00 } },
+    { 0x3B, 1, { 0x00 } },
+    { 0x3C, 1, { 0x00 } },
+    { 0x3D, 1, { 0x00 } },
+    { 0x3E, 1, { 0x00 } },
+    { 0x3F, 1, { 0x00 } },
+    { 0x40, 1, { 0x00 } },
+    { 0x41, 1, { 0x00 } },
+    { 0x42, 1, { 0x00 } },
+    { 0x43, 1, { 0x00 } },
+    { 0x44, 1, { 0x00 } },
+
+    { 0x50, 1, { 0x01 } },
+    { 0x51, 1, { 0x23 } },
+    { 0x52, 1, { 0x45 } },
+    { 0x53, 1, { 0x67 } },
+    { 0x54, 1, { 0x89 } },
+    { 0x55, 1, { 0xAB } },
+    { 0x56, 1, { 0x01 } },
+    { 0x57, 1, { 0x23 } },
+    { 0x58, 1, { 0x45 } },
+    { 0x59, 1, { 0x67 } },
+    { 0x5A, 1, { 0x89 } },
+    { 0x5B, 1, { 0xAB } },
+    { 0x5C, 1, { 0xCD } },
+    { 0x5D, 1, { 0xEF } },
+
+    { 0x5E, 1, { 0x11 } },
+    { 0x5F, 1, { 0x02 } },
+    { 0x60, 1, { 0x00 } },
+    { 0x61, 1, { 0x07 } },
+    { 0x62, 1, { 0x06 } },
+    { 0x63, 1, { 0x0E } },
+    { 0x64, 1, { 0x0F } },
+    { 0x65, 1, { 0x0C } },
+    { 0x66, 1, { 0x0D } },
+    { 0x67, 1, { 0x02 } },
+    { 0x68, 1, { 0x02 } },
+    { 0x69, 1, { 0x02 } },
+    { 0x6A, 1, { 0x02 } },
+    { 0x6B, 1, { 0x02 } },
+    { 0x6C, 1, { 0x02 } },
+    { 0x6D, 1, { 0x02 } },
+    { 0x6E, 1, { 0x02 } },
+    { 0x6F, 1, { 0x02 } },
+    { 0x70, 1, { 0x02 } },
+    { 0x71, 1, { 0x02 } },
+    { 0x72, 1, { 0x02 } },
+    { 0x73, 1, { 0x05 } },
+    { 0x74, 1, { 0x01 } },
+    { 0x75, 1, { 0x02 } },
+    { 0x76, 1, { 0x00 } },
+    { 0x77, 1, { 0x07 } },
+    { 0x78, 1, { 0x06 } },
+    { 0x79, 1, { 0x0E } },
+    { 0x7A, 1, { 0x0F } },
+    { 0x7B, 1, { 0x0C } },
+    { 0x7C, 1, { 0x0D } },
+    { 0x7D, 1, { 0x02 } },
+    { 0x7E, 1, { 0x02 } },
+    { 0x7F, 1, { 0x02 } },
+    { 0x80, 1, { 0x02 } },
+    { 0x81, 1, { 0x02 } },
+    { 0x82, 1, { 0x02 } },
+    { 0x83, 1, { 0x02 } },
+    { 0x84, 1, { 0x02 } },
+    { 0x85, 1, { 0x02 } },
+    { 0x86, 1, { 0x02 } },
+    { 0x87, 1, { 0x02 } },
+    { 0x88, 1, { 0x02 } },
+    { 0x89, 1, { 0x05 } },
+    { 0x8A, 1, { 0x01 } },
+
+    // page 4
+    { 0xFF, 3, { 0x98, 0x81, 0x04 } },
+    { 0x38, 1, { 0x01 } },
+    { 0x39, 1, { 0x00 } },
+    { 0x6C, 1, { 0x15 } },
+    { 0x6E, 1, { 0x1A } },
+    { 0x6F, 1, { 0x25 } },
+    { 0x3A, 1, { 0xA4 } },
+    { 0x8D, 1, { 0x20 } },
+    { 0x87, 1, { 0xBA } },
+    { 0x3B, 1, { 0x98 } },
+
+    // page 1
+    { 0xFF, 3, { 0x98, 0x81, 0x01 } },
+    { 0x22, 1, { 0x0A } },
+    { 0x31, 1, { 0x00 } },
+    { 0x50, 1, { 0x6B } },
+    { 0x51, 1, { 0x66 } },
+    { 0x53, 1, { 0x73 } },
+    { 0x55, 1, { 0x8B } },
+    { 0x60, 1, { 0x1B } },
+    { 0x61, 1, { 0x01 } },
+    { 0x62, 1, { 0x0C } },
+    { 0x63, 1, { 0x00 } },
+
+    // gamma, positive
+    { 0xA0, 1, { 0x00 } },
+    { 0xA1, 1, { 0x15 } },
+    { 0xA2, 1, { 0x1F } },
+    { 0xA3, 1, { 0x13 } },
+    { 0xA4, 1, { 0x11 } },
+    { 0xA5, 1, { 0x21 } },
+    { 0xA6, 1, { 0x17 } },
+    { 0xA7, 1, { 0x1B } },
+    { 0xA8, 1, { 0x6B } },
+    { 0xA9, 1, { 0x1E } },
+    { 0xAA, 1, { 0x2B } },
+    { 0xAB, 1, { 0x5D } },
+    { 0xAC, 1, { 0x19 } },
+    { 0xAD, 1, { 0x14 } },
+    { 0xAE, 1, { 0x4B } },
+    { 0xAF, 1, { 0x1D } },
+    { 0xB0, 1, { 0x27 } },
+    { 0xB1, 1, { 0x49 } },
+    { 0xB2, 1, { 0x5D } },
+    { 0xB3, 1, { 0x39 } },
+
+    // gamma, negative
+    { 0xC0, 1, { 0x00 } },
+    { 0xC1, 1, { 0x01 } },
+    { 0xC2, 1, { 0x0C } },
+    { 0xC3, 1, { 0x11 } },
+    { 0xC4, 1, { 0x15 } },
+    { 0xC5, 1, { 0x28 } },
+    { 0xC6, 1, { 0x1B } },
+    { 0xC7, 1, { 0x1C } },
+    { 0xC8, 1, { 0x62 } },
+    { 0xC9, 1, { 0x1C } },
+    { 0xCA, 1, { 0x29 } },
+    { 0xCB, 1, { 0x60 } },
+    { 0xCC, 1, { 0x16 } },
+    { 0xCD, 1, { 0x17 } },
+    { 0xCE, 1, { 0x4A } },
+    { 0xCF, 1, { 0x23 } },
+    { 0xD0, 1, { 0x24 } },
+    { 0xD1, 1, { 0x4F } },
+    { 0xD2, 1, { 0x5F } },
+    { 0xD3, 1, { 0x39 } },
+
+    // page 0: tearing effect line on, 0xFE, display on
+    { 0xFF, 3, { 0x98, 0x81, 0x00 } },
+    { 0x35, 0, {} },
+    { 0xFE, 0, {} },
+    { 0x29, 0, {} },
+};
+
+const Panel M5STACK_TAB5 = { TAB5_COMMANDS, sizeof(TAB5_COMMANDS) / sizeof(TAB5_COMMANDS[0]) };
+
+bool start(const Panel *panel, SendCommand *send) {
+    // the table of the panel (it ends on page 0, where the commands of
+    // DCS are)
+    for (size_t index = 0; index < panel->count; index++) {
+        const Command *command = &panel->commands[index];
+        if (!send(command->command, command->data, command->size)) {
+            return false;
+        }
+    }
+
+    // the image as it is scanned, 16 bits per pixel
+    const uint8_t scanned = 0x00;
+    const uint8_t format = PIXEL_FORMAT_16_BITS;
+    bool formatted = send(MEMORY_ACCESS, &scanned, 1) && send(PIXEL_FORMAT, &format, 1);
+    if (!formatted) {
+        return false;
+    }
+
+    // out of sleep, then the display on
+    if (!send(SLEEP_OUT, nullptr, 0)) {
+        return false;
+    }
+    platform::sleepMs(AFTER_SLEEP_OUT_MS);
+
+    if (!send(DISPLAY_ON, nullptr, 0)) {
+        return false;
+    }
+    platform::sleepMs(AFTER_DISPLAY_ON_MS);
+    return true;
+}
+
+} // namespace ili9881c
+} // namespace drivers

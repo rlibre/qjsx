@@ -6,7 +6,7 @@
  */
 
 // Drawing in memory (draw.h): filled rectangles, lines, text, arcs, rounded
-// rectangles, lists of commands.
+// rectangles, images, lists of commands.
 //
 // HOW IT IS MADE FAST (measured on the WT32-SC01, ESP32 at 240 MHz, a band of
 // 16 rows of 480 pixels, 2026-11-17):
@@ -603,6 +603,109 @@ void roundRect(const Target *target, int x, int y, int width, int height, int ra
     }
 }
 
+namespace {
+
+/**
+ * Draws the runs of one row of an image ('at' to 'end', image.h) into the
+ * row 'line' of the target ('targetWidth' pixels), the first pixel of the
+ * image at column 'left' of the target (negative: cut on the left). Each
+ * run is cut to the target: only the pixels inside are read.
+ */
+void drawImageRow(uint8_t *line, int targetWidth, int left, int imageWidth, const uint8_t *at, const uint8_t *end) {
+    int column = 0;   // where the run starts, in the image
+
+    while (column < imageWidth && at < end) {
+        // the run: its kind, its length, the bytes it carries
+        int kind = at[0] >> 6;
+        int count = (at[0] & 0x3F) + 1;
+        at++;
+
+        size_t carried = 0;
+        if (kind == IMAGE_RUN_OPAQUE) {
+            carried = (size_t)count * 2;
+        } else if (kind == IMAGE_RUN_BLENDED) {
+            carried = (size_t)count * 3;
+        } else if (kind == IMAGE_RUN_REPEAT) {
+            carried = 2;
+        }
+
+        // damaged: the row stops there
+        if (carried > (size_t)(end - at)) {
+            return;
+        }
+
+        // its pixels inside the target, in the image's columns
+        int from = highest(column, -left);
+        int to = lowest(column + count, targetWidth - left);
+
+        if (to > from) {
+            uint8_t *out = line + (size_t)(left + from) * 2;
+
+            switch (kind) {
+                case IMAGE_RUN_OPAQUE: {
+                    // copied as they are
+                    memcpy(out, at + (size_t)(from - column) * 2, (size_t)(to - from) * 2);
+                    break;
+                }
+                case IMAGE_RUN_REPEAT: {
+                    // one pixel, again and again
+                    for (int index = from; index < to; index++) {
+                        out[0] = at[0];
+                        out[1] = at[1];
+                        out += 2;
+                    }
+                    break;
+                }
+                case IMAGE_RUN_BLENDED: {
+                    // each one over what is there, by its alpha (0..255 to 0..COVERED)
+                    const uint8_t *pixel = at + (size_t)(from - column) * 3;
+                    for (int index = from; index < to; index++) {
+                        int alpha = pixel[2];
+                        putCoverage(out, (uint16_t)((pixel[0] << 8) | pixel[1]), alpha + (alpha >> 7));
+                        pixel += 3;
+                        out += 2;
+                    }
+                    break;
+                }
+                default: {
+                    // transparent: nothing
+                    break;
+                }
+            }
+        }
+
+        at += carried;
+        column += count;
+    }
+}
+
+} // namespace
+
+void drawImage(const Target *target, const Image *image, int x, int y) {
+    // where it is in the target, and its rows inside it (a band holds a few)
+    int left = x - target->originX;
+    int top = y - target->originY;
+    int firstRow = highest(0, -top);
+    int lastRow = lowest(image->height, target->height - top);
+
+    // nothing of it in the columns of the target
+    if (left >= target->width || left + image->width <= 0) {
+        return;
+    }
+
+    for (int row = firstRow; row < lastRow; row++) {
+        // its runs; a row out of the file is not drawn
+        const uint8_t *start = nullptr;
+        const uint8_t *end = nullptr;
+        if (!imageRow(image, row, &start, &end)) {
+            continue;
+        }
+
+        uint8_t *line = target->bytes + (size_t)(top + row) * (size_t)target->width * 2;
+        drawImageRow(line, target->width, left, image->width, start, end);
+    }
+}
+
 int textWidth(const Font *font, const uint16_t *units, int count, int flags) {
     // the advances of its code points, in 1/16 px
     bool tabularDigits = (flags & TEXT_TABULAR_DIGITS) != 0;
@@ -617,7 +720,8 @@ int textWidth(const Font *font, const uint16_t *units, int count, int flags) {
     return (width + 15) >> 4;
 }
 
-void render(const int16_t *items, int count, const Font *fonts, int fontCount, const Target *target) {
+void render(const int16_t *items, int count, const Font *fonts, int fontCount, const Image *images, int imageCount,
+            const Target *target) {
     for (int at = 0; at + COMMAND_ITEMS <= count;) {
         // the next command, and the items it takes
         const Command *command = (const Command *)(items + at);
@@ -664,6 +768,14 @@ void render(const int16_t *items, int count, const Font *fonts, int fontCount, c
                 // its radius and thickness follow it
                 const int16_t *corner = items + at + COMMAND_ITEMS;
                 roundRect(target, command->x0, command->y0, command->x1, command->y1, corner[0], corner[1], command->pixel);
+                break;
+            }
+            case KIND_IMAGE: {
+                // its image, given
+                int imageIndex = command->x1;
+                if (imageIndex >= 0 && imageIndex < imageCount) {
+                    drawImage(target, &images[imageIndex], command->x0, command->y0);
+                }
                 break;
             }
             default: {

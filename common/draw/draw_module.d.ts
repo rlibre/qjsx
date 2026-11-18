@@ -31,17 +31,20 @@
  * | 2 | a line of text | the top left of its line | x1: font index (0..15, the low 4 bits) \| flags << 4 (1: tabular digits); y1: its length in UTF-16 units | its UTF-16 units, one item each |
  * | 3 | an arc of a ring, smoothed | its center | outer radius, thickness inward | start and end angles in tenths of a degree, 0 at the top, clockwise |
  * | 4 | a rectangle with rounded corners, smoothed | its first pixel | width, height | the radius of its corners, its thickness (0: filled) |
+ * | 5 | an image (`pixel` and y1 unused) | its top left pixel | x1: image index (0..15) | none |
  *
  * The commands are drawn in their order, the later ones over the earlier
  * ones, over the background. Another kind draws nothing (6 items skipped);
- * a command cut by the end of the items, and a text whose font is not
- * given, are skipped. Nothing is checked beyond that.
+ * a command cut by the end of the items, a text whose font is not given and
+ * an image that is not given, are skipped. Nothing is checked beyond that.
  *
  * Fonts are files in LVGL's binary bitmap format made WITHOUT compression
  * (`lv_font_conv --format bin --no-compress`; 1, 2, 3, 4 or 8 bits per
  * pixel; the kerning is ignored), as `Uint8Array`s: read in place (in flash
  * for a file imported with `with { type: "bytes" }` from the package), never
- * copied.
+ * copied. Images are PNG files imported with `with { type: "image" }`, which
+ * the tool converted into the format of this renderer
+ * (common/draw/image.h), read in place the same way.
  *
  * Every number argument is a strict integer (a fraction, NaN or a string is
  * a `TypeError`, a value beyond 32 bits a `RangeError`).
@@ -80,12 +83,14 @@ declare module "sys/draw" {
 
     /**
      * Renders the first `count` items of `items` into the area
-     * (x, y, width, height) of the drawing and sends its pixels, row after
-     * row, as one write on `device`. The controller must already expect them
-     * (its column and row ranges and its memory write command are the
-     * caller's). The items are copied at once: the caller may write the next
-     * image right away. The font files are NOT copied: the caller keeps them
-     * alive until the promise settles.
+     * (x, y, width, height) of the drawing and sends it as ONE transaction on
+     * `device`: the area told to the controller (MIPI DCS commands 0x2A
+     * column range, 0x2B row range, 0x2C memory write, with DC low for the
+     * commands), then the pixels, row after row. The coordinates are those of
+     * the controller's memory as its rotation turns it (`stdlib/display` sets
+     * it so). The items are copied at once: the caller may write the next
+     * image right away. The font and image files are NOT copied: the caller
+     * keeps them alive until the promise settles.
      *
      * Two buffers of `bandRows` rows of the area (2 bytes per pixel) and the
      * copy of the items are taken from the RAM of the firmware until the end.
@@ -103,15 +108,81 @@ declare module "sys/draw" {
      *     area's height is used).
      * @param fonts the font files the texts use, by index (at most 16);
      *     not an array: no fonts.
+     * @param images the image files the image commands draw, by index (at
+     *     most 16); not an array: no images.
      * @returns a promise resolved once the last pixel is sent; rejected with
      *     an `Error` with a `code` from `device/spi` (`"EBADF"` closed,
      *     `"EAGAIN"` too many transactions pending on the bus, `"EIO"`,
      *     `"ECANCELED"`).
      * @throws synchronously a `TypeError` (`device` is not an `SpiDevice`,
-     *     `items` not a typed array, a font that is not one) or a
-     *     `RangeError` (an area or `bandRows` below 1, more than 16 fonts).
+     *     `items` not a typed array, a font or an image that is not one) or
+     *     a `RangeError` (an area or `bandRows` below 1, more than 16 fonts
+     *     or images).
      */
-    export function show(device: SpiDevice, items: Int16Array, count: number, x: number, y: number, width: number, height: number, background: number, bandRows: number, fonts?: readonly Uint8Array[]): Promise<void>;
+    export function show(device: SpiDevice, items: Int16Array, count: number, x: number, y: number, width: number, height: number, background: number, bandRows: number, fonts?: readonly Uint8Array[], images?: readonly Uint8Array[]): Promise<void>;
+
+    /**
+     * The size of an image of this renderer, in pixels.
+     */
+    export interface DrawImageSize {
+        /** Its width. */
+        width: number;
+
+        /** Its height. */
+        height: number;
+    }
+
+    /**
+     * Reads the header of an image file (a PNG imported with `with { type:
+     * "image" }`).
+     *
+     * @throws `TypeError` when `image` is not a `Uint8Array` or not an image
+     *     of this renderer.
+     */
+    export function imageSize(image: Uint8Array): DrawImageSize;
+
+    /**
+     * The size of the display built into the board (the M5Stack Tab5's),
+     * as its panel scans it (rotation 0), in pixels; null on a board
+     * without one.
+     */
+    export function screenSize(): DrawImageSize | null;
+
+    /**
+     * The display built into the board (the M5Stack Tab5's): its panel
+     * shows an image held in memory, which {@link Screen.show} draws into.
+     */
+    export class Screen {
+        /**
+         * Takes the display built into the board.
+         *
+         * @throws an `Error` with code `"ENODEV"` on a board without one.
+         */
+        constructor();
+
+        /**
+         * Draws the area (x, y, width, height) of the drawing, turned by
+         * `rotation` (0, 90, 180 or 270 degrees clockwise), into the image
+         * of the display, a band of `bandRows` rows at a time, on a task of
+         * its own (the JS thread goes on). The area must lie on the screen
+         * as the drawing sees it. The other arguments are those of
+         * {@link show}; the items are copied at once, the font and image
+         * files are read until the promise settles.
+         *
+         * @returns a promise resolved once the screen shows the area.
+         * @throws an `Error` with code `"EBADF"` (closed) or `"EBUSY"` (a
+         *     frame is still being drawn); a `RangeError` for another
+         *     rotation; the errors of {@link show} for the list, the fonts
+         *     and the images.
+         */
+        show(items: Int16Array, count: number, x: number, y: number, width: number, height: number, background: number, bandRows: number, fonts: readonly Uint8Array[] | undefined, images: readonly Uint8Array[] | undefined, rotation: number): Promise<void>;
+
+        /**
+         * Lets the display go (a frame being drawn is finished first, its
+         * promise rejected). The screen keeps its image.
+         */
+        close(): void;
+    }
 
     /**
      * Reads the header of a font file.

@@ -21,7 +21,7 @@
 import { compile, quickjsVersion, qjsxVersion, bytecodeVersion } from "sys/compiler";
 import { sha256 } from "sys/crypto";
 import { hex, encodeText, placeOf } from "qjsx:util";
-import { importsBytes } from "qjsx:bytes";
+import { importType } from "qjsx:bytes";
 
 export const SIDECAR_FORMAT = 2;   // 2: with 'functions'
 
@@ -97,10 +97,11 @@ export function normalizeImport(importer, specifier) {
  * on a device; the debug info goes into the sidecar. 'import()' is refused:
  * every module of a program must be known when it is built.
  * Returns { buildId, sourceHash, bytecode, sidecar, imports, warnings, outline }:
- *   - 'imports' has one { specifier, name, bytes, place } per module it
- *     imports, each module once: the text written in the source, the name of
- *     the module it means, true for an import of bytes ('with { type:
- *     "bytes" }', qjsx:bytes), and "file:line:column" of the text;
+ *   - 'imports' has one { specifier, name, bytes, type, place } per module
+ *     it imports, each module once: the text written in the source, the
+ *     name of the module it means, true for an import of a file ('with {
+ *     type: "bytes" }' or '"image"', qjsx:bytes), that type (null for a
+ *     module), and "file:line:column" of the text;
  *   - 'warnings' has one { kind, line, column } per use of eval() or of the
  *     Function constructor (see warningText);
  *   - 'outline': its top-level statements, imports and exports, which 'qjsx
@@ -140,7 +141,7 @@ export function compileModule(name, source) {
  * compiler gives, one per import statement; the requests of the outline,
  * in the same order, add their attributes and positions (none without
  * outline). Throws when an import has attributes other than { type:
- * "bytes" }, or when a module is imported both as bytes and as a module.
+ * "bytes" } or { type: "image" }, or when a module is imported two ways.
  */
 function importedModules(name, source, imports, outline) {
     const sourceBytes = encodeText(source);
@@ -148,22 +149,23 @@ function importedModules(name, source, imports, outline) {
     const imported = new Map();
 
     imports.forEach((specifier, index) => {
-        // where it is written, and whether it asks for bytes
+        // where it is written, and whether it asks for a file
         const request = requests?.[index];
         const place = request !== undefined ? placeOf(name, sourceBytes, request.position) : name;
-        const bytes = request !== undefined && importsBytes(request.attributes, place);
+        const type = request !== undefined ? importType(request.attributes, place) : null;
         const importedName = normalizeImport(name, specifier);
 
         // already imported: the same way
         const earlier = imported.get(importedName);
         if (earlier !== undefined) {
-            if (earlier.bytes !== bytes) {
-                throw new Error(`${place}: '${importedName}' is imported both as bytes and as a module`);
+            if (earlier.type !== type) {
+                const ways = [earlier.type, type].map(way => way ?? "a module").join(" and as ");
+                throw new Error(`${place}: '${importedName}' is imported both as ${ways}`);
             }
             return;
         }
 
-        imported.set(importedName, { specifier, name: importedName, bytes, place });
+        imported.set(importedName, { specifier, name: importedName, bytes: type !== null, type, place });
     });
 
     return [...imported.values()];

@@ -300,6 +300,11 @@ void registerRegionHeapTestModule();   // region_heap_module.cpp
 void registerProfileTestModule();   // profile_module.cpp
 
 /**
+ * Registers the module "draw_test".
+ */
+void registerDrawTestModule();   // draw_test_module.cpp
+
+/**
  * Registers the native test modules; called by main() in qjsx-tests only.
  * The modules of a board (device/gpio..., and sys/draw of a board with a
  * display) too, registered elsewhere only in the digital twin:
@@ -321,4 +326,5 @@ void registerTestModules() {
     registerDebugTestModule();
     registerRegionHeapTestModule();
     registerProfileTestModule();
+    registerDrawTestModule();
 }

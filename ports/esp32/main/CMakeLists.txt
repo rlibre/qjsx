@@ -37,9 +37,29 @@ if(IDF_TARGET IN_LIST QJSX_DAC_TARGETS)
 endif()
 
 # what the board adds (boards/<board>/board.cmake, optional): QJSX_BOARD_DRAW
-# when it has a display
+# when it has a display; QJSX_BOARD_SCREEN when that display is built into it
+# (MIPI-DSI: board::startScreen, hal_dsi_esp32.cpp, esp_lcd); QJSX_BOARD_SOURCES:
+# its own code and the drivers it uses (common/drivers)
 set(QJSX_BOARD_DRAW OFF)
+set(QJSX_BOARD_SCREEN OFF)
+set(QJSX_BOARD_SOURCES "")
 include("${QJSX_BOARD_INCLUDE}/board.cmake" OPTIONAL)
+
+set(QJSX_SCREEN_SOURCES "")
+set(QJSX_SCREEN_DEFINES "")
+if(QJSX_BOARD_SCREEN)
+    set(QJSX_SCREEN_SOURCES "hal_dsi_esp32.cpp")
+    set(QJSX_SCREEN_DEFINES QJSX_HAS_SCREEN=1)
+endif()
+
+# the components of a display on MIPI-DSI, by chip and not by board: ESP-IDF
+# finds the requirements of a component in a first pass that does not know
+# the board (board.cmake is not read there)
+set(QJSX_DSI_TARGETS esp32p4)
+set(QJSX_SCREEN_REQUIRES "")
+if(IDF_TARGET IN_LIST QJSX_DSI_TARGETS)
+    set(QJSX_SCREEN_REQUIRES esp_lcd esp_mm)
+endif()
 
 # sys/draw (drawing on a display, common/draw, for stdlib/display): on the
 # boards whose board.cmake asks for it; on another one for a try, with
@@ -69,6 +89,8 @@ idf_component_register(
         ${QJSX_USB_SOURCES}
         ${QJSX_DAC_SOURCES}
         ${QJSX_DRAW_BUILD_SOURCES}
+        ${QJSX_BOARD_SOURCES}
+        ${QJSX_SCREEN_SOURCES}
         "main.cpp"
         "board_esp32.cpp"
         "platform_esp32.cpp"
@@ -92,6 +114,7 @@ idf_component_register(
         esp_driver_rmt
         esp_driver_spi
         esp_driver_uart
+        esp_driver_usb_serial_jtag
         esp_hw_support
         esp_partition
         esp_psram
@@ -101,9 +124,11 @@ idf_component_register(
         spi_flash
         vfs
         ${QJSX_USB_REQUIRES}
-        ${QJSX_DAC_REQUIRES})
+        ${QJSX_DAC_REQUIRES}
+        ${QJSX_SCREEN_REQUIRES})
 
-target_compile_definitions(${COMPONENT_LIB} PRIVATE ${QJSX_DEFINES} ${QJSX_USB_DEFINES} ${QJSX_DAC_DEFINES} ${QJSX_DRAW_DEFINES})
+target_compile_definitions(${COMPONENT_LIB} PRIVATE ${QJSX_DEFINES} ${QJSX_USB_DEFINES} ${QJSX_DAC_DEFINES} ${QJSX_DRAW_DEFINES}
+                           ${QJSX_SCREEN_DEFINES})
 
 # a board without PSRAM: its JS heap is a region of internal RAM
 # (board_esp32.cpp), the engine's arenas are sized for it. To compare,

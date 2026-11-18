@@ -81,16 +81,81 @@ JSModuleDef *loadFileBytes(JSContext *ctx, const char *name, void *) {
 }
 
 /**
+ * 'size' bytes as text in hexadecimal, two digits a byte (memory::allocate,
+ * zero-terminated).
+ */
+char *hexText(const uint8_t *bytes, size_t size) {
+    const char DIGITS[] = "0123456789abcdef";
+    char *text = (char *)memory::allocate(size * 2 + 1);
+
+    for (size_t index = 0; index < size; index++) {
+        text[index * 2] = DIGITS[bytes[index] >> 4];
+        text[index * 2 + 1] = DIGITS[bytes[index] & 0x0F];
+    }
+
+    text[size * 2] = 0;
+    return text;
+}
+
+/**
+ * Loader of the imports of images on the host (rt::RunHooks::loadImage),
+ * for the sources run by 'qjsx run': the file on disk, converted for the
+ * displays as 'qjsx build' does it. The converter is JS (qjsx:image), so
+ * the module is made from a source text that hands it the bytes of the
+ * file, in hexadecimal: 'default' is the converted image. Read whatever the
+ * permissions of the program, like code. nullptr with a pending exception if
+ * the file cannot be read or the module cannot be made.
+ */
+JSModuleDef *loadFileImage(JSContext *ctx, const char *name, void *) {
+    // read the file; the module name is its path
+    size_t size = 0;
+    uint8_t *data = files::readAll(name, &size);
+    if (data == nullptr) {
+        JS_ThrowReferenceError(ctx, "could not load the image '%s': %s", name, strerror(errno));
+        return nullptr;
+    }
+
+    // the source: the converter, given the bytes; a failure says which file
+    char *hex = hexText(data, size);
+    memory::release(data);
+    const char HEAD[] =
+        "import { imageFromPng } from \"qjsx:image\";\n"
+        "const file = Uint8Array.fromHex(\"";
+    const char TAIL[] =
+        "\");\n"
+        "let image;\n"
+        "try {\n"
+        "    image = imageFromPng(file);\n"
+        "} catch (error) {\n"
+        "    throw new Error(`${import.meta.url}: the image cannot be converted: ${error.message}`);\n"
+        "}\n"
+        "export default image;\n";
+    size_t hexSize = size * 2;
+    size_t sourceSize = sizeof(HEAD) - 1 + hexSize + sizeof(TAIL) - 1;
+    char *source = (char *)memory::allocate(sourceSize + 1);
+    memcpy(source, HEAD, sizeof(HEAD) - 1);
+    memcpy(source + sizeof(HEAD) - 1, hex, hexSize);
+    memcpy(source + sizeof(HEAD) - 1 + hexSize, TAIL, sizeof(TAIL));
+    memory::release(hex);
+
+    // compiled as the module of that name
+    JSModuleDef *module = rt::compileModule(ctx, name, source, sourceSize);
+    memory::release(source);
+    return module;
+}
+
+/**
  * Hooks of a run of the host tool: modules may also come from files, and an
  * uncaught exception stops the program.
  */
 rt::RunHooks fileHooks() {
-    // the defaults, plus: stop on an uncaught exception, files as modules
-    // and as bytes
+    // the defaults, plus: stop on an uncaught exception, files as modules,
+    // as bytes and as images
     rt::RunHooks hooks = {};
     hooks.exitOnUncaught = true;
     hooks.loadModule = &loadFileModule;
     hooks.loadBytes = &loadFileBytes;
+    hooks.loadImage = &loadFileImage;
     return hooks;
 }
 

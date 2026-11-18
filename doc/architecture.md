@@ -762,8 +762,15 @@ What the server does:
   - The bytes are read-only, but the engine has no immutable `ArrayBuffer`: a write into
     the array is an error that is not detected (on a device the memory is flash). Its
     `buffer.transfer()` detaches it for every importer.
-  - Not done: the `.d.ts` typing of such imports in a program (a module of the standard
-    library that exports bytes has its typing: `stdlib/fonts/inter16`...).
+  - Typed for the editor by `common/runtime/modules/bytes_import.d.ts` (`*.bin`, `*.png`).
+- **Images imported** (2026-11-18): `import logo from "./logo.png" with { type: "image" }`
+  takes the same path as bytes (same entry `bytes/<module name>`, same list in the
+  manifest, same module on the device), but `qjsx build` puts the PNG converted for the
+  displays (`qjsx:image`, see `stdlib/display` in 5.4), and the size and hash recorded are
+  those of the converted image. A file imported both as an image and as bytes is an
+  error. `qjsx run src/main.js` converts it when the module is loaded
+  (`RunHooks::loadImage`, `host/host.cpp`: a module made from a source that hands the
+  file's bytes to `qjsx:image`).
 - The zip (with its CRC32) is written by the host JS.
 
 Content:
@@ -1348,8 +1355,8 @@ the device where it makes sense.
 | `device/i2c` | ESP32, the twin | class `I2c`: an I2C master bus (`device`, `probe`, `probeSync`, `reset`, `close`); class `I2cDevice`: `write`, `read`, `writeRead` (promises) and their `Sync` versions, `close` |
 | `device/spi` | ESP32, the twin | class `Spi`: an SPI master bus (`device`, `close`); class `SpiDevice`: `transaction`, `write`, `read`, `transfer`, `writeRead`, `command` (promises) and their `Sync` versions, `frequency`, `close` |
 | `device/dac` | the original ESP32 and the S2 (WT32-SC01), the twin | class `Dac`: `write(raw)`, `writeVoltage(volts)`, `bits`, `fullScale`, `value`, `close`; the output stops at `close()` and at the end of the program |
-| `stdlib/display` | boards whose firmware has `sys/draw` (today the WT32-SC01), their twin (standard library, in JS) | class `Display`: color SPI displays (ST7796); drawing commands kept in a list (`fillRect`, `line`, `pixel`, `rect`, `arc`, `circle`, `disc`, `fillRoundRect`, `roundRect`, `text` with fonts imported as bytes), shown by `show()` while the program goes on |
-| `sys/draw` | the same | the engine of `stdlib/display`: renders a list of commands band by band while the SPI bus sends it (`show`, `fontMetrics`, `textWidth`); not meant to be used directly |
+| `stdlib/display` | boards whose firmware has `sys/draw` (today the WT32-SC01), their twin (standard library, in JS) | class `Display`: color SPI displays (ST7796); drawing commands kept in a list (`fillRect`, `line`, `pixel`, `rect`, `arc`, `circle`, `disc`, `fillRoundRect`, `roundRect`, `text` with fonts imported as bytes, `drawImage` with PNG files imported as images), shown by `show()` while the program goes on |
+| `sys/draw` | the same | the engine of `stdlib/display`: renders a list of commands band by band while the SPI bus sends it (`show`, `fontMetrics`, `textWidth`, `imageSize`); not meant to be used directly |
 | `device/adc` | ESP32 (ADC1), the twin | class `Adc`: `read`, `readVoltage`, `bits`, `close` |
 | `device/pwm` | ESP32 (LEDC), i.MX RT1062 (FlexPWM, QuadTimer), the twin | class `Pwm`: `setDuty`, `setFrequency`, `setPulseWidth`, `duty`, `frequency`, `bits`, `close` |
 | `stdlib/fonts/inter16`, `inter24`, `inter40` | all (standard library, files imported as bytes) | the default export is a font file of Inter Regular (LVGL's binary format, 4 bits per pixel, not compressed): 16 and 24 px with ASCII and Latin-1, 40 px with ASCII and `°`; one module per font, so a package holds only the fonts its program imports |
@@ -1671,11 +1678,56 @@ await lcd.show();                                   // or show(x, y, width, heig
   read in place, in flash on a device (`common/draw/font.{h,cpp}`: character maps of the
   four formats, 1 to 8 bits per pixel blended over the band, kerning ignored). Tabular
   digits are an option of the renderer; `textWidth()` for centering; 16 fonts a display.
+- **Images** (2026-11-18, design agreed by the user): a PNG file imported with
+  `with { type: "image" }` (see 4.1) is converted on the PC by `qjsx build`
+  (`host/js/image.js`, `qjsx:image`: our own PNG decoder in JS, no dependency: inflate,
+  chunks and their CRC, the five row filters, every color type and depth, `tRNS`;
+  interlaced files refused; JPEG not done) into the renderer's format
+  (`common/draw/image.{h,cpp}`, described in image.h): a header, the offset of each row (a
+  band goes straight to its rows), then rows of runs of four kinds: skip (transparent),
+  opaque (16-bit pixels in the display's byte order: a copy), blended (16 bits + an alpha
+  of 8 bits: the smoothed edges), repeat (one pixel). The colors are always dithered
+  (Floyd-Steinberg) on their way to 16 bits. `lcd.image(bytes)` gives a handle (16 a
+  display), `lcd.drawImage(x, y, image)` one command (kind 5); read in place, in flash on
+  a device. No scaling, no rotation. Icons of one color are meant to be an icon font
+  (Font Awesome...) drawn with `text()`, each project converting its own. A logo of
+  96 x 96 with smoothed edges: 13.5 KB (36 KB in RGBA).
+- **Display built into the board** (2026-11-18, the M5Stack Tab5; design agreed by the
+  user): `new Display({ type: "builtin", backlight: 22, rotation })`, same drawing calls.
+  Layers: `common/drivers/ili9881c.{h,cpp}` (portable driver of the controller: the table
+  of the Tab5's panel, taken from M5Stack's code, Apache-2.0, credited in the file; 16 bits,
+  sleep out, display on), `common/drivers/pi4ioe5v6408.{h,cpp}` (the I2C expander that
+  holds the panel's reset), `common/hal/hal_dsi.h` + `ports/esp32/main/hal_dsi_esp32.cpp`
+  (the only P4 part: `esp_lcd` of ESP-IDF, a DSI bus, DBI for the commands, DPI video from
+  one frame buffer in PSRAM, 1.8 MB), `common/board/board_screen.h` +
+  `ports/esp32/boards/m5stack-tab5/board_screen.cpp` (started at boot, before any program:
+  reset pulse, DSI 2 lanes at 730 Mb/s, 60 MHz, LDO 3 at 2.5 V; the I2C bus given back).
+  The board's `board.cmake` sets `QJSX_BOARD_SCREEN` and lists those sources; `esp_lcd` and
+  `esp_mm` are required by CHIP (esp32p4), because ESP-IDF resolves the requirements in a
+  pass that does not read board.cmake. `sys/draw` has `showScreen()` and `screenSize()` in
+  every firmware with it (null / ENODEV without a built-in display, so the static imports of
+  `stdlib/display` stay valid): bands rendered in a small buffer as for SPI, then copied
+  into the frame buffer turned (rotation) and in the chip's byte order, then the cache
+  flushed. Rendered on a task of its own (2026-11-18, user): `sys/draw` class `Screen`
+  (`show()` hands the frame to the task "screen", one frame at a time, EBUSY else; the end
+  is posted to the loop, which settles the promise; closing, or the end of the program,
+  waits for a frame being drawn: it reads the program's fonts and images). Measured on
+  the Tab5, a counter of 300 x 60 shown in a loop that awaits each show: on the JS
+  thread 232 images a second, JS thread 91 %; on the task 189 images a second, JS thread
+  60 % (the hand-over costs about 1 ms; the JS work of a frame, about 3 ms, is the list,
+  the native calls and the promise). The whole screen 116 ms (on the JS thread). Next
+  ideas, not done: the P4's PPA for the rotation and the byte order, two frame buffers
+  against tearing, a cheaper JS side of a frame.
 - **Arcs and rounded rectangles**: smoothed edges, fixed point (coverage 0..256, distances
   24.8, 32-bit integers only: a 64-bit operation is a library call on the ESP32), work only
   where it matters (the hole of a ring skipped, square roots on the one pixel wide edges
   only, the straight parts of a rounded rectangle filled as they are). The reasons and the
   measures are written at the top of `common/draw/draw.cpp`.
+- **One transaction per image** (2026-11-18, user): `sys/draw` `show()` sends the area to the
+  controller (MIPI DCS 0x2A, 0x2B, 0x2C, DC low) and the pixels as ONE queued transaction;
+  `stdlib/display` made 5 synchronous SPI calls per image before. temp/wtstats on the
+  WT32-SC01 (a counter of 200 x 50 shown in a loop that awaits each show): 70 -> 84 images
+  a second, JS thread 73 % -> 71 % (about 8.5 ms of JS per image left: to profile).
 - **Speed on the WT32-SC01** (temp/wtgauge: two gauges of 448 x 250 with text): 4.3 images
   a second at first, 15.5 after the work above; a full screen 70 ms (61 ms of wire at
   40 MHz); rendering 34 ms an image. In the twin: 21.7 images a second (its SPI takes the
@@ -1816,6 +1868,20 @@ optionally, `board.cmake`: what the firmware adds for that board (2026-11-17:
 `QJSX_BOARD_DRAW` compiles `sys/draw` for a board with a display, the WT32-SC01). The
 board is chosen at build time (`QJSX_BOARD`), each one in its `build-<board>` folder. The partition
 tables go by flash size (4, 8, 16 MB), not by board.
+
+**The link of the agent is the console of the board** (2026-11-18): UART0 on the boards with
+a USB-serial bridge, or the chip's USB Serial/JTAG when the board's `sdkconfig.board` puts
+the console there (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG`; `board_esp32.cpp` picks the
+driver from it). First used by the **M5Stack Tab5** (`boards/m5stack-tab5/`): ESP32-P4
+(RISC-V, two cores, chip revision v1.0, `CONFIG_ESP32P4_SELECTS_REV_LESS_V3`, 360 MHz),
+16 MB of flash, 32 MB of PSRAM; its USB-C port reaches the P4's USB Serial/JTAG with no
+bridge (UART0 only goes to the M5-Bus). A write the host does not read is dropped after
+100 ms. On the P4, LEDC (`device/pwm`) takes the PLL's 80 MHz division (no APB clock
+there): not measured yet. Tried 2026-11-18: debugger 72/72, proxy 33/33, cdp 53/53,
+`qjsx device reset` (the COM port comes back). Not done there: its MIPI-DSI display, its
+radio (an ESP32-C6 on SDIO), its I2C expanders (power, resets), a twin. After `idf.py
+flash` the chip may stay in download mode (`boot:0x204`): a short press on its
+Reset/Boot button starts it.
 
 **The RP2350 port** (`ports/rp2350/`, 2026-11-11; built by `tools/pico.ps1` with the
 toolchain installed in `C:\tools\pico`: Arm GNU Toolchain 15.2, pico-sdk 2.3.1, FreeRTOS-Kernel

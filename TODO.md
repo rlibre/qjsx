@@ -6,7 +6,16 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
 
 ## Où on en est
 
-- Derniers travaux (17/11) : écran de la WT32-SC01 (`stdlib/display` + `sys/draw` : liste
+- Derniers travaux (18/11) : images de l'écran (PNG importé `with { type: "image" }`,
+  converti par `qjsx build` : RLE par ligne, alpha sur les bords, tramage ;
+  `lcd.image()` / `drawImage()`), essayé sur la WT32-SC01 (démo `temp/wtimage`) et dans
+  le jumeau. Puis la M5Stack Tab5 (ESP32-P4 v1.0, COM30) : firmware minimal, liaison de
+  l'agent sur l'USB Serial/JTAG ; débogueur 72/72, proxy 33/33, cdp 53/53. Écran intégré
+  (ILI9881C, MIPI-DSI, `type: "builtin"`) fait : plein écran 116 ms, zone 300 x 60 ~4 ms
+  (232 images/s, JS 91 %), puis rendu dans une tâche : 185-189 images/s, JS 60 %. Reste
+  sur la Tab5 : PPA pour la rotation, double image, alléger le côté JS d'une image (~3 ms) ; tactile GT911 (plus tard) ; radio (ESP32-C6 en SDIO) ;
+  fréquence du PWM à vérifier ; jumeau.
+- (17/11) : écran de la WT32-SC01 (`stdlib/display` + `sys/draw` : liste
   de commandes rendue par bandes pendant l'envoi SPI, texte avec polices LVGL lues en
   flash, arcs, rectangles arrondis ; 15,5 images/s sur deux jauges), import de fichiers en
   octets (`with { type: "bytes" }`), `device/dac` et ses cadrans dans le jumeau, jumeau de
@@ -29,7 +38,8 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
       (LPSPI) et RP2350, et la lenteur de `transactionSync` (1,3 ms + 0,35 ms par segment :
       la conversion des segments, à confirmer) si un programme en a besoin.
 - [ ] **Écran, suite** : le tactile FT6336 de la WT32-SC01 (`stdlib/touch`, adresse I2C
-      0x38, broches 18 / 19) et son modèle dans le jumeau ; images (bitmaps en octets) ;
+      0x38, broches 18 / 19) et son modèle dans le jumeau ; images : JPEG plus tard,
+      PNG entrelacé refusé, import d'une image dans une bibliothèque non essayé ;
       vérifier le modèle `st7796-320x480` du jumeau contre la fiche du ST7796
       (known-bugs.md) ; d'autres contrôleurs (ILI9341, ST7789…) : une entrée de `TYPES`.
 - [ ] **DAC, suite** : mesurer la sortie sur la WT32-SC01 (démo `temp/dacdemo` installée :

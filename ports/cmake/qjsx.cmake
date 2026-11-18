@@ -87,6 +87,7 @@ set(QJSX_DEVICE_SERIAL_SOURCES "${QJSX_ROOT}/common/device/serial_module.cpp")
 set(QJSX_DRAW_SOURCES
     "${QJSX_ROOT}/common/draw/draw.cpp"
     "${QJSX_ROOT}/common/draw/font.cpp"
+    "${QJSX_ROOT}/common/draw/image.cpp"
     "${QJSX_ROOT}/common/draw/draw_module.cpp")
 
 set(QJSX_INCLUDE_DIRS
@@ -99,6 +100,7 @@ set(QJSX_INCLUDE_DIRS
     "${QJSX_ROOT}/common/hal"
     "${QJSX_ROOT}/common/device"
     "${QJSX_ROOT}/common/draw"
+    "${QJSX_ROOT}/common/drivers"
     "${QJSX_ROOT}/ports/freertos")
 
 set(QJSX_DEFINES

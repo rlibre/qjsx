@@ -23,11 +23,20 @@
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "soc/soc_caps.h"
 
 namespace {
 
 const ledc_mode_t MODE = LEDC_LOW_SPEED_MODE;        // the only mode of the S3
-const uint32_t    CLOCK = 80000000;                  // the APB clock, Hz
+const uint32_t    CLOCK = 80000000;                  // the clock of the timers, Hz
+
+// That 80 MHz clock: the APB clock, or on the chips whose LEDC cannot take
+// it (ESP32-P4) the 80 MHz division of the PLL.
+#if SOC_LEDC_SUPPORT_APB_CLOCK
+const ledc_clk_cfg_t CLOCK_SOURCE = LEDC_USE_APB_CLK;
+#else
+const ledc_clk_cfg_t CLOCK_SOURCE = LEDC_USE_PLL_DIV_CLK;
+#endif
 const int         TIMER_COUNT = LEDC_TIMER_MAX;      // timers of the chip (4)
 const int         CHANNEL_COUNT = LEDC_CHANNEL_MAX;  // outputs of the chip (8 on the S3)
 const int         MAX_BITS = LEDC_TIMER_BIT_MAX - 1; // the widest counter of the chip (14 bits on the S3)
@@ -61,13 +70,13 @@ Channel *channelOf(int handle) {
  * asked) and runs it; false if LEDC refuses.
  */
 bool setUpTimer(int index, uint32_t frequency, const hal::pwm::TimerSetting *setting) {
-    // the timer: its resolution, the frequency, the APB clock
+    // the timer: its resolution, the frequency, the 80 MHz clock
     ledc_timer_config_t config = {};
     config.speed_mode = MODE;
     config.duty_resolution = (ledc_timer_bit_t)setting->bits;
     config.timer_num = (ledc_timer_t)index;
     config.freq_hz = frequency;
-    config.clk_cfg = LEDC_USE_APB_CLK;
+    config.clk_cfg = CLOCK_SOURCE;
     if (ledc_timer_config(&config) != ESP_OK) {
         return false;
     }

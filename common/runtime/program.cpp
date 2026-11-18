@@ -71,24 +71,28 @@ const package::Entry *findBytecode(const package::Reader *reader, const char *na
 // import font from "./font.bin" with { type: "bytes" }: the file is an entry
 // of the package, "bytes/<module name>", written by "qjsx build"
 // (host/js/bytes.js); the module exports a Uint8Array over it.
+// import logo from "./logo.png" with { type: "image" }: the same, the file
+// converted by "qjsx build" for the displays (host/js/image.js).
 
-// Prefix of the entries of the files imported as bytes, and the value of the
-// import attribute 'type' that asks for them.
+// Prefix of the entries of the files imported as bytes or images, and the
+// values of the import attribute 'type' that ask for them.
 const char *const BYTES_PREFIX = "bytes/";
 const char *const BYTES_TYPE = "bytes";
+const char *const IMAGE_TYPE = "image";
 
 // What an import asks for (its import attribute 'type').
 enum class ImportType {
     Module,        // no type: a JS module, or a native one
     Bytes,         // type "bytes": the bytes of a file
+    Image,         // type "image": an image file, converted for the displays
     Unsupported,   // any other type: an exception is pending
 };
 
 /**
  * What the import attributes of the module 'name' ask for ('attributes':
  * JS_UNDEFINED without a 'with' clause, else an object of strings). Another
- * type than "bytes" is a TypeError ('qjsx build' refuses it where it is
- * written; the sources run by 'qjsx run' reach this one).
+ * type than "bytes" or "image" is a TypeError ('qjsx build' refuses it where
+ * it is written; the sources run by 'qjsx run' reach this one).
  */
 ImportType importType(JSContext *ctx, JSValueConst attributes, const char *name) {
     // no 'with' clause: a module
@@ -114,15 +118,19 @@ ImportType importType(JSContext *ctx, JSValueConst attributes, const char *name)
         return ImportType::Unsupported;
     }
 
-    // "bytes", or a type this runtime does not have
-    bool isBytes = strcmp(text, BYTES_TYPE) == 0;
-    if (!isBytes) {
-        JS_ThrowTypeError(ctx, "module '%s': unsupported import type '%s' (the only one is \"%s\")", name, text,
-                          BYTES_TYPE);
+    // "bytes", "image", or a type this runtime does not have
+    ImportType asked = ImportType::Unsupported;
+    if (strcmp(text, BYTES_TYPE) == 0) {
+        asked = ImportType::Bytes;
+    } else if (strcmp(text, IMAGE_TYPE) == 0) {
+        asked = ImportType::Image;
+    } else {
+        JS_ThrowTypeError(ctx, "module '%s': unsupported import type '%s' (known: \"%s\" or \"%s\")", name, text,
+                          BYTES_TYPE, IMAGE_TYPE);
     }
 
     JS_FreeCString(ctx, text);
-    return isBytes ? ImportType::Bytes : ImportType::Unsupported;
+    return asked;
 }
 
 /**
@@ -145,13 +153,14 @@ int initBytesModule(JSContext *ctx, JSModuleDef *module) {
 }
 
 /**
- * A module imported as bytes: the entry "bytes/<name>" of the package, made
- * into an array where it lies (on a device, in flash: nothing copied into
- * RAM), else a file embedded in the executable (the desktop tool's standard
- * library), else the hooks' loader (host: the file on disk). nullptr with a
- * pending ReferenceError when found nowhere.
+ * A module imported as bytes or as an image ('type'): the entry
+ * "bytes/<name>" of the package (an image converted already), made into an
+ * array where it lies (on a device, in flash: nothing copied into RAM), else
+ * a file embedded in the executable (the desktop tool's standard library),
+ * else the hooks' loader (host: the file on disk, an image converted on the
+ * fly). nullptr with a pending ReferenceError when found nowhere.
  */
-JSModuleDef *loadBytesModule(JSContext *ctx, const Session *session, const char *name) {
+JSModuleDef *loadBytesModule(JSContext *ctx, const Session *session, const char *name, ImportType type) {
     // the file in the package; the array is not a script: the debugger is
     // not told
     if (session->package != nullptr) {
@@ -169,14 +178,18 @@ JSModuleDef *loadBytesModule(JSContext *ctx, const Session *session, const char 
         return newBytesModule(ctx, name, (uint8_t *)embedded->data, embedded->size, nullptr);
     }
 
-    // then the extra loader of the hooks
-    bool hasExtraLoader = session->hooks != nullptr && session->hooks->loadBytes != nullptr;
-    if (hasExtraLoader) {
-        return session->hooks->loadBytes(ctx, name, session->hooks->opaque);
+    // then the extra loader of the hooks, for that type
+    const RunHooks *hooks = session->hooks;
+    if (type == ImportType::Image && hooks != nullptr && hooks->loadImage != nullptr) {
+        return hooks->loadImage(ctx, name, hooks->opaque);
+    }
+
+    if (type == ImportType::Bytes && hooks != nullptr && hooks->loadBytes != nullptr) {
+        return hooks->loadBytes(ctx, name, hooks->opaque);
     }
 
     // found nowhere
-    JS_ThrowReferenceError(ctx, "could not load bytes '%s'", name);
+    JS_ThrowReferenceError(ctx, "could not load the %s '%s'", type == ImportType::Image ? "image" : "bytes", name);
     return nullptr;
 }
 
@@ -230,14 +243,15 @@ JSModuleDef *readPackageModule(JSContext *ctx, const Session *session, const pac
 JSModuleDef *loadModule(JSContext *ctx, const char *name, void *opaque, JSValueConst attributes) {
     Session *session = (Session *)opaque;
 
-    // an import of bytes is a file, never code; another type: refused
+    // an import of bytes or of an image is a file, never code; another
+    // type: refused
     ImportType type = importType(ctx, attributes, name);
     if (type == ImportType::Unsupported) {
         return nullptr;
     }
 
-    if (type == ImportType::Bytes) {
-        return loadBytesModule(ctx, session, name);
+    if (type == ImportType::Bytes || type == ImportType::Image) {
+        return loadBytesModule(ctx, session, name, type);
     }
 
     // a native module (C++) first; a device program only gets those of its

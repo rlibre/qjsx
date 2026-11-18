@@ -7,9 +7,10 @@
 
 // The ESP32 boards (see board.h), shared by every board: what differs comes
 // from the board's description (boards/<board>/board_config.h, sdkconfig.board).
-// The host link is UART0 (the boards' USB-serial bridge). The JS heap lives in
-// PSRAM when the board has some, packages in the "packages" partition
-// (partitions/), read in place.
+// The host link is the console of the board: UART0 (the USB-serial bridge of
+// most boards) or the USB Serial/JTAG of the chip (the M5Stack Tab5). The JS
+// heap lives in PSRAM when the board has some, packages in the "packages"
+// partition (partitions/), read in place.
 #include "board.h"
 #include "board_config.h"
 #include "board_esp32.h"
@@ -38,6 +39,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/freertos_debug.h"
+#endif
+
+// the host link on the USB Serial/JTAG of the chip (sdkconfig.board)
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
 #endif
 
 // the board has PSRAM (its sdkconfig.board sets CONFIG_SPIRAM)
@@ -471,41 +478,131 @@ const char DATA_FOLDER[] = "/data";        // where the partition is mounted: pr
 const char DATA_PARTITION[] = "data";      // its label in partitions/*.csv
 bool dataMounted = false;                  // set once by mountData() (app_main, before the JS task)
 
-// ### Link to the host over UART0 #############################################
+// ### Link to the host ########################################################
+// The console of the board (sdkconfig): UART0, or the USB Serial/JTAG of the
+// chip when the board's sdkconfig.board puts the console there
+// (CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG: the M5Stack Tab5, whose USB-C port
+// reaches the chip with no bridge). Both have a driver with buffers, read
+// by a task of ours and written by the agent; printf goes through the same
+// driver.
 
-const uart_port_t HOST_UART = UART_NUM_0;   // the COM port (CH343) and the IDF console
-const int         UART_RX_BUFFER = 4096;    // receive buffer of the driver, bytes
-const int         UART_TX_BUFFER = 4096;    // transmit buffer of the driver, bytes
-const size_t      READ_BLOCK = 256;         // bytes read at once by the reader task
-const int         READ_TIMEOUT_MS = 20;     // the reader gives what came after that much silence
+const int    LINK_RX_BUFFER = 4096;      // receive buffer of the driver, bytes
+const int    LINK_TX_BUFFER = 4096;      // transmit buffer of the driver, bytes
+const size_t READ_BLOCK = 256;           // bytes read at once by the reader task
+const int    READ_TIMEOUT_MS = 20;       // the reader gives what came after that much silence
 
-// agent::Link over UART0. The console (printf, IDF logs) shares the wire:
-// every write goes through the driver, one call at a time, so a frame is
-// never cut by text, and the host takes the bytes outside frames as console.
-class UartLink : public agent::Link {
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+
+const char LINK_NAME[] = "USB Serial/JTAG";   // in the message of startLinks
+const int  LINK_WRITE_TIMEOUT_MS = 100;       // a host that reads nothing: the rest of a write is dropped
+
+/**
+ * Installs the driver of the USB Serial/JTAG; stdout / stderr go through it.
+ */
+bool installLink() {
+    usb_serial_jtag_driver_config_t config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    config.rx_buffer_size = LINK_RX_BUFFER;
+    config.tx_buffer_size = LINK_TX_BUFFER;
+    if (usb_serial_jtag_driver_install(&config) != ESP_OK) {
+        return false;
+    }
+
+    usb_serial_jtag_vfs_use_driver();
+    return true;
+}
+
+/**
+ * Writes bytes to the host; returns how many went into the driver (fewer
+ * when the host has read nothing for LINK_WRITE_TIMEOUT_MS: USB is not a
+ * wire that always takes the bytes).
+ */
+int writeLink(const uint8_t *data, size_t size) {
+    return usb_serial_jtag_write_bytes(data, size, pdMS_TO_TICKS(LINK_WRITE_TIMEOUT_MS));
+}
+
+/**
+ * Reads what came, at most 'size' bytes, waiting at most 'timeoutMs'.
+ */
+int readLink(uint8_t *buffer, size_t size, int timeoutMs) {
+    return usb_serial_jtag_read_bytes(buffer, size, pdMS_TO_TICKS(timeoutMs));
+}
+
+/**
+ * Waits until what was written has left, at most 'timeoutMs'.
+ */
+void waitLinkSent(int timeoutMs) {
+    usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(timeoutMs));
+}
+
+#else
+
+const char        LINK_NAME[] = "UART0";   // in the message of startLinks
+const uart_port_t HOST_UART = UART_NUM_0;  // the COM port (CH343...) and the IDF console
+
+/**
+ * Installs the driver of UART0; stdout / stderr go through it.
+ */
+bool installLink() {
+    if (uart_driver_install(HOST_UART, LINK_RX_BUFFER, LINK_TX_BUFFER, 0, nullptr, 0) != ESP_OK) {
+        return false;
+    }
+
+    uart_vfs_dev_use_driver(HOST_UART);
+    return true;
+}
+
+/**
+ * Writes bytes to the host (one driver call: never interleaved with a
+ * printf); returns how many.
+ */
+int writeLink(const uint8_t *data, size_t size) {
+    return uart_write_bytes(HOST_UART, data, size);
+}
+
+/**
+ * Reads what came, at most 'size' bytes, waiting at most 'timeoutMs'.
+ */
+int readLink(uint8_t *buffer, size_t size, int timeoutMs) {
+    return uart_read_bytes(HOST_UART, buffer, size, pdMS_TO_TICKS(timeoutMs));
+}
+
+/**
+ * Waits until what was written has left, at most 'timeoutMs'.
+ */
+void waitLinkSent(int timeoutMs) {
+    uart_wait_tx_done(HOST_UART, pdMS_TO_TICKS(timeoutMs));
+}
+
+#endif
+
+// agent::Link over the console. The console (printf, IDF logs) shares the
+// link: every write goes through the driver, one call at a time, so a frame
+// is never cut by text, and the host takes the bytes outside frames as
+// console.
+class ConsoleLink : public agent::Link {
 public:
     /**
-     * Writes whole frames (one driver call: never interleaved with a printf).
+     * Writes whole frames (one driver call).
      */
     bool send(const uint8_t *data, size_t size) override {
-        int written = uart_write_bytes(HOST_UART, data, size);
+        int written = writeLink(data, size);
         return written == (int)size;
     }
 };
 
-UartLink uartLink;                     // the agent's link
+ConsoleLink consoleLink;               // the agent's link
 agent::Agent *linkedAgent = nullptr;   // set by startLinks, before the reader starts
 
 /**
- * Reader task of UART0: gives the received bytes to the agent, forever.
+ * Reader task of the link: gives the received bytes to the agent, forever.
  */
-void uartReader(void *) {
+void linkReader(void *) {
     // on the heap: task stacks are small
     uint8_t *buffer = (uint8_t *)memory::allocate(READ_BLOCK);
 
     for (;;) {
         // what came, given after READ_TIMEOUT_MS of silence or a full block
-        int received = uart_read_bytes(HOST_UART, buffer, READ_BLOCK, pdMS_TO_TICKS(READ_TIMEOUT_MS));
+        int received = readLink(buffer, READ_BLOCK, READ_TIMEOUT_MS);
         if (received > 0) {
             linkedAgent->receive(buffer, (size_t)received);
         }
@@ -603,7 +700,7 @@ bool restart() {
     // one deadline for every output: the agent's link, the open UARTs, the
     // USB serial functions
     int64_t deadline = platform::monotonicMs() + RESTART_FLUSH_MS;
-    uart_wait_tx_done(HOST_UART, pdMS_TO_TICKS(RESTART_FLUSH_MS));
+    waitLinkSent(RESTART_FLUSH_MS);
     hal::serial::drainUntil(deadline);
 #if QJSX_HAS_USB
     hal::usb::drainUntil(deadline);
@@ -782,37 +879,34 @@ void closePackage(const uint8_t *) {
 }
 
 /**
- * UART0: installs its driver (the console then writes through it too),
- * attaches it to the agent for good (a serial link is always there) and
- * starts its reader task.
+ * The console (UART0 or USB Serial/JTAG): installs its driver (the console
+ * then writes through it too), attaches it to the agent for good (a serial
+ * link is always there) and starts its reader task.
  */
 bool startLinks(agent::Agent *agent) {
     // the driver, and stdout / stderr through it: one write call at a time
-    bool installed = uart_driver_install(HOST_UART, UART_RX_BUFFER, UART_TX_BUFFER, 0, nullptr, 0) == ESP_OK;
-    if (!installed) {
-        fprintf(stderr, "qjsx: cannot install the UART0 driver\n");
+    if (!installLink()) {
+        fprintf(stderr, "qjsx: cannot install the driver of %s\n", LINK_NAME);
         return false;
     }
-
-    uart_vfs_dev_use_driver(HOST_UART);
 
     // the agent talks through it from now on
     linkedAgent = agent;
-    agent->attach(&uartLink);
+    agent->attach(&consoleLink);
 
     // the reader task
-    if (!platform::startThread(&uartReader, nullptr, platform::defaultThreadOptions("agent-uart"))) {
-        fprintf(stderr, "qjsx: cannot start the UART0 reader\n");
+    if (!platform::startThread(&linkReader, nullptr, platform::defaultThreadOptions("agent-link"))) {
+        fprintf(stderr, "qjsx: cannot start the reader of %s\n", LINK_NAME);
         return false;
     }
 
-    printf("qjsx agent: listening on UART0\n");
+    printf("qjsx agent: listening on %s\n", LINK_NAME);
     return true;
 }
 
 /**
- * The IDF console (UART0): the program's output when no host session is
- * open.
+ * The IDF console (UART0 or USB Serial/JTAG): the program's output when no
+ * host session is open.
  */
 void writeConsole(int stream, const char *text, size_t length) {
     FILE *out = stream == rt::OUTPUT_STDERR ? stderr : stdout;

@@ -24,6 +24,10 @@
 #include "draw_module.h"
 #endif
 
+#if QJSX_HAS_SCREEN
+#include "board_screen.h"
+#endif
+
 namespace {
 
 /**
@@ -50,6 +54,11 @@ extern "C" void app_main(void) {
 
     // the files of the programs: the "data" partition on /data
     board::mountData();
+
+    // the display built into the board, black, before any program
+#if QJSX_HAS_SCREEN
+    board::startScreen();
+#endif
 
     // the hardware modules of this port, before any program runs
     rt::registerNativeModule("device/board", &jsNewModule_board);

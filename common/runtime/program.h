@@ -13,7 +13,9 @@
 // the package being run, the JS modules embedded in the executable, then
 // RunHooks::loadModule (the host tool loads the files on disk there).
 // A module imported with { type: "bytes" } is a file of the package
-// ("bytes/<name>", a Uint8Array over it), else RunHooks::loadBytes.
+// ("bytes/<name>", a Uint8Array over it), else RunHooks::loadBytes; one
+// imported with { type: "image" } the same (converted by 'qjsx build'), else
+// RunHooks::loadImage.
 #pragma once
 
 #include <stddef.h>
@@ -56,6 +58,10 @@ struct RunHooks {
     // in the package, with newBytesModule(); returns nullptr with a pending
     // exception if it cannot.
     JSModuleDef *(*loadBytes)(JSContext *ctx, const char *name, void *opaque);
+    // Loads a module imported as an image (with { type: "image" }) that is
+    // not in the package: the file converted for the displays, as 'qjsx
+    // build' does; returns nullptr with a pending exception if it cannot.
+    JSModuleDef *(*loadImage)(JSContext *ctx, const char *name, void *opaque);
     // What the program may reach (files, network, environment, serial
     // ports), those of the thread during the run; borrowed. nullptr: the
     // tool's own commands, everything allowed.

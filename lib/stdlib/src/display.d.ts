@@ -43,6 +43,10 @@
  * `with { type: "bytes" }`: they are read in place (in flash on a device),
  * never copied. See {@link Display.font}.
  *
+ * Images are PNG files imported with `with { type: "image" }`: `qjsx build`
+ * converts them for the display (16-bit pixels, dithered, their transparency
+ * kept), and they are read in place too. See {@link Display.image}.
+ *
  * @example
  * import { Display } from "stdlib/display";
  * import inter16 from "./fonts/inter16.bin" with { type: "bytes" };
@@ -76,9 +80,13 @@
 declare module "stdlib/display" {
     /**
      * The display controllers known to {@link Display}: `"st7796"` (320 x 480
-     * pixels at rotation 0, SPI clock 40 MHz).
+     * pixels at rotation 0, SPI clock 40 MHz), and `"builtin"`: the display
+     * built into the board (the M5Stack Tab5's, 720 x 1280 at rotation 0,
+     * MIPI-DSI): no bus nor pins to give but its `backlight` (22 on the
+     * Tab5); its `show()` draws into the image the panel shows, on a task
+     * of its own (its promise is settled once the screen shows the area).
      */
-    export type DisplayType = "st7796";
+    export type DisplayType = "st7796" | "builtin";
 
     /**
      * How the image is turned, clockwise, in degrees. At 90 and 270 the
@@ -91,14 +99,23 @@ declare module "stdlib/display" {
      * fields are ignored.
      */
     export interface DisplayOptions {
-        /** The controller. Default `"st7796"`; another one is a `RangeError`. */
+        /**
+         * The controller. Default `"st7796"`; another one is a `RangeError`,
+         * and so is `"builtin"` on a board without a built-in display.
+         */
         type?: DisplayType;
 
-        /** The SPI port of the bus (2 or 3 on the ESP32). See `device/spi`. */
-        port: number;
+        /**
+         * The SPI port of the bus (2 or 3 on the ESP32). See `device/spi`.
+         * Not for `"builtin"`.
+         */
+        port?: number;
 
-        /** Clock pin of the bus. Required by `device/spi` (`TypeError`). */
-        sclk: number;
+        /**
+         * Clock pin of the bus. Required by `device/spi` (`TypeError`). Not
+         * for `"builtin"`.
+         */
+        sclk?: number;
 
         /** Data out pin of the bus (MOSI). */
         mosi?: number;
@@ -109,8 +126,11 @@ declare module "stdlib/display" {
          */
         cs?: number;
 
-        /** Data / command pin of the controller. Required (`TypeError`). */
-        dc: number;
+        /**
+         * Data / command pin of the controller. Required on SPI
+         * (`TypeError`); not for `"builtin"`.
+         */
+        dc?: number;
 
         /**
          * Reset pin of the controller: pulsed low when the display opens,
@@ -189,6 +209,25 @@ declare module "stdlib/display" {
 
         /** The height of a line: `ascent - descent`. */
         readonly lineHeight: number;
+    }
+
+    /**
+     * An image made by {@link Display.image}, for {@link Display.drawImage}
+     * of THE SAME display (its index is the display's). Do not change its
+     * fields.
+     */
+    export interface DisplayImage {
+        /** Its place among the images of the display, 0 to 15. */
+        readonly index: number;
+
+        /** Its width, pixels. */
+        readonly width: number;
+
+        /** Its height, pixels. */
+        readonly height: number;
+
+        /** The image file, as given (kept by the display while it lives). */
+        readonly bytes: Uint8Array;
     }
 
     /**
@@ -353,6 +392,33 @@ declare module "stdlib/display" {
          * @throws `TypeError` when `string` is not a string.
          */
         textWidth(string: string, font: DisplayFont): number;
+
+        /**
+         * Makes an image for {@link Display.drawImage} from a PNG file
+         * imported with `with { type: "image" }`: `qjsx build` converted it
+         * (16-bit pixels, dithered, transparency kept; `qjsx run script.js`
+         * converts it when the program starts). The file is read in place
+         * and kept by the display while it lives. The same file given again
+         * counts once.
+         *
+         * @example
+         * import logoFile from "./logo.png" with { type: "image" };
+         * const logo = lcd.image(logoFile);
+         * lcd.drawImage(lcd.width - logo.width - 8, 8, logo);
+         *
+         * @throws `TypeError` when `bytes` is not a `Uint8Array` or not such
+         *     an image (a PNG imported with `type: "bytes"` included);
+         *     `RangeError` for a 17th image on the same display (at most 16).
+         */
+        image(bytes: Uint8Array): DisplayImage;
+
+        /**
+         * Adds an image made by {@link Display.image} of this display, its
+         * top left pixel at (x, y). Its transparent pixels leave what is
+         * below them, its partly transparent ones (smoothed edges) are
+         * blended over it. What lies outside the screen is cut.
+         */
+        drawImage(x: number, y: number, image: DisplayImage): void;
 
         /**
          * Empties the image being made without showing it, and sets

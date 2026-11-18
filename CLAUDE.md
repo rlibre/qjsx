@@ -1069,6 +1069,32 @@ keeps the old name: `C:\Sandbox\espjs`.
     in the twin (the board 15.5: its rendering is not simulated), a full screen
     62 ms; display 42/42, spi 59/59, twinparts 38/38. A video stream (MJPEG / BMP) for the page: postponed until needed (user
     agreed to wait for these figures);
+  - IMAGES (design agreed by the user 2026-11-18, IMPLEMENTED the same day:
+    host/js/image.js (`qjsx:image`), common/draw/image.{h,cpp}, kind 5 of sys/draw +
+    `imageSize`, `lcd.image()` / `drawImage()`, `RunHooks::loadImage` (host.cpp: a
+    source module handing the bytes in hex to qjsx:image), typings incl. `*.png`;
+    tests/image.test.js 70 (fixtures made by Node: tests/fixtures/images/make-fixtures.mjs),
+    fixture imageimport (sources / package / target), display.test.js 49 (step 6: an
+    image in the twin); flashed on the WT32-SC01, demo temp/wtimage (logo 96 x 96 =
+    13.5 KB)):
+    - icons = an icon FONT (Font Awesome Free...) converted by lv_font_conv, drawn
+      with `text()` in any color (`--bpp 2` or 4); nothing in qjsx: EACH PROJECT
+      converts its own (user), the guide says how (license: FA icons CC BY 4.0,
+      attribution kept in the project);
+    - a logo = an RGBA image: `import logo from "./logo.png" with { type: "image" }`,
+      converted by `qjsx build` (and `qjsx run script.js`) on the PC, on the path of
+      the bytes imports (stored in `bytes/<module>`, read in place, in the build id);
+      the module gives a Uint8Array, `lcd.image(bytes)` a handle (`width`, `height`;
+      16 at most per display, as fonts), `lcd.drawImage(x, y, image)` one command;
+      no scaling, no rotation;
+    - format: header (version, width, height), table of row starts, each row RLE runs
+      of three kinds: transparent (skip N), opaque (N RGB565 pixels in the display's
+      order), edge (N pixels RGB565 + alpha 8 bits, blended); renderer reads the rows
+      of each band in place;
+    - PNG only (JPEG later, user: "on fait simple"), decoder WRITTEN BY US IN JS in the
+      tool (inflate RFC 1951, chunks + CRC, the 5 row filters, grey / RGB / RGBA /
+      palette, 8 and 16 bits; interlaced refused with a message); no dependency;
+    - dithering ALWAYS at the conversion to RGB565 (user);
   - trials in temp/: wtscreen (probe), spibench, wtdisplay, wtcanvas, wtdraw, wtshow, wttext,
     wtgauge (+ wtgauge-twin), drawcheck (renderer on the PC, ASCII);
   - NEXT, to discuss with the user first: text and fonts ("pour les fontes, on
@@ -1427,6 +1453,29 @@ in the include path (no two headers share a name; keep it so).
   - order: minimal firmware (agent, deploy, run, debugger, same board tests as the ESP32),
     then PSRAM heap + microbench, then device/gpio (native SIO XOR toggle), then device/rmt
     on PIO.
+- Sixth board, first ESP32-P4 (user, 2026-11-18, DONE the same day): M5Stack Tab5,
+  ESP32-P4NRW32 chip revision v1.0 (`CONFIG_ESP32P4_SELECTS_REV_LESS_V3`, 360 MHz), 16 MB
+  flash (DIO), 32 MB PSRAM (200 MHz), MAC 30:ed:a0:e1:6b:28, COM30 (`serial:COM30`, the
+  P4's USB Serial/JTAG on its USB-C: no bridge; UART0 only on the M5-Bus). Folder
+  `ports/esp32/boards/m5stack-tab5/`. The agent's link follows the console of the board
+  (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` -> USB Serial/JTAG driver, else UART0;
+  board_esp32.cpp `installLink / writeLink / readLink / waitLinkSent`). LEDC on the P4:
+  `LEDC_USE_PLL_DIV_CLK` (no APB clock; assumed 80 MHz, not measured). Factory firmware
+  overwritten WITHOUT backup (user: M5Burner can restore it). Debugger 72/72, proxy 33/33,
+  cdp 53/53, device reset OK. After `idf.py flash` it stayed in download mode
+  (`boot:0x204`): a short press on Reset/Boot starts it (the next flash booted by
+  itself). Flash it FREELY (user, 2026-11-18), MAC checked first. The user's unit is the FIRST version (I2C scan: GT911 touch at
+  0x14, nothing at 0x55): ILI9881C panel. DISPLAY DONE 2026-11-18 (design agreed by the
+  user: same `Display`, type "builtin"; drivers in `common/drivers/` (user: not P4 code);
+  no Espressif ili9881c component, only ESP-IDF's esp_lcd; M5's init table copied with
+  its Apache-2.0 notice; one frame buffer): seen right by the user (orientation, colors);
+  whole screen 116 ms, area 300 x 60 ~4 ms (232 images/s, JS 91 % when synchronous);
+  then RENDERED IN A TASK (user, 2026-11-18): sys/draw class `Screen`, 185-189 images/s,
+  JS 60 % (doc/architecture.md "Display built into the board"); demo temp/tab5screen,
+  the same on the WT32-SC01 in temp/wtstats. SPI displays (user, 2026-11-18): sys/draw
+  show() sends the area (0x2A / 0x2B / 0x2C) and the pixels as ONE transaction (was 5
+  synchronous calls from display.js): WT32-SC01 70 -> 84 images/s, JS 73 -> 71 %.
+  Touch: later (user). Not done: the ESP32-C6 radio (SDIO), the other expander pins, twin.
 - Fifth board, first ORIGINAL ESP32 (user, 2026-11-17): Wireless-Tag WT32-SC01 v3.2,
   ESP32-WROVER-B (ESP32-D0WD chip REVISION v1.0: PSRAM cache bug worked around by
   ESP-IDF), 4 MB flash XMC 3.3 V (DIO), 4 MB of PSRAM seen, 3.5" display on SPI and

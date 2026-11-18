@@ -4,7 +4,7 @@ description: Drawing on a color display wired on SPI with stdlib/display.
 ---
 
 `stdlib/display` drives a color display wired on SPI: shapes, smoothed arcs and rounded
-rectangles, text in proportional fonts. It is written in JS over `device/spi`, and its
+rectangles, text in proportional fonts, images with transparency. It is written in JS over `device/spi`, and its
 pixels are made by `sys/draw`, a native renderer that only the firmware of a board with a
 display has (today the WT32-SC01) and the twin of such a board. The controller known
 today is the ST7796 (320 x 480 pixels). Every call is described in the API reference of
@@ -178,6 +178,37 @@ const x = (lcd.width - lcd.textWidth(value, big)) >> 1;   // centered
 lcd.text(x, 120, value, big, 0xffff00);
 ```
 
+## Images
+
+A PNG file of the project is imported as an image: `qjsx build` converts it on the PC
+into the format the display draws, and that is what the package holds, read in place
+(in flash on the board):
+
+```js
+import logoFile from "./logo.png" with { type: "image" };
+
+const logo = lcd.image(logoFile);                       // its width and height, in pixels
+lcd.drawImage(lcd.width - logo.width - 8, 8, logo);     // its top left pixel at (x, y)
+```
+
+- Its transparency is kept: a transparent pixel leaves what is under it, a partly
+  transparent one (the smoothed edge of a logo) is blended over it. Draw the image after
+  what it lies on.
+- Its colors go down to 16 bits; they are dithered on the way, so a gradient shows no
+  bands.
+- Every kind of PNG is read (grey, RGB, palette, with or without alpha, 8 or 16 bits);
+  an interlaced one is refused (save it again without interlacing).
+- No scaling, no rotation: the image is drawn at the size of its file.
+- Its size in the package depends on its content: transparent areas and areas of one
+  color cost almost nothing; a logo of 96 x 96 with a gradient takes about 13 KB, a photo
+  of the whole screen about 300 KB (the WT32-SC01 holds packages of 512 KB).
+- A display takes at most 16 images.
+
+Icons of one color (pictograms) are better as a font: an icon font such as Font Awesome
+Free, converted by `lv_font_conv` with the icons you need (`-r 0xf015,0xf013`, `--bpp 2`
+or `4`), drawn with `text()` in any color, a few hundred bytes an icon. Keep the
+attribution its license asks for in your project.
+
 ## Speed
 
 Measured on the WT32-SC01 (original ESP32 at 240 MHz, display at 40 MHz):
@@ -192,6 +223,22 @@ Measured on the WT32-SC01 (original ESP32 at 240 MHz, display at 40 MHz):
 
 The rendering runs on the task of the SPI bus, not on the JS thread: while an image goes
 out, the program lists the next one, reads its sensors, answers its links.
+
+## The display built into the board
+
+On a board whose display is part of it (the M5Stack Tab5: 5", 720 x 1280, MIPI-DSI),
+`type: "builtin"` takes it: no bus and no pins to give, but the backlight.
+
+```js
+const lcd = new Display({ type: "builtin", backlight: 22, rotation: 90 });   // 1280 x 720
+```
+
+The drawing calls are the same. The panel shows an image held in memory; `show()` draws
+the area into it on a task of its own, and its promise is settled once the screen shows
+it: the program goes on meanwhile, as with a display on SPI. Measured on the Tab5: the
+whole screen in about 120 ms, an area of 300 x 60 shown again and again 189 times a second
+(the JS thread busy 60 % of the time). `"builtin"` on a board without such a display is a
+`RangeError`.
 
 ## In the twin
 

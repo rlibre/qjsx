@@ -30,6 +30,16 @@
 // library ("stdlib/..."). The tool's own copy of the standard library embeds
 // these files too (tools/embed-bytes.lua), for 'qjsx run script.js'.
 //
+// An image (user, 2026-11-18) is imported the same way, with { type: "image" }:
+//
+//   import logo from "./logo.png" with { type: "image" };
+//
+// the PNG file is converted here (qjsx:image) into the format the renderer of
+// the displays reads in place, and that is what goes into the package, under
+// the same entry and in the same list as the bytes; its size and hash are
+// those of the converted image. On the device both are the same: a module
+// whose 'default' is a Uint8Array over the entry.
+//
 // Known limit: the bytes are read-only, but nothing says so to the program
 // (the engine has no immutable ArrayBuffer): writing into the array is an
 // error that is not detected (on a device the memory is flash).
@@ -37,9 +47,13 @@ import * as fs from "sys/fs";
 import { join } from "stdlib/path";
 import { sha256 } from "sys/crypto";
 import { hex } from "qjsx:util";
+import { imageFromPng } from "qjsx:image";
 
-// The value of the attribute 'type' that imports a file as bytes.
+// The values of the attribute 'type' that import a file: as its bytes, or as
+// an image converted for the displays.
 export const BYTES_TYPE = "bytes";
+export const IMAGE_TYPE = "image";
+const IMPORT_TYPES = [BYTES_TYPE, IMAGE_TYPE];
 
 // Prefix of the entries of the package that hold the files, and their
 // alignment in the archive (a device reads them where the package lies).
@@ -57,38 +71,40 @@ const BYTES_OUTLINE = {
 };
 
 /**
- * True if the import attributes of an import ({ type: "bytes" }, or null
- * without a 'with' clause) ask for bytes, false for a module. Any other
- * attribute or type is an error at 'place' ("file:line:column").
+ * What the import attributes of an import ask for: null for a module (no
+ * 'with' clause: 'attributes' null), BYTES_TYPE or IMAGE_TYPE for a file.
+ * Any other attribute or type is an error at 'place' ("file:line:column").
  */
-export function importsBytes(attributes, place) {
+export function importType(attributes, place) {
     // no 'with' clause: a module
     if (attributes === null) {
-        return false;
+        return null;
     }
 
     // 'type' is the only attribute
+    const known = IMPORT_TYPES.map(type => `"${type}"`).join(" or ");
     for (const key of Object.keys(attributes)) {
         if (key !== "type") {
-            throw new Error(`${place}: unsupported import attribute '${key}' (the only one is type: "${BYTES_TYPE}")`);
+            throw new Error(`${place}: unsupported import attribute '${key}' (the only one is type: ${known})`);
         }
     }
 
-    // and "bytes" its only value
-    if (attributes.type !== BYTES_TYPE) {
-        throw new Error(`${place}: unsupported import type '${attributes.type}' (the only one is "${BYTES_TYPE}")`);
+    // and one of the known types its value
+    if (!IMPORT_TYPES.includes(attributes.type)) {
+        throw new Error(`${place}: unsupported import type '${attributes.type}' (known: ${known})`);
     }
 
-    return true;
+    return attributes.type;
 }
 
 /**
- * The file of an import of bytes ({ specifier, name, place } of
- * compileModule().imports) in the project 'directory', at 'path' in the
- * project: the module name for a program (named by their paths), the path
- * next to the source file for a library (see the top of the file). Returns
- * { name, data, record }: 'name' is the module name, 'record' its record of
- * the manifest of a package ({ path: the module name, size, hash }). The
+ * The file of an import of bytes or of an image ({ specifier, name, type,
+ * place } of compileModule().imports) in the project 'directory', at 'path'
+ * in the project: the module name for a program (named by their paths), the
+ * path next to the source file for a library (see the top of the file).
+ * Returns { name, data, record }: 'name' is the module name, 'data' the
+ * bytes of the file (an image: converted), 'record' its record of the
+ * manifest of a package ({ path: the module name, size, hash }). The
  * specifier must be relative, the file inside the project.
  */
 export function readBytesFile(directory, path, imported) {
@@ -111,9 +127,23 @@ export function readBytesFile(directory, path, imported) {
         throw new Error(`${imported.place}: no file '${path}' for this import of bytes`);
     }
 
-    // its bytes, as they are, and what the manifest says of them
+    // its bytes, as they are or converted when an image, and what the
+    // manifest says of them
     const data = fs.readFileSync(file);
-    return bytesFile(imported.name, data, hex(sha256(data)));
+    const packaged = imported.type === IMAGE_TYPE ? convertImage(data, path, imported.place) : data;
+    return bytesFile(imported.name, packaged, hex(sha256(packaged)));
+}
+
+/**
+ * The image file 'path' (its bytes: 'data') converted for the displays
+ * (qjsx:image). A failure says which file and where it is imported.
+ */
+function convertImage(data, path, place) {
+    try {
+        return imageFromPng(data);
+    } catch (error) {
+        throw new Error(`${place}: the image '${path}' cannot be converted: ${error.message}`);
+    }
 }
 
 /**

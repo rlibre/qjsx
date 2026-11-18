@@ -1,0 +1,34 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
+# M5Stack Tab5: ESP32-P4 (RISC-V, two cores; chip revision v1.0 as esptool
+# reads it on the user's board, 2026-11-18), 16 MB of flash, 32 MB of PSRAM
+# in the package; a 5" MIPI-DSI display, an ESP32-C6 for the radio (SDIO),
+# not used yet. Host link: the USB Serial/JTAG of the P4 on the USB-C port
+# (no UART bridge: UART0 only reaches the M5-Bus connector).
+
+CONFIG_IDF_TARGET="esp32p4"
+
+# the chips before revision 3: ESP-IDF v6 aims at revision 3 by default
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+
+# flash and partitions
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/16MB.csv"
+
+# PSRAM, only through heap_caps_malloc(MALLOC_CAP_SPIRAM), for the JS heap
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_USE_CAPS_ALLOC=y
+
+# 360 MHz: the most a chip of revision < 3 runs at (sdkconfig.defaults asks
+# for 240, which the P4 does not have)
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
+
+# the console and the agent's link on the USB Serial/JTAG (board_esp32.cpp
+# takes the link from this choice), not on UART0
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

@@ -18,6 +18,7 @@
 import { Gpio } from "device/gpio";
 import { Display } from "stdlib/display";
 import inter16 from "./inter16.bin" with { type: "bytes" };
+import badgeFile from "./badge.png" with { type: "image" };
 
 // The display of the board, turned by 'rotation'.
 function open(rotation) {
@@ -83,6 +84,17 @@ for (let step = 0; step < 20; step++) {
     await new Promise(resolve => setTimeout(resolve, 30));
 }
 console.log("shown values");
+
+// 6. rotation 0, an image with transparent and half transparent pixels
+// (tests/fixtures/images/badge.png) over a blue background
+await next();
+lcd.close();
+lcd = open(0);
+lcd.background = 0x0000ff;
+const badge = lcd.image(badgeFile);
+lcd.drawImage(100, 100, badge);
+await lcd.show(96, 96, 16, 16);
+console.log(`shown image ${badge.width}x${badge.height}`);
 
 // the end: the test reads the last state, then the program ends
 await next();

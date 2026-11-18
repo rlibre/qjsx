@@ -164,12 +164,16 @@ for (let y = 300; y < 300 + lineHeight; y++) {
 }
 equal(leftOfText, 0, "... and none left of it");
 
-// the trace of the page: the pixels went as one write of the whole screen
+// the trace of the page: the area and the pixels of the whole screen went as
+// ONE transaction (the commands of the area, then the made segment)
 const traced = messages.filter(item => item.msg === "twin.spi.data").flatMap(item => item.params.records);
 const imageWrite = traced.find(record => record.segments.some(segment => segment.size === WIDTH * HEIGHT * 2));
-check(imageWrite !== undefined && imageWrite.outcome === "answered" && imageWrite.segments[0].kind === "write",
+const pixelSegment = imageWrite?.segments.find(segment => segment.size === WIDTH * HEIGHT * 2);
+check(imageWrite !== undefined && imageWrite.outcome === "answered" && pixelSegment?.kind === "write",
     "the trace has the made segment as a write of 307200 bytes, answered by the screen");
-equal(imageWrite?.segments[0].written.length, 16, "... of which it keeps the first 16 bytes only");
+equal(pixelSegment?.written.length, 16, "... of which it keeps the first 16 bytes only");
+const commands = (imageWrite?.segments ?? []).filter(segment => segment.dc === 0).map(segment => segment.written[0]);
+equal(JSON.stringify(commands), "[42,43,44]", "... in the same transaction as the area: 0x2A, 0x2B, 0x2C");
 
 // the state of the page: the bus with the screen on it (the page then does
 // not show the bus: the screen shows itself)
@@ -245,6 +249,20 @@ for (let index = 0; index < glass.length; index++) {
     stale += glass[index] !== rebuilt[index] ? 1 : 0;
 }
 equal(stale, 0, "the glass rebuilt from the changes equals the whole glass sent again");
+
+// --- 6. an image imported with { type: "image" }: 8 x 6 at (100, 100), its
+// first column transparent, its second white at half, the rest red, over
+// blue; white at half over blue as the renderer blends it (coverage 129/256)
+const WHITE_OVER_BLUE = (15 << 11) | (31 << 5) | 31;
+nextStep();
+check(await printed("shown image 8x6"), "the program showed an image of 8 x 6");
+await settle();
+equal(hex(pixel(100, 100)), hex(BLUE), "its transparent column shows the background");
+equal(hex(pixel(101, 100)), hex(WHITE_OVER_BLUE), "its half transparent column is blended over it");
+equal(hex(pixel(102, 100)), hex(RED), "its opaque pixels: red");
+equal(hex(pixel(107, 105)), hex(RED), "... to its bottom right");
+equal(hex(pixel(108, 100)), hex(BLUE), "right of it: the background");
+equal(hex(pixel(102, 106)), hex(BLUE), "under it: the background");
 
 // --- the end
 nextStep();

@@ -29,6 +29,7 @@
 #include <stdint.h>
 
 #include "font.h"
+#include "image.h"
 
 namespace draw {
 
@@ -53,6 +54,7 @@ const int16_t KIND_ARC = 3;          // x0, y0: its center; x1: its outer radius
 
 const int16_t KIND_ROUND_RECT = 4;   // x0, y0: its first pixel; x1, y1: its width and height; then
                                      // 2 items: the radius of its corners, its thickness (0: filled)
+const int16_t KIND_IMAGE = 5;        // x0, y0: its top left pixel; x1: image index; y1 and pixel unused
 
 // Items an arc and a rounded rectangle take after their command.
 const int ARC_EXTRA_ITEMS = 2;
@@ -62,6 +64,9 @@ const int ROUND_RECT_EXTRA_ITEMS = 2;
 // may use (its font index is 4 bits).
 const int TEXT_TABULAR_DIGITS = 1;   // the digits 0..9 all take the width of the widest one
 const int MAX_FONTS = 16;
+
+// The most images a list may use.
+const int MAX_IMAGES = 16;
 
 // One command of a list: 6 values of 16 bits, so that a list is exactly an
 // Int16Array a JS program writes itself, 6 items per command, a text
@@ -119,6 +124,13 @@ void arc(const Target *target, int cx, int cy, int radius, int thickness, int st
 void roundRect(const Target *target, int x, int y, int width, int height, int radius, int thickness, uint16_t pixel);
 
 /**
+ * Draws an image, its top left pixel at (x, y): its opaque pixels copied,
+ * its partly transparent ones blended over the target, its transparent ones
+ * left as they are. A row whose runs go out of the file stops there.
+ */
+void drawImage(const Target *target, const Image *image, int x, int y);
+
+/**
  * The width of a line of text, in whole pixels (rounded up), as text()
  * draws it.
  */
@@ -127,9 +139,11 @@ int textWidth(const Font *font, const uint16_t *units, int count, int flags);
 /**
  * Draws the commands of 'items' (count items of 16 bits: commands, a text
  * followed by its characters) into the target, in their order (the later
- * ones over the earlier ones). A text uses fonts[its font index]; one whose
- * font is not given, or a command cut by the end of the items, is skipped.
+ * ones over the earlier ones). A text uses fonts[its font index], an image
+ * images[its image index]; one whose font or image is not given, or a
+ * command cut by the end of the items, is skipped.
  */
-void render(const int16_t *items, int count, const Font *fonts, int fontCount, const Target *target);
+void render(const int16_t *items, int count, const Font *fonts, int fontCount, const Image *images, int imageCount,
+            const Target *target);
 
 } // namespace draw

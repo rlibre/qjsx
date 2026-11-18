@@ -76,6 +76,18 @@ check "the same from its package" \
     bash -c "'$BIN/qjsx' run '$FONTS_PACKAGE' | diff --strip-trailing-cr tests/fixtures/fonts/expected.txt -"
 check "the same without compiler" \
     bash -c "'$BIN/qjsx-target' run '$FONTS_PACKAGE' | diff --strip-trailing-cr tests/fixtures/fonts/expected.txt -"
+# images: the PNG decoder, the format, the renderer, the import (builds the
+# package of tests/fixtures/imageimport); that program reads its image
+# converted on the fly from its sources, converted by the build from its
+# package
+check "images of the displays (PNG decoder, format, renderer, import)" "$BIN/qjsx-tests" run -A tests/image.test.js
+IMAGE_PACKAGE=$(ls tests/fixtures/imageimport/build/packages/*.qjspkg 2>/dev/null | head -1)
+check "an image read by the program run from its sources" \
+    bash -c "'$BIN/qjsx' run tests/fixtures/imageimport/src/main.js | diff --strip-trailing-cr tests/fixtures/imageimport/expected.txt -"
+check "the same from its package" \
+    bash -c "'$BIN/qjsx' run '$IMAGE_PACKAGE' | diff --strip-trailing-cr tests/fixtures/imageimport/expected.txt -"
+check "the same without compiler" \
+    bash -c "'$BIN/qjsx-target' run '$IMAGE_PACKAGE' | diff --strip-trailing-cr tests/fixtures/imageimport/expected.txt -"
 check "tool modules" "$BIN/qjsx" run -A tests/tools.test.js
 check "protocol (CBOR, COBS, frames)" "$BIN/qjsx" run -A tests/protocol.test.js
 check "debug info (lines, breakpoints, scopes)" "$BIN/qjsx" run -A tests/debuginfo.test.js
