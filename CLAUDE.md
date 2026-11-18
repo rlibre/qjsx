@@ -1513,8 +1513,12 @@ in the include path (no two headers share a name; keep it so).
   with the browser's Uint8Array.fromBase64, ~150 ms with atob). DSI, expander, radio not
   played. Demo temp/tab5twin; tests/tab5.test.js (21 checks, fixture
   tests/fixtures/twintab5, in run-tests.sh). The same for the WT32-SC01 (user): its
-  st7796 model no longer compares pixels nor marks tiles, it sends the box written; any
-  screen of the page shrinks to fit (smoothed when shrunk).
+  st7796 model no longer compares pixels nor marks tiles, it sends the areas written; any
+  screen of the page shrinks to fit (smoothed when shrunk). Areas kept as a few
+  rectangles (`DirtyRects` of qjsx:twin, user): ONE box around them was the whole Tab5
+  image (header + chart at the two ends of the panel), 2.4 MB every 0.6 s, which starved
+  the page (parts and page server share the twin's runtime): a page opened then stayed
+  empty for seconds.
 - Bytecode reader (engine change Z, 2026-11-18, reported by the user): a truncated last
   opcode of a function read 4 bytes past the buffer (JS_ReadFunctionBytecode, and
   bc_byte_swap); now a SyntaxError "truncated opcode"; tests/bytecode.test.js (qjsx-tests

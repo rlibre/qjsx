@@ -47,18 +47,19 @@
 // Speed: the pixels of a memory write are taken a row of the window at a
 // time (a straight line on the glass: one loop, no call per pixel), written
 // without comparing them (user, 2026-11-18: only the areas written are sent,
-// as the display of the Tab5); each line written grows the box to send. The
-// memory holds the pixels in the byte order of the wire (high byte first),
-// so that the rows sent to the page are copied whole.
+// as the display of the Tab5); each line written is added to the areas to
+// send (DirtyRects of qjsx:twin: close areas merged, distant ones kept
+// apart). The memory holds the pixels in the byte order of the wire (high
+// byte first), so that the rows sent to the page are copied whole.
 //
-// The page: every FLUSH_MS at most, the box of what was written since the
-// last time, as one rectangle, its pixels in base64 (16 bits, high byte
-// first, red in the high bits), with the look of the screen: { width,
+// The page: every FLUSH_MS at most, the areas written since the last time,
+// a few rectangles, their pixels in base64 (16 bits, high byte first, red
+// in the high bits), with the look of the screen: { width,
 // height, awake, on, inverted, brightness, turn (how the image is turned on
 // the glass: 0, 90, 180, 270), rects: [{ x, y, width, height, pixels }] }.
 // Nothing is sent when nothing changed. The action "refresh" sends the whole
 // glass (a page that opens asks for it).
-import { Part, parsePin } from "qjsx:twin";
+import { DirtyRects, Part, parsePin } from "qjsx:twin";
 
 // The glass, in pixels, as seen USB connector at the bottom.
 const WIDTH = 320;
@@ -152,7 +153,7 @@ export default class St7796 extends Part {
         // the memory, the controller as at power on, nothing shown yet
         this._memory = new Uint16Array(WIDTH * HEIGHT);      // the glass, row by row: a pixel each, in wire order (toWire)
         this._memoryBytes = new Uint8Array(this._memory.buffer);   // the same, as the bytes sent to the page
-        this._dirty = null;                                   // the box written since the last flush: { left, top, right, bottom }; null: none
+        this._dirty = new DirtyRects();                       // the areas written since the last flush
         this._lookSent = "";                                  // the look last sent, as JSON
         this._glassX = 0;                                     // the place _locate() found
         this._glassY = 0;
@@ -531,26 +532,10 @@ export default class St7796 extends Part {
 
     /**
      * Adds the glass box from (x0, y0) to (x1, y1), corners included, in any
-     * order, to the box to send.
+     * order, to the areas to send.
      */
     _mark(x0, y0, x1, y1) {
-        // its corners in order
-        const left = Math.min(x0, x1);
-        const right = Math.max(x0, x1);
-        const top = Math.min(y0, y1);
-        const bottom = Math.max(y0, y1);
-
-        // the first one, or the box grows
-        const box = this._dirty;
-        if (box === null) {
-            this._dirty = { left, top, right, bottom };
-            return;
-        }
-
-        box.left = Math.min(box.left, left);
-        box.top = Math.min(box.top, top);
-        box.right = Math.max(box.right, right);
-        box.bottom = Math.max(box.bottom, bottom);
+        this._dirty.add(x0, y0, x1, y1);
     }
 
     /**
@@ -573,7 +558,7 @@ export default class St7796 extends Part {
     }
 
     /**
-     * Sends the page what changed: the pixels of the box written, and the
+     * Sends the page what changed: the pixels of the areas written, and the
      * look of the screen; nothing when nothing changed.
      */
     _flush() {
@@ -590,15 +575,14 @@ export default class St7796 extends Part {
         const lookText = JSON.stringify(look);
 
         // nothing changed: nothing sent
-        const box = this._dirty;
-        if (box === null && lookText === this._lookSent) {
+        const rects = this._dirty.take();
+        if (rects.length === 0 && lookText === this._lookSent) {
             return;
         }
 
         // the look, and the pixels written
-        this._dirty = null;
         this._lookSent = lookText;
-        this.publish({ ...look, rects: box === null ? [] : [this._pixelsOf(box)] });
+        this.publish({ ...look, rects: rects.map(rect => this._pixelsOf(rect)) });
     }
 
     /**

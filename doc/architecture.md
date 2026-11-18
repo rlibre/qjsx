@@ -2290,7 +2290,11 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
   through the bridge (`BridgeEvent::screenFlush`, the event `{ type: "screen", x, y,
   width, height, rotation }`, `screen.onFlush()`). The part reads only the pixels of the
   areas shown (`twinboard.screenPixels`, high byte first; no pixel compared), at most 15
-  times a second, the box of them as one rectangle. Without such a part, `board::screen()`
+  times a second, as a few rectangles (`DirtyRects` of qjsx:twin: an area merged with
+  those close to it, a merged rectangle at most 1.25 times the area of the two, at most 8
+  rectangles; one box around all of them was the whole image when a header and a chart
+  at the two ends of the panel changed, 2.4 MB every 0.6 s, which starved the pages: the
+  parts and the page server share the twin's runtime). Without such a part, `board::screen()`
   is nullptr and `new Screen()` throws ENODEV (qjsx run, the desktop agent, other twins).
   Measured in the page (Chromium of the pane): an area of a card a few milliseconds; the
   whole image (720 x 1280, 2.5 MB of JSON) about 40 ms with the browser's
@@ -2467,8 +2471,9 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
     core): the pixels of a memory write are taken a row of the window at a time (a straight
     line on the glass, one loop), written without being compared (user, 2026-11-18: only
     the areas written are sent, as the display of the Tab5; before, a changed pixel marked
-    its tile of 16 x 16); every 66 ms at most the box of what was written goes to the page
-    as one rectangle, its pixels in base64, 16 bits high byte first (the memory is kept in that
+    its tile of 16 x 16); every 66 ms at most the areas written go to the page as a few
+    rectangles (`DirtyRects`, as the display of the Tab5), their pixels in base64, 16 bits
+    high byte first (the memory is kept in that
     byte order: rows are copied whole), with the look of the screen: `{ width, height,
     awake, on, inverted, brightness, turn, rects: [{ x, y, width, height, pixels }] }`;
     nothing when nothing changed. The action `"refresh"` sends the whole glass (a page that

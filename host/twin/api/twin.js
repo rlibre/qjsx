@@ -28,6 +28,8 @@
 //   board.rmt(pin)          onBytes(bytes => ...), onPulses(pulses => ...)
 //   board.screen(w, h)      the display built into the board: onFlush(area => ...),
 //                           pixels(x, y, width, height)
+//   new DirtyRects()        the areas of a screen written, as a few rectangles:
+//                           add(x0, y0, x1, y1), take()
 //   board.now()             ms since the twin started
 //   board.restart()         restarts the device (its reset button)
 //
@@ -777,6 +779,113 @@ export class Board {
 
         twinboard.spiAnswer(event.request, bytes);
     }
+}
+
+// ### Dirty rectangles ########################################################
+
+// How much larger than its two rectangles a merged one may be (its area over
+// the sum of theirs): close or overlapping areas merge, distant ones stay
+// apart (the header and the chart of a screen are not sent as the whole
+// screen between them).
+const MERGE_RATIO = 1.25;
+
+// The areas of a screen written since they were last taken, for a model
+// that sends them to the page: a few rectangles, not one box around all of
+// them, nothing compared. Corners included (left, top, right, bottom).
+export class DirtyRects {
+    /**
+     * None yet; at most 'most' rectangles kept (more: the two that cost
+     * the least to merge are merged).
+     */
+    constructor(most = 8) {
+        this._rects = [];          // { left, top, right, bottom }
+        this._most = most;
+    }
+
+    /**
+     * Adds the rectangle from (x0, y0) to (x1, y1), corners included, in any
+     * order: merged with those close to it, kept apart from the others.
+     */
+    add(x0, y0, x1, y1) {
+        // its corners in order
+        let rect = { left: Math.min(x0, x1), top: Math.min(y0, y1), right: Math.max(x0, x1), bottom: Math.max(y0, y1) };
+
+        // merged with every rectangle close to it, again with what that made
+        let merged = true;
+        while (merged) {
+            merged = false;
+            for (let i = 0; i < this._rects.length; i++) {
+                const other = this._rects[i];
+                const union = unionOf(rect, other);
+                if (areaOf(union) <= (areaOf(rect) + areaOf(other)) * MERGE_RATIO) {
+                    rect = union;
+                    this._rects.splice(i, 1);
+                    merged = true;
+                    break;
+                }
+            }
+        }
+
+        this._rects.push(rect);
+
+        // too many: the pair whose merge adds the least area, merged
+        while (this._rects.length > this._most) {
+            this._mergeCheapest();
+        }
+    }
+
+    /**
+     * The rectangles, then none.
+     */
+    take() {
+        const rects = this._rects;
+        this._rects = [];
+        return rects;
+    }
+
+    /**
+     * Merges the two rectangles whose union adds the least area.
+     */
+    _mergeCheapest() {
+        let best = null;
+        let bestCost = Infinity;
+
+        for (let i = 0; i < this._rects.length; i++) {
+            for (let j = i + 1; j < this._rects.length; j++) {
+                const a = this._rects[i];
+                const b = this._rects[j];
+                const cost = areaOf(unionOf(a, b)) - areaOf(a) - areaOf(b);
+                if (cost < bestCost) {
+                    bestCost = cost;
+                    best = [i, j];
+                }
+            }
+        }
+
+        const [i, j] = best;
+        const union = unionOf(this._rects[i], this._rects[j]);
+        this._rects.splice(j, 1);
+        this._rects[i] = union;
+    }
+}
+
+/**
+ * The box of two rectangles.
+ */
+function unionOf(a, b) {
+    return {
+        left: Math.min(a.left, b.left),
+        top: Math.min(a.top, b.top),
+        right: Math.max(a.right, b.right),
+        bottom: Math.max(a.bottom, b.bottom),
+    };
+}
+
+/**
+ * The pixels of a rectangle (corners included).
+ */
+function areaOf(rect) {
+    return (rect.right - rect.left + 1) * (rect.bottom - rect.top + 1);
 }
 
 // ### Registers ###############################################################

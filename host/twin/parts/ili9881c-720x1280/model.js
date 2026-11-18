@@ -16,15 +16,18 @@
 //   { "id": "screen", "model": "ili9881c-720x1280", "label": "Screen", "backlight": 22 }
 //
 // The page: every FLUSH_MS at most, the areas made visible since the last
-// time, as one rectangle (the box of them all), its pixels in base64 (16
-// bits, high byte first), with the look of the screen: { width, height,
+// time, a few rectangles (DirtyRects of qjsx:twin: close areas merged,
+// distant ones kept apart: one box around a header and a chart at the two
+// ends of the panel was the whole image, 2.4 MB of base64 every 0.6 s, which
+// starved the page), their pixels in base64 (16 bits, high byte first), with
+// the look of the screen: { width, height,
 // awake, on, inverted, brightness, turn (how the program's image is turned
 // on the panel: 0, 90, 180, 270), rects: [{ x, y, width, height, pixels }] },
 // as the part st7796-320x480 sends it (the same view shows both). Nothing is
 // sent when nothing changed. The action "refresh" sends the whole image (a
 // page that opens asks for it). Only the areas shown are read: no pixel is
 // compared.
-import { Part, parsePin } from "qjsx:twin";
+import { DirtyRects, Part, parsePin } from "qjsx:twin";
 
 // The panel, in pixels, as it scans its image (the board held upright).
 const WIDTH = 720;
@@ -52,7 +55,7 @@ export default class Ili9881c extends Part {
         }
 
         // nothing shown yet
-        this._dirty = null;            // the box of the areas shown since the last flush: { left, top, right, bottom }; null: none
+        this._dirty = new DirtyRects();   // the areas shown since the last flush
         this._turn = 0;                // the rotation of the last drawing
         this._lookSent = "";           // the look last sent, as JSON
 
@@ -80,20 +83,10 @@ export default class Ili9881c extends Part {
     }
 
     /**
-     * Adds a rectangle (its corners included) to the box to send.
+     * Adds a rectangle (its corners included) to the areas to send.
      */
     _mark(left, top, right, bottom) {
-        // the first one, or the box grows
-        const box = this._dirty;
-        if (box === null) {
-            this._dirty = { left, top, right, bottom };
-            return;
-        }
-
-        box.left = Math.min(box.left, left);
-        box.top = Math.min(box.top, top);
-        box.right = Math.max(box.right, right);
-        box.bottom = Math.max(box.bottom, bottom);
+        this._dirty.add(left, top, right, bottom);
     }
 
     /**
@@ -116,8 +109,8 @@ export default class Ili9881c extends Part {
     }
 
     /**
-     * Sends the page what changed: the pixels of the box of the areas shown,
-     * and the look of the screen; nothing when nothing changed.
+     * Sends the page what changed: the pixels of the areas shown, and the
+     * look of the screen; nothing when nothing changed.
      */
     _flush() {
         // the look now (the panel is always on: its backlight dims it)
@@ -133,16 +126,14 @@ export default class Ili9881c extends Part {
         const lookText = JSON.stringify(look);
 
         // nothing changed: nothing sent
-        const box = this._dirty;
-        if (box === null && lookText === this._lookSent) {
+        const rects = this._dirty.take();
+        if (rects.length === 0 && lookText === this._lookSent) {
             return;
         }
 
-        // the look, and the pixels of the box
-        this._dirty = null;
+        // the look, and the pixels of the areas
         this._lookSent = lookText;
-        const rects = box === null ? [] : [this._pixelsOf(box)];
-        this.publish({ ...look, rects });
+        this.publish({ ...look, rects: rects.map(rect => this._pixelsOf(rect)) });
     }
 
     /**
