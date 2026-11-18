@@ -22,7 +22,9 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
   `temp/cover/cover.png`, schéma `temp/overview-fr.png`. Puis le jumeau de la Tab5
   (écran intégré dessiné en mémoire, GT911 ; `tests/tab5.test.js`) et le correctif du
   lecteur de bytecode (modification Z). L'écran réel de la Tab5 vérifié avec le firmware
-  reflashé (`flushScreen` par zone).
+  reflashé (`flushScreen` par zone) ; son rétroéclairage réglable (PWM sur G22, curseur
+  de la démo `temp/tab5ui`) vérifié sur la carte ; celui de la WT32-SC01 aussi (PWM sur
+  GPIO23, démo `temp/wt32ui`, qui tourne sur la carte et dans son jumeau).
 - (17/11) : écran de la WT32-SC01 (`stdlib/display` + `sys/draw` : liste
   de commandes rendue par bandes pendant l'envoi SPI, texte avec polices LVGL lues en
   flash, arcs, rectangles arrondis ; 15,5 images/s sur deux jauges), import de fichiers en
