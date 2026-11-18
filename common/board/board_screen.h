@@ -9,7 +9,8 @@
 // panel refreshed from an image in memory (MIPI-DSI video, hal_dsi.h), which
 // sys/draw draws into (stdlib/display, type "builtin"). Only a board with
 // such a display implements this (its firmware is built with
-// QJSX_HAS_SCREEN); the others pay nothing.
+// QJSX_HAS_SCREEN); the others pay nothing. The twin implements it too
+// (host/twin/sim/twin_screen.cpp): an image in memory shown in the page.
 #pragma once
 
 #include <stdint.h>
@@ -37,10 +38,20 @@ bool startScreen();
  */
 const Screen *screen();
 
+// An area of the image just written: in pixels of the image (as the panel
+// scans it), and how the drawing that wrote it is turned.
+struct ScreenArea {
+    int x;                         // first column
+    int y;                         // first row
+    int width;                     // columns
+    int height;                    // rows
+    int rotation;                  // the drawing turned 0, 90, 180 or 270 degrees clockwise
+};
+
 /**
- * Makes rows 'firstRow' to 'firstRow' + 'rows' of the image, just written,
- * visible to the video.
+ * Makes 'area' of the image, just written, visible to the video (the rows it
+ * covers, or exactly the area: the board's choice).
  */
-void flushScreen(int firstRow, int rows);
+void flushScreen(ScreenArea area);
 
 } // namespace board

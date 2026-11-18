@@ -142,6 +142,9 @@ local function hostApplication(name, engine, extraFiles, excludedFiles, extraDef
         -- always (desktop agent, twin); a firmware asks for it
         -- (idf.py -DQJSX_PROFILER=ON)
         defines { "QJSX_PROFILER" }
+        -- the display built into a board (board_screen.h): the twin plays
+        -- it (host/twin/sim/twin_screen.cpp); none elsewhere
+        defines { "QJSX_HAS_SCREEN=1" }
         defines(extraDefines)
         buildoptions { "-fno-exceptions", "-fno-rtti", "-Wall" }
         files {

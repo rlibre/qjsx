@@ -11,6 +11,8 @@
 // host/twin/js/twin.js: pins driven and pulled, I2C and SPI answers, the bridge of
 // the hardware events). Registered by "qjsx agent --board" only, for the
 // twin's runtime (its own thread), never offered to the device program.
+#include <string.h>
+
 #include "jsbind.h"
 #include "twin.h"
 #include "hal_gpio.h"
@@ -223,6 +225,29 @@ void spiAnswer(double request, js::Bytes bytes) {
 }
 
 /**
+ * JS screenStart(width, height): makes the image of the display built into
+ * the board (its part, when built); false if there is one of another size.
+ */
+bool screenStart(js::Range<int, 1, 4096> width, js::Range<int, 1, 4096> height) {
+    return twin::screenStart((int)width, (int)height);
+}
+
+/**
+ * JS screenPixels(x, y, width, height): the pixels of that area of the image
+ * of the display built into the board, cut to it, as a Uint8Array (16 bits a
+ * pixel, high byte first, row by row); empty when there is none.
+ */
+js::Value screenPixels(int x, int y, js::Range<int, 0, 4096> width, js::Range<int, 0, 4096> height) {
+    // room for the whole area; the bytes written, kept
+    size_t room = (size_t)(int)width * (size_t)(int)height * 2;
+    uint8_t *pixels = (uint8_t *)memory::allocate(room > 0 ? room : 1);
+    size_t size = twin::screenPixels(x, y, (int)width, (int)height, pixels);
+    js::Buffer bytes = js::Buffer::copy(pixels, size);
+    memory::release(pixels);
+    return bytes.value();
+}
+
+/**
  * JS ready(error): the parts are built (no argument), or not: why. The agent
  * waits for it before running the program.
  */
@@ -311,6 +336,8 @@ void spiEvent(JSContext *ctx, JSValue event, const rt::Message *message) {
  *   { type: "i2c", request, sda, scl, address, written, readLength }
  *   { type: "spi", request, port, cs, frequency, mode, bitOrder, segments }
  *     (see spiEvent)
+ *   { type: "screen", x, y, width, height, rotation }   an area of the
+ *     display built into the board made visible (twin_screen.cpp)
  */
 JSValue bridgeEvent(JSContext *ctx, const rt::Message *message) {
     JSValue event = JS_NewObject(ctx);
@@ -364,6 +391,23 @@ JSValue bridgeEvent(JSContext *ctx, const rt::Message *message) {
         }
         case twin::BridgeEvent::spiTransaction: {
             spiEvent(ctx, event, message);
+            break;
+        }
+        case twin::BridgeEvent::screenFlush: {
+            // a board::ScreenArea: five ints, x, y, width, height, rotation
+            // (board_screen.h is not included here: its namespace 'board'
+            // would hide the function board() of this module)
+            int area[5] = {};
+            if (message->size == sizeof(area)) {
+                memcpy(area, message->data, sizeof(area));
+            }
+
+            JS_SetPropertyStr(ctx, event, "type", JS_NewString(ctx, "screen"));
+            JS_SetPropertyStr(ctx, event, "x", JS_NewInt32(ctx, area[0]));
+            JS_SetPropertyStr(ctx, event, "y", JS_NewInt32(ctx, area[1]));
+            JS_SetPropertyStr(ctx, event, "width", JS_NewInt32(ctx, area[2]));
+            JS_SetPropertyStr(ctx, event, "height", JS_NewInt32(ctx, area[3]));
+            JS_SetPropertyStr(ctx, event, "rotation", JS_NewInt32(ctx, area[4]));
             break;
         }
     }
@@ -1177,6 +1221,8 @@ JS_MODULE(twinboard, module) {
     JS_FUNCTION(module, i2cAnswer);
     JS_FUNCTION(module, spiAttach);
     JS_FUNCTION(module, spiAnswer);
+    JS_FUNCTION(module, screenStart);
+    JS_FUNCTION(module, screenPixels);
     JS_FUNCTION(module, ready);
     JS_FUNCTION(module, uarts);
     JS_FUNCTION(module, uartTraffic);

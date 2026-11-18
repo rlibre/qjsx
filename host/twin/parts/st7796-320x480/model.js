@@ -45,30 +45,24 @@
 // (or its level).
 //
 // Speed: the pixels of a memory write are taken a row of the window at a
-// time (a straight line on the glass: one loop, no call per pixel); a pixel
-// that does not change marks nothing. The glass is cut in tiles of TILE x
-// TILE pixels; a pixel that changes marks its tile. The memory holds the
-// pixels in the byte order of the wire (high byte first), so that the rows
-// sent to the page are copied whole.
+// time (a straight line on the glass: one loop, no call per pixel), written
+// without comparing them (user, 2026-11-18: only the areas written are sent,
+// as the display of the Tab5); each line written grows the box to send. The
+// memory holds the pixels in the byte order of the wire (high byte first),
+// so that the rows sent to the page are copied whole.
 //
-// The page: every FLUSH_MS at most, the dirty tiles as a few rectangles
-// (the tiles side by side on a row of tiles, merged with the same ones of
-// the row above), their pixels in base64 (16 bits, high byte first, red in
-// the high bits), with the look of the screen: { width, height, awake, on,
-// inverted, brightness, turn (how the image is turned on the glass: 0, 90,
-// 180, 270), rects: [{ x, y, width, height, pixels }] }. Nothing is sent
-// when nothing changed. The action "refresh" sends the whole glass (a page
-// that opens asks for it).
+// The page: every FLUSH_MS at most, the box of what was written since the
+// last time, as one rectangle, its pixels in base64 (16 bits, high byte
+// first, red in the high bits), with the look of the screen: { width,
+// height, awake, on, inverted, brightness, turn (how the image is turned on
+// the glass: 0, 90, 180, 270), rects: [{ x, y, width, height, pixels }] }.
+// Nothing is sent when nothing changed. The action "refresh" sends the whole
+// glass (a page that opens asks for it).
 import { Part, parsePin } from "qjsx:twin";
 
 // The glass, in pixels, as seen USB connector at the bottom.
 const WIDTH = 320;
 const HEIGHT = 480;
-
-// The tiles of the glass that changed pixels mark.
-const TILE = 16;
-const TILES_X = WIDTH / TILE;
-const TILES_Y = HEIGHT / TILE;
 
 // How often the changes go to the page, in ms (15 times a second at most).
 const FLUSH_MS = 66;
@@ -158,7 +152,7 @@ export default class St7796 extends Part {
         // the memory, the controller as at power on, nothing shown yet
         this._memory = new Uint16Array(WIDTH * HEIGHT);      // the glass, row by row: a pixel each, in wire order (toWire)
         this._memoryBytes = new Uint8Array(this._memory.buffer);   // the same, as the bytes sent to the page
-        this._dirty = new Uint8Array(TILES_X * TILES_Y);     // the tiles changed since the last flush: 1
+        this._dirty = null;                                   // the box written since the last flush: { left, top, right, bottom }; null: none
         this._lookSent = "";                                  // the look last sent, as JSON
         this._glassX = 0;                                     // the place _locate() found
         this._glassY = 0;
@@ -188,7 +182,7 @@ export default class St7796 extends Part {
      */
     onAction(action) {
         if (action === "refresh") {
-            this._dirty.fill(1);
+            this._mark(0, 0, WIDTH - 1, HEIGHT - 1);
             this._lookSent = "";
         }
     }
@@ -201,7 +195,7 @@ export default class St7796 extends Part {
      */
     _reset() {
         this._memory.fill(0);
-        this._dirty.fill(1);
+        this._mark(0, 0, WIDTH - 1, HEIGHT - 1);
         this._awake = false;                // SLEEP_OUT received
         this._on = false;                   // DISPLAY_ON received
         this._inverted = false;             // INVERSION_ON received
@@ -415,38 +409,25 @@ export default class St7796 extends Part {
             return;
         }
 
-        // the pixels along the line, those that change written and marked
+        // the pixels along the line, written (nothing compared)
         const dx = Math.sign(x1 - x0);
         const dy = Math.sign(y1 - y0);
         const step = dy * WIDTH + dx;
         const swap = (this._access & BGR) === 0;
         const memory = this._memory;
         let offset = y0 * WIDTH + x0;
-        let first = -1;
-        let last = -1;
 
         for (let index = 0; index < count; index++) {
             // in wire order: the bytes as sent, exchanged (BGR clear: red and
             // blue exchanged first)
             const sent = (bytes[at + 1] << 8) | bytes[at];
-            const pixel = swap ? toWire(swapRedBlue(toWire(sent))) : sent;
-            if (memory[offset] !== pixel) {
-                memory[offset] = pixel;
-                if (first < 0) {
-                    first = index;
-                }
-
-                last = index;
-            }
-
+            memory[offset] = swap ? toWire(swapRedBlue(toWire(sent))) : sent;
             at += 2;
             offset += step;
         }
 
-        // the tiles of what changed
-        if (first >= 0) {
-            this._markTiles(x0 + dx * first, y0 + dy * first, x0 + dx * last, y0 + dy * last);
-        }
+        // the line, in the box to send
+        this._mark(x0, y0, x1, y1);
 
         // the place after them: the next row of the window when this one is done
         this._column += count - 1;
@@ -475,16 +456,13 @@ export default class St7796 extends Part {
      * the window.
      */
     _putPixel(pixel) {
-        // on the glass, if the address is in the memory, its tile marked when
-        // it changes
+        // on the glass, if the address is in the memory, and in the box to send
         this._locate(this._column, this._row);
         const x = this._glassX;
         const y = this._glassY;
-        const offset = y * WIDTH + x;
-        const wire = toWire(pixel);
-        if (isOnGlass(x, y) && this._memory[offset] !== wire) {
-            this._memory[offset] = wire;
-            this._markTiles(x, y, x, y);
+        if (isOnGlass(x, y)) {
+            this._memory[y * WIDTH + x] = toWire(pixel);
+            this._mark(x, y, x, y);
         }
 
         this._advance();
@@ -552,65 +530,27 @@ export default class St7796 extends Part {
     // ### The page ###########################################################
 
     /**
-     * Marks the tiles of the glass box from (x0, y0) to (x1, y1), corners
-     * included, in any order.
+     * Adds the glass box from (x0, y0) to (x1, y1), corners included, in any
+     * order, to the box to send.
      */
-    _markTiles(x0, y0, x1, y1) {
-        // the tiles of the box
-        const left = Math.floor(Math.min(x0, x1) / TILE);
-        const right = Math.floor(Math.max(x0, x1) / TILE);
-        const top = Math.floor(Math.min(y0, y1) / TILE);
-        const bottom = Math.floor(Math.max(y0, y1) / TILE);
+    _mark(x0, y0, x1, y1) {
+        // its corners in order
+        const left = Math.min(x0, x1);
+        const right = Math.max(x0, x1);
+        const top = Math.min(y0, y1);
+        const bottom = Math.max(y0, y1);
 
-        for (let tileY = top; tileY <= bottom; tileY++) {
-            this._dirty.fill(1, tileY * TILES_X + left, tileY * TILES_X + right + 1);
-        }
-    }
-
-    /**
-     * The dirty tiles as rectangles of the glass ({ left, top, right, bottom
-     * }, corners included), then none dirty: each run of tiles on a row of
-     * tiles, merged with the run of the same columns on the row above.
-     */
-    _dirtyRectangles() {
-        const rectangles = [];
-        let above = new Map();      // "first/last" tile columns -> the rectangle of the row of tiles above
-
-        for (let tileY = 0; tileY < TILES_Y; tileY++) {
-            const current = new Map();
-            let tileX = 0;
-
-            while (tileX < TILES_X) {
-                // a run of dirty tiles
-                if (this._dirty[tileY * TILES_X + tileX] === 0) {
-                    tileX++;
-                    continue;
-                }
-
-                const first = tileX;
-                while (tileX < TILES_X && this._dirty[tileY * TILES_X + tileX] !== 0) {
-                    tileX++;
-                }
-
-                // under the same run of the row above: that rectangle grows,
-                // else a new one
-                const key = `${first}/${tileX - 1}`;
-                let rectangle = above.get(key);
-                if (rectangle !== undefined) {
-                    rectangle.bottom = (tileY + 1) * TILE - 1;
-                } else {
-                    rectangle = { left: first * TILE, top: tileY * TILE, right: tileX * TILE - 1, bottom: (tileY + 1) * TILE - 1 };
-                    rectangles.push(rectangle);
-                }
-
-                current.set(key, rectangle);
-            }
-
-            above = current;
+        // the first one, or the box grows
+        const box = this._dirty;
+        if (box === null) {
+            this._dirty = { left, top, right, bottom };
+            return;
         }
 
-        this._dirty.fill(0);
-        return rectangles;
+        box.left = Math.min(box.left, left);
+        box.top = Math.min(box.top, top);
+        box.right = Math.max(box.right, right);
+        box.bottom = Math.max(box.bottom, bottom);
     }
 
     /**
@@ -633,7 +573,7 @@ export default class St7796 extends Part {
     }
 
     /**
-     * Sends the page what changed: the pixels of the dirty tiles, and the
+     * Sends the page what changed: the pixels of the box written, and the
      * look of the screen; nothing when nothing changed.
      */
     _flush() {
@@ -650,14 +590,15 @@ export default class St7796 extends Part {
         const lookText = JSON.stringify(look);
 
         // nothing changed: nothing sent
-        const rectangles = this._dirtyRectangles();
-        if (rectangles.length === 0 && lookText === this._lookSent) {
+        const box = this._dirty;
+        if (box === null && lookText === this._lookSent) {
             return;
         }
 
-        // the look, and the pixels changed
+        // the look, and the pixels written
+        this._dirty = null;
         this._lookSent = lookText;
-        this.publish({ ...look, rects: rectangles.map(rectangle => this._pixelsOf(rectangle)) });
+        this.publish({ ...look, rects: box === null ? [] : [this._pixelsOf(box)] });
     }
 
     /**

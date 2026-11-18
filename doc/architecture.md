@@ -1727,7 +1727,13 @@ await lcd.show();                                   // or show(x, y, width, heig
   controller (MIPI DCS 0x2A, 0x2B, 0x2C, DC low) and the pixels as ONE queued transaction;
   `stdlib/display` made 5 synchronous SPI calls per image before. temp/wtstats on the
   WT32-SC01 (a counter of 200 x 50 shown in a loop that awaits each show): 70 -> 84 images
-  a second, JS thread 73 % -> 71 % (about 8.5 ms of JS per image left: to profile).
+  a second, JS thread 73 % -> 71 % (about 8.5 ms of JS per image left). Measured
+  afterwards (temp/wttiming, 2026-11-18): the cost is the synchronous call of
+  `Display.show()`, about 7 ms whatever the area (10 x 10 or 480 x 320); `sys/draw` `show()`
+  called directly returns in 2 to 3 ms; on this board a jsbind call costs 0.1 to 0.2 ms, one
+  that makes an object of 4 properties about 0.5 ms (Math.abs 12 us). The 4 ms between the
+  two are not explained; left there (user: the P4 is faster anyway). The load meter counts
+  whole milliseconds and timer wake-ups fall on ticks: "JS %" around timers is overstated.
 - **Speed on the WT32-SC01** (temp/wtgauge: two gauges of 448 x 250 with text): 4.3 images
   a second at first, 15.5 after the work above; a full screen 70 ms (61 ms of wire at
   40 MHz); rendering 34 ms an image. In the twin: 21.7 images a second (its SPI takes the
@@ -1738,6 +1744,48 @@ await lcd.show();                                   // or show(x, y, width, heig
   is JS, in the package only of a program that imports it; a font only in the package of a
   program that imports it.
 - **Twin**: the part `st7796-320x480` and the board `wt32-sc01` (see 6.6).
+
+**`stdlib/touch`** (2026-11-18; design agreed with the user; tried on the WT32-SC01 and the
+M5Stack Tab5): the touch controller of a display, in JS over `device/i2c` and `device/gpio`.
+
+```js
+import { Touch } from "stdlib/touch";
+const touch = new Touch({ type: "gt911", port: 0, sda: 31, scl: 32, interrupt: 23, display: lcd });
+touch.onChange(() => {                       // a finger came, went, or moved by 'threshold'
+    for (let i = 0; i < touch.count; i++) {
+        const point = touch.points[i];       // { id, x, y }, coordinates of the drawing
+    }
+});
+```
+
+- **Controllers** (a table `TYPES` in `lib/stdlib/src/touch.js`, one entry each): `gt911`
+  (Goodix: 16-bit registers, its configuration read at the opening: range of x and y,
+  most points; a report = status 0x814E then 8 bytes a point, cleared by writing 0) and
+  `ft6336` (FocalTech: register 2 the number of points, 6 bytes a point, at most 2).
+- **Reads** (user: not at full speed): with the interrupt pin, nothing is read while nobody
+  touches; its falling edge starts the reads. While a finger is down, one read every
+  1000 / `rate` ms at most (33 a second by default, set at the opening), whatever the
+  controller's ~100 reports a second; without the pin, polled at that rate. A change is
+  reported when a finger comes or goes or moves by `threshold` pixels (2 by default).
+- **No allocation per move** (user): `points` is made once (maxPoints objects updated in
+  place), `onChange()` has no argument, the points of a read go through an `Int32Array`
+  made once. `device/i2c` is not changed (user): each read makes its `Uint8Array` and its
+  promise, freed at once by the reference count.
+- **Coordinates**: those of the drawing of `display` (its width, height and rotation), or
+  of `width` / `height` / `rotation`; the controller's raw ones scaled to the panel (the
+  GT911's configured range; the FT6336 gives pixels of the panel), then turned as the
+  display. `swapXY`, `mirrorX`, `mirrorY` (user, 2026-11-18) undo how the touch panel is
+  mounted on its display, applied first (a setting of the board, not of the controller);
+  neither the WT32-SC01 nor the Tab5 needs them.
+- **The GT911 of the Tab5** answers on I2C without its start sequence but has then no
+  configuration and reports nothing: `ports/esp32/boards/m5stack-tab5/board_screen.cpp`
+  plays it at boot with the panel's reset (reset pin 5 of the expander 0x43 low, interrupt
+  G23 driven high to keep the address 0x14, reset released, INT low 50 ms, INT given back),
+  so the program only reads it. Its configuration there: 720 x 1280, 10 points, falling edge.
+- **Measured**: on the WT32-SC01 30 changes a second while a finger draws; a drawing
+  program that lists every dot it ever drew at each move slows down as the drawing grows
+  (a disc costs about 0.2 ms of JS there): list only what falls in the area shown.
+- **Twin**: the parts `ft6336` and `gt911` (see 6.6).
 
 **`device/serial` on the UARTs of a board** (2026-11-12; design agreed with the user, built
 for the ESP32 and the twin; not tried on a board, nothing wired; RP2350 later):
@@ -2225,8 +2273,30 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
   WT32-SC01 (`wt32-sc01.json`, 2026-11-17: original ESP32, its natives those of its
   firmware built with `QJSX_DRAW`, `sys/draw` included; parts: RESET, a `button` with
   `"reset": true`, and its screen, an `st7796-320x480` on SPI2, chip select 15, DC 21,
-  reset 22, backlight 23; its FT6336 touch on I2C, SDA 18, SCL 19, 0x38, is not simulated
-  yet; no BOOT button described: not checked on the board).
+  reset 22, backlight 23; its touch panel, an `ft6336` on I2C, SDA 18, SCL 19, 0x38,
+  interrupt GPIO39, over the screen (2026-11-18); no BOOT button described: not checked
+  on the board), and the M5Stack Tab5 (`m5stack-tab5.json`, 2026-11-18: ESP32-P4, 55
+  pins, the natives of its firmware, `sys/draw` included; parts: RESET, its display built
+  in, an `ili9881c-720x1280` with its backlight on G22, and its touch, a `gt911` on I2C
+  31 / 32, 0x14, interrupt G23, range 720 x 1280, 10 points; the ADC and PWM sections are
+  the ESP32-S3's, not checked against the P4).
+- **The display built into a board** (2026-11-18, user): `board_screen.h` is implemented
+  by the twin (`host/twin/sim/twin_screen.cpp`; every PC executable is built with
+  `QJSX_HAS_SCREEN`): an image in memory made by the part of the display
+  (`board.screen(width, height)` of qjsx:twin -> `twinboard.screenStart`); `sys/draw`'s
+  class `Screen` draws into it on its render task exactly as on the board, and
+  `board::flushScreen(ScreenArea)` (the area of the image written, and the rotation of
+  its drawing; on the P4 the rows of that area are written back from the cache) posts it
+  through the bridge (`BridgeEvent::screenFlush`, the event `{ type: "screen", x, y,
+  width, height, rotation }`, `screen.onFlush()`). The part reads only the pixels of the
+  areas shown (`twinboard.screenPixels`, high byte first; no pixel compared), at most 15
+  times a second, the box of them as one rectangle. Without such a part, `board::screen()`
+  is nullptr and `new Screen()` throws ENODEV (qjsx run, the desktop agent, other twins).
+  Measured in the page (Chromium of the pane): an area of a card a few milliseconds; the
+  whole image (720 x 1280, 2.5 MB of JSON) about 40 ms with the browser's
+  `Uint8Array.fromBase64` (screenview.ts uses it when there is one; about 150 ms with
+  `atob` and a loop). Tested by `tests/tab5.test.js` (fixture `tests/fixtures/twintab5`:
+  rotation 0 and 90, the backlight, the GT911 at rotation 90).
 - **What the program sees**: only the board's native modules (`rt::setDeviceNativeModules`:
   the loader refuses the others in a device run, the agent lists only them in HELLO, so
   `qjsx deploy` refuses a program importing `sys/net` or `sys/compiler`); the board's
@@ -2360,7 +2430,26 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
     `potentiometer` (pin, position: the voltage on the pin, read by `device/adc`),
     `st7796-320x480` (2026-11-17; named after the controller and the size of the screen,
     never after a board, user: spi `{ port, cs }`, dc, reset, backlight, all but spi
-    optional), below;
+    optional), below; `ft6336` and `gt911` (2026-11-18), touch panels over a screen part,
+    below; `ili9881c-720x1280` (2026-11-18), the display built into the M5Stack Tab5 (its
+    `backlight` pin; the image in memory of `board.screen()`, see "The display built into
+    a board" above; the same state as `st7796-320x480`, the same view);
+  - `ft6336` and `gt911`, touch controllers on I2C laid over a screen part (`"screen"`: its
+    id), as the chips answer (a driver written for the chip reads them): the FT6336 its
+    8-bit registers (2 the number of points, a point from 3, chip id 0x64 at 0xA3, vendor
+    0x11 at 0xA8), its coordinates the pixels of the glass, its interrupt low while a
+    finger is down; the GT911 its 16-bit registers (configuration at 0x8047: range
+    `"range"`, default 320 x 480, most points `"points"`, default 5, falling edge; product
+    "911" at 0x8140; status 0x814E then a point from 0x814F), a report every 10 ms while a
+    finger is down, written only once the program cleared the status, the last one
+    without point (a release not reported yet goes before a new press: two quick clicks
+    stay two touches), a pulse of 1 ms on its interrupt at each report; it starts configured
+    (its reset sequence is not played). One finger. The page sends "press", "move" with `{
+    x, y, width, height }` (pixels of the glass and its size) and "release"; each publishes
+    `{ screen, pressed, x, y }`. Tested by `tests/touch.test.js` (fixture
+    `tests/fixtures/twintouch`: the FT6336 of the board read at rotation 0 and with its
+    mounting undone, a GT911 of range 640 x 960 read at rotation 90, the threshold, the
+    rate);
   - `st7796-320x480`, a color display of 320 x 480 driven by an ST7796 on SPI (the screen
     of the WT32-SC01). The model understands SWRESET, SLPIN / SLPOUT, INVOFF / INVON,
     DISPOFF / DISPON, CASET, RASET, RAMWR, RAMWRC, MADCTL and COLMOD (16 or 18 bits a
@@ -2376,10 +2465,10 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
     check against the datasheet). The backlight's brightness is the duty cycle of the PWM
     on its pin (`pin.pwm`), else its level. For speed (the user saw a twin take most of a
     core): the pixels of a memory write are taken a row of the window at a time (a straight
-    line on the glass, one loop), a pixel that does not change marks nothing, a changed one
-    marks its tile of 16 x 16; every 66 ms at most the dirty tiles go to the page as a few
-    rectangles (the runs of tiles of a row of tiles, merged with the same runs of the row
-    above), their pixels in base64, 16 bits high byte first (the memory is kept in that
+    line on the glass, one loop), written without being compared (user, 2026-11-18: only
+    the areas written are sent, as the display of the Tab5; before, a changed pixel marked
+    its tile of 16 x 16); every 66 ms at most the box of what was written goes to the page
+    as one rectangle, its pixels in base64, 16 bits high byte first (the memory is kept in that
     byte order: rows are copied whole), with the look of the screen: `{ width, height,
     awake, on, inverted, brightness, turn, rects: [{ x, y, width, height, pixels }] }`;
     nothing when nothing changed. The action `"refresh"` sends the whole glass (a page that
@@ -2457,8 +2546,16 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
     `import()`, given x4js and `part = { id, label, model, onState(fn), send(action,
     args) }`), or, for a part of qjsx, a view built into the page (`BUILT_IN_VIEWS` of
     `partview.ts`, by model: a part of qjsx has no `view.js`);
-  - `screenview.ts`, the built-in view of `st7796-320x480`: the pixels, one canvas pixel
-    per pixel of the screen (not smoothed), and a line under them (its size; asleep, off,
+  - `touchview.ts`, the built-in view of `ft6336` and `gt911`, NOT shown (user: the touch
+    panel is part of its screen; `TOUCH_MODELS` of boardview.ts gives them no section): it
+    records the screen the part covers (`touchlink.ts`), and the view of that screen sends
+    the mouse to it: pressed, moved, released on the canvas, the point turned back by the
+    image's turn to a pixel of the glass (one finger; a screen with a touch panel says
+    "touch it with the mouse" in its line);
+  - `screenview.ts`, the built-in view of `st7796-320x480` and `ili9881c-720x1280`: the
+    pixels, one canvas pixel per pixel of the screen (not smoothed), shrunk to fit the
+    page when larger (user, 2026-11-18; then smoothed: class `scaled`, set by a
+    `ResizeObserver`), and a line under them (its size; asleep, off,
     or the backlight in %; where the USB connector of the board is). The rectangles are
     copied into an ImageData of the whole glass kept between updates, then by one
     `putImageData` (the box of the update) into a canvas of the glass off the page; the
@@ -2536,8 +2633,8 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
   files of `dist/` become a zip archive with stored entries, written as a byte array
   (`twin::uiArchive()`). To work on the page without linking qjsx again: `npm run build`
   in `host/twin/ui`, and the hidden option `qjsx agent ... --ui-dir host/twin/ui/dist`.
-- **Not done**: other parts (other displays: SSD1306; the touch of the WT32-SC01, an
-  FT6336 on I2C), UART devices played by models,
+- **Not done**: other parts (other displays: SSD1306; touch with several fingers), UART
+  devices played by models,
   in the analyzer the Auto mode, an adjustable holdoff and position of the trigger,
   decoders; `pin.pwm` for the models of the parts; the speed of the board simulated, test
   scenarios, signals (values that change over time, scripted in the page), more boards

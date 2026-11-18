@@ -1,0 +1,18 @@
+{
+    "name": "M5Stack Tab5",
+    "chip": "ESP32-P4",
+    "description": "M5Stack Tab5 (ESP32-P4, 16 MB flash, 32 MB PSRAM), first version: 5\" 720 x 1280 display built in (ILI9881C, MIPI-DSI), GT911 touch on I2C (SDA 31, SCL 32, 0x14, interrupt G23); the ADC and PWM settings are those of the ESP32-S3, not checked against the P4",
+    "platform": "esp32",
+    "pins": 55,
+    "uarts": 5,
+    "adc": { "pins": [16, 17, 18, 19, 20, 21], "bits": 12, "spans": [950, 1250, 1750, 3100], "vref": 3.3 },
+    "pwm": { "outputs": 8, "timers": 4, "clock": 80000000, "maxBits": 14 },
+    "spi": { "ports": [2, 3], "reserved": [0, 1] },
+    "natives": ["sys/fs", "sys/crypto", "sys/draw", "device/board", "device/gpio", "device/rmt", "device/usb", "device/i2c", "device/spi", "device/adc", "device/pwm", "device/serial"],
+    "parts": [
+        { "id": "reset", "model": "button", "label": "RESET", "reset": true },
+        { "id": "screen", "model": "ili9881c-720x1280", "label": "Screen", "backlight": 22 },
+        { "id": "touch", "model": "gt911", "label": "Touch", "i2c": { "sda": 31, "scl": 32 }, "address": "0x14",
+          "interrupt": 23, "screen": "screen", "range": [720, 1280], "points": 10 }
+    ]
+}

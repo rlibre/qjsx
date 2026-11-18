@@ -21,6 +21,7 @@ import { HoldButton } from "./controls/holdbutton";
 import { Led } from "./controls/led";
 import { PartControl, PartInfo, PartState, sendPartAction } from "./messages";
 import { ScreenView } from "./screenview";
+import { TouchView } from "./touchview";
 
 // What a view of its own gets: the part, its state, and how to act on it.
 export interface PartHandle {
@@ -40,6 +41,9 @@ interface ViewModule {
 // page (a part of qjsx has no view.js).
 const BUILT_IN_VIEWS: Record<string, (part: PartHandle) => Component> = {
     "st7796-320x480": part => new ScreenView({}, part),
+    "ili9881c-720x1280": part => new ScreenView({}, part),
+    "ft6336": part => new TouchView({}, part),
+    "gt911": part => new TouchView({}, part),
 };
 
 /**

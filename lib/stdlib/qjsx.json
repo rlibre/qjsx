@@ -9,6 +9,7 @@
         "path": "src/path.js",
         "rgbled": "src/rgbled.js",
         "tasks": "src/tasks.js",
+        "touch": "src/touch.js",
         "usb": "src/usb.js"
     }
 }

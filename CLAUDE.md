@@ -1475,7 +1475,50 @@ in the include path (no two headers share a name; keep it so).
   the same on the WT32-SC01 in temp/wtstats. SPI displays (user, 2026-11-18): sys/draw
   show() sends the area (0x2A / 0x2B / 0x2C) and the pixels as ONE transaction (was 5
   synchronous calls from display.js): WT32-SC01 70 -> 84 images/s, JS 73 -> 71 %.
-  Touch: later (user). Not done: the ESP32-C6 radio (SDIO), the other expander pins, twin.
+  The ~8.5 ms of JS left per image on the WT32-SC01 were measured (temp/wttiming): the
+  synchronous call of Display.show() ~7 ms whatever the area, a jsbind call 0.1-0.7 ms
+  there; not pursued (user: "la P4 est de toute façon plus rapide").
+  TOUCH DONE 2026-11-18 (see "stdlib/touch" below): its GT911 (0x14, INT G23, reset pin
+  5 of the expander 0x43) needs its start sequence, played at boot by board_screen.cpp.
+  Not done: the ESP32-C6 radio (SDIO), the other expander pins, twin.
+- `stdlib/touch` (design agreed by the user 2026-11-18, DONE the same day; tried on the
+  WT32-SC01 and the Tab5, both at rotation 90; doc/architecture.md 5.4 and 6.6): JS over
+  device/i2c (NOT changed, user) and device/gpio; `new Touch({ type: "gt911" | "ft6336",
+  bus | port + sda + scl, address?, interrupt?, rate = 33, threshold = 2, display |
+  width + height + rotation, swapXY, mirrorX, mirrorY })`; `onChange(callback | null)`
+  called with NO argument; `points` (maxPoints objects { id, x, y } made ONCE, updated in
+  place: user, no array per move), `count`, `maxPoints`, `width`, `height`, `rotation`;
+  `close()`. Reads (user: not at full speed): the interrupt's falling edge starts them,
+  then one read every 1000 / rate ms while a finger is down; polled without the pin.
+  `swapXY` / `mirrorX` / `mirrorY` (user): how the touch panel is mounted, applied to the
+  controller's coordinates before the rotation. Demos temp/tab5touch, temp/wttouch, the
+  LVGL-like demo temp/tab5ui (Tab5) and temp/wt32ui (WT32 twin, BME280 + buttons). Twin
+  (user, 2026-11-18): parts `ft6336` (in boards/wt32-sc01.json, I2C 18/19, 0x38, INT 39)
+  and `gt911` (a project's part, `range`, `points`), each over a screen part
+  (`"screen"`), ONE finger (the mouse on the screen of the page; user: no multi-touch,
+  no touch screen on his PC), minimal fidelity (registers, ~100 reports a second, INT);
+  page: touchview.ts + touchlink.ts, pointer events in screenview.ts; tests/touch.test.js
+  (17 checks, fixture tests/fixtures/twintouch, in run-tests.sh). The touch parts have
+  NO section of their own in the page (user: part of their screen). The GT911 model
+  reports a release before the next press (two quick clicks were one touch).
+- Twin of the M5Stack Tab5 (scope, name and test agreed by the user 2026-11-18, DONE the
+  same day; doc/architecture.md 6.6 "The display built into a board"): board
+  `boards/m5stack-tab5.json` (RESET, `ili9881c-720x1280` with backlight 22, `gt911` on
+  31/32 0x14 INT 23 range 720x1280 10 points); `board_screen.h` played by
+  `host/twin/sim/twin_screen.cpp` (all PC executables built with QJSX_HAS_SCREEN=1): the
+  part makes the image (`board.screen(w, h)` of qjsx:twin), sys/draw's Screen draws in it
+  as on the board, `board::flushScreen(ScreenArea)` (CHANGED from rows to an area +
+  rotation; Tab5 firmware rebuilt and flashed) posts the area; the part reads only those
+  pixels, 15 times a second at most (user feared the page's speed: whole image ~40 ms
+  with the browser's Uint8Array.fromBase64, ~150 ms with atob). DSI, expander, radio not
+  played. Demo temp/tab5twin; tests/tab5.test.js (21 checks, fixture
+  tests/fixtures/twintab5, in run-tests.sh). The same for the WT32-SC01 (user): its
+  st7796 model no longer compares pixels nor marks tiles, it sends the box written; any
+  screen of the page shrinks to fit (smoothed when shrunk).
+- Bytecode reader (engine change Z, 2026-11-18, reported by the user): a truncated last
+  opcode of a function read 4 bytes past the buffer (JS_ReadFunctionBytecode, and
+  bc_byte_swap); now a SyntaxError "truncated opcode"; tests/bytecode.test.js (qjsx-tests
+  `readBytecode`); Bellard's tests 0 failure; microbench not run (reader only).
 - Fifth board, first ORIGINAL ESP32 (user, 2026-11-17): Wireless-Tag WT32-SC01 v3.2,
   ESP32-WROVER-B (ESP32-D0WD chip REVISION v1.0: PSRAM cache bug worked around by
   ESP-IDF), 4 MB flash XMC 3.3 V (DIO), 4 MB of PSRAM seen, 3.5" display on SPI and

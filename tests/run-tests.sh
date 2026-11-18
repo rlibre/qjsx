@@ -33,6 +33,7 @@ check() {
 
 check "binding library" "$BIN/qjsx-tests" run -A tests/jsbind.test.js
 check "typings: the names of every module and global match the runtime" "$BIN/qjsx-tests" run -A tests/types.test.js
+check "bytecode reader: a truncated opcode is refused" "$BIN/qjsx-tests" run tests/bytecode.test.js
 check "debugger support of the engine" "$BIN/qjsx-tests" run -A tests/debug.test.js
 check "region heap (JS heap of a raw region)" "$BIN/qjsx-tests" run -A tests/region_heap.test.js
 check "runtime library" "$BIN/qjsx" run -A tests/runtime.test.js
@@ -535,6 +536,42 @@ check "the screen of the twin (stdlib/display, sys/draw, the st7796-320x480 part
 kill "$TWIN_PID" 2> /dev/null
 wait "$TWIN_PID" 2> /dev/null
 rm -rf "$TWINDISPLAY/build"
+
+# --- stdlib/touch and the touch parts of the twin: the WT32-SC01's FT6336,
+# a GT911 of the project, touched as a page does (tests/touch.test.js)
+TWINTOUCH=tests/fixtures/twintouch
+TWINTOUCH_PORT=45796       # "twin.ports" of its qjsx.json
+TWINTOUCH_UI_PORT=45797
+rm -rf "$TWINTOUCH/build"
+"$BIN/qjsx" agent -p "$TWINTOUCH" > build/twintouch-out.txt 2>&1 &
+TWIN_PID=$!
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    grep -q listening build/twintouch-out.txt 2>/dev/null && break
+    sleep 0.2
+done
+check "the touch panels of the twin (stdlib/touch, the ft6336 and gt911 parts)" \
+    "$BIN/qjsx" run -A tests/touch.test.js "tcp:127.0.0.1:$TWINTOUCH_PORT" "$TWINTOUCH_UI_PORT"
+kill "$TWIN_PID" 2> /dev/null
+wait "$TWIN_PID" 2> /dev/null
+rm -rf "$TWINTOUCH/build"
+
+# --- the twin of the M5Stack Tab5: its display built in (sys/draw drawing
+# into the image of the part ili9881c-720x1280), its GT911 (tests/tab5.test.js)
+TWINTAB5=tests/fixtures/twintab5
+TWINTAB5_PORT=45798        # "twin.ports" of its qjsx.json
+TWINTAB5_UI_PORT=45799
+rm -rf "$TWINTAB5/build"
+"$BIN/qjsx" agent -p "$TWINTAB5" > build/twintab5-out.txt 2>&1 &
+TWIN_PID=$!
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    grep -q listening build/twintab5-out.txt 2>/dev/null && break
+    sleep 0.2
+done
+check "the twin of the Tab5 (its display built in, its touch)" \
+    "$BIN/qjsx" run -A tests/tab5.test.js "tcp:127.0.0.1:$TWINTAB5_PORT" "$TWINTAB5_UI_PORT"
+kill "$TWIN_PID" 2> /dev/null
+wait "$TWIN_PID" 2> /dev/null
+rm -rf "$TWINTAB5/build"
 
 check "a twin whose parts are wrong does not start" \
     bash -c "! '$BIN/qjsx' agent -p tests/fixtures/twinbad --port 0 --ui-port 0 > /dev/null 2> build/twinbad.txt && grep -q 'another part has this id' build/twinbad.txt"

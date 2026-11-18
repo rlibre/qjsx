@@ -306,6 +306,16 @@ static int JS_ReadFunctionBytecode(BCReaderState *s, JSFunctionBytecode *b,
     while (pos < bc_len) {
         op = bc_buf[pos];
         len = short_opcode_info(op).size;
+        /* qjsx: an opcode must fit in the bytecode before its operand is
+           read (and an atom relocated): a truncated last opcode read and
+           rewrote up to 4 bytes past the buffer. The atoms are freed up to
+           this position, as on the other errors. */
+        if (unlikely((uint32_t)len > bc_len - (uint32_t)pos)) {
+            JS_ThrowSyntaxError(s->ctx, "truncated opcode in the bytecode (pos=%d)", pos);
+            b->byte_code_len = pos;
+            s->error_state = -1;
+            return -1;
+        }
         switch(short_opcode_info(op).fmt) {
         case OP_FMT_atom:
         case OP_FMT_atom_u8:

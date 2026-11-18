@@ -33,6 +33,7 @@ your project for VS Code.
 | `stdlib/path` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `stdlib/rgbled` | — | ✓ | — | — | ✓ |
 | `stdlib/tasks` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `stdlib/touch` | — | ✓ boards with a touch controller ⁶ | — | — | ✓ ⁶ |
 | `stdlib/usb` | — | ✓ S2, S3, P4 | — | — | ✓ |
 
 ¹ The module is there, but the RP2350 and the i.MX RT1062 have no file system yet: every
@@ -45,7 +46,10 @@ call throws (`code` `"ENOSYS"`), except `existsSync`, which returns false.
 ⁴ Only a firmware built for a board with a display has `sys/draw`, the renderer of
 `stdlib/display`: today the WT32-SC01.
 
-⁵ The twin of such a board (`wt32-sc01`): its screen is drawn in the page.
+⁵ The twin of such a board (`wt32-sc01`, `m5stack-tab5`): its screen is drawn in the page.
+
+⁶ A touch controller on I2C: the WT32-SC01 (FT6336) and the M5Stack Tab5 (GT911). In the
+twins of both boards, the mouse on the screen of the page touches it (one finger).
 
 PC: `qjsx run` and the programs of the PC. i.MX RT1062: the Teensy 4.0. Twin: the digital twin of a board offers the
 native modules of that board (here the YD-ESP32-S3, which has every module of the

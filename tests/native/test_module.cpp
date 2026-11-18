@@ -269,6 +269,27 @@ const char *nativeModuleName(int index) {
     return rt::nativeModuleNameAt(index);
 }
 
+/**
+ * Reads 'bytes' as bytecode (JS_ReadObject with JS_READ_OBJ_BYTECODE, in
+ * this context): "ok", or the message of the error it threw
+ * (tests/bytecode.test.js: a truncated opcode must be refused).
+ */
+js::Value readBytecode(js::Bytes bytes) {
+    // read; what it made is not used
+    JSContext *ctx = js::context();
+    JSValue object = JS_ReadObject(ctx, bytes.data(), bytes.size(), JS_READ_OBJ_BYTECODE);
+    if (!JS_IsException(object)) {
+        JS_FreeValue(ctx, object);
+        return js::Value(ctx, JS_NewString(ctx, "ok"));
+    }
+
+    // refused: the message of its error
+    JSValue error = JS_GetException(ctx);
+    JSValue message = JS_GetPropertyStr(ctx, error, "message");
+    JS_FreeValue(ctx, error);
+    return js::Value(ctx, message);
+}
+
 } // namespace
 
 /**
@@ -282,6 +303,7 @@ JS_MODULE(jsbind_test, module) {
     JS_FUNCTION(module, keptAliveCount);
     JS_FUNCTION(module, nativeModuleCount);
     JS_FUNCTION(module, nativeModuleName);
+    JS_FUNCTION(module, readBytecode);
 }
 
 /**

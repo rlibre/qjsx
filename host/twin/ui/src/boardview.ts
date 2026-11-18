@@ -37,6 +37,10 @@ import { usbSummary, UsbView } from "./usbview";
 // The model of the push buttons: they share one section.
 const BUTTON_MODEL = "button";
 
+// The models of the touch panels: no section of their own (they are touched
+// on their screen).
+const TOUCH_MODELS = ["ft6336", "gt911"];
+
 // Name under which the browser keeps the order of the sections.
 const ORDER_KEY = "qjsx.twin.sections";
 
@@ -295,8 +299,10 @@ export class BoardView extends VBox {
             sections.push(section);
         }
 
-        // the other parts: a section each
-        const others = parts.filter(item => item.model !== BUTTON_MODEL);
+        // the other parts: a section each, but the touch panels (user: part
+        // of their screen, touched on it; their views, not shown, link them
+        // to it)
+        const others = parts.filter(item => item.model !== BUTTON_MODEL && !TOUCH_MODELS.includes(item.model));
 
         for (const part of others) {
             const section = new Section({ title: partTitle(part), persist: `part-${part.id}`, content: this._parts.get(part.id) });

@@ -1,7 +1,7 @@
 {
     "name": "WT32-SC01",
     "chip": "ESP32",
-    "description": "Wireless-Tag WT32-SC01 v3.2, ESP32-WROVER-B (original ESP32, 4 MB flash, 4 MB PSRAM), 3.5\" 320 x 480 ST7796 display on SPI2 (FT6336 touch on I2C: not simulated)",
+    "description": "Wireless-Tag WT32-SC01 v3.2, ESP32-WROVER-B (original ESP32, 4 MB flash, 4 MB PSRAM), 3.5\" 320 x 480 ST7796 display on SPI2, FT6336 touch on I2C (SDA 18, SCL 19, 0x38, interrupt GPIO39)",
     "platform": "esp32",
     "pins": 40,
     "uarts": 3,
@@ -13,6 +13,7 @@
     "natives": ["sys/fs", "sys/crypto", "sys/draw", "device/board", "device/gpio", "device/rmt", "device/i2c", "device/spi", "device/adc", "device/pwm", "device/serial", "device/dac"],
     "parts": [
         { "id": "reset", "model": "button", "label": "RESET", "reset": true },
-        { "id": "screen", "model": "st7796-320x480", "label": "Screen", "spi": { "port": 2, "cs": 15 }, "dc": 21, "reset": 22, "backlight": 23 }
+        { "id": "screen", "model": "st7796-320x480", "label": "Screen", "spi": { "port": 2, "cs": 15 }, "dc": 21, "reset": 22, "backlight": 23 },
+        { "id": "touch", "model": "ft6336", "label": "Touch", "i2c": { "sda": 18, "scl": 19 }, "address": "0x38", "interrupt": 39, "screen": "screen" }
     ]
 }

@@ -57,7 +57,8 @@
  * ¹ Only in a firmware built for a board with a display (`QJSX_DRAW`, today
  * the WT32-SC01): a board without a screen pays nothing for it.
  *
- * ² The twin of a board that lists it (`wt32-sc01`).
+ * ² The twin of a board that lists it (`wt32-sc01`; `m5stack-tab5`, whose
+ * display built in is an image in memory drawn in the page).
  *
  * @module sys/draw
  */

@@ -646,7 +646,31 @@ enum class BridgeEvent {
     rmtPulses,                      // value: pin; data: [ticks u32 LE, level u8] per pulse
     i2cTransfer,                    // value: request; data: [sda, scl, address, 0, readSize u32 LE, written...]
     spiTransaction,                 // value: request; data: see spiTransaction()
+    screenFlush,                    // value: 0; data: board::ScreenArea, five ints (twin_screen.cpp)
 };
+
+// ### The display built into the board (twin_screen.cpp) ######################
+//
+// board::screen() of board_screen.h for the twin: an image in memory, made by
+// the part of the display (screenStart, from its model), which sys/draw draws
+// into as on the board; each area made visible (board::flushScreen) goes to
+// the part through the bridge (BridgeEvent::screenFlush), which reads its
+// pixels (screenPixels) for the page. The image is never freed: the render
+// task of sys/draw may write into it at any time.
+
+/**
+ * Makes the image of the display, 'width' x 'height', black (twin's thread,
+ * when the part is built). False if there is one already, of another size.
+ */
+bool screenStart(int width, int height);
+
+/**
+ * Copies the pixels of the area (x, y, width, height) of the image into
+ * 'out' (room for width x height x 2 bytes), 16 bits a pixel, high byte
+ * first; the area is cut to the image. The number of bytes written. Any
+ * thread (the render task may be writing: a pixel is read whole or not).
+ */
+size_t screenPixels(int x, int y, int width, int height, uint8_t *out);
 
 /**
  * The bridge of the twin's runtime: the messages go to 'source' of the loop

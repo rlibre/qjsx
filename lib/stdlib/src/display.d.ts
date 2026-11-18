@@ -73,7 +73,8 @@
  * ¹ Boards with a display, whose firmware has `sys/draw` (today the
  * WT32-SC01). Elsewhere importing it fails.
  *
- * ² The twin of such a board (`wt32-sc01`): the screen is drawn in the page.
+ * ² The twin of such a board (`wt32-sc01`, `m5stack-tab5` and its display
+ * built in): the screen is drawn in the page.
  *
  * @module stdlib/display
  */

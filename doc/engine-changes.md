@@ -1005,6 +1005,31 @@ nor where the import is written. Compiler only: nothing changes on the devices.
 - Tests: `tests/bytes.test.js`, `tests/fixtures/bytes` run from its sources and from its
   package (with and without compiler) in `tests/run-tests.sh`.
 
+## Z. A truncated opcode refused by the bytecode reader
+
+2026-11-18, a defect reported to the user (upstream QuickJS has it too).
+`JS_ReadFunctionBytecode` walks the opcodes of a function read and, for the formats
+that hold an atom, reads its 4-byte operand at `bc_buf + pos + 1` and rewrites it
+(`put_u32`). The loop only checked `pos < bc_len`, not that the whole opcode fits: a
+function whose byte_code ends in a truncated atom opcode read and relocated up to 4
+bytes past the bytecode allocation (`JS_ReadObject` with `JS_READ_OBJ_BYTECODE`; a heap
+buffer overflow, a 4-byte read, on a 17-byte input whose byte_code is a lone
+`OP_push_atom_value`). `bc_byte_swap` (big-endian targets) had the same walk.
+
+- **Reader** (`bytecode/reader.c`): each opcode must fit in `bc_len` before its operand
+  is read; otherwise a `SyntaxError` "truncated opcode in the bytecode (pos=N)", and
+  `b->byte_code_len` set back to `pos`, so that the cleanup frees only the atoms already
+  relocated (as the other errors of that loop). The check is in the reader: the
+  operand bytes come from the input, no caller can make a short opcode whole.
+- **Byte swap** (`bytecode/writer.c`): stops at an opcode that does not fit (the reader
+  then refuses it).
+- **Trade-off**: a deliberately truncated last opcode now fails the load instead of being
+  tolerated. Bytecode written by the compiler never has one: nothing changes for it;
+  `BC_VERSION` not bumped.
+- Test: `tests/bytecode.test.js` (qjsx-tests, function `readBytecode` of
+  `tests/native/test_module.cpp`): a whole `OP_push_atom_value` is read, the same cut
+  after its opcode byte or after 3 operand bytes is refused.
+
 ## Limits and items not done
 
 - **"Uncaught" prediction**: done statically (section M), not with the planned
@@ -1103,3 +1128,4 @@ Measurements of 2026-11-10:
 | `quickjs-internal.h`, `core/generators.c`, `core/core.h`, `core/runtime.c` (also) | stock of states of async functions (X) |
 | `compiler/outline.c` (new), `quickjs-debug.h`, `quickjs-internal.h`, `compiler/compiler.h`, `compiler/eval.c`, `compiler/emitter.c`, `compiler/parser-func.c`, `compiler/parser-expr.c`, `compiler/parser-module.c`, `compiler/debug-info.c` (also) | outline of a module: statements, names declared and used, imports, exports (W) |
 | `quickjs-debug.h`, `compiler/outline.c`, `compiler/compiler.h`, `compiler/parser-module.c` (also) | requests of a module in the outline: import attributes and position (Y) |
+| `bytecode/reader.c`, `bytecode/writer.c` (also) | a truncated opcode refused before its operand is read (Z) |

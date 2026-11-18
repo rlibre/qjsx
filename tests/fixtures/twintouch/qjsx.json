@@ -1,0 +1,11 @@
+{
+    "name": "twintouch",
+    "twin": {
+        "board": "wt32-sc01",
+        "ports": { "agent": 45796, "ui": 45797 },
+        "parts": [
+            { "id": "gt", "model": "gt911", "label": "GT911", "i2c": { "sda": 18, "scl": 19 },
+              "address": "0x14", "interrupt": 27, "screen": "screen", "range": [640, 960] }
+        ]
+    }
+}

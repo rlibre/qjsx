@@ -1,0 +1,7 @@
+{
+    "name": "twintab5",
+    "twin": {
+        "board": "m5stack-tab5",
+        "ports": { "agent": 45798, "ui": 45799 }
+    }
+}

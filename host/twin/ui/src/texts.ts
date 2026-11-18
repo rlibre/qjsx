@@ -79,6 +79,11 @@ const twin_en = {
         screen_backlight: "backlight",          // "backlight 50 %"
         screen_usb:     "USB connector",        // where the board's USB connector is, the image upright: "USB connector at the right"
         screen_sides:   ["at the bottom", "at the right", "at the top", "at the left"],   // the image turned 0, 90, 180, 270 degrees
+        screen_touch:   "touch it with the mouse",   // a screen with a touch panel over it
+        touch_none:     "not touched",          // a touch part (touchview.ts): no finger
+        touch_at:       "a finger at",          // "a finger at 120, 45 (pixels of the glass)"
+        touch_glass:    "pixels of the glass",
+        touch_screen:   "over",                 // "over screen"
         spi:            "SPI",                  // title of an SPI bus section: "SPI 2"
         spi_closed:     "closed",
         spi_clear:      "Clear the transactions",   // menu of a bus: empties its trace

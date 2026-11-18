@@ -240,6 +240,53 @@ whole screen in about 120 ms, an area of 300 x 60 shown again and again 189 time
 (the JS thread busy 60 % of the time). `"builtin"` on a board without such a display is a
 `RangeError`.
 
+## Touch
+
+`stdlib/touch` reads the touch controller of a display, on I2C, and gives the fingers in
+the coordinates of the drawing (the size and rotation of the display): a finger lands where
+the program drew.
+
+```js
+import { Touch } from "stdlib/touch";
+
+// WT32-SC01: FT6336, 2 fingers
+const touch = new Touch({ type: "ft6336", port: 0, sda: 18, scl: 19, interrupt: 39, display: lcd });
+
+// M5Stack Tab5: GT911, 10 fingers (its firmware starts the controller)
+const touch = new Touch({ type: "gt911", port: 0, sda: 31, scl: 32, interrupt: 23, display: lcd });
+
+touch.onChange(() => {
+    for (let i = 0; i < touch.count; i++) {
+        const point = touch.points[i];          // { id, x, y }
+        lcd.disc(point.x, point.y, 6, 0xff4040);
+    }
+    lcd.show();
+});
+```
+
+- `onChange()` is called when a finger comes or goes, or moves by `threshold` pixels or
+  more (2 by default: a finger held still trembles by a pixel or two).
+- While a finger is on the screen, the controller is read `rate` times a second at most
+  (33 by default): it makes about 100 reports a second, the program does not need them
+  all. With the `interrupt` pin, nothing is read while nobody touches; without it, the
+  controller is read `rate` times a second, always.
+- `touch.points` is made once: its objects are updated in place, nothing is made at each
+  move. Keep a copy of `x` and `y` if you need a position later. `touch.points[0]` read in
+  a loop of your own gives the finger of the moment, without any callback.
+- `id` is the controller's number of a finger: the same while it stays on the screen, so
+  that two fingers can be followed apart.
+- A bus shared with other devices: open it yourself and give it as `bus`; the touch leaves
+  it open at `close()`.
+- A touch panel mounted otherwise than its display (fingers seen mirrored, or moving
+  across when they move along): `swapXY`, `mirrorX`, `mirrorY` undo how it is mounted, the
+  controller's x and y exchanged first, then mirrored. They are a setting of the board, not
+  of the controller. The WT32-SC01 and the Tab5 need none.
+
+Draw only what falls in the area you show: listing a command costs JS time (about 0.2 ms
+for a disc on the WT32-SC01), and a drawing program that lists every dot it ever drew at
+each move slows down as the drawing grows. Measured on the WT32-SC01 with a finger
+drawing: 30 changes a second, listing and showing a small area about 6 + 10 ms.
+
 ## In the twin
 
 The twin of the WT32-SC01 (`qjsx agent --board wt32-sc01`, or `"board": "wt32-sc01"` in
@@ -247,4 +294,20 @@ the `"twin"` section of `qjsx.json`) has `sys/draw` and the screen: the page dra
 backlight included. Its SPI takes the time of the wire (the bytes at the clock of the
 display), so a program that shows too many pixels is as slow there as on the board. The
 rendering runs at the speed of the PC: the gauges above make about 21 images per second
-in the twin. The touch panel is not simulated.
+in the twin.
+
+The touch panel is there too: the FT6336 of the WT32-SC01 is a part of its twin (`touch`),
+and pressing, dragging and releasing the mouse on the screen of the page touches it, one
+finger. A project may add a GT911 the same way, in its `"twin"` parts:
+
+```json
+{ "id": "gt", "model": "gt911", "i2c": { "sda": 18, "scl": 19 }, "address": "0x14",
+  "interrupt": 27, "screen": "screen", "range": [640, 960] }
+```
+
+Both answer as the chips do (their registers, a report every 10 ms while a finger is down,
+the interrupt pin), so a driver written for the real chip works there too.
+
+The twin of the M5Stack Tab5 (`qjsx agent --board m5stack-tab5`) has its display built in
+and its GT911: `type: "builtin"` draws into an image of 720 x 1280 in memory, as on the
+board, and the page shows it shrunk to fit; the mouse on it touches the GT911.

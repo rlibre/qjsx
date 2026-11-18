@@ -26,6 +26,8 @@
 //   board.i2c({ sda, scl }) attach(address, { onTransfer(written, readLength) }), detach(address)
 //   board.spi({ port })     attach(cs, { onTransaction(segments, device) }), detach(cs)
 //   board.rmt(pin)          onBytes(bytes => ...), onPulses(pulses => ...)
+//   board.screen(w, h)      the display built into the board: onFlush(area => ...),
+//                           pixels(x, y, width, height)
 //   board.now()             ms since the twin started
 //   board.restart()         restarts the device (its reset button)
 //
@@ -383,6 +385,37 @@ function readBytes(reading, given) {
     return bytes;
 }
 
+// ### The display built into the board ########################################
+
+class BuiltinScreen {
+    /**
+     * The display of 'width' x 'height' pixels (its image is made by
+     * Board.screen()), no listener yet.
+     */
+    constructor(width, height) {
+        this.width = width;             // pixels, as the panel scans it
+        this.height = height;
+        this._listeners = [];           // functions of onFlush(), called by Board._dispatch
+    }
+
+    /**
+     * Calls 'listener({ x, y, width, height, rotation })' each time the
+     * program makes an area of the image visible (pixels of the image; the
+     * rotation of its drawing, 0, 90, 180, 270 clockwise).
+     */
+    onFlush(listener) {
+        this._listeners.push(listener);
+    }
+
+    /**
+     * The pixels of an area of the image, cut to it: a Uint8Array, 16 bits a
+     * pixel (5 red, 6 green, 5 blue), high byte first, row by row.
+     */
+    pixels(x, y, width, height) {
+        return twinboard.screenPixels(x, y, width, height);
+    }
+}
+
 // ### RMT #####################################################################
 
 class RmtLine {
@@ -429,6 +462,7 @@ export class Board {
         this._buses = new Map();        // "sda/scl" -> I2cBus
         this._spiBuses = new Map();     // port -> SpiBus
         this._rmt = new Map();          // pin -> RmtLine
+        this._screen = null;            // the BuiltinScreen; null: none
         this._currentPart = undefined;  // id of the part being built (pins taken)
     }
 
@@ -545,6 +579,26 @@ export class Board {
     }
 
     /**
+     * The display built into the board (its image in memory, 'width' x
+     * 'height' pixels, as the panel scans it), made at the first request:
+     * sys/draw draws into it as on the board. Throws if it was made with
+     * another size.
+     */
+    screen(width, height) {
+        // one display: made once, the same size asked again
+        if (this._screen === null) {
+            this._screen = new BuiltinScreen(width, height);
+        }
+
+        const isSameSize = this._screen.width === width && this._screen.height === height;
+        if (!isSameSize || !twinboard.screenStart(width, height)) {
+            throw new Error(`the board has a display of ${this._screen.width} x ${this._screen.height} already`);
+        }
+
+        return this._screen;
+    }
+
+    /**
      * The pins each part is on (taken, or its bus): id -> [numbers].
      */
     pinsOfParts() {
@@ -627,6 +681,16 @@ export class Board {
             case "spi": {
                 // a transaction: answered at once
                 this._answerTransaction(event);
+                break;
+            }
+            case "screen": {
+                // an area of the built-in display made visible: its listeners
+                const listeners = this._screen?._listeners ?? [];
+                const area = { x: event.x, y: event.y, width: event.width, height: event.height, rotation: event.rotation };
+                for (const listener of listeners) {
+                    this._call(() => listener(area));
+                }
+
                 break;
             }
             default: {

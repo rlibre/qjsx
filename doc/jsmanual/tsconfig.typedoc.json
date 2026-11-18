@@ -27,6 +27,7 @@
         "../../common/device/serial_module.d.ts",
         "../../common/device/usb_module.d.ts",
         "../../lib/stdlib/src/display.d.ts",
+        "../../lib/stdlib/src/touch.d.ts",
         "../../lib/stdlib/src/fonts/inter16.d.ts",
         "../../lib/stdlib/src/fonts/inter24.d.ts",
         "../../lib/stdlib/src/fonts/inter40.d.ts",

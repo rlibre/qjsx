@@ -13,8 +13,16 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
   l'agent sur l'USB Serial/JTAG ; débogueur 72/72, proxy 33/33, cdp 53/53. Écran intégré
   (ILI9881C, MIPI-DSI, `type: "builtin"`) fait : plein écran 116 ms, zone 300 x 60 ~4 ms
   (232 images/s, JS 91 %), puis rendu dans une tâche : 185-189 images/s, JS 60 %. Reste
-  sur la Tab5 : PPA pour la rotation, double image, alléger le côté JS d'une image (~3 ms) ; tactile GT911 (plus tard) ; radio (ESP32-C6 en SDIO) ;
+  sur la Tab5 : PPA pour la rotation, double image, alléger le côté JS d'une image (~3 ms) ; radio (ESP32-C6 en SDIO) ;
   fréquence du PWM à vérifier ; jumeau.
+  Puis le tactile (`stdlib/touch` : GT911 de la Tab5, démarré par son firmware, et FT6336
+  de la WT32-SC01), essayé sur les deux cartes ; démo façon LVGL `temp/tab5ui` ; dans le
+  jumeau, modèles `ft6336` et `gt911` touchés à la souris (un doigt),
+  `tests/touch.test.js`. Article LinkedIn : `temp/linkedin-article.md`, couverture
+  `temp/cover/cover.png`, schéma `temp/overview-fr.png`. Puis le jumeau de la Tab5
+  (écran intégré dessiné en mémoire, GT911 ; `tests/tab5.test.js`) et le correctif du
+  lecteur de bytecode (modification Z). L'écran réel de la Tab5 vérifié avec le firmware
+  reflashé (`flushScreen` par zone).
 - (17/11) : écran de la WT32-SC01 (`stdlib/display` + `sys/draw` : liste
   de commandes rendue par bandes pendant l'envoi SPI, texte avec polices LVGL lues en
   flash, arcs, rectangles arrondis ; 15,5 images/s sur deux jauges), import de fichiers en
@@ -37,8 +45,8 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
 - [ ] **`device/spi`, suite** : essayé sur l'écran de la WT32-SC01 (fait) ; reste Teensy
       (LPSPI) et RP2350, et la lenteur de `transactionSync` (1,3 ms + 0,35 ms par segment :
       la conversion des segments, à confirmer) si un programme en a besoin.
-- [ ] **Écran, suite** : le tactile FT6336 de la WT32-SC01 (`stdlib/touch`, adresse I2C
-      0x38, broches 18 / 19) et son modèle dans le jumeau ; images : JPEG plus tard,
+- [ ] **Écran, suite** : tactile fait (reste : plusieurs doigts dans le jumeau, gestes) ;
+      images : JPEG plus tard,
       PNG entrelacé refusé, import d'une image dans une bibliothèque non essayé ;
       vérifier le modèle `st7796-320x480` du jumeau contre la fiche du ST7796
       (known-bugs.md) ; d'autres contrôleurs (ILI9341, ST7789…) : une entrée de `TYPES`.

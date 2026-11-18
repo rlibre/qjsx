@@ -5,8 +5,9 @@
  *    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
  */
 
-// The view of a display part of qjsx (host/twin/parts/st7796-320x480): its
-// pixels, one canvas pixel per pixel of the screen, and a line under them
+// The view of a display part of qjsx (host/twin/parts/st7796-320x480,
+// ili9881c-720x1280): its pixels, one canvas pixel per pixel of the screen
+// (shrunk to fit the page when larger, then smoothed), and a line under them
 // (its size, asleep / off / the backlight, where the USB connector of the
 // board is).
 //
@@ -21,9 +22,15 @@
 // upright, as the board is held to read it: rotation 90 of stdlib/display
 // shows the USB connector at the right. Asleep or off: black; the backlight
 // dims the image (its brightness as the opacity over black).
+//
+// A touch part over the screen (touchlink.ts): the mouse pressed, moved and
+// released on it sends "press", "move" with { x, y, width, height } (the
+// pixel of the glass under the mouse, and the glass's size) and "release" to
+// that part. One finger.
 import { BoxProps, Component, Label, VBox } from "x4js";
 import type { PartHandle } from "./partview";
 import { tx } from "./texts";
+import { isTouchable, touchScreen } from "./touchlink";
 
 // A rectangle of the glass the model sends.
 interface ScreenRect {
@@ -46,10 +53,22 @@ interface ScreenState {
     rects:      ScreenRect[];   // the pixels changed
 }
 
+// Uint8Array.fromBase64 of the browser (native: 2 ms for the 2.4 MB of a
+// whole 720 x 1280 image, against about 110 ms by atob and a loop); not in
+// the TypeScript library yet, hence this type.
+type Base64Decoder = { fromBase64?: (text: string) => Uint8Array };
+
 /**
- * The bytes of a base64 text.
+ * The bytes of a base64 text: by the browser's decoder when it has one.
  */
 function decodeBase64(text: string) {
+    // native
+    const decoder = Uint8Array as unknown as Base64Decoder;
+    if (typeof decoder.fromBase64 === "function") {
+        return decoder.fromBase64(text);
+    }
+
+    // by hand
     const binary = atob(text);
     const bytes = new Uint8Array(binary.length);
 
@@ -69,6 +88,7 @@ export class ScreenView extends VBox {
     private _part: PartHandle;                  // the part, to ask it for the whole glass
     private _whole = false;                     // the whole glass came at least once
     private _askedAt = 0;                       // Date.now() of the last ask for it
+    private _pressed = false;                   // the mouse down on it, a touch part told
 
     /**
      * An empty screen; the model is asked for all its pixels.
@@ -86,6 +106,93 @@ export class ScreenView extends VBox {
         this._part = part;
         part.onState(state => this._show(state as unknown as ScreenState));
         this._askWhole();
+
+        // the mouse: a finger on the touch panel over it, if any; shown
+        // smaller than its pixels: smoothed
+        const canvas = this._screen.dom as HTMLCanvasElement;
+        new ResizeObserver(() => this._markScaled()).observe(canvas);
+        canvas.addEventListener("pointerdown", event => this._onPress(event));
+        canvas.addEventListener("pointermove", event => this._onMove(event));
+        canvas.addEventListener("pointerup", () => this._onRelease());
+        canvas.addEventListener("pointercancel", () => this._onRelease());
+    }
+
+    /**
+     * The canvas is shown smaller than its pixels (the page shrinks it to
+     * fit): class "scaled", smoothed.
+     */
+    private _markScaled() {
+        const canvas = this._screen.dom as HTMLCanvasElement;
+        const isShrunk = canvas.clientWidth > 0 && canvas.clientWidth < canvas.width;
+        canvas.classList.toggle("scaled", isShrunk);
+    }
+
+    /**
+     * The mouse pressed on the screen: the finger put there (the mouse
+     * captured until it is released).
+     */
+    private _onPress(event: PointerEvent) {
+        // no touch panel over it, or nothing shown yet
+        const point = this._glassPoint(event);
+        if (!isTouchable(this._part.id) || point === null) {
+            return;
+        }
+
+        (this._screen.dom as HTMLElement).setPointerCapture(event.pointerId);
+        this._pressed = true;
+        touchScreen(this._part.id, "press", point);
+    }
+
+    /**
+     * The mouse moved, pressed: the finger moved.
+     */
+    private _onMove(event: PointerEvent) {
+        const point = this._pressed ? this._glassPoint(event) : null;
+        if (point !== null) {
+            touchScreen(this._part.id, "move", point);
+        }
+    }
+
+    /**
+     * The mouse released (or lost): the finger lifted.
+     */
+    private _onRelease() {
+        if (this._pressed) {
+            this._pressed = false;
+            touchScreen(this._part.id, "release");
+        }
+    }
+
+    /**
+     * The pixel of the glass under the mouse, with the glass's size: the
+     * canvas shows the glass turned back by 'turn' around its center, so the
+     * point is turned by 'turn' around the center to find it. null before
+     * the first state.
+     */
+    private _glassPoint(event: PointerEvent) {
+        // nothing shown yet
+        const look = this._look;
+        if (look === null) {
+            return null;
+        }
+
+        // the pixel of the canvas (shown maybe at another size)
+        const canvas = this._screen.dom as HTMLCanvasElement;
+        const shownX = (event.offsetX * canvas.width) / canvas.clientWidth;
+        const shownY = (event.offsetY * canvas.height) / canvas.clientHeight;
+
+        // from the center of the canvas, turned by 'turn' (clockwise), to the
+        // center of the glass
+        const angle = (look.turn * Math.PI) / 180;
+        const dx = shownX - canvas.width / 2;
+        const dy = shownY - canvas.height / 2;
+        const glassX = dx * Math.cos(angle) - dy * Math.sin(angle) + look.width / 2;
+        const glassY = dx * Math.sin(angle) + dy * Math.cos(angle) + look.height / 2;
+
+        // a pixel of the glass
+        const x = Math.max(0, Math.min(look.width - 1, Math.floor(glassX)));
+        const y = Math.max(0, Math.min(look.height - 1, Math.floor(glassY)));
+        return { x, y, width: look.width, height: look.height };
     }
 
     /**
@@ -187,6 +294,7 @@ export class ScreenView extends VBox {
         if (canvas.width !== width || canvas.height !== height) {
             canvas.width = width;
             canvas.height = height;
+            this._markScaled();
         }
 
         // black: asleep, off, or no light
@@ -230,6 +338,12 @@ export class ScreenView extends VBox {
         // where the USB connector is, the image upright
         const side = tx.twin.screen_sides[(look.turn / 90) & 3];
         parts.push(`${tx.twin.screen_usb} ${side}`);
+
+        // a touch panel over it
+        if (isTouchable(this._part.id)) {
+            parts.push(tx.twin.screen_touch);
+        }
+
         return parts.join(" · ");
     }
 }

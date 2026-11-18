@@ -13,11 +13,17 @@
 // Tab5 (M5Tab5-UserDemo, Apache-2.0: 2 lanes at 730 Mb/s, pixel clock
 // 60 MHz, porches H 140 / 40 / 40, V 20 / 4 / 20; about 48 images a second),
 // the regulator of the PHY its LDO 3 at 2.5 V.
+//
+// Its touch controller, a GT911 at 0x14 on the same bus (interrupt G23, reset
+// pin 5 of the same expander), is started here too: without its start
+// sequence it answers on I2C but has no configuration and reports nothing.
+// The program then reads it with stdlib/touch.
 #include "board_screen.h"
 
 #include <stdio.h>
 
 #include "hal_dsi.h"
+#include "hal_gpio.h"
 #include "hal_i2c.h"
 #include "ili9881c.h"
 #include "pi4ioe5v6408.h"
@@ -34,6 +40,13 @@ const int      I2C_SCL = 32;
 const int      EXPANDER_ADDRESS = 0x43;
 const uint32_t EXPANDER_HZ = 400000;
 const int      PANEL_RESET_PIN = 4;
+const int      TOUCH_RESET_PIN = 5;
+
+// The interrupt pin of the GT911: during its reset, its level chooses the
+// address (high: 0x14), then held low a moment (the GT911's start sequence).
+const int TOUCH_INTERRUPT = 23;
+const int TOUCH_SETTLE_MS = 10;    // reset released, before INT goes low
+const int TOUCH_SYNC_MS = 50;      // INT held low
 
 // How long the reset pulse lasts, and the wait after it (the controller's).
 const int RESET_PULSE_MS = 10;
@@ -55,9 +68,11 @@ Screen started = {};               // the display, once started
 bool   isStarted = false;
 
 /**
- * Pulses the reset pin of the panel (through the expander), then waits for
- * the controller. The bus is given back at the end, for the programs. False
- * after printing why.
+ * Pulses the reset pins of the panel and of the touch controller (through
+ * the expander), the touch's interrupt pin high meanwhile (its address
+ * 0x14), then gives the GT911 its start signal (INT low a moment) and waits
+ * for the panel's controller. The bus and the interrupt pin are given back
+ * at the end, for the programs. False after printing why.
  */
 bool resetPanel() {
     // the bus and the expander
@@ -69,11 +84,23 @@ bool resetPanel() {
     int expander = hal::i2c::addDevice(I2C_BUS, EXPANDER_ADDRESS, EXPANDER_HZ);
     bool pulsed = false;
     if (expander >= 0) {
-        // the pin low a moment, then released to its pull-up
+        // both reset pins low a moment, INT high (the GT911 at 0x14)
+        hal::gpio::configure(TOUCH_INTERRUPT, hal::gpio::Mode::output, hal::gpio::Pull::none);
+        hal::gpio::write(TOUCH_INTERRUPT, 1);
         pulsed = drivers::pi4ioe5v6408::drive(expander, PANEL_RESET_PIN, false);
+        pulsed = drivers::pi4ioe5v6408::drive(expander, TOUCH_RESET_PIN, false) && pulsed;
         platform::sleepMs(RESET_PULSE_MS);
+
+        // released to their pull-ups
         pulsed = drivers::pi4ioe5v6408::release(expander, PANEL_RESET_PIN) && pulsed;
+        pulsed = drivers::pi4ioe5v6408::release(expander, TOUCH_RESET_PIN) && pulsed;
         hal::i2c::removeDevice(expander);
+
+        // the GT911's start signal: INT low a moment, then an input again
+        platform::sleepMs(TOUCH_SETTLE_MS);
+        hal::gpio::write(TOUCH_INTERRUPT, 0);
+        platform::sleepMs(TOUCH_SYNC_MS);
+        hal::gpio::reset(TOUCH_INTERRUPT);
     }
 
     hal::i2c::closeBus(I2C_BUS);
@@ -113,9 +140,11 @@ const Screen *screen() {
     return isStarted ? &started : nullptr;
 }
 
-void flushScreen(int firstRow, int rows) {
-    uint16_t *first = started.pixels + (size_t)firstRow * (size_t)started.width;
-    hal::dsi::flush(first, (size_t)rows * (size_t)started.width * sizeof(uint16_t));
+void flushScreen(ScreenArea area) {
+    // the whole rows of the area: the cache is written back by lines, a
+    // row is contiguous
+    uint16_t *first = started.pixels + (size_t)area.y * (size_t)started.width;
+    hal::dsi::flush(first, (size_t)area.height * (size_t)started.width * sizeof(uint16_t));
 }
 
 } // namespace board

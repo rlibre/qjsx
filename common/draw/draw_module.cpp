@@ -431,15 +431,14 @@ const board::Screen *builtinScreen() {
 }
 
 /**
- * Makes rows of the screen built into the board visible (see
+ * Makes an area of the screen built into the board visible (see
  * board::flushScreen); nothing on a board without one.
  */
-void flushBuiltinScreen(int firstRow, int rows) {
+void flushBuiltinScreen(board::ScreenArea area) {
 #if QJSX_HAS_SCREEN
-    board::flushScreen(firstRow, rows);
+    board::flushScreen(area);
 #else
-    (void)firstRow;
-    (void)rows;
+    (void)area;
 #endif
 }
 
@@ -483,19 +482,26 @@ void copyBand(const uint8_t *band, int width, int rows, int x, int y, int rotati
 }
 
 /**
- * The rows of the image of the screen that the area (x, y, width, height)
- * of the drawing turned by 'rotation' covers: *first and *count.
+ * The area of the image of the screen that the area (x, y, width, height)
+ * of the drawing turned by 'rotation' covers (see screenIndex).
  */
-void screenRows(int x, int y, int width, int height, int rotation, const board::Screen *screen, int *first, int *count) {
-    // the rows of the drawing, or its columns when turned on its side
-    bool isOnItsSide = rotation == 90 || rotation == 270;
-    int from = isOnItsSide ? x : y;
-    int span = isOnItsSide ? width : height;
-
-    // counted from the other end when turned 180 or 270
-    bool isReversed = rotation == 180 || rotation == 270;
-    *first = isReversed ? screen->height - (from + span) : from;
-    *count = span;
+board::ScreenArea screenArea(int x, int y, int width, int height, int rotation, const board::Screen *screen) {
+    switch (rotation) {
+        case 90: {
+            // drawing x -> image row, drawing y -> image column from the right
+            return board::ScreenArea{ screen->width - (y + height), x, height, width, rotation };
+        }
+        case 180: {
+            return board::ScreenArea{ screen->width - (x + width), screen->height - (y + height), width, height, rotation };
+        }
+        case 270: {
+            // drawing y -> image column, drawing x -> image row from the bottom
+            return board::ScreenArea{ y, screen->height - (x + width), height, width, rotation };
+        }
+        default: {
+            return board::ScreenArea{ x, y, width, height, rotation };
+        }
+    }
 }
 
 /**
@@ -519,11 +525,8 @@ void renderFrame(Frame *frame, int bandRows, int rotation, const board::Screen *
 
     memory::release(band);
 
-    // the rows changed, made visible to the video
-    int firstRow = 0;
-    int rowCount = 0;
-    screenRows(frame->x, frame->y, frame->width, frame->height, rotation, screen, &firstRow, &rowCount);
-    flushBuiltinScreen(firstRow, rowCount);
+    // the area changed, made visible to the video
+    flushBuiltinScreen(screenArea(frame->x, frame->y, frame->width, frame->height, rotation, screen));
 }
 
 // ### The render task of the screen built into the board ######################

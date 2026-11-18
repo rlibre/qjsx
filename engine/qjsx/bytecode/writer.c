@@ -263,6 +263,10 @@ void bc_byte_swap(uint8_t *bc_buf, int bc_len)
         op = bc_buf[pos];
         len = short_opcode_info(op).size;
         fmt = short_opcode_info(op).fmt;
+        /* qjsx: a truncated last opcode is left as it is (its operand
+           would lie past the buffer); the reader then refuses it */
+        if (len > bc_len - pos)
+            break;
         switch(fmt) {
         case OP_FMT_u16:
         case OP_FMT_i16:
