@@ -70,8 +70,10 @@
  * |---|---|---|---|---|
  * | — | ✓ ¹ | — | — | ✓ ² |
  *
- * ¹ Boards with a display, whose firmware has `sys/draw` (today the
- * WT32-SC01). Elsewhere importing it fails.
+ * ¹ Boards with a display, whose firmware has `sys/draw`: the WT32-SC01
+ * (ST7796 over SPI, `type: "spi"`) and the two ESP32-P4 boards, M5Stack
+ * Tab5 and Waveshare ESP32-P4-Module-DEV-KIT (panel built into the board,
+ * `type: "builtin"`). Elsewhere importing it fails.
  *
  * ² The twin of such a board (`wt32-sc01`, `m5stack-tab5` and its display
  * built in): the screen is drawn in the page.

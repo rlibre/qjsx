@@ -54,8 +54,11 @@
  * |---|---|---|---|---|
  * | — | ✓ ¹ | — | — | ✓ ² |
  *
- * ¹ Only in a firmware built for a board with a display (`QJSX_DRAW`, today
- * the WT32-SC01): a board without a screen pays nothing for it.
+ * ¹ Only in a firmware built for a board with a display (`QJSX_DRAW`): the
+ * WT32-SC01, whose ST7796 is driven over SPI, and the two ESP32-P4 boards
+ * (M5Stack Tab5, Waveshare ESP32-P4-Module-DEV-KIT), whose panel is built
+ * into the board and drawn by a task. A board without a screen pays nothing
+ * for it.
  *
  * ² The twin of a board that lists it (`wt32-sc01`; `m5stack-tab5`, whose
  * display built in is an image in memory drawn in the page).

@@ -33,11 +33,16 @@ A program that uses what is new here needs the firmware of this version on its b
 - A display on SPI receives each image as one transaction: faster small updates.
 - Waveshare ESP32-P4: the backlight stays off while the display starts.
 - `qjsx.exe` (Windows) is one static executable: it needs no MinGW DLL next to it.
+- The page of the digital twin takes its icons from x4js 2.3.33, which draws its own: it
+  carries no third-party icon any more.
 
 ### Fixed
 
 - A synchronous I2C call (`writeSync`, `readSync`...) made right after a queued transfer
   on the same bus could block the program for good, on every board.
+- The typings of `sys/draw`, `stdlib/display` and `stdlib/touch`, and the compatibility
+  table of the manual, said that only the WT32-SC01 had a display: they now name the two
+  ESP32-P4 boards and the touch controller of the Waveshare.
 - A package whose bytecode ends in the middle of an instruction is refused instead of
   being read past its end.
 - Twin: two quick clicks on a GT911 touch panel were seen as one touch.

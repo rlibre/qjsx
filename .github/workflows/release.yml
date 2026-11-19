@@ -36,11 +36,21 @@ permissions:
 
 env:
   PREMAKE_VERSION: "5.0.0"
+  # The compiler of the Windows tool: the same archive as the development
+  # machine holds, pinned (user, 2026-11-19), instead of the package of
+  # MSYS2, which follows a rolling release and would change without notice.
+  # Both machines then build the executable with the same compiler, and a
+  # release can be built again, as it was, months later.
+  GCC_RELEASE: "16.2.0-rt_v14-rev1"
+  GCC_ARCHIVE: "x86_64-16.2.0-release-posix-seh-ucrt-rt_v14-rev1.7z"
 
 jobs:
   # The tool for Windows, and the tests of the whole project. MSYS2 gives
   # the compiler (MinGW-w64) and the make the project is built with; the
   # executable is static, so it needs none of their DLLs.
+  # UCRT64, not MINGW64 (user, 2026-11-19): MSYS2 has deprecated MINGW64.
+  # The executable then uses the C library of Windows 10 and later
+  # (ucrtbase.dll) instead of the old msvcrt.dll.
   tool-windows:
     runs-on: windows-latest
     defaults:
@@ -53,26 +63,33 @@ jobs:
       - name: Set up MSYS2
         uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: false
           install: >-
             make
             unzip
             curl
             diffutils
-            mingw-w64-x86_64-gcc
 
-      - name: Get premake5
+      # premake5, and the compiler, which is NOT the one of MSYS2: the
+      # archive named above, extracted once (bsdtar comes with MSYS2 and
+      # reads .7z). The Build step puts its bin at the head of its PATH.
+      - name: Get premake5 and the compiler
         run: |
           curl -fsSL -o premake.zip "https://github.com/premake/premake-core/releases/download/v$PREMAKE_VERSION/premake-$PREMAKE_VERSION-windows.zip"
           unzip -o premake.zip premake5.exe -d /usr/local/bin
           chmod +x /usr/local/bin/premake5.exe
+          curl -fsSL -o gcc.7z "https://github.com/niXman/mingw-builds-binaries/releases/download/$GCC_RELEASE/$GCC_ARCHIVE"
+          mkdir -p /usr/local/gcc-ucrt
+          bsdtar -xf gcc.7z -C /usr/local/gcc-ucrt
+          /usr/local/gcc-ucrt/mingw64/bin/gcc --version | head -1
 
       # The makefiles of the project, then everything: the engine, the tool,
       # qjsx-tests and qjsx-target. The tool makes stdlib.qjslib when it is
       # linked (post-build step).
       - name: Build
         run: |
+          export PATH="/usr/local/gcc-ucrt/mingw64/bin:$PATH"
           premake5 gmake --cc=gcc --shell=posix
           make -C build config=release -j4
 

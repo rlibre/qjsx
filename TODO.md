@@ -193,6 +193,13 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
         gdtoa, tables Unicode de QuickJS) : à relire avant la release publique ;
   - [x] exécutable Windows lié en statique (fait le 19/11 : il ne dépendait pas que des
         DLL de Windows, donc il n'aurait pas démarré chez un testeur) ;
+  - [ ] **UCRT64 sur la machine de développement** : la CI construit maintenant l'outil
+        Windows avec `mingw-w64-ucrt-x86_64-gcc` (MSYS2 a déprécié MINGW64), donc le
+        binaire livré se lie à `ucrtbase.dll` alors que celui construit ici se lie encore
+        à `msvcrt.dll` : ce n'est plus le même exécutable qu'on éprouve au jour le jour.
+        À faire : installer la chaîne UCRT64 (paquet `mingw-w64-ucrt-x86_64-gcc` de
+        MSYS2), repasser la suite complète, et surveiller ce que ces deux bibliothèques
+        font différemment (affichage des nombres, locales, dates) ;
   - [ ] icônes de la page du jumeau : Font Awesome **Pro** venait de x4js. Remplacées par
         les Material Symbols de Google (Apache-2.0) : jeu prêt dans `temp/x4-icons/
         google-set` (17 fichiers, 13 entrées de `icons.ts`), l'utilisateur les intègre
@@ -209,15 +216,19 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
         une archive par système, zip écrit par le script lui-même ; archive Windows
         essayée pour de vrai, décompressée dans un dossier vide, `qjsx --version`,
         script avec `stdlib/path`, et un flash de la Waveshare depuis ce dossier) ;
-  - [ ] CI (`.github/workflows/release.yml`, écrit le 19/11, JAMAIS LANCÉ) : sur tag
-        `v*`, plus un lancement manuel qui construit sans publier. Outil Windows (MSYS2)
-        + suite de tests, outil Linux Arm (compilateur croisé de la distribution,
-        `QJSX_CROSS_PREFIX` ajouté à `premake5.lua`), 5 firmwares dans l'image
-        `espressif/idf:v6.1`, archives, `gh release create --prerelease` avec l'entrée du
-        changelog comme texte. À ESSAYER sur une branche (ajouter un déclencheur `push`
-        temporaire : GitHub n'offre « Run workflow » que depuis la branche par défaut).
-        Non vérifiés : le nom du fichier de licences d'ESP-IDF dans l'image (trois
-        chemins essayés), les paquets MSYS2, le `cp --parents` des firmwares ;
+  - [x] CI (`.github/workflows/release.yml`, écrit et ESSAYÉ le 19/11 sur la branche
+        `ci-release`, tout vert au deuxième tour) : sur tag `v*`, plus un lancement
+        manuel qui construit sans publier. Outil Windows (MSYS2) + suite de tests, outil
+        Linux Arm (compilateur croisé de la distribution, `QJSX_CROSS_PREFIX` ajouté à
+        `premake5.lua`), 5 firmwares dans l'image `espressif/idf:v6.1`, archives,
+        `gh release create --prerelease` avec l'entrée du changelog comme texte.
+        Corrigés en route : `premake5` extrait sans droit d'exécution, `diff` absent de
+        MSYS2, deux tests chronométrés laissés de côté sur une machine partagée
+        (`QJSX_SKIP_TIMING`, `tests/run-tests.sh`). Archives vérifiées : bit d'exécution
+        du binaire Linux gardé, vrai fichier de licences d'ESP-IDF, exécutable Windows
+        qui tourne sans MinGW. RESTE : retirer le déclencheur `push` temporaire de
+        `ci-release` et fusionner dans `main` ; la publication elle-même (étape sous
+        `if: tag`) n'a jamais tourné ;
   - [ ] ensuite : flasher UF2 (RP2350), puis PJRC (HID, natif).
 - [ ] **CI/CD** (pour la release publique annoncée) : GitHub Actions sur un tag ; `qjsx`
       pour Linux x64 et macOS (jamais construits : portage à prévoir),

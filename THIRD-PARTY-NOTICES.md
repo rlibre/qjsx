@@ -13,7 +13,6 @@ Where each one is:
 | Inter font | | | yes | SIL Open Font License 1.1 |
 | x4js | yes (page of the digital twin) | | | MIT |
 | normalize.css | yes (page of the digital twin) | | | MIT |
-| Font Awesome Free icons | yes (page of the digital twin) | | | CC BY 4.0 |
 | LittleFS | | yes | | BSD-3-Clause |
 | esp_littlefs | | yes | | MIT |
 | TinyUSB | | yes (boards with a USB device port) | | MIT, parts BSD-3-Clause |
@@ -66,13 +65,6 @@ Style rules of x4js come from normalize.css v8.0.1
     Copyright (c) Nicolas Gallagher and Jonathan Neal
 
 License: MIT (text below).
-
-## Font Awesome Free icons
-
-Icons of the page of the digital twin come from Font Awesome Free 6.5.1 by
-@fontawesome (https://fontawesome.com), under the Creative Commons
-Attribution 4.0 International license (https://fontawesome.com/license/free,
-https://creativecommons.org/licenses/by/4.0/).
 
 ## LittleFS
 
@@ -166,7 +158,9 @@ version that built the firmwares.
 
 ## MinGW-w64 and GCC runtime (Windows executable)
 
-`qjsx.exe` is built with GCC for MinGW-w64 and linked statically with:
+`qjsx.exe` is built with GCC for MinGW-w64 (UCRT64), so it calls the C library of
+Windows itself (`ucrtbase.dll`, part of Windows 10 and later), which is not
+delivered here. It is linked statically with:
 
 - the MinGW-w64 runtime and winpthreads (https://www.mingw-w64.org),
   Copyright (c) the mingw-w64 project and its contributors, under permissive

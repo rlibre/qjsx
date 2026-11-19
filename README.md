@@ -98,15 +98,20 @@ the board does not have.
 
 ## What is inside
 
-- **`qjsx`, a command-line tool**: a single executable to build, send, start, stop and watch a
-  program, read and write the files of the board, and see which functions take its time
-  (`qjsx profile`).
-- **Firmwares for the boards**: ESP32-S3 and the original ESP32 (over their serial port),
-  Teensy 4.0 and RP2350 (over their own USB port). Each one receives programs and runs them.
-- **Color displays**: `stdlib/display` draws rectangles, lines, arcs, rounded rectangles and
-  smoothed text on an SPI display (today the ST7796 of the WT32-SC01), about 15 images a
-  second for two animated gauges. It keeps no copy of the screen: the image is rendered a
-  few rows at a time while it goes out, and the fonts stay in flash.
+- **`qjsx`, a command-line tool**: a single executable to flash the firmware of a board, build,
+  send, start, stop and watch a program, read and write the files of the board, and see which
+  functions take its time (`qjsx profile`).
+- **Firmwares for the boards**: the ESP32 family — the original ESP32 and the ESP32-S3 over
+  their serial port, the ESP32-P4 over the chip's own USB — then the Teensy 4.0 and the RP2350,
+  over their own USB port. Each one receives programs and runs them. A board that runs Linux
+  needs no firmware: the cross-built tool runs there and plays the device.
+- **Color displays**: `stdlib/display` draws rectangles, lines, arcs, rounded rectangles,
+  smoothed text and PNG images, on an SPI display (the ST7796 of the WT32-SC01: about 15 images
+  a second for two animated gauges) or on the panel built into the board (720 x 1280 on the two
+  ESP32-P4 boards: about 185 images a second, drawn by a task of its own); `stdlib/touch` reads
+  the touch panel in front of it. On an SPI display nothing keeps a copy of the screen — the
+  image is rendered a few rows at a time while it goes out — and the fonts and the images stay
+  in flash.
 - **Libraries**: the standard library (`stdlib`) comes with the tool, and you can make your
   own with `qjsx mklib`. Only the modules a program really imports go to the board (see
   below), and inside them only what it uses: `qjsx build` leaves out the functions, classes
@@ -177,27 +182,114 @@ The twin runs at the speed of the PC, not of the board.
 
 ## Where the project stands
 
-| | Status |
-|---|---|
-| `qjsx` tool on Windows | works |
-| `qjsx` tool on Linux and macOS | written, not tried yet |
-| ESP32-S3 firmware (YD-ESP32-S3 board, 16 MB flash, 8 MB PSRAM) | works |
-| ESP32-S3 firmware (Espressif ESP32-S3-DevKitC-1, N8R8: 8 MB flash, 8 MB PSRAM) | works |
-| Teensy 4.0 firmware (NXP i.MX RT1062, 600 MHz, 1 MB RAM, no PSRAM) | works: USB link, debugger, `device/gpio`, `device/pwm`, `device/board`; 2 to 7 times faster than the ESP32-S3 |
-| Sending and running a program over the serial port | works |
-| Libraries (`.qjslib`) | works |
-| Debugger on the board | works |
-| Debugger in VS Code (`qjsx debug`) | works (conditional breakpoints and logpoints to do) |
-| Hardware modules | `device/gpio`, `device/rmt` and RGB LEDs (`stdlib/rgbled`), `device/usb`, `device/pwm` on the ESP32; `device/gpio` and `device/pwm` on the Teensy 4.0; `device/gpio` on the RP2350; `device/i2c`, `device/adc` and the UARTs of `device/serial` written for the ESP32 (not tried with a real component yet); SPI, WiFi to do |
-| Files on the board | works on the ESP32 (LittleFS on `/data`); to do on the others |
-| Native USB link | works on the Teensy 4.0 and the RP2350; to do on the ESP32 |
-| WiFi link | to do |
-| RP2350 board (Olimex PICO2-XXL) | works (USB link, JS heap in PSRAM); slow for now |
-| Digital twin of a board on the PC (`qjsx agent`) | works: pins, parts (button, LEDs, BME280, potentiometer, your own), I2C, ADC, UARTs and USB over TCP, in a web page |
-| Permissions of a program run on the PC (Deno-like: files, network, environment, serial ports) | works |
+What a program, and the tool, can do on each chip:
 
-In short: today you can run JavaScript on an ESP32-S3 or a Teensy 4.0, debug it from VS Code,
-drive its pins, its PWM outputs and its RGB LED; most of the other hardware is still to come.
+| | PC | Twin | ESP32 ¹ | RP2350 | RT1062 | Linux |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|
+| **The link and the tool** | | | | | | |
+| Link over the board's UART ² | — | — | ✓ | — | — | — |
+| Link over the chip's own USB ² | — | — | ✓ | ✓ | ✓ | — |
+| Link over TCP | ✓ | ✓ | — ³ | — | — | ✓ |
+| Send and run a program (`qjsx deploy`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Debugger from VS Code (`qjsx debug`) ⁴ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Flash the firmware (`qjsx flash`) ⁵ | — | — | ✓ | — | — | — |
+| Sampling profiler (`qjsx profile`) ⁶ | ✓ | ✓ | ~ | ~ | ~ | ✓ |
+| **The program** | | | | | | |
+| Package kept in flash, run from it ⁷ | — | — | ✓ | ✓ | ✓ | — |
+| Package loaded in RAM (`deploy --ram`) | ✓ | ✓ | ✓ | ~ | ~ | ✓ |
+| Libraries (`.qjslib`), `stdlib` written in JS | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Fonts and PNG images kept in flash (`with { type: "bytes" }`) | ✓ | ✓ | ✓ | ~ | ~ | ✓ |
+| Files of the program (`sys/fs`) ⁸ | ✓ | ✓ | ✓ `/data` | — | — | ✓ |
+| Permissions of a program of the PC ⁹ | ✓ | — | — | — | — | — |
+| TCP sockets (`sys/net`) | ✓ | — | — ³ | — | — | ✓ |
+| **The hardware** | | | | | | |
+| `device/gpio` | — | ✓ | ✓ | ✓ | ✓ | — ¹⁰ |
+| `device/pwm` | — | ✓ | ✓ | — | ✓ | — ¹⁰ |
+| `device/i2c` | — | ✓ | ✓ | — | — | — ¹⁰ |
+| `device/spi` | — | ✓ | ✓ | — | — | — ¹⁰ |
+| `device/adc` | — | ✓ | ~ | — | — | — |
+| `device/dac` ¹¹ | — | ✓ | ✓ | — | — | — |
+| `device/rmt`, `stdlib/rgbled` | — | ✓ | ✓ | — | — | — |
+| `device/serial` ¹⁴ | ✓ | ✓ | ~ | — | — | ~ |
+| `device/usb`, the board as a USB device ¹² | — | ✓ | ✓ | — | — | — |
+| `device/board` (id, MAC, memory, load, restart) | — | ✓ | ✓ | — | ✓ | ✓ |
+| `device/wifi` ³ | — | — | — | — | — | — |
+| **The screen** | | | | | | |
+| `sys/draw`, `stdlib/display` ¹³ | — | ✓ | ✓ | — | — | ✓ |
+| `stdlib/touch` ¹³ | — | ✓ | ✓ | — | — | ✓ |
+
+**✓** works, and was tried on the real hardware (for the PC and the twin: by the test suite).
+**~** it is in the build and compiles, but has not been seen working on that hardware, often
+because nothing was wired to the board at hand. **—** not there.
+
+The columns: **PC** a program of the PC (`qjsx run`); **Twin** the digital twin of a board;
+**ESP32** the original ESP32 (WT32-SC01), the ESP32-S3 (YD-ESP32-S3, ESP32-S3-DevKitC-1 N8R8)
+and the ESP32-P4 (M5Stack Tab5, Waveshare ESP32-P4-Module-DEV-KIT); **RP2350** Olimex
+PICO2-XXL; **RT1062** Teensy 4.0; **Linux** a board running Linux, where the tool itself is
+the agent (STM32MP157-DK2).
+
+¹ One firmware serves every ESP32 chip, so a mark in that column holds for the whole family
+unless a footnote says otherwise. There is one original ESP32 board here, two ESP32-S3 and two
+ESP32-P4, and not every module could be tried on each: `device/i2c`, `qjsx flash` and the fonts
+and images read in flash were seen on the original ESP32 and on an ESP32-P4, not on an S3;
+`device/spi` only on the original ESP32 (its display); `device/rmt` with `stdlib/rgbled`,
+`device/usb`, `device/board` and a package loaded in RAM only on an S3; the files of `/data` on
+the original ESP32 and an S3, not on a P4; `device/pwm` on an S3 (with an oscilloscope) and on a
+P4, whose timer clock is taken as 80 MHz from the PLL without having been measured;
+`device/adc` on none of them.
+
+² The link of the agent is the console of the board: UART0 where the board has a USB-serial
+bridge (the original ESP32 and the ESP32-S3 boards here), the chip's own USB Serial/JTAG where
+the board has nothing else (both ESP32-P4 boards; the original ESP32 has no USB at all, and no
+S3 board here puts its console there). The RP2350 and the Teensy 4.0 have only their own USB.
+The PC sees either one as a serial port.
+
+³ A board reaches the network through WiFi, which is designed but not written; `sys/net` and a
+link over TCP to a board wait for it.
+
+⁴ Breakpoints, stepping, pause, call stack, reading and changing variables, `console` output.
+Conditional breakpoints, logpoints and hit counts are still to do.
+
+⁵ `qjsx flash` speaks to the ROM loader of the ESP32 chips. The RP2350 and the Teensy 4.0 are
+flashed by their own tools (`tools/pico.ps1`, `tools/teensy.ps1`).
+
+⁶ The tool always has it; a firmware only when it is built with `-DQJSX_PROFILER=ON`.
+
+⁷ The PC, the twin and a Linux board keep the packages as files of a folder, not in flash.
+
+⁸ On an ESP32 the files of the program live on LittleFS in the `data` partition, mounted on
+`/data`, and the program reaches nothing outside it. `sys/fs` is in the firmware of the RP2350
+and the Teensy 4.0 too, but they have no file system yet: every call fails with `ENOSYS`.
+
+⁹ The Deno-like permissions (files, network, environment, serial ports) are for a program of
+the PC. A program of a board, of the twin or of a Linux board is confined to its data folder.
+
+¹⁰ On a Linux board these modules are registered so that the static imports of
+`stdlib/display` and `stdlib/touch` resolve; they drive nothing.
+
+¹¹ Only the chips that have a DAC: the original ESP32 (GPIO25, GPIO26) and the ESP32-S2 — not
+the S3, not the P4. Flashed on the original ESP32; its output has not been measured yet.
+
+¹² Only the chips with USB OTG: the ESP32-S2, S3 and P4; tried on an S3. This is the board's
+own USB port offered to a host as a device, not the link of the agent.
+
+¹³ A screen needs a firmware built for a board that has one: the WT32-SC01 (an ST7796 on SPI)
+and the two ESP32-P4 boards (a MIPI-DSI panel built into the board), each with its touch
+controller on I2C. No ESP32-S3 board here has a display. On a Linux board the display is the
+kernel's (DRM) and the touch panel is read as an input device.
+
+¹⁴ On a board, `device/serial` opens the UARTs of the chip (never the one that carries the
+link of the agent). On the PC and on a Linux board it opens the serial ports of the system
+(`COM3`, `/dev/ttyUSB0`); its POSIX side is built but was not tried.
+
+The tool is built for Windows, and cross-built for 32-bit Arm Linux (that is what runs on the
+Linux board); a Linux x64 build and a macOS build have not been made yet.
+
+In short: programs run and are debugged from VS Code on the original ESP32, the ESP32-S3, the
+ESP32-P4, the RP2350, the Teensy 4.0 and a Linux board. Pins, PWM, I2C, SPI, a color display
+with its touch panel, the files of the board and USB are there; WiFi, and with it the network
+and a link over TCP to a board, is the main piece missing. Several modules compile but have
+never been wired to a board: the table says which.
 
 ## Building
 
@@ -224,12 +316,19 @@ The firmwares, one per board:
 
 | Boards | Folder | Built with |
 |---|---|---|
-| ESP32-S3: YD-ESP32-S3, ESP32-S3-DevKitC-1 | `ports/esp32` | [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) 6.1 (`tools/idf.ps1`) |
+| ESP32-S3: YD-ESP32-S3, ESP32-S3-DevKitC-1 N8R8 | `ports/esp32` | [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) 6.1 (`tools/idf.ps1`) |
+| Original ESP32: WT32-SC01 (display and touch) | `ports/esp32` | the same |
+| ESP32-P4: M5Stack Tab5, Waveshare ESP32-P4-Module-DEV-KIT (display and touch) | `ports/esp32` | the same |
 | Teensy 4.0 (i.MX RT1062) | `ports/imxrt1062` | NXP's [MCUXpresso SDK](https://github.com/nxp-mcuxpresso) 26.06 LTS, FreeRTOS, the Arm GNU toolchain; flashed with `teensy_loader_cli` (`tools/teensy.ps1`) |
 | RP2350: Olimex PICO2-XXL | `ports/rp2350` | the pico-sdk, FreeRTOS, the Arm GNU toolchain (`tools/pico.ps1`) |
 
-A Teensy running qjsx is flashed again without its button: the tool asks it for its loader
+One firmware serves every board of the same chip family; the board is chosen at build time.
+An ESP32 board is flashed by the tool itself (`qjsx flash --board <name> --port COM3`). A
+Teensy running qjsx is flashed again without its button: the tool asks it for its loader
 through its USB serial port.
+
+A board running Linux needs no firmware: the tool itself, cross-built for the board
+(`premake5 gmake --cc=gcc --shell=posix --cross=linux-arm`), runs there as `qjsx agent`.
 
 ## Going further
 

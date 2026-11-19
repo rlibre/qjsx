@@ -6,6 +6,18 @@ measurements that changed no code but settle a question.
 
 ## 2026-11-19
 
+### An archive of a release delivered a board that is not in the repository
+
+`tools/release/assemble.mjs` put into the archive every `boards/*.json` and every
+`flashers/*.js` it found in the folder. The board description of a client, which is kept
+out of the repository on purpose (git ignores it), is in that folder on the development
+machine: an archive made there delivered it. The build machine escaped it only because
+its checkout does not hold the file.
+
+The script now asks git for the files of those folders (`git ls-files`), so what is not
+part of the repository is never delivered. Found by comparing the archive built by the
+release flow with the one built here: one board less.
+
 ### A Sync I2C call after a queued transfer blocked the JS thread for good
 
 On a board, a `writeSync` / `readSync` / `writeReadSync` (or `probeSync`, `reset`,
