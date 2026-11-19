@@ -420,7 +420,11 @@ keeps the old name: `C:\Sandbox\espjs`.
     (`tsconfig.typedoc.json` and the list in `astro.config.mjs`: add a new module to both;
     `api-readme.md` = its introduction, needed or the module pages are dropped);
     `npm run build` / `npm run dev` there (`.claude/launch.json` "jsmanual", port 4321).
-    Not published (GitHub Pages: later, with the CI).
+    PUBLISHED on GitHub Pages, https://rlibre.github.io/qjsx/, by
+    `.github/workflows/manual.yml` (at each push to main that changes the manual or a
+    typing; actions pinned by commit SHA: the model for the other workflows).
+    `.github/CODEOWNERS` (2026-11-19): `* @eco747` (eco747 and ecochard are both the
+    user; eco-incare is a third collaborator account).
 - Conditional breakpoints, logpoints and hit counts are compiled by the proxy and evaluated on
   the ESP itself (no round trip per hit).
 - Proxy core without CDP (API agreed by the user 2026-11-11, IMPLEMENTED the same day in

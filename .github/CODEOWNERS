@@ -1,0 +1,11 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
+# Who reviews a proposed change, by the files it touches (GitHub asks them
+# when a pull request is opened). One owner for the whole repository today.
+# It protects nothing by itself: it counts once the repository requires a
+# review before merging.
+*   @eco747

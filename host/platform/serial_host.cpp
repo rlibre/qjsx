@@ -37,6 +37,8 @@ struct hal::serial::Port {
 #if defined(_WIN32)
     HANDLE handle;                  // the COM port, opened for overlapped I/O; owned
     bool   dtr;                     // the DTR line as last set (setPortSignals sends it again)
+    bool   rts;                     // the RTS line as last set
+    bool   flowControl;             // RTS belongs to the flow control of the port
 #else
     int    handle;                  // the tty; owned
 #endif
@@ -131,7 +133,10 @@ Port *openPort(const char *name, int, const Settings *settings, int *error) {
     DCB state;
     memset(&state, 0, sizeof(state));
     state.DCBlength = sizeof(state);
-    port->dtr = !GetCommState(handle, &state) || state.fDtrControl != DTR_CONTROL_DISABLE;
+    bool known = GetCommState(handle, &state) != 0;
+    port->dtr = !known || state.fDtrControl != DTR_CONTROL_DISABLE;
+    port->rts = !known || state.fRtsControl == RTS_CONTROL_ENABLE;
+    port->flowControl = settings->flowControl;
     return port;
 }
 
@@ -233,7 +238,8 @@ bool setPortSignals(Port *port, int dtr, int rts) {
     // RTS
     bool done = true;
     if (rts != hal::serial::SIGNAL_KEEP) {
-        done = EscapeCommFunction(port->handle, rts == hal::serial::SIGNAL_ON ? SETRTS : CLRRTS) != 0;
+        port->rts = rts == hal::serial::SIGNAL_ON;
+        done = EscapeCommFunction(port->handle, port->rts ? SETRTS : CLRRTS) != 0;
     }
 
     // DTR, as asked or as it was
@@ -261,6 +267,17 @@ bool setPortBaudRate(Port *port, int baudRate) {
     }
 
     state.BaudRate = (DWORD)baudRate;
+
+    // DTR and RTS as they are NOW. Setting the state of a port also sets its
+    // two lines, to what that state says they are when the port opens, not
+    // to what setPortSignals() made them: a board held in its loader by
+    // these lines was restarted by the change of speed (found on an
+    // ESP32-P4, 2026-11-19: its loader no longer answered after it).
+    state.fDtrControl = port->dtr ? DTR_CONTROL_ENABLE : DTR_CONTROL_DISABLE;
+    if (!port->flowControl) {
+        state.fRtsControl = port->rts ? RTS_CONTROL_ENABLE : RTS_CONTROL_DISABLE;
+    }
+
     return SetCommState(port->handle, &state) != 0;
 }
 

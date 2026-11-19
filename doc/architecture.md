@@ -1881,6 +1881,11 @@ reader.port();                                             // 2 ("COM3" on the P
   `FlushFileBuffers` then `SetCommState`, POSIX `tcsetattr(TCSADRAIN)`, ESP32
   `uart_wait_tx_done` then `uart_set_baudrate`; the twin keeps it in the UART's settings
   (the page, a wired port of the PC). Not tried on a UART of a board.
+  On Windows, setting the state of a port also sets DTR and RTS to what that state says
+  they are at the opening: `setBaudRate` writes them as `setSignals` last made them (a
+  board held in its loader by these lines was restarted by the change of speed: the
+  flasher lost its loader right after `CHANGE_BAUDRATE`, on a port whose stored state
+  differed from the lines).
 - **DTR and RTS of a port of the PC** (2026-11-19, for the flashers of the tool):
   `setSignals({ dtr, rts })`, each line true, false or left out; a TypeError on a board
   and in a twin (`Driver::setSignals` is nullptr there), EINVAL for `rts` on a port
