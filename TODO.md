@@ -185,9 +185,19 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
         RESTE À ESSAYER : un ESP32-S3 (YD, DevKitC), la Tab5 ;
   - [ ] idée de l'utilisateur : une option pour appeler esptool à la place (l'outil ne
         sait pas lancer un autre programme aujourd'hui : à discuter) ;
-  - [ ] `firmware/<carte>/` avec son `firmware.json` dans l'archive (la commande lit
-        déjà ce format et le dossier de build ESP-IDF) ;
-  - [ ] inventaire des licences des composants tiers, fichier de mentions dans l'archive ;
+  - [x] `firmware/<carte>/` avec son `firmware.json` dans l'archive (fait le 19/11,
+        `tools/release/firmware.mjs`, depuis le `flasher_args.json` du build ESP-IDF) ;
+  - [x] inventaire des licences des composants tiers et `THIRD-PARTY-NOTICES.md` +
+        `licenses/` dans l'archive (fait le 19/11). Deux mentions écrites de mémoire,
+        faute de pouvoir lire les fichiers d'origine hors du projet (runtime MinGW avec
+        gdtoa, tables Unicode de QuickJS) : à relire avant la release publique ;
+  - [x] exécutable Windows lié en statique (fait le 19/11 : il ne dépendait pas que des
+        DLL de Windows, donc il n'aurait pas démarré chez un testeur) ;
+  - [ ] icônes de la page du jumeau : Font Awesome **Pro** venait de x4js. Remplacées par
+        les Material Symbols de Google (Apache-2.0) : jeu prêt dans `temp/x4-icons/
+        google-set` (17 fichiers, 13 entrées de `icons.ts`), l'utilisateur les intègre
+        dans x4js et republie. ENSUITE : `npm install` du nouveau x4js, page reconstruite,
+        section Font Awesome du fichier des mentions remplacée, ligne du changelog ;
   - [x] numéro de version : `version.h` à 0.3.0 (numéro de la PROCHAINE release, jamais
         modifié à la main), `CHANGELOG.md` (version en cours en tête, sans date) et
         `tools/release.sh` (date le journal, tag, push, puis dernier chiffre + 1 et
@@ -195,10 +205,19 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
         pour de vrai ;
   - [ ] `ports/esp32/dependencies.lock` est réécrit par chaque build ESP32 et bloque
         `tools/release.sh` : ne plus le suivre dans git ? (à décider) ;
-  - [ ] CI dès la première release (décidé le 19/11) : flux GitHub sur tag + lancement
-        manuel sans publication, essais sur une branche ; à vérifier avant d'écrire : image
-        officielle ESP-IDF 6.1, compilateur des machines Windows de GitHub ;
-  - [ ] script d'assemblage des archives (Windows, Linux Arm), `firmware.json` par carte ;
+  - [x] script d'assemblage des archives (fait le 19/11, `tools/release/assemble.mjs` :
+        une archive par système, zip écrit par le script lui-même ; archive Windows
+        essayée pour de vrai, décompressée dans un dossier vide, `qjsx --version`,
+        script avec `stdlib/path`, et un flash de la Waveshare depuis ce dossier) ;
+  - [ ] CI (`.github/workflows/release.yml`, écrit le 19/11, JAMAIS LANCÉ) : sur tag
+        `v*`, plus un lancement manuel qui construit sans publier. Outil Windows (MSYS2)
+        + suite de tests, outil Linux Arm (compilateur croisé de la distribution,
+        `QJSX_CROSS_PREFIX` ajouté à `premake5.lua`), 5 firmwares dans l'image
+        `espressif/idf:v6.1`, archives, `gh release create --prerelease` avec l'entrée du
+        changelog comme texte. À ESSAYER sur une branche (ajouter un déclencheur `push`
+        temporaire : GitHub n'offre « Run workflow » que depuis la branche par défaut).
+        Non vérifiés : le nom du fichier de licences d'ESP-IDF dans l'image (trois
+        chemins essayés), les paquets MSYS2, le `cp --parents` des firmwares ;
   - [ ] ensuite : flasher UF2 (RP2350), puis PJRC (HID, natif).
 - [ ] **CI/CD** (pour la release publique annoncée) : GitHub Actions sur un tag ; `qjsx`
       pour Linux x64 et macOS (jamais construits : portage à prévoir),
@@ -211,6 +230,17 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
 - [ ] **Livetrace des ports** (utilisateur) : à préciser.
 
 ## Ports
+
+- [ ] **Modèle de création d'une carte** (utilisateur, 19/11) : à préciser avec lui.
+      Aujourd'hui, ajouter une carte ESP32 demande d'écrire à la main, en copiant une
+      carte voisine : `ports/esp32/boards/<carte>/sdkconfig.board` (puce, taille et mode
+      de la flash, PSRAM, console, fréquence), `board_config.h` (nom, pile de la tâche
+      JS, valeurs propres à la carte), parfois `board.cmake` (ce que le firmware ajoute :
+      écran, sources de pilotes) et `board_screen.cpp` ; puis, pour le jumeau,
+      `boards/<carte>.json` (natifs offerts, broches, parts) ; et la ligne du tableau des
+      cartes dans la documentation. À décider : une commande (`qjsx newboard <nom>` ?) ou
+      un dossier modèle commenté ; ce qui est demandé à l'utilisateur et ce qui est
+      deviné ; si le JSON du jumeau est produit en même temps.
 
 ### ESP32
 

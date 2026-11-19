@@ -32,6 +32,7 @@ A program that uses what is new here needs the firmware of this version on its b
 
 - A display on SPI receives each image as one transaction: faster small updates.
 - Waveshare ESP32-P4: the backlight stays off while the display starts.
+- `qjsx.exe` (Windows) is one static executable: it needs no MinGW DLL next to it.
 
 ### Fixed
 

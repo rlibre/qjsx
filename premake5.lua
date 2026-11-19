@@ -82,6 +82,13 @@ local CROSS_COMPILERS = {
     ["linux-arm"] = { system = "linux", prefix = "C:/tools/arm-linux/bin/arm-none-linux-gnueabihf-" },
 }
 
+-- Another compiler than the one of this machine: QJSX_CROSS_PREFIX holds the
+-- prefix to use, so that a build machine with the compiler of its own system
+-- (the release flow, where it is "arm-linux-gnueabihf-") needs no change here.
+if CROSS ~= nil and os.getenv("QJSX_CROSS_PREFIX") ~= nil then
+    CROSS_COMPILERS[CROSS].prefix = os.getenv("QJSX_CROSS_PREFIX")
+end
+
 workspace "qjsx"
     configurations { "Debug", "Release", "Profile" }
     if CROSS == nil then
@@ -98,6 +105,12 @@ workspace "qjsx"
         gccprefix(CROSS_COMPILERS[CROSS].prefix)
         linkoptions { "-static" }
     end
+
+    -- On Windows the executables are static too: MinGW's runtime (libgcc,
+    -- libstdc++, winpthread) is linked in, else they would need its three
+    -- DLLs, which a PC without MinGW does not have.
+    filter "system:windows"
+        linkoptions { "-static" }
 
     filter "configurations:Debug"
         defines { "DEBUG" }

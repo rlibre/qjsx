@@ -1,0 +1,277 @@
+#          _
+#  __ _   (_)  ___ __ __    qjsx - JavaScript for devices
+# / _` |  | | (_-< \ \ /    Author: Etienne Cochard + Opus 5.5
+# \__, | _/ | /__/ /_\_\    Copyright (c) 2026 R-LIBRE INGENIERIE
+#    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
+
+# Builds a release and publishes it: the tool for Windows and for Linux Arm,
+# the firmware of every board, each system's archive, all from ONE commit.
+#
+# Started by a pushed tag "v<version>", which tools/release.sh makes (never
+# at each push to main). Started by hand from the Actions tab, it builds and
+# keeps the archives as artifacts WITHOUT publishing anything: that is how a
+# change of this file is tried. GitHub only offers "Run workflow" for a file
+# that is on the default branch, so to try it from a branch, add there, for
+# the time of the trial:
+#     push:
+#       branches: ["the branch"]
+#
+# Actions pinned by commit SHA (the tag in the comment): a tag can be moved,
+# a SHA cannot.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+    # TEMPORARY, for the trial of this file: every push to this branch runs
+    # it, which builds everything and publishes nothing (only a tag
+    # publishes). REMOVE the line below, and this comment, before the branch
+    # goes into main.
+    branches: ["ci-release"]
+  workflow_dispatch:
+
+# Reading is enough everywhere; the job that publishes asks for more.
+permissions:
+  contents: read
+
+env:
+  PREMAKE_VERSION: "5.0.0"
+
+jobs:
+  # The tool for Windows, and the tests of the whole project. MSYS2 gives
+  # the compiler (MinGW-w64) and the make the project is built with; the
+  # executable is static, so it needs none of their DLLs.
+  tool-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            make
+            unzip
+            curl
+            mingw-w64-x86_64-gcc
+
+      - name: Get premake5
+        run: |
+          curl -fsSL -o premake.zip "https://github.com/premake/premake-core/releases/download/v$PREMAKE_VERSION/premake-$PREMAKE_VERSION-windows.zip"
+          unzip -o premake.zip premake5.exe -d /usr/local/bin
+
+      # The makefiles of the project, then everything: the engine, the tool,
+      # qjsx-tests and qjsx-target. The tool makes stdlib.qjslib when it is
+      # linked (post-build step).
+      - name: Build
+        run: |
+          premake5 gmake --cc=gcc --shell=posix
+          make -C build config=release -j4
+
+      - name: Test
+        run: bash tests/run-tests.sh Release
+
+      - name: Keep the tool
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tool-windows-x64
+          path: |
+            bin/Release/qjsx.exe
+            bin/Release/stdlib.qjslib
+          if-no-files-found: error
+
+  # The tool for a 32-bit Arm Linux board, built with the cross compiler of
+  # the distribution (QJSX_CROSS_PREFIX tells premake5 to use it instead of
+  # the one of the development machine). Static: it runs on a board whose C
+  # library is older. stdlib.qjslib is not made here (the tool built cannot
+  # run on this machine): the archive takes the one of the Windows job, the
+  # same file for every system.
+  tool-linux-arm:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Get the cross compiler and premake5
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends g++-arm-linux-gnueabihf
+          curl -fsSL -o premake.tar.gz "https://github.com/premake/premake-core/releases/download/v$PREMAKE_VERSION/premake-$PREMAKE_VERSION-linux-glibc-2.39.tar.gz"
+          sudo tar -xzf premake.tar.gz -C /usr/local/bin premake5
+
+      - name: Build
+        env:
+          QJSX_CROSS_PREFIX: arm-linux-gnueabihf-
+        run: |
+          premake5 gmake --cc=gcc --shell=posix --cross=linux-arm
+          make -C build-linux-arm config=release qjsx -j4
+
+      - name: Keep the tool
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tool-linux-arm
+          path: bin/linux-arm/Release/qjsx
+          if-no-files-found: error
+
+  # One firmware per board, in Espressif's own image: ESP-IDF is already
+  # there, nothing is installed. The client's board is never in a release.
+  firmware:
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v6.1
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - esp32-s3-devkitc-n8r8
+          - m5stack-tab5
+          - waveshare-p4-module-7a
+          - wt32-sc01
+          - yd-esp32-s3-n16r8
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # git inside the container does not own the checked out folder.
+      - name: Let git read the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Build
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd ports/esp32
+          idf.py -B "build-${{ matrix.board }}" -D "QJSX_BOARD=${{ matrix.board }}" build
+
+      # What a release delivers for a board: the files to write and where,
+      # as the build itself says (flasher_args.json). They are gathered in a
+      # folder of their own, keeping the paths that file names, so that the
+      # artifact holds exactly a build folder as firmware.mjs reads it.
+      - name: Gather the firmware
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/firmware-out"
+          cd "ports/esp32/build-${{ matrix.board }}"
+          cp --parents flasher_args.json *.bin bootloader/bootloader.bin partition_table/partition-table.bin "$GITHUB_WORKSPACE/firmware-out/"
+
+      - name: Keep the firmware
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firmware-${{ matrix.board }}
+          path: firmware-out
+          if-no-files-found: error
+
+  # What ESP-IDF brings with it, under which licenses: the file of the image
+  # that built the firmwares, which goes into every archive
+  # (THIRD-PARTY-NOTICES.md points at it).
+  idf-notices:
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v6.1
+    steps:
+      - name: Take the file of licenses
+        shell: bash
+        run: |
+          for file in "$IDF_PATH/COPYRIGHT.rst" "$IDF_PATH/docs/en/COPYRIGHT.rst" "$IDF_PATH/LICENSE"; do
+              if [ -f "$file" ]; then
+                  cp "$file" ESP-IDF-COPYRIGHT.rst
+                  echo "taken from $file"
+                  exit 0
+              fi
+          done
+          echo "no file of licenses found in $IDF_PATH" >&2
+          exit 1
+
+      - name: Keep it
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: idf-notices
+          path: ESP-IDF-COPYRIGHT.rst
+          if-no-files-found: error
+
+  # The archives, one per system, from everything the jobs above made; and,
+  # when a tag started this, the release itself.
+  release:
+    needs: [tool-windows, tool-linux-arm, firmware, idf-notices]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+
+      - name: Take what was built
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: built
+
+      # One folder per board: its files side by side and firmware.json,
+      # which "qjsx flash --board <name>" reads.
+      - name: Make the firmware folders
+        run: |
+          for folder in built/firmware-*; do
+              board="${folder#built/firmware-}"
+              node tools/release/firmware.mjs "$folder" "$board" "dist/firmware/$board"
+          done
+
+      - name: Make the archives
+        run: |
+          chmod +x built/tool-linux-arm/qjsx
+          for system in windows-x64 linux-arm; do
+              if [ "$system" = "windows-x64" ]; then
+                  tool=built/tool-windows-x64/qjsx.exe
+              else
+                  tool=built/tool-linux-arm/qjsx
+              fi
+              node tools/release/assemble.mjs \
+                  --system "$system" \
+                  --tool "$tool" \
+                  --stdlib built/tool-windows-x64/stdlib.qjslib \
+                  --firmware dist/firmware \
+                  --output dist/archives \
+                  --idf-notices built/idf-notices/ESP-IDF-COPYRIGHT.rst
+          done
+          ls -l dist/archives
+
+      # By hand: the archives are kept here and nothing is published, so
+      # that a change of this file can be tried.
+      - name: Keep the archives
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: archives
+          path: dist/archives/*.zip
+          if-no-files-found: error
+
+      # From a tag: the release, marked "pre-release" (the repository is
+      # public and these builds are for testers). Its text is the entry of
+      # that version in CHANGELOG.md.
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v version="$version" '
+              $0 == "## " version || index($0, "## " version " ") == 1 { inside = 1; next }
+              inside && /^## / { exit }
+              inside { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+              echo "CHANGELOG.md has no entry for $version" >&2
+              exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+              --title "qjsx $version" \
+              --notes-file notes.md \
+              --prerelease \
+              --verify-tag \
+              dist/archives/*.zip
