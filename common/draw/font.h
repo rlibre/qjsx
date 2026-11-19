@@ -90,6 +90,14 @@ bool glyphOf(const Font *font, uint32_t id, Glyph *out);
 int advanceOf(const Font *font, uint32_t codePoint, bool tabularDigits);
 
 /**
+ * The height of the capital letters, pixels above the baseline: the top of
+ * the glyph of 'H' (what a text is centered on to look centered: a line also
+ * holds the room of the accents and of the descenders). A font without 'H':
+ * the top of its '0'; without digits either: its ascent.
+ */
+int capHeightOf(const Font *font);
+
+/**
  * The value of pixel 'index' of a glyph, 0 (nothing) to 2^bpp - 1 (full).
  */
 int glyphPixel(const Font *font, const Glyph *glyph, uint32_t index);

@@ -38,6 +38,9 @@ struct Panel {
 // The panel of the M5Stack Tab5 (its first version, 720 x 1280, 2 lanes).
 extern const Panel M5STACK_TAB5;
 
+// The Waveshare 7-DSI-TOUCH-A (7", 720 x 1280, 2 lanes).
+extern const Panel WAVESHARE_7_DSI_TOUCH_A;
+
 // Sends a command with its parameters on the link; false if it failed.
 typedef bool SendCommand(uint8_t command, const uint8_t *data, size_t size);
 

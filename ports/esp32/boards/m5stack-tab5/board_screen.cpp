@@ -140,6 +140,19 @@ const Screen *screen() {
     return isStarted ? &started : nullptr;
 }
 
+// The touch panel: the program reads the GT911 itself (stdlib/touch over
+// device/i2c): none read by the board.
+bool touchInfo(TouchInfo *) {
+    return false;
+}
+
+void touchWatch(TouchChanged *, void *) {
+}
+
+int touchRead(TouchPoint *, int) {
+    return -1;
+}
+
 void flushScreen(ScreenArea area) {
     // the whole rows of the area: the cache is written back by lines, a
     // row is contiguous

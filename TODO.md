@@ -6,6 +6,15 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
 
 ## Où on en est
 
+- Derniers travaux (18/11, soir) : **carte sous Linux**, la STM32MP157-DK2 (OpenSTLinux,
+  armv7l). Pas de firmware : l'outil `qjsx` compilé en croisé (`premake5 ... --cross=linux-arm`,
+  `bin/linux-arm/Release/qjsx`, statique) y tourne en `qjsx agent --screen /dev/dri/card0
+  --touch /dev/input/event1` : écran par DRM, tactile du noyau, `Display` et `Touch` de
+  type `"builtin"` ; débogueur 72/72, proxy 33/33, cdp 53/53 par TCP ; démo `temp/dk2/ui`.
+  `--screen-size` (image centrée dans un mode plus grand, tactile converti) essayé sur la
+  DK2 en 400x600. Souris jouée comme un doigt, avec curseur : écrite, PAS essayée.
+  Correctif du modèle gt911 du jumeau (file de rapports). Doc : `doc/architecture.md` 5.5
+  « A Linux board ». Suite : Raspberry Pi 4 B (HDMI + souris), voir « Ports ».
 - Derniers travaux (18/11) : images de l'écran (PNG importé `with { type: "image" }`,
   converti par `qjsx build` : RLE par ligne, alpha sur les bords, tramage ;
   `lcd.image()` / `drawImage()`), essayé sur la WT32-SC01 (démo `temp/wtimage`) et dans
@@ -182,6 +191,14 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
       `crypto::Sha256` (common/runtime/sha256.h), implémentation séparée : mbedTLS sur
       l'ESP32-S3, `pico_sha256` sur la RP2350, logicielle sur l'hôte. Pas urgent.
 - [ ] ESP32-S3-DevKitC-1 N8R8 : pas de JSON de jumeau.
+- [ ] Waveshare ESP32-P4-Module-DEV-KIT + 7-DSI-TOUCH-A (19/11, COM32) : firmware, écran
+      et tactile faits (`doc/architecture.md` 5.5). Restent : une image fantôme vue UNE fois
+      à travers la démo, non reproduite (ni reste en mémoire, ni rémanence : gris propre
+      après une mire de 5 min), cause inconnue ; la page entière qu'on voit se dessiner
+      (~0,3 s) : deux images en mémoire refusées (trop gourmand), reste le rendu plus
+      rapide (rotation par le PPA) ; effacer la mémoire d'écran quand un programme ouvre l'écran
+      (proposé, pas décidé) ; une option de `Display` pour un rétroéclairage par I2C ?
+      radio, audio, Ethernet, SD, jumeau.
 
 ### RP2350 (Olimex PICO2-XXL)
 
@@ -199,15 +216,29 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
 - [ ] `/data` (LittleFS : cœur littlefs à télécharger, ou la copie du composant
       ESP-IDF) ; `device/pwm` pas vérifié à l'oscilloscope.
 
+### Cartes sous Linux (STM32MP157-DK2, Raspberry Pi 4 B)
+
+- [ ] Souris en `--touch` et curseur DRM : jamais essayés (pas de souris sur la DK2) ; à
+      essayer sur le Pi.
+- [ ] Raspberry Pi 4 B (Raspberry Pi OS 64 bits avec bureau, utilisateur `eco`, clé SSH
+      dans `temp/pi4/`) : vérifier que le binaire `linux-arm` (ARMv7 statique) tourne sur
+      son noyau 64 bits ; `ls /dev/dri` (l'affichage est sans doute `card1`) ; souris par
+      `/dev/input/by-id/*-event-mouse` ; arrêter le bureau avant l'agent ; démo
+      `temp/pi4/ui` en rotation 0 ; moniteur HDMI avec `--screen-size 800x480` en attendant
+      la nappe de l'écran 7" (sa taille à confirmer par l'étiquette).
+- [ ] Production : l'agent lancé au démarrage (service systemd à la place du bureau) ; le
+      port TCP de l'agent (jeton, écoute locale, ou pas d'agent : `--screen` / `--touch`
+      n'existent que pour `qjsx agent`) ; confinement des fichiers ; à discuter.
+- [ ] Rétroéclairage par Linux ; adresse fixe de la carte ; GPIO / I2C / SPI de la carte
+      sous Linux ; build 64 bits.
+- [ ] Mesures de vitesse de la DK2 (`temp/dk2/hello`) : pas notées dans la doc.
+
 ### WeAct Studio STM32H743 (utilisateur, après la RP2350)
 
-- [ ] Caractéristiques citées de mémoire, à vérifier sur le schéma WeAct : Cortex-M7
-      480 MHz, 2 Mo de flash interne, ~1 Mo de RAM en blocs (tas JS dans les 512 Ko d'AXI
-      SRAM), flash QSPI 8 Mo (paquets lus en place), microSD (`sys/fs` sur FatFS), USB FS
-      (USB CDC ou UART), écran ST7735 160×80 en SPI (`device/spi` + pilote JS), WS2812 par
-      timer + DMA ou SPI derrière `hal_rmt.h` ; cohérence cache / DMA du M7. Pack
-      STM32CubeH7 + FreeRTOS à télécharger (accord). Proposition :
-      `doc/port-stm32h755-proposal.md`.
+- [ ] Mis de côté le 18/11 (on reprendra après la STM32MP157-DK2) : proposition et faits de
+      la carte (H743VIT6) dans `doc/port-stm32h743-proposal.md`. Décidé : Cube, USB CDC,
+      DFU, paquets dans la QSPI, ordre de la Teensy. Restent : TinyUSB, outil de flash,
+      400 / 480 MHz, la liste des téléchargements.
 - [ ] **microSD** (H743, PICO2-XXL) : `sys/fs` sur FatFS (`/sd`), confinement étendu aux
       points de montage (FatFS : vérifier CVE-2026-6685 / -6688 à ce moment-là).
 

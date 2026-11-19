@@ -21,6 +21,16 @@
 --   qjsx-tests          qjsx + the native test modules (tests/native)
 --   qjsx-target         qjsx without the compiler module, linked with qjsx-engine-target
 --
+-- Cross build for a Linux board (2026-11-18, first the STM32MP157-DK2):
+--   premake5 gmake --cc=gcc --shell=posix --cross=linux-arm
+--   make -C build-linux-arm config=release qjsx
+-- gives bin/linux-arm/<config>/qjsx, a static executable for 32-bit Arm
+-- Linux (armhf), built by the Arm GNU Toolchain arm-none-linux-gnueabihf of
+-- C:\tools\arm-linux. Its own build/ and bin/ folders: the Windows build is
+-- not touched. No stdlib.qjslib is made after the link (that step runs the
+-- tool just linked, which cannot run on the PC): the board runs packages
+-- built on the PC.
+--
 -- Folders: engine/ (QuickJS), common/ (portable code, also built for the
 -- ESP: jsbind, runtime, agent), host/ (the desktop tool only).
 -- Headers are included by their name alone: every folder below is in the
@@ -60,11 +70,34 @@ TYPES_INPUTS = table.translate(TYPES_INPUTS, function(file)
     return path.getabsolute(file)
 end)
 
+-- The cross builds: their name -> the system and the compiler (prefix of gcc)
+newoption {
+    trigger = "cross",
+    value = "TARGET",
+    description = "Build the tool for another system",
+    allowed = { { "linux-arm", "32-bit Arm Linux (armhf), static: arm-none-linux-gnueabihf of C:/tools/arm-linux" } },
+}
+local CROSS = _OPTIONS["cross"]
+local CROSS_COMPILERS = {
+    ["linux-arm"] = { system = "linux", prefix = "C:/tools/arm-linux/bin/arm-none-linux-gnueabihf-" },
+}
+
 workspace "qjsx"
     configurations { "Debug", "Release", "Profile" }
-    location "build"
-    targetdir "bin/%{cfg.buildcfg}"
-    objdir "build/obj/%{prj.name}/%{cfg.buildcfg}"
+    if CROSS == nil then
+        location "build"
+        targetdir "bin/%{cfg.buildcfg}"
+        objdir "build/obj/%{prj.name}/%{cfg.buildcfg}"
+    else
+        -- folders of their own, the system and the compiler of the target,
+        -- a static executable (no dependence on the board's C library)
+        location("build-" .. CROSS)
+        targetdir("bin/" .. CROSS .. "/%{cfg.buildcfg}")
+        objdir("build-" .. CROSS .. "/obj/%{prj.name}/%{cfg.buildcfg}")
+        system(CROSS_COMPILERS[CROSS].system)
+        gccprefix(CROSS_COMPILERS[CROSS].prefix)
+        linkoptions { "-static" }
+    end
 
     filter "configurations:Debug"
         defines { "DEBUG" }
@@ -315,10 +348,15 @@ hostApplication("qjsx", "qjsx-engine", {}, {}, {})
     -- executable of the folder finds it there (qjsx-tests, qjsx-target).
     -- The board descriptions of the digital twin ("qjsx agent --board
     -- <name>") go next to it too, in boards/.
-    postbuildmessage "making stdlib.qjslib, copying the boards"
+    -- (a cross build only copies the boards: its tool cannot run here)
+    if CROSS == nil then
+        postbuildmessage "making stdlib.qjslib, copying the boards"
+        postbuildcommands {
+            '"%{cfg.buildtarget.abspath}" mklib "' .. path.getabsolute("lib/stdlib")
+                .. '" --output "%{cfg.targetdir}/stdlib.qjslib"',
+        }
+    end
     postbuildcommands {
-        '"%{cfg.buildtarget.abspath}" mklib "' .. path.getabsolute("lib/stdlib")
-            .. '" --output "%{cfg.targetdir}/stdlib.qjslib"',
         'mkdir -p "%{cfg.targetdir}/boards"',
         'cp -f "' .. path.getabsolute("boards") .. '"/*.json "%{cfg.targetdir}/boards/"',
     }

@@ -13,6 +13,7 @@
 //   qjsx agent [--host 127.0.0.1] [--port 5555] [--storage build/agent] [--token secret]
 //              [--board <name | file.json>] [-p | --project <folder>] [--ui-port 8090]
 //              [--usb-port <port>] [--uart-port <port>] [--uart-serial <uart>=<PC port>]...
+//              [--screen <DRM device>] [--touch <input device>]
 //
 // With --board, the agent is the digital twin of that board (host/twin/sim/twin.h):
 // a program sees the board's native modules (device/gpio, device/rmt,
@@ -45,6 +46,17 @@
 // cannot be built stops the agent. --board on the command line wins over
 // the project's board; the project's parts come with -p only then.
 //
+// A Linux board (2026-11-18, first the STM32MP157-DK2): --screen
+// /dev/dri/card0 takes its display through DRM (the display built into the
+// board, stdlib/display type "builtin"; --screen-size 800x480 the size the
+// program sees: that mode of the display, else the image centered in the
+// smallest mode holding it), --touch /dev/input/eventN its touch
+// panel as the kernel reads it (stdlib/touch type "builtin"), or a mouse
+// played as one finger with the display's cursor (evdev_touch.cpp); both before
+// the program runs (host/platform/screen_host.h). The program then gets
+// sys/draw, and device/gpio, device/pwm, device/spi and device/i2c so that
+// stdlib/display and stdlib/touch import (they act on nothing there: no pin).
+//
 // Hidden option, to work on the page (host/twin/ui): --ui-dir <folder> serves
 // the page from that folder (its dist/, built by "npm run build") instead of
 // the one embedded in the executable.
@@ -68,6 +80,7 @@
 #include "quickjs.h"
 #include "random.h"
 #include "runner.h"
+#include "screen_host.h"
 #include "twin.h"
 #include "version.h"
 
@@ -98,6 +111,10 @@ struct Options {
     int         uartPort = 0;             // TCP port of UART 0 of the twin; 0: the page's choice
     const char *uiDir = nullptr;          // hidden: folder the page is served from; nullptr: the embedded one
     int         maxMessage = 0;           // hidden: largest message of the agent's link; 0: the default
+    const char *screen = nullptr;         // DRM device of the display of a Linux board; nullptr: none
+    int         screenWidth = 0;          // --screen-size: the size the program sees; 0: the display's preferred mode
+    int         screenHeight = 0;
+    const char *touch = nullptr;          // input device of its touch panel; nullptr: none
     SerialWiring wirings[twin::MAX_UARTS];   // UARTs wired to PC serial ports from the start
     int         wiringCount = 0;          // entries of wirings
     bool        portGiven = false;        // the command line gave --port (wins over the project's)
@@ -115,7 +132,8 @@ const char *const PROJECT_FILE = "qjsx.json";
 
 const char *const USAGE = "usage: qjsx agent [--host 127.0.0.1] [--port 5555] [--storage build/agent] "
                           "[--token secret] [--board <name | file.json>] [-p | --project <folder>] [--ui-port 8090] "
-                          "[--usb-port <port>] [--uart-port <port>] [--uart-serial <uart>=<PC port>]...\n";
+                          "[--usb-port <port>] [--uart-port <port>] [--uart-serial <uart>=<PC port>]... "
+                          "[--screen <DRM device>] [--screen-size <width>x<height>] [--touch <input device>]\n";
 
 // The command line of the twin's page thread ("qjsx twin-ui ..."), kept for
 // the life of the process.
@@ -188,6 +206,30 @@ bool parseWiring(char *text, SerialWiring *wiring) {
 }
 
 /**
+ * Reads "<width>x<height>" (--screen-size, as 800x480) into *width and
+ * *height; false when it is not that.
+ */
+bool parseSize(const char *text, int *width, int *height) {
+    // a number, an 'x', a number, nothing after
+    char *end = nullptr;
+    long wide = strtol(text, &end, 10);
+    if (end == text || *end != 'x') {
+        return false;
+    }
+
+    const char *second = end + 1;
+    long high = strtol(second, &end, 10);
+    bool valid = end != second && *end == 0 && wide > 0 && high > 0 && wide <= 0xffff && high <= 0xffff;
+    if (!valid) {
+        return false;
+    }
+
+    *width = (int)wide;
+    *height = (int)high;
+    return true;
+}
+
+/**
  * Reads the options that follow "qjsx agent" into *options (missing ones keep
  * their default). Prints the usage and returns false on a bad option.
  */
@@ -223,6 +265,15 @@ bool parseOptions(int argc, char **argv, Options *options) {
             options->uartPortGiven = true;
         } else if (strcmp(argv[i], "--ui-dir") == 0 && hasValue) {
             options->uiDir = argv[++i];
+        } else if (strcmp(argv[i], "--screen") == 0 && hasValue) {
+            options->screen = argv[++i];
+        } else if (strcmp(argv[i], "--screen-size") == 0 && hasValue) {
+            if (!parseSize(argv[++i], &options->screenWidth, &options->screenHeight)) {
+                fprintf(stderr, "qjsx agent: --screen-size %s: expected <width>x<height>, as 800x480\n", argv[i]);
+                return false;
+            }
+        } else if (strcmp(argv[i], "--touch") == 0 && hasValue) {
+            options->touch = argv[++i];
         } else if (strcmp(argv[i], "--max-message") == 0 && hasValue) {
             options->maxMessage = atoi(argv[++i]);
             if (options->maxMessage < agent::MIN_MAX_MESSAGE) {
@@ -737,6 +788,43 @@ bool startTwin(const char *executable, const Options *options) {
     return true;
 }
 
+/**
+ * Takes the display and the touch panel of a Linux board (--screen,
+ * --touch), then gives the program sys/draw and the modules stdlib/display
+ * and stdlib/touch import. Nothing without these options. False after
+ * printing why.
+ */
+bool startLinuxBoard(const Options *options) {
+    // a size for the display, only with one
+    bool sizeGiven = options->screenWidth > 0;
+    if (sizeGiven && options->screen == nullptr) {
+        fprintf(stderr, "qjsx agent: --screen-size needs --screen\n");
+        return false;
+    }
+
+    // nothing asked
+    if (options->screen == nullptr && options->touch == nullptr) {
+        return true;
+    }
+
+    // the display, the touch panel
+    if (options->screen != nullptr && !hostscreen::openDrm(options->screen, options->screenWidth, options->screenHeight)) {
+        return false;
+    }
+
+    if (options->touch != nullptr && !hostscreen::openTouch(options->touch)) {
+        return false;
+    }
+
+    // the renderer, and what the standard library's modules import
+    rt::registerNativeModule("sys/draw", &jsNewModule_draw);
+    rt::registerNativeModule("device/gpio", &jsNewModule_gpio);
+    rt::registerNativeModule("device/pwm", &jsNewModule_pwm);
+    rt::registerNativeModule("device/spi", &jsNewModule_spi);
+    rt::registerNativeModule("device/i2c", &jsNewModule_i2c);
+    return true;
+}
+
 } // namespace
 
 /**
@@ -762,6 +850,18 @@ int runAgentCommand(int argc, char **argv) {
     // the twin of a board, if asked
     bool wantsTwin = options.board != nullptr;
     if (wantsTwin && !startTwin(argv[0], &options)) {
+        return 1;
+    }
+
+    // the display and the touch panel of a Linux board, if asked (not with a
+    // twin: it has its own)
+    bool wantsLinuxBoard = options.screen != nullptr || options.touch != nullptr;
+    if (wantsTwin && wantsLinuxBoard) {
+        fprintf(stderr, "qjsx agent: --screen and --touch are for a Linux board, not with --board\n");
+        return 2;
+    }
+
+    if (!startLinuxBoard(&options)) {
         return 1;
     }
 

@@ -54,4 +54,43 @@ struct ScreenArea {
  */
 void flushScreen(ScreenArea area);
 
+// ### The touch panel of the display, read by the system #####################
+// (2026-11-18, first the STM32MP157-DK2 under Linux: its kernel driver reads
+// the controller, the board gives the points it reports). A board whose
+// touch controller the program reads itself (stdlib/touch over device/i2c,
+// as the Tab5's GT911) has none: touchInfo() is false.
+
+// What the touch panel is.
+struct TouchInfo {
+    int maxPoints;                 // fingers it reports at most
+    int rangeX;                    // its coordinates: 0 .. range - 1, the panel at rotation 0
+    int rangeY;
+};
+
+// A finger of a report.
+struct TouchPoint {
+    int id;                        // the same while the finger stays
+    int x;                         // in the range of TouchInfo
+    int y;
+};
+
+// Called when a new report came (any thread: post, do not work).
+typedef void TouchChanged(void *context);
+
+/**
+ * The touch panel, if the board reads one; false otherwise.
+ */
+bool touchInfo(TouchInfo *out);
+
+/**
+ * Calls 'changed(context)' at each new report; nullptr: no more calls.
+ */
+void touchWatch(TouchChanged *changed, void *context);
+
+/**
+ * The last report into 'points' (room for 'most'): how many fingers, or -1
+ * when no report came since the last call. Any thread.
+ */
+int touchRead(TouchPoint *points, int most);
+
 } // namespace board

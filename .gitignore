@@ -3,6 +3,9 @@
 /build/
 /bin/
 
+# Cross builds of the tool (premake5 --cross=<target>): its makefiles and objects
+/build-*/
+
 # What qjsx itself builds in a project: packages and libraries, in the
 # "build" folder of the project (tests/fixtures/*/build, lib/*/build)
 build/

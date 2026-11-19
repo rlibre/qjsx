@@ -300,6 +300,22 @@ int advanceOf(const Font *font, uint32_t codePoint, bool tabularDigits) {
     return glyph.advance;
 }
 
+int capHeightOf(const Font *font) {
+    // the top of 'H', else of '0'
+    const uint32_t references[] = { 'H', '0' };
+
+    for (uint32_t reference : references) {
+        uint32_t id = glyphIdOf(font, reference);
+        Glyph glyph;
+        if (id != 0 && glyphOf(font, id, &glyph)) {
+            return glyph.y + glyph.height;
+        }
+    }
+
+    // neither: the room above the baseline
+    return font->ascent;
+}
+
 int glyphPixel(const Font *font, const Glyph *glyph, uint32_t index) {
     uint32_t position = glyph->firstBit + index * (uint32_t)font->bpp;
     return (int)readBits(glyph->bits, &position, font->bpp);

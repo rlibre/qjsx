@@ -58,6 +58,9 @@
  * touched with the mouse on the screen of the page (one finger); a project
  * may add such a part to another board.
  *
+ * Also on a Linux board run by `qjsx agent --touch` (the STM32MP157-DK2),
+ * with the type `"builtin"`.
+ *
  * @module stdlib/touch
  */
 declare module "stdlib/touch" {
@@ -69,9 +72,13 @@ declare module "stdlib/touch" {
      *   address 0x14; the range of its coordinates is read from its
      *   configuration;
      * - `"ft6336"` (FocalTech): up to 2 points, address 0x38; its coordinates
-     *   are pixels of the panel.
+     *   are pixels of the panel;
+     * - `"builtin"`: the touch panel the board's system reads itself (a
+     *   Linux board, as the STM32MP157-DK2 run by `qjsx agent --touch`): no
+     *   bus, no address, no pin; an `Error` with code `"ENODEV"` on a board
+     *   that reads none.
      */
-    export type TouchType = "gt911" | "ft6336";
+    export type TouchType = "gt911" | "ft6336" | "builtin";
 
     /**
      * Options of `new Touch(options)`. The pins are GPIO numbers. Unknown

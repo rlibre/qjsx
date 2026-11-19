@@ -18,7 +18,10 @@
 //     bytes a point from 0x814F (id, x, y little-endian, size, a reserved
 //     byte). While a finger is on the screen the chip makes a report every
 //     10 ms, but only once the program cleared the status (wrote 0 there):
-//     until then the report stays. The last report says no point;
+//     until then the report stays. The last report says no point. The
+//     reports the program has not had yet wait in a queue, in order (a
+//     press and its release within one tick both reach it); a move
+//     replaces the finger's report still waiting;
 //   - the interrupt pin, when wired, pulses low at each new report;
 //   - it starts configured: its reset sequence (reset pin, interrupt pin
 //     choosing the address) is not played.
@@ -118,7 +121,7 @@ export default class Gt911 extends Part {
         this._glassX = 0;           // as the page gave it
         this._glassY = 0;
         this._ticker = null;        // the reports while touched (and the last one)
-        this._releasePending = false;
+        this._queue = [];           // reports the program has not had yet, in order: { points: 0 | 1, x, y }
         this._publishState();
     }
 
@@ -159,18 +162,26 @@ export default class Gt911 extends Part {
         this._y = Math.max(0, Math.min(this._rangeY - 1, Math.floor((args.y * this._rangeY) / args.height)));
         this._pressed = true;
 
-        // the reports, a first one at once
-        if (this._ticker === null) {
-            this._ticker = setInterval(() => this._report(), REPORT_MS);
-            this._report();
+        // a report of the finger queued (a move replaces the finger's report
+        // not had yet: the program gets the place of the moment)
+        const last = this._queue[this._queue.length - 1];
+        if (last !== undefined && last.points === 1) {
+            last.x = this._x;
+            last.y = this._y;
+        } else {
+            this._queue.push({ points: 1, x: this._x, y: this._y });
         }
 
+        // the reports, from now on every REPORT_MS; one at once if it can
+        if (this._ticker === null) {
+            this._ticker = setInterval(() => this._report(), REPORT_MS);
+        }
+        this._report();
         this._publishState();
     }
 
     /**
-     * The finger lifted: a last report, without point, once the program took
-     * the one before.
+     * The finger lifted: a report without point queued, after the finger's.
      */
     _release() {
         if (!this._pressed) {
@@ -178,16 +189,16 @@ export default class Gt911 extends Part {
         }
 
         this._pressed = false;
-        this._releasePending = true;
+        this._queue.push({ points: 0, x: 0, y: 0 });
         this._report();
         this._publishState();
     }
 
     /**
-     * A report, when the program cleared the status: a release not reported
-     * yet first (a new press waits for it: two clicks stay two touches),
-     * else the finger; none left, the reports stop. A pulse on the interrupt
-     * pin.
+     * A report, when the program cleared the status: the oldest queued
+     * (a press and its release both reach the program, even within one
+     * tick: two clicks stay two touches), else the finger still there;
+     * nothing left, the reports stop. A pulse on the interrupt pin.
      */
     _report() {
         // the program has not taken the last report yet: it stays
@@ -195,19 +206,24 @@ export default class Gt911 extends Part {
             return;
         }
 
-        // the release, the finger, or nothing more to report
-        if (this._releasePending) {
-            this._releasePending = false;
-            this._set(REG_STATUS, [NEW_REPORT]);
-        } else if (this._pressed) {
-            const x = this._x;
-            const y = this._y;
-            this._set(REG_POINT_1, [FINGER_ID, x & 0xff, x >> 8, y & 0xff, y >> 8, SIZE, 0, 0]);
-            this._set(REG_STATUS, [NEW_REPORT | 1]);
-        } else {
+        // the oldest report queued, else the finger held, else the end
+        let report = this._queue.shift();
+        if (report === undefined && this._pressed) {
+            report = { points: 1, x: this._x, y: this._y };
+        }
+
+        if (report === undefined) {
             clearInterval(this._ticker);
             this._ticker = null;
             return;
+        }
+
+        if (report.points === 1) {
+            const { x, y } = report;
+            this._set(REG_POINT_1, [FINGER_ID, x & 0xff, x >> 8, y & 0xff, y >> 8, SIZE, 0, 0]);
+            this._set(REG_STATUS, [NEW_REPORT | 1]);
+        } else {
+            this._set(REG_STATUS, [NEW_REPORT]);
         }
 
         // the pulse

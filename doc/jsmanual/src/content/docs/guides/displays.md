@@ -163,7 +163,9 @@ lcd.text(10, 40, "21.5 °C", big, 0xffff00);
 
 - `font()` returns a handle for `text()` and `textWidth()` of the same display, with the
   font's metrics in pixels: `size`, `ascent` (top of the line to the baseline),
-  `descent` (0 or negative), `lineHeight`.
+  `descent` (0 or negative), `lineHeight`, `capHeight` (the height of the capitals above
+  the baseline). To center a text on `cy` as the eye sees it, center its capitals, not
+  its line: `y = cy - font.ascent + (font.capHeight >> 1)`.
 - A text is ONE line; a character its font lacks is skipped (a line break too). The next
   line is `lineHeight` lower.
 - A display takes at most 16 font files; the same file with other options counts once.
@@ -240,11 +242,44 @@ whole screen in about 120 ms, an area of 300 x 60 shown again and again 189 time
 (the JS thread busy 60 % of the time). `"builtin"` on a board without such a display is a
 `RangeError`.
 
+### On a Linux board
+
+A board that runs Linux (tried on the STM32MP157-DK2: 480 x 800 DSI panel) has no qjsx
+firmware: the `qjsx` tool itself, built for the board, runs there as `qjsx agent` and takes
+the display from Linux.
+
+```bash
+qjsx agent --host 0.0.0.0 --port 5555 --storage /home/root/qjsx-storage --screen /dev/dri/card0 --touch /dev/input/event1
+```
+
+From the PC the board is then a device like the others, reached by the network
+(`"target": "tcp:192.168.1.17:5555"` in `qjsx.json`): `qjsx deploy`, `qjsx debug`. In the
+program, the display is `"builtin"` and so is its touch panel:
+
+```js
+const lcd = new Display({ type: "builtin", rotation: 90 });       // 800 x 480 on the DK2
+const touch = new Touch({ type: "builtin", display: lcd });
+```
+
+- `--screen <device>` is the display (`/dev/dri/card0`, or `card1` on a board whose
+  `card0` is its GPU). Stop the desktop of the board first (Weston, a display manager):
+  only one program drives a display, and the agent says so when another one has it.
+- `--touch <device>` is the touch panel as the kernel reads it (`/dev/input/eventN`).
+  The fingers arrive in the coordinates of the drawing, as with any `Touch`.
+- `--screen-size 800x480` is the size the program sees, when it is not the display's
+  own: the display is set to that mode if it has it, else to the smallest mode that holds
+  it, with the image centered and black around. The touch follows the image; a finger in
+  the black border is ignored. Handy on a monitor, while the panel of the product is not
+  there yet.
+- A mouse given as `--touch` is one finger: it is on the screen while the left button is
+  held, and an arrow shows where it is.
+
 ## Touch
 
 `stdlib/touch` reads the touch controller of a display, on I2C, and gives the fingers in
 the coordinates of the drawing (the size and rotation of the display): a finger lands where
-the program drew.
+the program drew. On a Linux board the system reads the controller: `type: "builtin"`,
+with no bus and no pin (see "On a Linux board" above); the rest is the same.
 
 ```js
 import { Touch } from "stdlib/touch";

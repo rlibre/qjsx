@@ -60,6 +60,10 @@
  * ² The twin of a board that lists it (`wt32-sc01`; `m5stack-tab5`, whose
  * display built in is an image in memory drawn in the page).
  *
+ * Also on a Linux board run by `qjsx agent --screen` or `--touch` (the
+ * STM32MP157-DK2): its display through DRM, its touch panel as the kernel
+ * reads it.
+ *
  * @module sys/draw
  */
 declare module "sys/draw" {
@@ -80,6 +84,9 @@ declare module "sys/draw" {
 
         /** The height of a line: `ascent - descent`. */
         lineHeight: number;
+
+        /** The height of the capital letters above the baseline (of `H`). */
+        capHeight: number;
     }
 
     /**
@@ -182,6 +189,52 @@ declare module "sys/draw" {
          * Lets the display go (a frame being drawn is finished first, its
          * promise rejected). The screen keeps its image.
          */
+        close(): void;
+    }
+
+    /**
+     * The touch panel the board's system reads itself (a Linux board run by
+     * `qjsx agent --touch`: its kernel's driver), for `stdlib/touch` type
+     * `"builtin"`: a callback at each new report, the report read into an
+     * array (nothing made at each move). One at a time.
+     */
+    export class TouchPanel {
+        /**
+         * Takes the touch panel.
+         *
+         * @throws an `Error` with code `"ENODEV"` when the board reads none.
+         */
+        constructor();
+
+        /** The most fingers it reports. */
+        maxPoints: number;
+
+        /** Its x coordinates: 0 to `rangeX - 1`, the panel at rotation 0. */
+        rangeX: number;
+
+        /** Its y coordinates: 0 to `rangeY - 1`. */
+        rangeY: number;
+
+        /**
+         * Calls `callback()` at each new report (then {@link read} it); the
+         * program is kept running while a callback is set. `null`: no more
+         * calls.
+         *
+         * @throws `TypeError` when `callback` is neither a function nor null.
+         */
+        onChange(callback: (() => void) | null): void;
+
+        /**
+         * The last report into `points`: id, x, y for each finger, as many as
+         * it holds.
+         *
+         * @returns how many fingers, or -1 when no report came since the last
+         *     read.
+         * @throws `TypeError` when `points` is not an `Int32Array`.
+         */
+        read(points: Int32Array): number;
+
+        /** No more calls; the program no longer kept running by it. */
         close(): void;
     }
 

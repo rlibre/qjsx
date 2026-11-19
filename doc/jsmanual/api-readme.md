@@ -55,3 +55,9 @@ PC: `qjsx run` and the programs of the PC. i.MX RT1062: the Teensy 4.0. Twin: th
 native modules of that board (here the YD-ESP32-S3, which has every module of the
 ESP32-S3; `device/dac` in the twin of an original ESP32). A board offers only the native modules of its firmware: `qjsx deploy` refuses a
 program that imports another one.
+
+A Linux board (the STM32MP157-DK2) has no column: it runs the `qjsx` tool as `qjsx agent
+--screen ... --touch ...`. A program has there the modules of the tool (the globals,
+`sys/fs`, `sys/crypto`, `sys/net`, `device/serial`, `device/board`, the `stdlib` modules
+written in JS), plus `sys/draw`, `stdlib/display` and `stdlib/touch`, both with the type
+`"builtin"`.

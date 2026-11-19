@@ -76,6 +76,9 @@
  * ² The twin of such a board (`wt32-sc01`, `m5stack-tab5` and its display
  * built in): the screen is drawn in the page.
  *
+ * Also on a Linux board run by `qjsx agent --screen` (the STM32MP157-DK2),
+ * with the type `"builtin"`.
+ *
  * @module stdlib/display
  */
 declare module "stdlib/display" {
@@ -210,6 +213,14 @@ declare module "stdlib/display" {
 
         /** The height of a line: `ascent - descent`. */
         readonly lineHeight: number;
+
+        /**
+         * The height of the capital letters above the baseline (of `H`; the
+         * digits are about as high). A line also holds the room of the
+         * accents and of the descenders: to center a text on `cy` as the eye
+         * sees it, draw it at `y = cy - font.ascent + (font.capHeight >> 1)`.
+         */
+        readonly capHeight: number;
     }
 
     /**

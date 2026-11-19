@@ -6,7 +6,8 @@
  */
 
 // The display built into the board, for the twin (board_screen.h, see
-// twin.h): an image in memory made by the part of the display. sys/draw draws
+// twin.h): an image in memory made by the part of the display, given to
+// host/platform/screen_host.cpp as the display of the board. sys/draw draws
 // into it on its render task, as on the board, and makes each area visible
 // with board::flushScreen, which posts it to the part through the bridge; the
 // part reads the pixels of the area for the page (screenPixels).
@@ -22,6 +23,7 @@
 
 #include "board_screen.h"
 #include "memory.h"
+#include "screen_host.h"
 #include "twin.h"
 
 namespace {
@@ -30,6 +32,14 @@ namespace {
 static_assert(sizeof(board::ScreenArea) == 5 * sizeof(int), "board::ScreenArea must be five ints");
 
 board::Screen image = {};          // pixels, width, height; pixels nullptr: none (yet)
+
+/**
+ * An area of the image made visible: to the part of the display, through
+ * the bridge (dropped without one).
+ */
+void postArea(board::ScreenArea area) {
+    twin::bridgePost(twin::BridgeEvent::screenFlush, 0, &area, sizeof(area));
+}
 
 } // namespace
 
@@ -41,11 +51,12 @@ bool screenStart(int width, int height) {
         return image.width == width && image.height == height;
     }
 
-    // black, as a panel after its reset
+    // black, as a panel after its reset; the display of the board from now
     size_t bytes = (size_t)width * (size_t)height * sizeof(uint16_t);
     uint16_t *pixels = (uint16_t *)memory::allocate(bytes);
     memset(pixels, 0, bytes);
     image = board::Screen{ pixels, width, height };
+    hostscreen::setScreen(image, &postArea);
     return true;
 }
 
@@ -81,20 +92,3 @@ size_t screenPixels(int x, int y, int width, int height, uint8_t *out) {
 }
 
 } // namespace twin
-
-namespace board {
-
-bool startScreen() {
-    return image.pixels != nullptr;
-}
-
-const Screen *screen() {
-    return image.pixels != nullptr ? &image : nullptr;
-}
-
-void flushScreen(ScreenArea area) {
-    // to the part of the display, through the bridge (dropped without one)
-    twin::bridgePost(twin::BridgeEvent::screenFlush, 0, &area, sizeof(area));
-}
-
-} // namespace board

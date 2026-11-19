@@ -87,7 +87,14 @@ commands:
                           qjsx.json: board, parts, ports); without --board, the
                           project of the current folder, if it has one
       --ui-port <port>    page of the twin on http://127.0.0.1:<port> (default 8090)
-  help                                         this help
+      --screen <device>   on a Linux board, its display through DRM (/dev/dri/card0):
+                          stdlib/display type "builtin"; stop the desktop (Weston) first
+      --screen-size <w>x<h>  the size the program sees (800x480): that mode of the
+                          display, else centered in the smallest mode holding it
+      --touch <device>    on a Linux board, its touch panel as the kernel reads it
+                          (/dev/input/eventN): stdlib/touch type "builtin"; a mouse
+                          is one finger (left button held), with a cursor
+  help                                        this help
   --version                                    versions of qjsx and QuickJS
 
 targets: tcp:<host>:<port>   serial:<port>[@<baud rate>]   e.g. serial:COM3, tcp:esp.local:5555

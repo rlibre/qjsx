@@ -46,7 +46,8 @@
 //     images      the images the commands draw, by index: Uint8Arrays (image
 //                 files made by 'qjsx build', imported with { type: "image" }:
 //                 image.h), kept alive by the caller the same way
-//   fontMetrics(font) -> { size, ascent, descent, lineHeight } (pixels);
+//   fontMetrics(font) -> { size, ascent, descent, lineHeight, capHeight }
+//                 (pixels; capHeight: the capitals above the baseline);
 //                 throws a TypeError when it is not a font this reader takes
 //   textWidth(font, text, flags) -> its width in pixels
 //   imageSize(image) -> { width, height } (pixels); throws a TypeError when
@@ -752,6 +753,218 @@ private:
     bool                    _kept = false;        // js::keepAlive(this, true) is in force
 };
 
+// ### The touch panel read by the system #####################################
+// (2026-11-18, first the STM32MP157-DK2 under Linux: its kernel reads the
+// controller). stdlib/touch, type "builtin", reads it through this class.
+
+// The most fingers a report gives here.
+const int MOST_TOUCH_POINTS = 10;
+
+// Items of a finger in the array read() fills: id, x, y.
+const int TOUCH_POINT_ITEMS = 3;
+
+/**
+ * The touch panel the board reads (board::touchInfo); false without one (a
+ * firmware built without QJSX_HAS_SCREEN, a board whose program reads its
+ * controller itself).
+ */
+bool builtinTouch(board::TouchInfo *out) {
+#if QJSX_HAS_SCREEN
+    return board::touchInfo(out);
+#else
+    (void)out;
+    return false;
+#endif
+}
+
+/**
+ * The touch panel read by the system (JS class TouchPanel of sys/draw): a
+ * callback at each new report, the report read into an array (nothing made
+ * at each move). One at a time.
+ */
+class TouchPanel {
+    JS_CLASS(TouchPanel);
+
+public:
+    /**
+     * Finalizer (no JS here): no more reports.
+     */
+    ~TouchPanel() {
+        stopWatching();
+    }
+
+    /**
+     * JS constructor: new TouchPanel(); an Error with code ENODEV when the
+     * board reads no touch panel.
+     */
+    void init() {
+        board::TouchInfo info = {};
+        if (!builtinTouch(&info)) {
+            return (void)js::failSystem(ENODEV);
+        }
+
+        maxPoints = info.maxPoints;
+        rangeX = info.rangeX;
+        rangeY = info.rangeY;
+    }
+
+    JS_EXPORT(maxPoints) int maxPoints = 0;      // fingers it reports at most
+    JS_EXPORT(rangeX) int rangeX = 0;            // its coordinates: 0 .. range - 1, the panel at rotation 0
+    JS_EXPORT(rangeY) int rangeY = 0;
+
+    /**
+     * JS: onChange(callback): callback() at each new report (then read() it),
+     * the program kept alive; null: no more calls.
+     */
+    JS_EXPORT(onChange) void onChange(js::Value callback) {
+        // none any more
+        JSContext *ctx = js::context();
+        if (callback.isNull() || callback.isUndefined()) {
+            _callback = js::Function();
+            stopWatching();
+            updateKeepAlive();
+            return;
+        }
+
+        // a function, then the reports
+        if (!JS_IsFunction(ctx, callback.get())) {
+            return (void)js::fail<js::TypeError>("draw: onChange takes a function or null");
+        }
+
+        _callback = js::Function(ctx, callback.dup());
+        startWatching();
+        updateKeepAlive();
+    }
+
+    /**
+     * JS: read(points): the last report into 'points', an Int32Array of
+     * id, x, y for each finger (as many as it holds): how many fingers, or
+     * -1 when no report came since the last read.
+     */
+    JS_EXPORT(read) int read(js::Value points) {
+        // the array, as int32 items
+        JSContext *ctx = js::context();
+        uint8_t *bytes = nullptr;
+        size_t size = 0;
+        JSValue buffer = JS_UNDEFINED;
+        if (!js::detail::bytesOf(ctx, points.get(), &bytes, &size, &buffer)) {
+            return js::fail<js::TypeError>("draw: read takes an Int32Array");
+        }
+
+        JS_FreeValue(ctx, buffer);
+        int room = (int)(size / (sizeof(int32_t) * TOUCH_POINT_ITEMS));
+        int most = room < MOST_TOUCH_POINTS ? room : MOST_TOUCH_POINTS;
+
+        // the report, then its fingers into the array
+        board::TouchPoint report[MOST_TOUCH_POINTS];
+        int count = readReport(report, most);
+        int32_t *items = (int32_t *)bytes;
+
+        for (int i = 0; i < count; i++) {
+            items[i * TOUCH_POINT_ITEMS] = report[i].id;
+            items[i * TOUCH_POINT_ITEMS + 1] = report[i].x;
+            items[i * TOUCH_POINT_ITEMS + 2] = report[i].y;
+        }
+
+        return count;
+    }
+
+    /**
+     * JS: no more calls; the program no longer kept alive by it.
+     */
+    JS_EXPORT(close) void close() {
+        _callback = js::Function();
+        stopWatching();
+        updateKeepAlive();
+    }
+
+private:
+    /**
+     * The last report of the board (see board::touchRead); -1 without one.
+     */
+    static int readReport(board::TouchPoint *points, int most) {
+#if QJSX_HAS_SCREEN
+        return board::touchRead(points, most);
+#else
+        (void)points;
+        (void)most;
+        return -1;
+#endif
+    }
+
+    /**
+     * The reports, to this object through the loop (JS thread), once.
+     */
+    void startWatching() {
+        if (_loop != nullptr) {
+            return;
+        }
+
+        _loop = rt::Loop::current();
+        _source = _loop->addSource(&onMessage, this);
+        _mailbox = _loop->mailbox();
+        _mailbox->retain();
+#if QJSX_HAS_SCREEN
+        board::touchWatch(&onReport, this);
+#endif
+    }
+
+    /**
+     * No more reports (no JS: also called by the finalizer). The board's
+     * watch is removed first: a call in progress is waited for.
+     */
+    void stopWatching() {
+        if (_loop == nullptr) {
+            return;
+        }
+
+#if QJSX_HAS_SCREEN
+        board::touchWatch(nullptr, nullptr);
+#endif
+        _mailbox->release();
+        _mailbox = nullptr;
+        _loop->removeSource(_source);
+        _loop = nullptr;
+    }
+
+    /**
+     * Keeps the object (and the program) alive while a callback waits.
+     */
+    void updateKeepAlive() {
+        bool keep = !_callback.isUndefined();
+        if (keep != _kept) {
+            js::keepAlive(this, keep);
+            _kept = keep;
+        }
+    }
+
+    /**
+     * A new report (the board's thread): posted to the loop of the program.
+     */
+    static void onReport(void *context) {
+        TouchPanel *panel = (TouchPanel *)context;
+        panel->_mailbox->post(panel->_source, 0, nullptr, 0, 0);
+    }
+
+    /**
+     * A new report (JS thread): the callback, through a local copy (it may
+     * replace itself or close the panel).
+     */
+    static void onMessage(void *opaque, const rt::Message *) {
+        TouchPanel *panel = (TouchPanel *)opaque;
+        js::Function callback = panel->_callback;
+        if (!callback.isUndefined()) {
+            callback();
+        }
+    }
+
+    js::Function  _callback;                // onChange callback; undefined: none
+    rt::Loop     *_loop = nullptr;          // loop of the run while watching; nullptr: not watching
+    rt::Mailbox  *_mailbox = nullptr;       // its mailbox, retained while watching
+    rt::SourceId  _source = { -1, 0 };      // message source of the reports
+    bool          _kept = false;            // js::keepAlive(this, true) is in force
+};
+
 /**
  * JS: screenSize(): the size of the screen built into the board, as its
  * panel scans it ({ width, height }, pixels); null when it did not start.
@@ -772,8 +985,8 @@ js::Value screenSize() {
 }
 
 /**
- * JS: fontMetrics(font): its size, ascent, descent and line height, in
- * pixels. Throws a TypeError when it is not a font this reader takes.
+ * JS: fontMetrics(font): its size, ascent, descent, line height and the
+ * height of its capitals, in pixels. Throws a TypeError when it is not a font this reader takes.
  */
 js::Value fontMetrics(js::Value fontValue) {
     // read
@@ -789,6 +1002,7 @@ js::Value fontMetrics(js::Value fontValue) {
     JS_SetPropertyStr(ctx, metrics, "ascent", JS_NewInt32(ctx, font.ascent));
     JS_SetPropertyStr(ctx, metrics, "descent", JS_NewInt32(ctx, font.descent));
     JS_SetPropertyStr(ctx, metrics, "lineHeight", JS_NewInt32(ctx, font.ascent - font.descent));
+    JS_SetPropertyStr(ctx, metrics, "capHeight", JS_NewInt32(ctx, draw::capHeightOf(&font)));
     return js::Value(ctx, metrics);
 }
 
@@ -858,4 +1072,5 @@ JS_MODULE(draw, module) {
     JS_FUNCTION(module, imageSize);
     JS_FUNCTION(module, screenSize);
     JS_ADD_CLASS(module, Screen);
+    JS_ADD_CLASS(module, TouchPanel);
 }

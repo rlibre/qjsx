@@ -4,6 +4,19 @@ A fixed defect leaves `known-bugs.md` and arrives here, with what was done. The 
 one comes first. The section "Measures and findings" at the end keeps the results of
 measurements that changed no code but settle a question.
 
+## 2026-11-18
+
+### Twin: two quick clicks on a GT911 seen as one touch
+
+The model of the GT911 (`host/twin/parts/gt911/model.js`) kept one report at a time and a
+flag for a release not reported yet: a press and its release that both came within one
+report period (10 ms), before the program had cleared the status, left only one of them
+for the program, so two quick clicks of the mouse could be one touch. The reports the
+program has not had yet now wait in a queue, in order (`_queue`: a finger with its place,
+or no finger); a move replaces the finger's report still waiting, so the program gets the
+place of the moment; `_report()` gives the oldest one each time the program clears the
+status, then the finger still held, then stops.
+
 ## 2026-11-17
 
 ### Defects of `stdlib/display` found while writing its typing

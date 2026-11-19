@@ -85,6 +85,7 @@ target.
 |---|---|
 | Development machine (Windows, macOS, Linux) | runs the host tool `qjsx` (compilation, package, deployment, debug proxy); can also run scripts |
 | Device (ESP32, RP2350, i.MX RT1062…) | runs the precompiled bytecode, the device agent (debug and deployment); no compiler, no `eval` |
+| Linux board (STM32MP157-DK2…) | runs the `qjsx` tool itself, cross-built, as `qjsx agent`: a device reached by TCP, with its display and touch panel (5.5) |
 
 ### 1.3 Components
 
@@ -1718,6 +1719,9 @@ await lcd.show();                                   // or show(x, y, width, heig
   the native calls and the promise). The whole screen 116 ms (on the JS thread). Next
   ideas, not done: the P4's PPA for the rotation and the byte order, two frame buffers
   against tearing, a cheaper JS side of a frame.
+- **Display of a Linux board** (2026-11-18, the STM32MP157-DK2): the same `type: "builtin"`,
+  the panel taken through DRM by `qjsx agent --screen` (5.5, "A Linux board"); no
+  `backlight` pin there.
 - **Arcs and rounded rectangles**: smoothed edges, fixed point (coverage 0..256, distances
   24.8, 32-bit integers only: a 64-bit operation is a library call on the ESP32), work only
   where it matters (the hole of a ring skipped, square roots on the one pixel wide edges
@@ -1785,6 +1789,19 @@ touch.onChange(() => {                       // a finger came, went, or moved by
 - **Measured**: on the WT32-SC01 30 changes a second while a finger draws; a drawing
   program that lists every dot it ever drew at each move slows down as the drawing grows
   (a disc costs about 0.2 ms of JS there): list only what falls in the area shown.
+- **Type `"builtin"`** (2026-11-18, the STM32MP157-DK2 under Linux): the touch panel the
+  board's system reads itself, `new Touch({ type: "builtin", display: lcd })`: no bus, no
+  address, no pin. `common/board/board_screen.h` gained `touchInfo()` (most points, range
+  of x and y at rotation 0; false on a board that reads none, as the Tab5, whose program
+  reads the GT911), `touchWatch(changed, context)` (called at each new report, any thread)
+  and `touchRead(points, most)` (the last report, -1 when none came since the last call).
+  `sys/draw` has the class `TouchPanel` over them (`maxPoints`, `rangeX`, `rangeY`,
+  `onChange(callback | null)`, `read(Int32Array)`, `close()`; one at a time; ENODEV
+  without such a panel; a callback set keeps the program running). In `touch.js` the
+  entry `builtin` of `TYPES` is null: the constructor makes the `TouchPanel` instead of
+  opening a bus, each report starts a read as an interrupt pin does, and the read takes
+  `panel.read(scratch)` instead of an I2C transfer; rate, threshold, coordinates and
+  `points` are the same code.
 - **Twin**: the parts `ft6336` and `gt911` (see 6.6).
 
 **`device/serial` on the UARTs of a board** (2026-11-12; design agreed with the user, built
@@ -1897,6 +1914,9 @@ led.close();
 > i.MX RT1062 (Teensy 4.0): written and tried on the board on 2026-11-16 (MCUXpresso SDK
 > 26.06 LTS, FreeRTOS, 690 KB firmware): debugger 72/72, proxy 33/33, cdp 53/53;
 > `device/gpio`, `device/board`, `device/pwm` (below).
+> Linux board (STM32MP157-DK2): on 2026-11-18 the tool cross-built for Arm Linux runs
+> there as `qjsx agent`, with the board's display (DRM) and touch panel (input device);
+> debugger 72/72, proxy 33/33, cdp 53/53 over TCP ("A Linux board", below).
 
 One firmware per board, generic: everything the chip can do, flashed once; the
 programs then arrive as packages. Each port provides three things around the common code,
@@ -1930,6 +1950,36 @@ there): not measured yet. Tried 2026-11-18: debugger 72/72, proxy 33/33, cdp 53/
 radio (an ESP32-C6 on SDIO), its I2C expanders (power, resets), a twin. After `idf.py
 flash` the chip may stay in download mode (`boot:0x204`): a short press on its
 Reset/Boot button starts it.
+
+**Waveshare ESP32-P4-Module-DEV-KIT with its 7-DSI-TOUCH-A** (2026-11-19,
+`boards/waveshare-p4-module-7a/`; the firmware depends on the display, hence the name):
+the same chip as the Tab5 (ESP32-P4 revision v1.0 as esptool reads it, 16 MB of flash,
+32 MB of PSRAM), the same `sdkconfig.board` but its comments. Two USB-C ports: "USB" is
+the P4's USB Serial/JTAG, the agent's link; "USB TO UART" is a CH343P on UART0 (GPIO37 /
+38), not used. The factory firmware was read back before the first flash
+(`esptool read-flash`, 16 MB). Tried: debugger 72/72, proxy 33/33, cdp 53/53.
+
+- *Display*: a 7" panel of 720 x 1280 with an ILI9881C on a ribbon cable that carries the
+  DSI lanes and the board's I2C bus (SDA GPIO7, SCL GPIO8, pulled up on the board), nothing
+  else: no reset pin, no backlight pin. `common/drivers/ili9881c.cpp` gained the table of
+  that panel (`WAVESHARE_7_DSI_TOUCH_A`: the values of Waveshare's driver, Apache-2.0,
+  credited in the file; written by a script from their source, 197 commands). The board's
+  `board_screen.cpp` powers the panel through a circuit of the display at I2C 0x45
+  (register 0x95 = 0x11 then 0x17; register 0x96, the backlight, 0 then 0xFF after
+  100 ms; Waveshare's sequence, the registers are not documented), opens the link (2 lanes
+  at 1000 Mb/s, pixel clock 80 MHz, porches H 239 / 50 / 33, V 20 / 30 / 2: about 57
+  images a second; LDO 3 at 2.5 V), resets the controller by its command (0x01), then
+  `ili9881c::start()`. Kept from the Tab5: 16 bits a pixel (Waveshare's table asks the
+  controller for 24). Measured: the whole screen 91 ms, an area of 300 x 60 2.6 ms.
+- *Backlight*: the program writes register 0x96 of the circuit at 0x45 itself (0 to 255)
+  with `device/i2c`; `Display` gets no `backlight` pin.
+- *Touch*: a GT9271 at 0x5D on the same bus, read by `stdlib/touch` as a `gt911` (`address:
+  0x5d`, the bus shared with the backlight: `bus`), without interrupt pin (polled, 33
+  reads a second; no measurable load of the JS thread at rest); the fingers land where
+  drawn (rotation 90). One read of its report (81 bytes at 400 kHz): 2.1 ms.
+- *On the bus*: 0x18 (the ES8311 audio codec), 0x45, 0x5D.
+- Not done: the radio (ESP32-C6 on SDIO), audio, Ethernet, SD card, a twin. Demos:
+  `temp/wsp4/probe` (I2C scan and a test image), `temp/wsp4/ui` (the Tab5's demo).
 
 **The RP2350 port** (`ports/rp2350/`, 2026-11-11; built by `tools/pico.ps1` with the
 toolchain installed in `C:\tools\pico`: Arm GNU Toolchain 15.2, pico-sdk 2.3.1, FreeRTOS-Kernel
@@ -1993,6 +2043,77 @@ Toolchain of `C:\tools\pico`):
   `native_profiler_imxrt1062.cpp`, 2026-11-17) found that the speed of an `await` depended on
   the layout of the code in the 32 KB instruction cache ([known-bugs.md](known-bugs.md),
   "Speed of the Teensy 4.0").
+
+**A Linux board** (2026-11-18, first the STM32MP157-DK2: OpenSTLinux, Linux 6.6, armv7l,
+a 480 x 800 DSI panel and its FT6236 touch controller read by the kernel). No firmware
+and no port folder: the board runs the `qjsx` tool itself, cross-built, as `qjsx agent`,
+which is the desktop agent (`host/platform/board_host.cpp`: packages and data as files of
+`--storage`, the link by TCP) plus the display and the touch panel of the board.
+
+- *Cross build.* `premake5 gmake --cc=gcc --shell=posix --cross=linux-arm`, then
+  `make -C build-linux-arm config=release qjsx`, gives `bin/linux-arm/Release/qjsx`
+  (3.2 MB): a static executable for 32-bit Arm Linux (armhf), so it does not depend on the
+  board's C library. The option `--cross` of `premake5.lua` gives the build its own
+  folders (`build-linux-arm/`, `bin/linux-arm/`; the Windows build is not touched), the
+  system `linux` and the compiler prefix (`arm-none-linux-gnueabihf-` of the Arm GNU
+  Toolchain in `C:\tools\arm-linux`). No `stdlib.qjslib` is made after the link (that step
+  runs the tool just linked, which cannot run on the PC); the board descriptions are still
+  copied. The board only runs packages built on the PC, which hold the library modules
+  they use.
+- *Running it.* The executable copied to the board, then
+  `qjsx agent --host 0.0.0.0 --port 5555 --storage <folder> --screen /dev/dri/card0
+  --touch /dev/input/event1`. The PC reaches it as `tcp:<address>:5555`: deploy, run,
+  debugger (debugger 72/72, proxy 33/33, cdp 53/53 on the DK2). `process.platform` is
+  `"linux"`; the files of the program are confined to `<storage>/data`, as on any device.
+  Another program driving the display (Weston on the DK2) must be stopped first: the
+  agent takes the DRM master and says so when it cannot.
+- *What the program gets.* With `--screen` or `--touch`, `startLinuxBoard()`
+  (`host/agent_command.cpp`) registers `sys/draw`, and `device/gpio`, `device/pwm`,
+  `device/spi`, `device/i2c` so that the static imports of `stdlib/display` and
+  `stdlib/touch` resolve (they act on nothing there: the PC hal has no pin). The options
+  are refused with `--board` (a twin has its own display).
+- *Who plays `board_screen.h`* (`host/platform/screen_host.{h,cpp}`): every `qjsx`
+  executable implements `board::screen()`, `flushScreen()`, `touchInfo()`, `touchWatch()`
+  and `touchRead()` once, over what was set before any program runs: the twin
+  (`hostscreen::setScreen`, by `twin_screen.cpp`), or a Linux board (`openDrm`,
+  `openTouch`). Set once, then only read: no lock. Nothing set: no display
+  (`new Screen()` throws ENODEV), no touch panel.
+- *The display* (`host/platform/drm_screen.cpp`; no libdrm, the kernel's ioctls): the
+  device opened and its master taken; the first connected connector, one of its modes, an
+  encoder and a CRTC that can drive it; a "dumb" buffer of the mode's size, 16 bits a
+  pixel (RGB565, the pixels of `board_screen.h`), made a framebuffer, mapped, black,
+  shown. `sys/draw` draws into an image in ordinary memory (the rotations write scattered
+  pixels, slow in the mapping); `flushScreen()` copies each area shown into the mapping,
+  row by row.
+- *`--screen-size <width>x<height>`* (user, 2026-11-18): the size the program sees.
+  Without it, the preferred mode of the display. With it, the mode of that size, else the
+  smallest mode that holds it (among modes of one size: the preferred, then the fastest),
+  the image centered in it, black around. A size larger than every mode is refused with
+  the list of the modes; so is the option without `--screen`. Meant for a board on a
+  monitor while its own panel is missing.
+- *The touch panel* (`host/platform/evdev_touch.cpp`): the input device read on a thread
+  of its own (the events straight into a buffer on the heap). A multi-touch panel
+  (protocol B): the thread keeps the slots (tracking id, x, y) and copies the fingers into
+  the report at each `SYN_REPORT`; at most 10 fingers; the range is the device's
+  (`EVIOCGABS`), from 0. Each report is marked new and the watcher told, which posts to
+  the program's loop.
+- *Touch of a centered image.* The panel covers the display, not the image:
+  `hostscreen::screenFrame()` gives the display's size and the image's top left on it;
+  the points are scaled to the display, then given in the image's pixels (the range
+  becomes the image's size), and a finger outside the image is left out (`pointOf`).
+  Tried on the DK2 with `--screen-size 400x600` in its 480 x 800 panel: the corners of
+  the image answer where touched, the black borders do not.
+- *A mouse as a touch panel* (user: the same option, detected by what the device says):
+  a device with relative moves and a left button is played as ONE finger. The moves add
+  up to a place kept on the image; the left button held is the finger there, released no
+  finger; moves without the button tell the program nothing. It needs `--screen`. The
+  display's cursor follows the place: an arrow in a 64 x 64 ARGB buffer of its own, shown
+  and moved by the CRTC's cursor plane (the legacy cursor ioctl), so the image is never
+  drawn again for it; made only for a mouse. A card without a cursor plane: the mouse
+  works unseen, and the agent says so. **Not tried yet** (no mouse on the DK2: planned on
+  a Raspberry Pi 4 on HDMI).
+- *Not done:* the agent started at boot (a systemd service in place of the desktop), the
+  backlight, the GPIO / I2C / SPI of the board under Linux, a 64-bit build.
 
 **Long computation and watchdog** (decided, coded and verified on the YD board on 2026-11-11:
 during the endless loop of `tests/fixtures/debuggee`, no "task_wdt" message in 17 s
@@ -2127,7 +2248,7 @@ A single executable:
 | `device info` / `run` / `stop` / `reset` | installed package and state (memory, load, data folder), start, stop, restart of the device |
 | `device ls` / `read` / `write` / `rm` / `mkdir` / `mv` | the files of the data folder of the device (5.4) |
 | `targets` | lists the serial ports of the PC |
-| `agent` | the device agent on the desktop, which stands in for a board; `--board` or `-p`: the digital twin of a board (6.6) |
+| `agent` | the device agent on the desktop, which stands in for a board; `--board` or `-p`: the digital twin of a board (6.6); `--screen`, `--screen-size`, `--touch`: the display and the touch panel of a Linux board (5.5) |
 | `debug` | starts the proxy, a CDP server for VS Code (3.9) |
 | `profile` | samples the JS thread of a device, prints the functions that take its time |
 | `trace` | planned; its behaviour is not designed yet |
@@ -2283,7 +2404,9 @@ the PC's speed, deployed and debugged exactly as on the board (`qjsx deploy`, `q
 - **The display built into a board** (2026-11-18, user): `board_screen.h` is implemented
   by the twin (`host/twin/sim/twin_screen.cpp`; every PC executable is built with
   `QJSX_HAS_SCREEN`): an image in memory made by the part of the display
-  (`board.screen(width, height)` of qjsx:twin -> `twinboard.screenStart`); `sys/draw`'s
+  (`board.screen(width, height)` of qjsx:twin -> `twinboard.screenStart`), given to
+  `host/platform/screen_host.cpp` as the display of the board (`hostscreen::setScreen`:
+  the same place a Linux board sets its DRM display, 5.5); `sys/draw`'s
   class `Screen` draws into it on its render task exactly as on the board, and
   `board::flushScreen(ScreenArea)` (the area of the image written, and the rotation of
   its drawing; on the P4 the rows of that area are written back from the cache) posts it
@@ -2797,7 +2920,7 @@ The inconsistencies noticed when this document was written have been fixed in th
 | `tests/` | `run-tests.sh`, the test scripts and their fixtures |
 | `tools/` | `quickjs-split/` (generator of the split engine, its test build and microbench), `rom-atoms/`, `profile/`, `embed-js.lua`, `embed-types.lua`, `embed-twin-ui.lua`, `idf.ps1`, `pico.ps1`, `teensy.ps1`, style and documentation checks |
 | `doc/` | documentation |
-| `premake5.lua` | build of the desktop tool (2.8) |
+| `premake5.lua` | build of the desktop tool (2.8); `--cross=linux-arm`: the same tool for a Linux board (5.5) |
 
 ### 8.3 Glossary
 
