@@ -5,12 +5,17 @@
 #    |_| |__/               SPDX-License-Identifier: MIT (see LICENSE)
 
 # Components fetched by the ESP-IDF component manager (into
-# ports/esp32/managed_components/, versions kept in dependencies.lock).
+# ports/esp32/managed_components/). Their versions are FIXED here, exactly:
+# dependencies.lock is not in the repository (every build rewrites it for the
+# chip of the board just built), so a new machine, or the build of a release
+# on GitHub, takes what this file says and nothing newer.
 dependencies:
   # TinyUSB for device/usb (hal_usb_esp32.cpp), on the chips with USB OTG only
   # (the same list as QJSX_USB_TARGETS in CMakeLists.txt)
+  # Version fixed (2026-11-19): 2.4.0 is the one device/usb was tried with
+  # (it brings espressif/tinyusb, 0.21.0~2 then, which this line does not fix).
   espressif/esp_tinyusb:
-    version: "^2.1.1"
+    version: "==2.4.0"
     rules:
       - if: "target in [esp32s2, esp32s3, esp32p4]"
 

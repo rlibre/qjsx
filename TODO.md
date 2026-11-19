@@ -188,8 +188,17 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
   - [ ] `firmware/<carte>/` avec son `firmware.json` dans l'archive (la commande lit
         déjà ce format et le dossier de build ESP-IDF) ;
   - [ ] inventaire des licences des composants tiers, fichier de mentions dans l'archive ;
-  - [ ] script d'assemblage des archives (Windows, Linux Arm), notes de version, montée
-        de `QJSX_VERSION`, tag ;
+  - [x] numéro de version : `version.h` à 0.3.0 (numéro de la PROCHAINE release, jamais
+        modifié à la main), `CHANGELOG.md` (version en cours en tête, sans date) et
+        `tools/release.sh` (date le journal, tag, push, puis dernier chiffre + 1 et
+        nouvelle entrée sans date ; `--dry-run`) ; écrits le 19/11, pas encore utilisés
+        pour de vrai ;
+  - [ ] `ports/esp32/dependencies.lock` est réécrit par chaque build ESP32 et bloque
+        `tools/release.sh` : ne plus le suivre dans git ? (à décider) ;
+  - [ ] CI dès la première release (décidé le 19/11) : flux GitHub sur tag + lancement
+        manuel sans publication, essais sur une branche ; à vérifier avant d'écrire : image
+        officielle ESP-IDF 6.1, compilateur des machines Windows de GitHub ;
+  - [ ] script d'assemblage des archives (Windows, Linux Arm), `firmware.json` par carte ;
   - [ ] ensuite : flasher UF2 (RP2350), puis PJRC (HID, natif).
 - [ ] **CI/CD** (pour la release publique annoncée) : GitHub Actions sur un tag ; `qjsx`
       pour Linux x64 et macOS (jamais construits : portage à prévoir),

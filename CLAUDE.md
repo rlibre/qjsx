@@ -1600,6 +1600,31 @@ in the include path (no two headers share a name; keep it so).
     LittleFS, TinyUSB, FreeRTOS, QuickJS, the Inter font, M5Stack's and Waveshare's panel
     tables...): an inventory to make;
   - the first release WAITS for the ESP32 flasher (user: not esptool + a merged file);
+  - CI NOW, for the first release (user, 2026-11-19, replaces "by hand first"): one GitHub
+    workflow started by a pushed TAG only (user: not at each push to main), plus a manual
+    start that builds without publishing (for the trials, which are made on a BRANCH:
+    user); the tool for Windows + its tests, the tool for Linux Arm, one ESP32 firmware
+    per board, the archives assembled by a script of the repository (usable by hand too),
+    published as a pre-release. Linux x64 / macOS, RP2350 and Teensy: later. Downloads on
+    GitHub's machines accepted, versions pinned, third-party actions by commit hash. To
+    check before writing: an official ESP-IDF 6.1 image, what the Windows machines give;
+  - VERSION NUMBER (user, 2026-11-19, after a long discussion: keep it SIMPLE, the user is
+    not a git specialist; NO "-dev" suffix, NO number derived from git): 0.Y.Z, Y = a
+    release that may require a change in a program or a firmware flashed again (any
+    bytecode version change), Z = fixes only. `common/runtime/version.h` holds the number
+    of the NEXT release and is never edited by hand: `tools/release.sh` (WRITTEN, has
+    `--dry-run`, not used for real yet) reads it, dates the entry of that version in
+    CHANGELOG.md and commits, tags that commit `v<number>` and pushes, THEN raises the
+    last figure in the file (0.99.22 -> 0.99.23, 0.1.6 -> 0.1.7), adds the new undated
+    entry at the top of CHANGELOG.md, commits and pushes; to start 0.4.0, write it in
+    the file first. It refuses when a tracked file is changed and not committed:
+    `ports/esp32/dependencies.lock`, which every ESP32 build rewrites for the last board
+    built, blocks it (to settle with the user: stop tracking it?). The source is at 0.3.0
+    = the first release; the commit id in work builds: later;
+  - CHANGELOG.md (user, 2026-11-19), at the root, in English: the version in progress
+    FIRST and WITHOUT a date; CLAUDE ADDS A LINE THERE WITH EACH CHANGE THE USER OF qjsx
+    CAN SEE (in the same work as the change, like the typings); at the release the script
+    dates that entry and adds the next undated one above it;
   - FLASHERS (user's idea, choice A: flashers only, NOT a general plugin system): external
     JS files next to the executable, `flashers/<family>.js` (`esp32.js` first: the
     equivalent of esptool; `uf2.js` then: a file copied to the board's USB drive, found by
