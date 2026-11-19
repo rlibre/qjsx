@@ -31,6 +31,25 @@ check() {
     fi
 }
 
+# Two tests measure time: how busy the JS thread is while the profiler
+# samples it, and how many changes a second of touch moves gives. Their
+# bounds are set on a development machine; on a shared build machine, which
+# runs several jobs at once, the measures drift and they fail although
+# nothing is wrong. QJSX_SKIP_TIMING=1 leaves them out
+# (.github/workflows/release.yml sets it; locally they always run).
+SKIP_TIMING=${QJSX_SKIP_TIMING:-0}
+
+# timed <name> <command...>: a check that only means something when the
+# machine is not loaded.
+timed() {
+    if [ "$SKIP_TIMING" = 1 ]; then
+        echo "skip  $1 (it measures time)"
+        return
+    fi
+
+    check "$@"
+}
+
 check "binding library" "$BIN/qjsx-tests" run -A tests/jsbind.test.js
 check "typings: the names of every module and global match the runtime" "$BIN/qjsx-tests" run -A tests/types.test.js
 check "bytecode reader: a truncated opcode is refused" "$BIN/qjsx-tests" run tests/bytecode.test.js
@@ -326,7 +345,7 @@ check "deploy --reset restarts the device, the package starts at boot" bash -c "
 check "debugger stub (breakpoints, steps, pause, values)" "$BIN/qjsx" run -A tests/debugger.test.js "$AGENT_TARGET"
 check "debugger proxy core (lines, names, evaluation)" "$BIN/qjsx" run -A tests/proxy.test.js "$AGENT_TARGET"
 check "debugger CDP server (as js-debug)" "$BIN/qjsx" run -A tests/cdp.test.js "$AGENT_TARGET"
-check "sampling profiler of the agent (qjsx profile)" "$BIN/qjsx" run -A tests/profile.test.js "$AGENT_TARGET"
+timed "sampling profiler of the agent (qjsx profile)" "$BIN/qjsx" run -A tests/profile.test.js "$AGENT_TARGET"
 check "device info gives the JS heap of the program" bash -c "'$BIN/qjsx' device info --target '$AGENT_TARGET' 2>/dev/null | grep -q '^JS heap:  .* at most (last run)'"
 
 # --- small messages, as a board without PSRAM: stops split, long console
@@ -550,7 +569,7 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
     grep -q listening build/twintouch-out.txt 2>/dev/null && break
     sleep 0.2
 done
-check "the touch panels of the twin (stdlib/touch, the ft6336 and gt911 parts)" \
+timed "the touch panels of the twin (stdlib/touch, the ft6336 and gt911 parts)" \
     "$BIN/qjsx" run -A tests/touch.test.js "tcp:127.0.0.1:$TWINTOUCH_PORT" "$TWINTOUCH_UI_PORT"
 kill "$TWIN_PID" 2> /dev/null
 wait "$TWIN_PID" 2> /dev/null

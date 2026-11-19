@@ -59,12 +59,14 @@ jobs:
             make
             unzip
             curl
+            diffutils
             mingw-w64-x86_64-gcc
 
       - name: Get premake5
         run: |
           curl -fsSL -o premake.zip "https://github.com/premake/premake-core/releases/download/v$PREMAKE_VERSION/premake-$PREMAKE_VERSION-windows.zip"
           unzip -o premake.zip premake5.exe -d /usr/local/bin
+          chmod +x /usr/local/bin/premake5.exe
 
       # The makefiles of the project, then everything: the engine, the tool,
       # qjsx-tests and qjsx-target. The tool makes stdlib.qjslib when it is
@@ -74,7 +76,12 @@ jobs:
           premake5 gmake --cc=gcc --shell=posix
           make -C build config=release -j4
 
+      # QJSX_SKIP_TIMING: two tests measure how busy a thread is and how many
+      # events a second gives; a build machine runs several jobs at once, so
+      # their measures mean nothing here (tests/run-tests.sh).
       - name: Test
+        env:
+          QJSX_SKIP_TIMING: 1
         run: bash tests/run-tests.sh Release
 
       - name: Keep the tool
@@ -104,6 +111,7 @@ jobs:
           sudo apt-get install --yes --no-install-recommends g++-arm-linux-gnueabihf
           curl -fsSL -o premake.tar.gz "https://github.com/premake/premake-core/releases/download/v$PREMAKE_VERSION/premake-$PREMAKE_VERSION-linux-glibc-2.39.tar.gz"
           sudo tar -xzf premake.tar.gz -C /usr/local/bin premake5
+          sudo chmod +x /usr/local/bin/premake5
 
       - name: Build
         env:
