@@ -226,9 +226,16 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
         MSYS2, deux tests chronométrés laissés de côté sur une machine partagée
         (`QJSX_SKIP_TIMING`, `tests/run-tests.sh`). Archives vérifiées : bit d'exécution
         du binaire Linux gardé, vrai fichier de licences d'ESP-IDF, exécutable Windows
-        qui tourne sans MinGW. RESTE : retirer le déclencheur `push` temporaire de
-        `ci-release` et fusionner dans `main` ; la publication elle-même (étape sous
-        `if: tag`) n'a jamais tourné ;
+        qui tourne sans MinGW et lié à l'UCRT. L'outil Windows est construit avec
+        l'archive gcc 16.2 UCRT figée (la même que la machine de développement), pas le
+        paquet MSYS2. Le déclencheur d'essai est retiré ; RESTE à fusionner `ci-release`
+        dans `main`. La publication elle-même (étape sous `if: tag`) n'a jamais tourné :
+        on la verra au premier `tools/release.sh` ;
+  - [ ] **outil Linux Arm : figer son compilateur comme celui de Windows**. La CI prend
+        `g++-arm-linux-gnueabihf` d'Ubuntu (gcc 13 ou 14), la machine de développement la
+        chaîne Arm GNU 15.2.Rel1 (`arm-none-linux-gnueabihf`) : le binaire livré n'est pas
+        celui qu'on éprouve. Remède : faire télécharger à la CI la chaîne Arm GNU pour
+        Linux x86_64, version figée, comme l'archive gcc du côté Windows ;
   - [ ] ensuite : flasher UF2 (RP2350), puis PJRC (HID, natif).
 - [ ] **CI/CD** (pour la release publique annoncée) : GitHub Actions sur un tag ; `qjsx`
       pour Linux x64 et macOS (jamais construits : portage à prévoir),

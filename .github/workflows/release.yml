@@ -23,11 +23,6 @@ name: Release
 on:
   push:
     tags: ["v*"]
-    # TEMPORARY, for the trial of this file: every push to this branch runs
-    # it, which builds everything and publishes nothing (only a tag
-    # publishes). REMOVE the line below, and this comment, before the branch
-    # goes into main.
-    branches: ["ci-release"]
   workflow_dispatch:
 
 # Reading is enough everywhere; the job that publishes asks for more.
