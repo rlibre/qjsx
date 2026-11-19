@@ -19,6 +19,11 @@ build/
 /ports/esp32/sdkconfig.old
 /ports/esp32/managed_components/
 
+# The lock of the ESP-IDF component manager: every build rewrites it for the
+# chip of the board just built, so it changed at each build of another board.
+# The versions of the components are pinned in main/idf_component.yml.
+/ports/esp32/dependencies.lock
+
 # pico-sdk builds of the RP2350 firmware, one folder per board
 /ports/rp2350/build-*/
 
