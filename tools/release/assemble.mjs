@@ -40,6 +40,7 @@
 // The zip is written here (deflate of Node's zlib), with no tool of the
 // machine: the same archive comes out on Windows and on a build machine of
 // GitHub, and the executable keeps its permission for Linux.
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as zlib from "node:zlib";
@@ -49,7 +50,10 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
 const VERSION_FILE = "common/runtime/version.h";
 
 // What goes into every archive from the repository, besides the tool, the
-// standard library and the firmwares.
+// standard library and the firmwares. Their files are the ones git knows,
+// never what happens to be in the folder: the board of a client, kept out
+// of the repository, was delivered in an archive made on the development
+// machine (19/11).
 const FOLDERS = [
     { folder: "boards", extension: ".json" },
     { folder: "flashers", extension: ".js" },
@@ -108,6 +112,25 @@ function qjsxVersion() {
     }
 
     return match[1];
+}
+
+/**
+ * The files of a folder OF THE REPOSITORY, by their names alone, sorted.
+ * Asked to git, not to the disk: a file that is there without being part of
+ * the repository (the board of a client, something left by a trial) is never
+ * delivered.
+ */
+function repositoryFiles(folder, extension) {
+    const lines = execFileSync("git", ["ls-files", "--", folder], { cwd: ROOT, encoding: "utf8" });
+    const names = lines.split("\n")
+        .filter(line => line.endsWith(extension))
+        .map(line => path.basename(line));
+
+    if (names.length === 0) {
+        fail(`${folder}: no ${extension} file of the repository there`);
+    }
+
+    return names.sort();
 }
 
 /**
@@ -232,7 +255,7 @@ add("stdlib.qjslib", options.stdlib);
 
 // the boards and the flashers of the repository
 for (const { folder, extension } of FOLDERS) {
-    const names = fs.readdirSync(path.join(ROOT, folder)).filter(name => name.endsWith(extension)).sort();
+    const names = repositoryFiles(folder, extension);
     for (const name of names) {
         add(`${folder}/${name}`, path.join(ROOT, folder, name));
     }

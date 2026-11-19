@@ -10,6 +10,9 @@ your computer, one command prepares it, another sends it to the board, and it st
 The JavaScript engine is [QuickJS](https://bellard.org/quickjs/) by Fabrice Bellard: classes,
 `async` / `await`, modules, promises… the whole language of today, in a few hundred kilobytes.
 
+📖 **[The manual of the JS developer](https://rlibre.github.io/qjsx/)** — getting started,
+guides, and the reference of every module.
+
 > **Work in progress.** The foundations run on a real board, but important pieces are still
 > missing. See [Where the project stands](#where-the-project-stands).
 
@@ -232,9 +235,10 @@ through its USB serial port.
 
 The detailed documentation is in the [`doc/`](doc/) folder:
 
-- [jsmanual/](doc/jsmanual/): the manual of the JS developer, a site (guides, and the API
-  reference of every module generated from its typings): `npm install` then `npm run dev`
-  in that folder;
+- the manual of the JS developer, published at **<https://rlibre.github.io/qjsx/>**: the
+  guides, and the reference of every module, generated from its typings. Its sources are
+  in [jsmanual/](doc/jsmanual/), to read it as it is being written: `npm install` then
+  `npm run dev` in that folder;
 - [architecture.md](doc/architecture.md): how it is all designed, and the status of each part;
 - [engine-changes.md](doc/engine-changes.md): what was changed in QuickJS, and why;
 - [new-device.md](doc/new-device.md): how to run qjsx on a new board or a new chip;
