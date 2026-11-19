@@ -125,6 +125,17 @@ declare module "device/serial" {
     export function list(): string[] | number[];
 
     /**
+     * The lines of {@link Serial.setSignals}; a line left out stays as it is.
+     */
+    export interface SerialSignals {
+        /** Data terminal ready: `true` on, `false` off. */
+        dtr?: boolean;
+
+        /** Request to send: `true` on, `false` off. */
+        rts?: boolean;
+    }
+
+    /**
      * An open serial port: a port of the PC or a UART of a board.
      *
      * Life cycle: the constructor opens the port and starts reading; from
@@ -213,6 +224,38 @@ declare module "device/serial" {
          *     failed.
          */
         write(data: SerialData): void;
+
+        /**
+         * Sets the DTR and RTS lines of a port of the PC: each one `true`
+         * (on), `false` (off), or left out (it stays as it is). What "on"
+         * does is up to what is wired to the line: the USB-serial bridge of
+         * many boards resets the chip, or puts it in its loader, from them.
+         *
+         * PC only: the UARTs of a board have no such lines.
+         *
+         * @throws `TypeError` on a board or in a twin, and for a field that
+         *     is not a boolean or is unknown; a system error with code
+         *     `EBADF` on a closed port, `EINVAL` for `rts` on a port opened
+         *     with `flowControl: "rts-cts"` (RTS then belongs to the flow
+         *     control), `EIO` when the system refuses.
+         */
+        setSignals(lines: SerialSignals): void;
+
+        /**
+         * Changes the speed of the open port; the rest of its settings
+         * stays. What was written before is sent at the speed it was written
+         * for: the call returns once it is out, then the new speed applies
+         * to what is written and received.
+         *
+         * In a twin, a UART takes no time on the line: the new speed is what
+         * the page shows and what a wired port of the PC is set to.
+         *
+         * @param baudRate bits per second, 300 to 4000000.
+         * @throws `RangeError` outside that range; a system error with code
+         *     `EBADF` on a closed port, `EINVAL` when the port cannot take
+         *     that speed (it keeps the one it had).
+         */
+        setBaudRate(baudRate: number): void;
 
         /**
          * Closes the port. It returns at once: the reading stops and the port

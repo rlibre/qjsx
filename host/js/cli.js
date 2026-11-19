@@ -26,6 +26,7 @@ import { KIND, KEY, STREAM, kindName } from "qjsx:protocol";
 import { PackageIndex } from "qjsx:debuginfo";
 import { readReport, profileText } from "qjsx:profile";
 import { CdpServer } from "qjsx:cdp";
+import { flashFirmware, firmwareFolderOf } from "qjsx:flash";
 
 const HELP = `usage: qjsx <command> [arguments]
 
@@ -78,6 +79,14 @@ commands:
       --interval <ms>     between two samples, default 1
       --top <n>           functions shown, default 20
   targets                                      list the serial ports
+  flash --port <port> (--board <name> | --firmware <folder>) [--baud <rate>]
+                                               write the firmware of a board through a serial
+                                               port of the PC (ESP32: the loader of its ROM)
+      --port <port>       the serial port of the board (COM32, /dev/ttyUSB0)
+      --board <name>      the firmware delivered with qjsx (firmware/<name>/)
+      --firmware <folder> another firmware: a folder with its firmware.json, or a
+                          build folder of ESP-IDF (ports/esp32/build-<board>)
+      --baud <rate>       speed of the transfer (default 921600)
   agent [--host h] [--port p] [--storage dir] [--token t]
                                                desktop device agent (stand-in for an ESP)
       --board <name | file.json>  digital twin of a board (boards/<name>.json):
@@ -655,6 +664,40 @@ function targetsCommand() {
 }
 
 /**
+ * qjsx flash --port <port> (--board <name> | --firmware <folder>) [--baud
+ * <rate>]: writes a firmware to a board (qjsx:flash).
+ */
+async function flashCommand(args) {
+    // the port, and one firmware
+    const { options, positional } = parseArguments(args, { values: ["port", "board", "firmware", "baud"] });
+    if (positional.length > 0) {
+        throw new Error(`flash: unexpected argument '${positional[0]}'`);
+    }
+
+    if (options.port === undefined) {
+        throw new Error("flash: give the serial port of the board with --port (see 'qjsx targets')");
+    }
+
+    const oneFirmware = (options.board === undefined) !== (options.firmware === undefined);
+    if (!oneFirmware) {
+        throw new Error("flash: give the firmware with --board <name> or --firmware <folder>, one of them");
+    }
+
+    // the speed, when given
+    const baudRate = options.baud === undefined ? undefined : Number(options.baud);
+    const validBaud = baudRate === undefined || (Number.isInteger(baudRate) && baudRate > 0);
+    if (!validBaud) {
+        throw new Error(`flash: --baud ${options.baud} is not a speed`);
+    }
+
+    // a "serial:COM3" target is taken as its port
+    const port = options.port.replace(/^serial:/, "");
+    const folder = options.firmware ?? firmwareFolderOf(options.board);
+    await flashFirmware({ port, folder, baudRate, log: status });
+    return 0;
+}
+
+/**
  * Compile warnings on stderr, like a compiler: "file:line:column: warning: text".
  * They do not make the command fail.
  */
@@ -856,6 +899,7 @@ const COMMANDS = {
     monitor: monitorCommand,
     device: deviceCommand,
     targets: targetsCommand,
+    flash: flashCommand,
 };
 
 /**

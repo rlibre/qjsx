@@ -97,11 +97,15 @@ equal(answer("dataBits 9"), "RangeError", "dataBits is 5 to 8");
 equal(answer("port"), "1", "port() gives the UART's number");
 equal(answer("taken"), "EBUSY", "a UART open already is refused");
 equal(answer("list open"), "2", "list() leaves out an open UART");
+equal(answer("signals"), "TypeError", "setSignals(): a board's UART has no DTR nor RTS line");
+equal(answer("baud too low"), "RangeError", "setBaudRate(): 300 bits per second at least");
+equal(answer("baud"), "ok", "setBaudRate() changes the speed of the open UART");
 
 // --- the page sees the UART
 check(await until(() => state?.uarts?.[1]?.open === true), "the page sees UART 1 open");
+check(await until(() => state?.uarts?.[1]?.baudRate === 115200), "the page sees the speed set after its opening");
 const uart = state.uarts[1];
-equal(`${uart.baudRate} ${uart.dataBits}${uart.parity} ${uart.stopBits}`, "9600 8even 1", "... with its format");
+equal(`${uart.baudRate} ${uart.dataBits}${uart.parity} ${uart.stopBits}`, "115200 8even 1", "... with its format");
 equal(`${uart.tx} ${uart.rx} ${uart.rts}`, "17 18 null", "... and its pins");
 equal(uart.tcp.client, true, "... and the TCP client");
 equal(state.uarts[0].link, true, "the page sees UART 0 as the agent's link");

@@ -72,6 +72,13 @@ struct SerialOptions {
 };
 JS_STRUCT(SerialOptions, baudRate, dataBits, parity, stopBits, flowControl, tx, rx, rts, cts);
 
+// The lines of 'serial.setSignals(lines)'; absent: left as it is.
+struct SignalOptions {
+    js::Optional<bool> dtr;                                      // data terminal ready
+    js::Optional<bool> rts;                                      // request to send
+};
+JS_STRUCT(SignalOptions, dtr, rts);
+
 // Shared by the JS thread and the reader thread. Allocated by Serial::start(),
 // freed by the last of its two owners (releasePortState).
 struct PortState {
@@ -380,6 +387,64 @@ public:
     }
 
     /**
+     * JS: setSignals({ dtr, rts }): sets the DTR and RTS lines of a port of
+     * the PC, each one true (on), false (off), or absent (left as it is).
+     * Throws a TypeError on a board (its UARTs have no such lines), EBADF on
+     * a closed port, EINVAL for RTS on a port opened with flow control (RTS
+     * is then the driver's), EIO if the system refuses.
+     */
+    JS_EXPORT(setSignals) void setSignals(SignalOptions lines) {
+        // only the ports of the PC have these lines
+        if (driver->setSignals == nullptr) {
+            return (void)js::fail<js::TypeError>("Serial: setSignals: the UARTs of a board have no DTR nor RTS line to set");
+        }
+
+        // the port must be open, and still owned by this side
+        if (!_open || _state == nullptr) {
+            return (void)js::failSystem(EBADF, _name);
+        }
+
+        // RTS belongs to the flow control of a port opened with it
+        if (lines.rts.has() && _flowControl) {
+            return (void)js::failSystem(EINVAL, _name);
+        }
+
+        // each line on, off, or kept
+        int dtr = hal::serial::SIGNAL_KEEP;
+        if (lines.dtr.has()) {
+            dtr = lines.dtr.value() ? hal::serial::SIGNAL_ON : hal::serial::SIGNAL_OFF;
+        }
+
+        int rts = hal::serial::SIGNAL_KEEP;
+        if (lines.rts.has()) {
+            rts = lines.rts.value() ? hal::serial::SIGNAL_ON : hal::serial::SIGNAL_OFF;
+        }
+
+        // set them
+        if (!driver->setSignals(_state->port, dtr, rts)) {
+            return (void)js::failSystem(EIO, _name);
+        }
+    }
+
+    /**
+     * JS: setBaudRate(baudRate): changes the speed of the open port, once
+     * what was written before is sent (blocks until then); the rest of its
+     * settings stays. Throws EBADF on a closed port, EINVAL when the port
+     * cannot take that speed (it keeps the one it had).
+     */
+    JS_EXPORT(setBaudRate) void setBaudRate(js::Range<int, 300, 4000000> baudRate) {
+        // the port must be open, and still owned by this side
+        if (!_open || _state == nullptr) {
+            return (void)js::failSystem(EBADF, _name);
+        }
+
+        // the new speed, or the one it had
+        if (!driver->setBaudRate(_state->port, (int)baudRate)) {
+            return (void)js::failSystem(EINVAL, _name);
+        }
+    }
+
+    /**
      * JS: asks the reader thread to stop; it closes the port within 100 ms.
      * The close callback is called when the reader thread has stopped.
      */
@@ -470,6 +535,7 @@ private:
             js::failSystem(error, _name);
             return false;
         }
+        _flowControl = settings->flowControl;
 
         // register the message source and allocate the PortState shared with
         // the reader thread (the mailbox is retained for the thread)
@@ -555,6 +621,7 @@ private:
     rt::SourceId  _source = { -1, 0 };    // message source of the reader thread
     PortState    *_state = nullptr;       // shared with the reader thread; nullptr once let go
     bool          _open = false;          // true from start() until the close message
+    bool          _flowControl = false;   // opened with RTS / CTS flow control: RTS is the driver's
     js::Function  _dataCallback;          // onData callback; empty: none
     js::Function  _closeCallback;         // onClose callback; empty: none
 };

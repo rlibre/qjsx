@@ -4,6 +4,31 @@ A fixed defect leaves `known-bugs.md` and arrives here, with what was done. The 
 one comes first. The section "Measures and findings" at the end keeps the results of
 measurements that changed no code but settle a question.
 
+## 2026-11-19
+
+### A Sync I2C call after a queued transfer blocked the JS thread for good
+
+On a board, a `writeSync` / `readSync` / `writeReadSync` (or `probeSync`, `reset`,
+`close`) that followed a transfer just queued on the same bus could block the JS thread
+for ever: the program frozen, STOP without effect, only a restart of the chip got out of
+it. Seen on the Waveshare ESP32-P4 as a demo that froze at start about one time out of
+two, its backlight stuck where it was (it polls its touch controller with queued reads
+and writes its backlight with `writeSync`).
+
+Cause: the FreeRTOS `platform::Signal` woke one task with a binary semaphore, and
+`device/i2c` has two kinds of waiters on one Signal (the "i2c" task, the JS thread): the
+JS thread took the wake-up meant for the task. Fixed in `platform::Signal` itself, which
+now wakes every waiter (`doc/architecture.md` 5.1, "Signal"), so that `sys/draw` and
+`device/spi`, built the same way, are covered too. Found by reading the state of the
+frozen board (program "running", load meter stuck: the JS thread inside a native call),
+then the code, then a program of twenty lines that froze within a few turns and now runs
+its 3000 turns.
+
+What misled the search for hours, worth knowing: the USB Serial/JTAG of an ESP32
+restarts the chip the instant its lines become "DTR off, RTS on" (no held reset), so
+scripts that played with these lines to watch the board restarted it without knowing;
+and one USB port of the PC did not carry the firmware's output (cause not found).
+
 ## 2026-11-18
 
 ### Twin: two quick clicks on a GT911 seen as one touch

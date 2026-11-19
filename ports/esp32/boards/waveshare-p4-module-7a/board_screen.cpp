@@ -14,6 +14,15 @@
 // to 255); the program sets the backlight afterwards by writing that
 // register with device/i2c.
 //
+// The backlight stays OFF while the display starts (user, 2026-11-19): it is
+// set to 0 with the power, and to full only as the last step, once the
+// controller is set up and the video runs from its black image. Before, it
+// was lit from the power on, so the panel glowed for the whole set-up (the
+// link, the 197 commands of the controller), about a second and a half
+// during which it shows nothing clean. This is the end of the board's own
+// start, just before the agent and the program: a program finds the light
+// on, as before. A display that fails to start stays dark.
+//
 // The power sequence, the link and the video settings are those of
 // Waveshare's code for this display (Waveshare-ESP32-components,
 // display/lcd/esp_lcd_ili9881c and bsp/esp32_p4_platform, Apache-2.0: 2 lanes
@@ -52,9 +61,8 @@ const uint8_t BACKLIGHT_REGISTER = 0x96;
 const uint8_t BACKLIGHT_OFF = 0x00;
 const uint8_t BACKLIGHT_FULL = 0xFF;
 
-// The waits: the backlight off before on (Waveshare's), then the controller
-// after its power on and after its software reset (the controller's).
-const int BACKLIGHT_OFF_MS = 100;
+// The waits: the controller after its power on and after its software reset
+// (the controller's).
 const int AFTER_POWER_MS = 120;
 const int AFTER_RESET_MS = 120;
 
@@ -86,30 +94,44 @@ bool writePower(int device, uint8_t index, uint8_t value) {
 }
 
 /**
- * Powers the panel through the circuit of the display, its backlight off
- * then full, and waits for the panel's controller. The bus is given back at
- * the end, for the programs. False after printing why.
+ * Opens the board's I2C bus and the power circuit of the display on it.
+ * Returns the device of the circuit, or -1 after printing why (the bus is
+ * then closed).
  */
-bool powerPanel() {
-    // the bus (pulled up on the board) and the circuit
+int openPowerCircuit() {
+    // the bus (pulled up on the board)
     if (!hal::i2c::openBus(I2C_BUS, I2C_SDA, I2C_SCL, false)) {
         printf("qjsx: screen: the I2C bus of the board is refused\n");
-        return false;
+        return -1;
     }
 
+    // the circuit on it
     int device = hal::i2c::addDevice(I2C_BUS, POWER_ADDRESS, POWER_HZ);
-    bool powered = false;
-    if (device >= 0) {
-        // the power, the backlight off a moment, then full
-        powered = writePower(device, POWER_REGISTER, POWER_FIRST)
-                  && writePower(device, POWER_REGISTER, POWER_ON)
-                  && writePower(device, BACKLIGHT_REGISTER, BACKLIGHT_OFF);
-        platform::sleepMs(BACKLIGHT_OFF_MS);
-        powered = powered && writePower(device, BACKLIGHT_REGISTER, BACKLIGHT_FULL);
-        hal::i2c::removeDevice(device);
+    if (device < 0) {
+        hal::i2c::closeBus(I2C_BUS);
+        printf("qjsx: screen: the display's circuit cannot be added to the I2C bus\n");
     }
 
+    return device;
+}
+
+/**
+ * Gives the bus back, for the programs.
+ */
+void closePowerCircuit(int device) {
+    hal::i2c::removeDevice(device);
     hal::i2c::closeBus(I2C_BUS);
+}
+
+/**
+ * Powers the panel through the circuit of the display, its backlight OFF,
+ * and waits for the panel's controller. False after printing why.
+ */
+bool powerPanel(int device) {
+    // the power, the backlight off
+    bool powered = writePower(device, POWER_REGISTER, POWER_FIRST)
+                   && writePower(device, POWER_REGISTER, POWER_ON)
+                   && writePower(device, BACKLIGHT_REGISTER, BACKLIGHT_OFF);
     if (!powered) {
         printf("qjsx: screen: the display's circuit at 0x%02x does not answer (ribbon cable?)\n", POWER_ADDRESS);
         return false;
@@ -135,18 +157,33 @@ bool resetController() {
 } // namespace
 
 bool startScreen() {
-    // the panel powered, the link open, the controller reset and set up
-    bool ready = powerPanel()
+    // the circuit that powers the panel and sets its backlight, kept for the
+    // whole start
+    int circuit = openPowerCircuit();
+    if (circuit < 0) {
+        return false;
+    }
+
+    // in the dark: the panel powered, the link open, the controller reset
+    // and set up
+    bool ready = powerPanel(circuit)
                  && hal::dsi::open(&PANEL)
                  && resetController()
                  && drivers::ili9881c::start(&drivers::ili9881c::WAVESHARE_7_DSI_TOUCH_A, &hal::dsi::command);
     if (!ready) {
         printf("qjsx: screen: the 7-DSI-TOUCH-A display could not be set up\n");
-        return false;
     }
 
-    // the video, from its image
-    uint16_t *pixels = hal::dsi::startVideo();
+    // the video, from its black image
+    uint16_t *pixels = ready ? hal::dsi::startVideo() : nullptr;
+
+    // the last step: the light, on a display that shows its image (a display
+    // that did not start stays dark); then the bus given back
+    if (pixels != nullptr) {
+        writePower(circuit, BACKLIGHT_REGISTER, BACKLIGHT_FULL);
+    }
+
+    closePowerCircuit(circuit);
     if (pixels == nullptr) {
         return false;
     }

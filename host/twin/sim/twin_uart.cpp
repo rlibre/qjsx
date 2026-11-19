@@ -288,6 +288,25 @@ void closePort(hal::serial::Port *port) {
 }
 
 /**
+ * Changes the speed of the UART (hal_serial.h): kept in its settings, for
+ * the page and for a wired PC port, which opens again with it. The twin's
+ * UARTs take no time on the line: nothing to wait for.
+ */
+bool setPortBaudRate(hal::serial::Port *port, int baudRate) {
+    Uart *uart = &uartTable[port->number];
+
+    // the settings with the new speed
+    uart->lock.lock();
+    uart->settings.baudRate = baudRate;
+    hal::serial::Settings settings = uart->settings;
+    uart->lock.unlock();
+
+    // a wired PC port takes them
+    twin::serialUartOpened(port->number, &settings);
+    return true;
+}
+
+/**
  * The UARTs neither open nor the link.
  */
 void listPorts(hal::serial::ListHandler *add, void *context) {
@@ -307,6 +326,8 @@ const hal::serial::Driver TWIN_DRIVER = {
     &writePort,
     &closePort,
     &listPorts,
+    nullptr,                                 // no DTR nor RTS line to set
+    &setPortBaudRate,
 };
 
 } // namespace

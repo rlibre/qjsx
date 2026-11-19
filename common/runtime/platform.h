@@ -188,7 +188,11 @@ public:
     bool  wait(int64_t timeoutMs);
 
     /**
-     * Wakes the waiting thread (lock held or not).
+     * Wakes EVERY thread waiting in wait() (lock held or not): a Signal may
+     * have several kinds of waiters (a task that waits for work, a thread
+     * that waits for that work to end), and each checks its own condition.
+     * Nobody waiting: nothing is kept for a later wait(): change the state
+     * the waiters check under the lock, then notify.
      */
     void  notify();
 

@@ -143,10 +143,10 @@ bool Signal::wait(int64_t timeoutMs) {
 }
 
 /**
- * Wakes one thread waiting in wait().
+ * Wakes every thread waiting in wait() (see platform.h).
  */
 void Signal::notify() {
-    WakeConditionVariable(&((SignalState *)_state)->condition);
+    WakeAllConditionVariable(&((SignalState *)_state)->condition);
 }
 
 namespace {
@@ -372,10 +372,10 @@ bool Signal::wait(int64_t timeoutMs) {
 }
 
 /**
- * Wakes one thread waiting in wait().
+ * Wakes every thread waiting in wait() (see platform.h).
  */
 void Signal::notify() {
-    pthread_cond_signal(&((SignalState *)_state)->condition);
+    pthread_cond_broadcast(&((SignalState *)_state)->condition);
 }
 
 namespace {

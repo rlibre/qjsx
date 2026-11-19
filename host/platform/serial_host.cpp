@@ -27,6 +27,7 @@
 #else
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 #endif
@@ -35,6 +36,7 @@
 struct hal::serial::Port {
 #if defined(_WIN32)
     HANDLE handle;                  // the COM port, opened for overlapped I/O; owned
+    bool   dtr;                     // the DTR line as last set (setPortSignals sends it again)
 #else
     int    handle;                  // the tty; owned
 #endif
@@ -124,6 +126,12 @@ Port *openPort(const char *name, int, const Settings *settings, int *error) {
     // the port, owning the handle
     Port *port = (Port *)memory::allocate(sizeof(Port));
     port->handle = handle;
+
+    // DTR as the port holds it (on, unless its settings keep it off)
+    DCB state;
+    memset(&state, 0, sizeof(state));
+    state.DCBlength = sizeof(state);
+    port->dtr = !GetCommState(handle, &state) || state.fDtrControl != DTR_CONTROL_DISABLE;
     return port;
 }
 
@@ -207,6 +215,53 @@ bool writePort(Port *port, const uint8_t *data, size_t size) {
 void closePort(Port *port) {
     CloseHandle(port->handle);
     memory::release(port);
+}
+
+/**
+ * Sets the DTR and RTS lines (hal_serial.h): each one on, off, or left as it
+ * is. False when the system refuses.
+ *
+ * RTS first, then DTR, sent again even when it does not change: the driver
+ * of the USB serial ports of Windows (usbser.sys: the USB Serial/JTAG of an
+ * ESP32, a CDC device) tells the device the state of the lines only when
+ * DTR is set, so a change of RTS alone never reached it (found on an
+ * ESP32-P4, 2026-11-19: the reset by RTS did nothing). With such a driver
+ * the two lines then change in one request; with a bridge that sends each
+ * line at once, RTS changes just before DTR.
+ */
+bool setPortSignals(Port *port, int dtr, int rts) {
+    // RTS
+    bool done = true;
+    if (rts != hal::serial::SIGNAL_KEEP) {
+        done = EscapeCommFunction(port->handle, rts == hal::serial::SIGNAL_ON ? SETRTS : CLRRTS) != 0;
+    }
+
+    // DTR, as asked or as it was
+    if (dtr != hal::serial::SIGNAL_KEEP) {
+        port->dtr = dtr == hal::serial::SIGNAL_ON;
+    }
+
+    return done && EscapeCommFunction(port->handle, port->dtr ? SETDTR : CLRDTR) != 0;
+}
+
+/**
+ * Changes the speed of the port (hal_serial.h), once what was written is
+ * sent. False when the port refuses that speed.
+ */
+bool setPortBaudRate(Port *port, int baudRate) {
+    // what was written goes out at the speed it was written for
+    FlushFileBuffers(port->handle);
+
+    // the state of the port, with the new speed
+    DCB state;
+    memset(&state, 0, sizeof(state));
+    state.DCBlength = sizeof(state);
+    if (!GetCommState(port->handle, &state)) {
+        return false;
+    }
+
+    state.BaudRate = (DWORD)baudRate;
+    return SetCommState(port->handle, &state) != 0;
 }
 
 /**
@@ -453,6 +508,59 @@ void closePort(Port *port) {
 }
 
 /**
+ * Sets the DTR and RTS lines (hal_serial.h): each one on, off, or left as it
+ * is, both in one call of the system (a sequence on the two lines must not
+ * show a state between two steps). False when the system refuses.
+ */
+bool setPortSignals(Port *port, int dtr, int rts) {
+    // the lines as they are
+    int lines = 0;
+    if (ioctl(port->handle, TIOCMGET, &lines) != 0) {
+        return false;
+    }
+
+    // DTR
+    if (dtr == hal::serial::SIGNAL_ON) {
+        lines |= TIOCM_DTR;
+    } else if (dtr == hal::serial::SIGNAL_OFF) {
+        lines &= ~TIOCM_DTR;
+    }
+
+    // RTS
+    if (rts == hal::serial::SIGNAL_ON) {
+        lines |= TIOCM_RTS;
+    } else if (rts == hal::serial::SIGNAL_OFF) {
+        lines &= ~TIOCM_RTS;
+    }
+
+    return ioctl(port->handle, TIOCMSET, &lines) == 0;
+}
+
+/**
+ * Changes the speed of the port (hal_serial.h), once what was written is
+ * sent. False when the system has no constant for that speed, or refuses.
+ */
+bool setPortBaudRate(Port *port, int baudRate) {
+    // a speed the system knows
+    speed_t speed = speedOf(baudRate);
+    if (speed == 0) {
+        return false;
+    }
+
+    // the settings of the port, with the new speed
+    struct termios state;
+    if (tcgetattr(port->handle, &state) != 0) {
+        return false;
+    }
+
+    cfsetispeed(&state, speed);
+    cfsetospeed(&state, speed);
+
+    // applied once the output is sent
+    return tcsetattr(port->handle, TCSADRAIN, &state) == 0;
+}
+
+/**
  * USB serial adapters: /dev/ttyUSB*, /dev/ttyACM* (Linux), /dev/cu.* (macOS),
  * in directory order.
  */
@@ -491,6 +599,8 @@ const hal::serial::Driver HOST_DRIVER = {
     &writePort,
     &closePort,
     &listPorts,
+    &setPortSignals,
+    &setPortBaudRate,
 };
 
 } // namespace

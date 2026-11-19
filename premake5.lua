@@ -347,10 +347,14 @@ hostApplication("qjsx", "qjsx-engine", {}, {}, {})
     -- (stdlib.qjslib): the tool just linked makes it from lib/stdlib. Every
     -- executable of the folder finds it there (qjsx-tests, qjsx-target).
     -- The board descriptions of the digital twin ("qjsx agent --board
-    -- <name>") go next to it too, in boards/.
-    -- (a cross build only copies the boards: its tool cannot run here)
+    -- <name>") go next to it too, in boards/, and the flashers of "qjsx
+    -- flash" (flashers/*.js, external JS files of the tool) in flashers/.
+    -- These copies run when the executable is linked: after a change of a
+    -- flasher alone, copy it by hand or link again.
+    -- (a cross build only copies the boards and the flashers: its tool
+    -- cannot run here)
     if CROSS == nil then
-        postbuildmessage "making stdlib.qjslib, copying the boards"
+        postbuildmessage "making stdlib.qjslib, copying the boards and the flashers"
         postbuildcommands {
             '"%{cfg.buildtarget.abspath}" mklib "' .. path.getabsolute("lib/stdlib")
                 .. '" --output "%{cfg.targetdir}/stdlib.qjslib"',
@@ -359,6 +363,8 @@ hostApplication("qjsx", "qjsx-engine", {}, {}, {})
     postbuildcommands {
         'mkdir -p "%{cfg.targetdir}/boards"',
         'cp -f "' .. path.getabsolute("boards") .. '"/*.json "%{cfg.targetdir}/boards/"',
+        'mkdir -p "%{cfg.targetdir}/flashers"',
+        'cp -f "' .. path.getabsolute("flashers") .. '"/*.js "%{cfg.targetdir}/flashers/"',
     }
 
 hostApplication("qjsx-tests", "qjsx-engine", { "tests/native/*.cpp" }, {}, { "QJSX_TESTS" })

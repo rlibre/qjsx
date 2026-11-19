@@ -38,6 +38,7 @@ check "debugger support of the engine" "$BIN/qjsx-tests" run -A tests/debug.test
 check "region heap (JS heap of a raw region)" "$BIN/qjsx-tests" run -A tests/region_heap.test.js
 check "runtime library" "$BIN/qjsx" run -A tests/runtime.test.js
 check "tasks of the standard library (stop, ticker, mailbox, mutex)" "$BIN/qjsx" run -A tests/tasks.test.js
+check "flasher of the ESP32 family (flashers/esp32.js, a loader played in JS)" "$BIN/qjsx" run -A tests/flasher.test.js
 # engine change V: the order of the awaits as upstream QuickJS's (the expected
 # output was written by qjs-original, tools/quickjs-split/test)
 check "awaits resume in the order of upstream QuickJS (engine change V)" \

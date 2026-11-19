@@ -100,11 +100,28 @@ output of the program. See [The digital twin](../twin/).
 
 ## Run it on the board
 
-Flash the qjsx firmware of the board once, then give the serial port of the board as the
-target:
+Flash the qjsx firmware of the board once. For an ESP32 board, `qjsx` does it itself,
+through the serial port of the board: there is nothing else to install (no Python, no
+esptool, no ESP-IDF).
 
 ```bash
-qjsx targets
+qjsx targets                                    # the serial ports of the PC
+qjsx flash --port COM11 --board yd-esp32-s3-n16r8
+```
+
+- `--board <name>` is a firmware delivered with qjsx (the folder `firmware/<name>/` next
+  to the executable); `--firmware <folder>` takes another one: a folder with its
+  `firmware.json`, or the build folder of a firmware you built with ESP-IDF.
+- The board is put in its loader, the firmware written and checked, the board restarted:
+  about 20 to 30 seconds. `--baud <rate>` lowers the speed of the transfer (921600 by
+  default) for a cable that does not take it.
+- A firmware made for another chip is refused before anything is erased.
+- If the board does not answer, hold its BOOT button while it resets, then run the
+  command again.
+
+Then give the serial port of the board as the target:
+
+```bash
 qjsx deploy --target serial:COM11 --monitor
 ```
 

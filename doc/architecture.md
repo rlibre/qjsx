@@ -1198,6 +1198,39 @@ Same model on every platform (host and device):
 An uncaught JS exception in a callback on the device is printed, then execution
 continues; restarting remains an option.
 
+**Signal: a wake-up reaches every waiter** (2026-11-19). `platform::Signal` (a lock and
+a condition: the queue of the loop, the queues of the "i2c" task, of the SPI workers, of
+the render task of the screen, the debugger stub) wakes EVERY thread waiting on it, and
+each checks its own condition again. Rule for the callers: change the state the waiters
+check under the lock, then notify; a notify with nobody waiting keeps nothing for later.
+
+- *The defect it fixes.* On the FreeRTOS ports the condition was a binary semaphore: a
+  notify woke ONE task, whichever took the semaphore first. `device/i2c` has two kinds of
+  waiters on one Signal: the "i2c" task waits for a job, the JS thread waits for its bus
+  to be idle before a Sync call. A Sync call that followed a queued transfer took the
+  wake-up meant for the task, saw the bus still busy and waited again; the task never
+  ran the job: the JS thread blocked for good, and STOP could not interrupt it. Found on
+  the Waveshare ESP32-P4: a program that polls its touch controller (queued reads) and
+  writes its backlight with `writeSync` froze at start about one time out of two; a
+  program of twenty lines (a queued read, then `writeSync`, in a loop) froze within a
+  few turns. The same shape exists in `sys/draw` (the render task and `close()`) and in
+  `device/spi`.
+- *FreeRTOS* (`ports/freertos/platform_freertos.cpp`, shared by the ESP32, RP2350 and
+  i.MX RT1062 ports): a Signal keeps the tasks waiting on it (4 at most, in a critical
+  section) and `notify()` wakes each one through its own task notification, so a
+  wake-up cannot be taken by another task. A task registers while it still holds the
+  lock: a notify that follows a change made under the lock always finds it.
+- *PC*: `WakeAllConditionVariable` / `pthread_cond_broadcast` instead of waking one.
+- *Cost*, measured on the ESP32-P4 (temp/wsp4/sigbench, three runs before and after): an
+  awaited I2C read of a byte 270 -> 267 µs; an awaited `show()` of 16 x 16 pixels 190 ->
+  258 µs (about 70 µs more per frame handed to the render task; NOT explained: the I2C
+  path has as many waits and pays nothing); a `show()` of 300 x 60 2.6 -> 2.1 ms, the
+  whole screen 91 -> 90 ms; an await of nothing and an awaited timer unchanged; firmware
+  +384 bytes, one FreeRTOS semaphore less per Signal.
+- *Checked*: the program that froze runs its 3000 turns, three times; the Debug suite on
+  the PC (133). Not built with it yet: the RP2350 and i.MX RT1062 firmwares. No test of
+  the suite replays the sequence yet.
+
 ### 5.2 Async styles
 
 > **Status: rule applied** by the modules written so far (`sys/net`, `device/serial`: callbacks for
@@ -1841,6 +1874,22 @@ reader.port();                                             // 2 ("COM3" on the P
   as plain GPIO (`gpio_reset_pin`). `qjsx.bin` of the YD-ESP32-S3 with it: 0xdf000 bytes.
 - **Twin**: each UART is a TCP port and a panel of the page (section 6.6), tested by
   `tests/serial.test.js`.
+- **Speed of an open port** (2026-11-19, user: needed on his boards): `setBaudRate(baudRate)`
+  (300 to 4000000) on the PC, the ESP32 and the twin; what was written before goes out
+  at its speed (the call waits), then the new one applies; EINVAL when the port cannot
+  take it, EBADF on a closed port. `Driver::setBaudRate` of `hal_serial.h`: Windows
+  `FlushFileBuffers` then `SetCommState`, POSIX `tcsetattr(TCSADRAIN)`, ESP32
+  `uart_wait_tx_done` then `uart_set_baudrate`; the twin keeps it in the UART's settings
+  (the page, a wired port of the PC). Not tried on a UART of a board.
+- **DTR and RTS of a port of the PC** (2026-11-19, for the flashers of the tool):
+  `setSignals({ dtr, rts })`, each line true, false or left out; a TypeError on a board
+  and in a twin (`Driver::setSignals` is nullptr there), EINVAL for `rts` on a port
+  opened with flow control, EBADF on a closed port. Windows: `EscapeCommFunction`, RTS
+  first, then DTR sent again even unchanged: the driver of the USB serial ports
+  (usbser.sys: the USB Serial/JTAG of an ESP32) tells the device the state of the lines
+  only when DTR is set (found on the Waveshare ESP32-P4: a reset by RTS alone did
+  nothing; with DTR sent again the board restarts and its boot log arrives). POSIX: one
+  `TIOCMSET` for both lines (built for Linux Arm, not tried).
 
 **`device/pwm`** (2026-11-13; design agreed with the user, built for the ESP32 and the twin;
 verified on the YD-ESP32-S3 with an oscilloscope by the user the same day; i.MX RT1062 on
@@ -1965,12 +2014,15 @@ the P4's USB Serial/JTAG, the agent's link; "USB TO UART" is a CH343P on UART0 (
   that panel (`WAVESHARE_7_DSI_TOUCH_A`: the values of Waveshare's driver, Apache-2.0,
   credited in the file; written by a script from their source, 197 commands). The board's
   `board_screen.cpp` powers the panel through a circuit of the display at I2C 0x45
-  (register 0x95 = 0x11 then 0x17; register 0x96, the backlight, 0 then 0xFF after
-  100 ms; Waveshare's sequence, the registers are not documented), opens the link (2 lanes
+  (register 0x95 = 0x11 then 0x17, Waveshare's values: the registers are not documented;
+  register 0x96, the backlight, 0), opens the link (2 lanes
   at 1000 Mb/s, pixel clock 80 MHz, porches H 239 / 50 / 33, V 20 / 30 / 2: about 57
   images a second; LDO 3 at 2.5 V), resets the controller by its command (0x01), then
-  `ili9881c::start()`. Kept from the Tab5: 16 bits a pixel (Waveshare's table asks the
-  controller for 24). Measured: the whole screen 91 ms, an area of 300 x 60 2.6 ms.
+  `ili9881c::start()`, then, as the LAST step, sets the backlight to full (user,
+  2026-11-19): the panel stays dark during its whole set-up, about a second and a half
+  (it was lit from the power on before), and a program finds the light on, as before; a
+  display that fails to start stays dark. Kept from the Tab5: 16 bits a pixel
+  (Waveshare's table asks the controller for 24). Measured: the whole screen 91 ms, an area of 300 x 60 2.6 ms.
 - *Backlight*: the program writes register 0x96 of the circuit at 0x45 itself (0 to 255)
   with `device/i2c`; `Display` gets no `backlight` pin.
 - *Touch*: a GT9271 at 0x5D on the same bus, read by `stdlib/touch` as a `gt911` (`address:
@@ -2248,6 +2300,7 @@ A single executable:
 | `device info` / `run` / `stop` / `reset` | installed package and state (memory, load, data folder), start, stop, restart of the device |
 | `device ls` / `read` / `write` / `rm` / `mkdir` / `mv` | the files of the data folder of the device (5.4) |
 | `targets` | lists the serial ports of the PC |
+| `flash` | writes the firmware of a board through a serial port, with a flasher in JS next to the executable (6.8) |
 | `agent` | the device agent on the desktop, which stands in for a board; `--board` or `-p`: the digital twin of a board (6.6); `--screen`, `--screen-size`, `--touch`: the display and the touch panel of a Linux board (5.5) |
 | `debug` | starts the proxy, a CDP server for VS Code (3.9) |
 | `profile` | samples the JS thread of a device, prints the functions that take its time |
@@ -2840,6 +2893,61 @@ disk. Model: Deno's — nothing is allowed unless granted.
   tool); on the devices `files::realPath` only normalizes (no links on their file systems).
 
 ---
+
+### 6.8 Flashing from the tool (`qjsx flash`)
+
+> **Status: written on 2026-11-19 for the ESP32 family**, tried on the Waveshare ESP32-P4
+> kit (its USB Serial/JTAG) and on the WT32-SC01 (an original ESP32 behind a CP210x
+> bridge): the firmware written and checked, the agent answers after. Not tried: an
+> ESP32-S3, the Tab5. UF2 (RP2350) and PJRC's loader (Teensy): later.
+
+**Why** (user): whoever gets a release of qjsx must have no tool to install to put its
+firmware on a board: no Python, no esptool, no ESP-IDF.
+
+```bash
+qjsx flash --port COM32 --board waveshare-p4-module-7a
+qjsx flash --port COM32 --firmware ports/esp32/build-waveshare-p4-module-7a [--baud 921600]
+```
+
+- **Flashers** (user: flashers only, not a general plugin system): external JS files next
+  to the executable, `flashers/<family>.js` (sources in `flashers/` of the repository,
+  copied by the build as `boards/`). A flasher imports nothing and exports
+  `async flash({ port, firmware, baudRate, log })`: it gets the open serial port (a
+  `Serial` of `device/serial`, at 115200 bauds) and the files (`firmware.files`: name,
+  address, bytes; `firmware.flashSize` in bytes). Fixing one, or adding a family, needs
+  no build of qjsx.
+- **Firmware folders**: `firmware/<board>/` next to the executable (`--board`), with its
+  files and `firmware.json` (`flasher`, `chip`, `flashSize` as "16MB", `files`: address
+  and file). `--firmware <folder>` takes any such folder, or a build folder of ESP-IDF:
+  its `flasher_args.json`, written by every build, gives the same facts. The folders of a
+  release are not assembled yet.
+- **The tool's side** (`host/js/flash.js`, `qjsx:flash`): reads the description and the
+  files, loads the flasher with a dynamic import of its path, opens the port, closes it
+  whatever happens.
+- **`flashers/esp32.js`**: the serial loader of the ROM, nothing loaded into the chip (no
+  "stub"), no compression. Written from Espressif's documentation of esptool only (the
+  pages are listed at the top of the file); no code of esptool was read. In order: the
+  chip put in download mode by DTR / RTS and synchronized (two ways tried in turn: the
+  reset of a USB-serial bridge, then the one of a USB Serial/JTAG); the chip id asked
+  (`GET_SECURITY_INFO`; a loader without it is an original ESP32) and compared with the
+  one in the header of each image, which refuses a firmware of another chip before
+  anything is erased; the flash attached and its size told; the speed raised
+  (`CHANGE_BAUDRATE`, then `setBaudRate` on the port, without reopening it); each file
+  written in blocks of 1024 bytes and checked by the MD5 the loader computes on the flash
+  (MD5 written in the file, RFC 1321); the chip restarted by RTS.
+- **What the documentation does not say**, settled by the trial on the ESP32-P4: the
+  reset sequence of the USB Serial/JTAG, blocks of 1024 bytes, the values of
+  `SPI_SET_PARAMS` besides the size, the new speed applied once `CHANGE_BAUDRATE` is
+  answered, and the chip id of `GET_SECURITY_INFO` being the one of the image header
+  (18 on the P4).
+- **Measured**: Waveshare ESP32-P4 (USB Serial/JTAG), the four files of the firmware
+  (1.38 MB) written and checked in about 19 s, the application (1.35 MB) in 18.4 s;
+  WT32-SC01 (original ESP32, CP210x at 921600 bauds), three files (1.15 MB) in about
+  31 s, the application (1.12 MB) in 30.2 s.
+- **Tests**: `tests/flasher.test.js` (26 checks, in run-tests.sh) gives the flasher a
+  port played in JS, which behaves as the loader of the ROM (frames, commands, the lines
+  that reset the chip): the two ways in, an original ESP32, an image of another chip,
+  a flash that holds something else, a chip that never answers.
 
 ## 7. Open points and points to verify
 

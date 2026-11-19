@@ -244,6 +244,17 @@ void closePort(Port *port) {
 }
 
 /**
+ * Changes the speed of the UART (hal_serial.h), once what was written is
+ * sent. False when the driver refuses that speed.
+ */
+bool setPortBaudRate(Port *port, int baudRate) {
+    // what was written goes out at the speed it was written for
+    uart_wait_tx_done(port->number, portMAX_DELAY);
+
+    return uart_set_baudrate(port->number, (uint32_t)baudRate) == ESP_OK;
+}
+
+/**
  * The UARTs neither open nor used by the system (the link of the agent).
  */
 void listPorts(hal::serial::ListHandler *add, void *context) {
@@ -263,6 +274,8 @@ const hal::serial::Driver BOARD_DRIVER = {
     &writePort,
     &closePort,
     &listPorts,
+    nullptr,                           // no DTR nor RTS line to set
+    &setPortBaudRate,
 };
 
 } // namespace

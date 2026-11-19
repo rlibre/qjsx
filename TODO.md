@@ -169,11 +169,32 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
 - [ ] **Accepter TypeScript** (utilisateur) : qui retire les types (transpileur embarqué ou
       outil externe), positions du débogueur (source maps ou lignes du `.ts`), `.d.ts`,
       vérification des types ; aucun téléchargement sans accord. À concevoir.
-- [ ] **CI/CD, release GitHub** (utilisateur : les firmwares ET `qjsx` en release) : GitHub
-      Actions sur un tag ; `qjsx` (Windows, puis Linux / macOS), `tests/run-tests.sh`,
-      firmware ESP32 par carte (image ESP-IDF officielle) ; attacher exécutables,
-      `stdlib.qjslib`, `qjsx.bin` (avec l'adresse de flashage). Questions : déclencheur,
-      plateformes, signature, `QJSX_VERSION`.
+- [ ] **Releases** (décidé le 19/11, rien de fait ; détail dans `CLAUDE.md` « Releases and
+      flashing from the tool ») : une release = l'outil et les firmwares du même commit,
+      sous `QJSX_VERSION`, avec un tag git. Première release : pour des testeurs, sur
+      GitHub en « pre-release » (dépôt public), Windows et Linux Arm, cartes ESP32 (YD,
+      DevKitC N8R8, WT32-SC01, Tab5, Waveshare P4). Elle ATTEND le flasher ESP32. À faire,
+      dans l'ordre :
+  - [x] `serial.setSignals({ dtr, rts })` sur le PC (fait le 19/11, essayé sur COM32 : la
+        carte Waveshare redémarre par RTS) et `serial.setBaudRate()` partout (PC, ESP32,
+        jumeau ; demandé par l'utilisateur pour ses cartes ; pas essayé sur un UART) ;
+  - [x] flasher ESP32 en JS externe (`flashers/esp32.js`) et commande `qjsx flash`
+        (fait le 19/11, `doc/architecture.md` 6.8, `tests/flasher.test.js` 26 contrôles) :
+        essayé sur la Waveshare P4 (USB Serial/JTAG, 1,38 Mo écrit et vérifié en ~19 s)
+        et sur la WT32-SC01 (ESP32 d'origine, pont CP210x, 1,15 Mo en ~31 s).
+        RESTE À ESSAYER : un ESP32-S3 (YD, DevKitC), la Tab5 ;
+  - [ ] idée de l'utilisateur : une option pour appeler esptool à la place (l'outil ne
+        sait pas lancer un autre programme aujourd'hui : à discuter) ;
+  - [ ] `firmware/<carte>/` avec son `firmware.json` dans l'archive (la commande lit
+        déjà ce format et le dossier de build ESP-IDF) ;
+  - [ ] inventaire des licences des composants tiers, fichier de mentions dans l'archive ;
+  - [ ] script d'assemblage des archives (Windows, Linux Arm), notes de version, montée
+        de `QJSX_VERSION`, tag ;
+  - [ ] ensuite : flasher UF2 (RP2350), puis PJRC (HID, natif).
+- [ ] **CI/CD** (pour la release publique annoncée) : GitHub Actions sur un tag ; `qjsx`
+      pour Linux x64 et macOS (jamais construits : portage à prévoir),
+      `tests/run-tests.sh`, firmwares par carte (image ESP-IDF officielle) ; signature de
+      l'exécutable ; manuel en ligne.
 - [ ] **Linux et macOS** : rien n'est compilé (branches POSIX des correctifs,
       `host/platform/executable_path.cpp`, permissions des programmes du PC).
 - [ ] **Éditeur Monaco pour les devices** (utilisateur) : à préciser ; x4js a un composant
@@ -243,6 +264,17 @@ Ici : seulement ce qui reste à faire, à essayer ou à décider.
       points de montage (FatFS : vérifier CVE-2026-6685 / -6688 à ce moment-là).
 
 ## Modules matériels et bibliothèque standard
+
+- [ ] **Défilement (scrolling) à l'écran** (utilisateur, 19/11) : à préciser avant de
+      concevoir (`stdlib/display`).
+- [ ] **Rétroéclairage par I2C dans `Display`** (Waveshare P4) : aujourd'hui le programme
+      écrit lui-même le registre 0x96 du circuit 0x45 ; le firmware garde la lumière
+      éteinte pendant l'init de l'écran et l'allume à la fin. Allumer la lumière au premier
+      `show()` plutôt qu'à l'ouverture : REFUSÉ par l'utilisateur (19/11).
+- [ ] Les ~70 µs de plus par `show()` attendu depuis le réveil « tous les fils » de
+      `platform::Signal` (ESP32-P4, 19/11) : non expliqués.
+- [ ] Un test de la suite qui rejoue « transfert I2C en file puis appel synchrone » (le
+      blocage corrigé le 19/11).
 
 - [ ] **Temps depuis le démarrage de la carte** (utilisateur : pas forcément accessible au
       JS, mais l'info quelque part) : une clé de plus dans la réponse INFO de l'agent,

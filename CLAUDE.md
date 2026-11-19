@@ -1582,6 +1582,96 @@ in the include path (no two headers share a name; keep it so).
     `temp/pi4/id_ed25519`, HDMI monitor + mouse with `--screen-size 800x480`): mouse and
     cursor to try there; production set-up (systemd service, TCP token, files) to discuss
     (TODO.md "Cartes sous Linux").
+- Releases and flashing from the tool (discussed and agreed by the user 2026-11-19, NOT
+  implemented; TODO.md "Releases"):
+  - a release is something to DISTRIBUTE: the `qjsx` executable (with `stdlib.qjslib` and
+    `boards/` next to it: one archive per system), the firmwares, the standard library;
+    the tool and every firmware built from the SAME commit (bytecode version, names of
+    the engine), under the one number `QJSX_VERSION`, with a git tag of that name. State
+    2026-11-19: no tag in the repository, one commit titled "v0.2.0" (8b16fc5),
+    `QJSX_VERSION` still 0.2.0;
+  - first release: for TESTERS, on GitHub (the repository is PUBLIC, so marked
+    "pre-release"), Windows and Linux Arm only (what the user's PC builds today: Linux
+    x64 was never built, macOS needs a Mac or GitHub's machines = the CI chantier, later
+    with the announced public release, as the manual online and a signed executable);
+    boards: the ESP32 ones (YD-ESP32-S3, ESP32-S3-DevKitC N8R8, WT32-SC01, M5Stack Tab5,
+    Waveshare P4; never the client board, which is not in the repository); a file of the
+    third-party license notices in the archive from this first release (ESP-IDF,
+    LittleFS, TinyUSB, FreeRTOS, QuickJS, the Inter font, M5Stack's and Waveshare's panel
+    tables...): an inventory to make;
+  - the first release WAITS for the ESP32 flasher (user: not esptool + a merged file);
+  - FLASHERS (user's idea, choice A: flashers only, NOT a general plugin system): external
+    JS files next to the executable, `flashers/<family>.js` (`esp32.js` first: the
+    equivalent of esptool; `uf2.js` then: a file copied to the board's USB drive, found by
+    its `INFO_UF2.TXT`; PJRC's HID loader later: needs native code), and
+    `firmware/<board>/` with its files and a small description (which flasher, which chip,
+    which file at which address: taken from what the ESP-IDF build already writes);
+    command `qjsx flash --board <board> --port COM11`; a flasher exports `flash`, given the
+    port, the files with their addresses and a way to report its progress;
+  - `serial.setSignals({ dtr, rts })` on `Serial`, PC only (TypeError on a board; refused
+    with `flowControl: "rts-cts"`): the only native addition the ESP32 flasher needs (to
+    enter the download mode); visible to JS programs too;
+  - DONE 2026-11-19: `setSignals` (hal_serial.h `Driver::setSignals`, nullptr on a board
+    and in the twin; Windows: RTS first then DTR sent AGAIN even unchanged, because
+    usbser.sys only tells the device the lines' state when DTR is set: without it a
+    reset by RTS did nothing on the Waveshare P4's USB Serial/JTAG; with it the board
+    restarts, tried with `temp/signals/main.js` on COM32) and, asked by the user for his
+    boards, `serial.setBaudRate(baudRate)` on an open port everywhere (PC, ESP32 UARTs,
+    twin; waits for what was written; EINVAL when refused; not tried on a UART of a
+    board). tests/serial.test.js 30 checks, types 479;
+  - DONE 2026-11-19: `flashers/esp32.js` + `qjsx flash --port <port> (--board <name> |
+    --firmware <folder>) [--baud <rate>]` (`host/js/flash.js` = `qjsx:flash`; a firmware
+    folder holds `firmware.json`, or is an ESP-IDF build folder: its flasher_args.json),
+    `doc/architecture.md` 6.8, `tests/flasher.test.js` (26 checks, a ROM loader played in
+    JS, in run-tests.sh). ROM loader only (no stub, no compression), chip id of
+    GET_SECURITY_INFO compared with the image header's (P4 = 18), blocks of 1024 bytes,
+    CHANGE_BAUDRATE to 921600 then setBaudRate, MD5 check (MD5 written in the flasher),
+    restart by RTS. TRIED on the Waveshare P4 (USB Serial/JTAG, COM32): 1.38 MB written
+    and checked in ~19 s, twice, the agent answers after; and on the WT32-SC01 (original
+    ESP32, CP210x bridge, COM29): 1.15 MB in ~31 s. NOT tried: an S3 (YD, DevKitC), the
+    Tab5. The getting-started guide of the manual describes `qjsx flash`. The top of the file
+    says why (user: no tool to install) and lists the pages of Espressif read (user asked
+    for the sources in the JS file). The flashers are copied next to the executable when
+    it is LINKED: after a change of a flasher alone, copy it to bin/<config>/flashers by
+    hand. User's idea, not decided: an option to call esptool instead (the tool cannot
+    start another program today);
+  - the ESP32 flasher is written from Espressif's documentation of the serial protocol of
+    the ROM loader, no code from esptool (GPL) nor esptool-js;
+  - open, to settle when writing it: changing the baud rate of an open port (reopening
+    moves DTR / RTS and resets the chip) or staying at 115200; whether the ROM takes
+    compressed data on every chip (believed for the recent ones, not checked for the
+    original ESP32); the download mode of the USB Serial/JTAG boards (Tab5, Waveshare)
+    with our own sequence; a running RP2350 restarted into its loader (button, or an
+    agent command).
+- `platform::Signal` wakes EVERY waiter (user chose option C, 2026-11-19, DONE the same day;
+  `doc/architecture.md` 5.1 "Signal", `doc/history.md`): on FreeRTOS it was a binary
+  semaphore that woke ONE task; `device/i2c` has two kinds of waiters on one Signal (the
+  "i2c" task, the JS thread before a Sync call): a Sync call right after a queued transfer
+  took the task's wake-up and the JS thread blocked for good (STOP without effect). Seen
+  as the Waveshare demo frozen at start one time out of two (touch polled with queued
+  reads + `writeSync` of the backlight). Now `ports/freertos/platform_freertos.cpp` keeps
+  the waiting tasks (4 at most, critical section; ESP-IDF spinlock) and notifies each by
+  its task notification; a task registers while holding the lock; a notify with nobody
+  waiting keeps NOTHING (rule: change the state under the lock, then notify). PC:
+  WakeAllConditionVariable / pthread_cond_broadcast. Cost measured on the P4
+  (temp/wsp4/sigbench): awaited I2C read 270 -> 267 us, awaited show() of 16 x 16
+  190 -> 258 us (NOT explained), 300 x 60 2.6 -> 2.1 ms, firmware +384 bytes. Debug suite
+  133 OK; every firmware builds (5 ESP32 boards + the client's, RP2350, Teensy), only the
+  Waveshare and WT32 ones were run. No suite test replays the sequence yet (TODO).
+  LESSONS of that search (hours lost): the USB Serial/JTAG of an ESP32 restarts the chip
+  the instant its lines BECOME "DTR off, RTS on" (no held reset; `setSignals` transmits
+  every change): never loop on these lines while the user watches the board, and read
+  the board's state with `qjsx device info` only (opening the port does not restart it
+  once the port has been used; the first open after a replug may). A frozen JS thread
+  shows as "running: true" with a load meter stuck on the same value and no full second
+  counted. One USB port of the user's PC did not carry the firmware's output (COM33):
+  use the port that gives COM32. After a fix, flash with `qjsx flash`, not esptool (the
+  user noticed).
+- Waveshare backlight at start (user, 2026-11-19): `board_screen.cpp` keeps the backlight
+  at 0 from the power on and sets it to 255 as the LAST step of `startScreen()` (the
+  panel no longer glows during its set-up); lighting it at the first `show()` in
+  `stdlib/display`: REFUSED by the user. The demo `temp/wsp4/ui` (installed in flash)
+  draws its first page in the dark then fades the light in.
 - Bytecode reader (engine change Z, 2026-11-18, reported by the user): a truncated last
   opcode of a function read 4 bytes past the buffer (JS_ReadFunctionBytecode, and
   bc_byte_swap); now a SyntaxError "truncated opcode"; tests/bytecode.test.js (qjsx-tests

@@ -61,4 +61,9 @@ open();
 console.log(`port: ${uart.port()}`);
 console.log(`taken: ${outcome(() => new Serial(1, { tx: 17 }))}`);
 console.log(`list open: ${list().join(",")}`);
+
+// --- on an open UART: no DTR nor RTS line on a board; its speed changed
+console.log(`signals: ${outcome(() => uart.setSignals({ dtr: true, rts: false }))}`);
+console.log(`baud too low: ${outcome(() => uart.setBaudRate(100))}`);
+console.log(`baud: ${outcome(() => uart.setBaudRate(115200))}`);
 console.log("serial ready");

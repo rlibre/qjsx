@@ -84,7 +84,22 @@ struct Driver {
 
     // The ports that can be opened now (see ListHandler).
     void (*list)(ListHandler *add, void *context);
+
+    // Sets the DTR and RTS lines of the port: SIGNAL_ON, SIGNAL_OFF, or
+    // SIGNAL_KEEP to leave a line as it is. False on error. nullptr: the
+    // driver has no such lines (the UARTs of a board, of the twin).
+    bool (*setSignals)(Port *port, int dtr, int rts);
+
+    // Changes the speed of the open port, once what was written before is
+    // sent (blocks until then); the rest of its settings stays. False when
+    // the port cannot take that speed (it keeps the one it had).
+    bool (*setBaudRate)(Port *port, int baudRate);
 };
+
+// What setSignals() does with a line.
+const int SIGNAL_KEEP = -1;
+const int SIGNAL_OFF = 0;
+const int SIGNAL_ON = 1;
 
 /**
  * The driver of the UARTs of the board, on a device port (one per port:
