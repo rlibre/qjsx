@@ -424,7 +424,7 @@ keeps the old name: `C:\Sandbox\espjs`.
     `.github/workflows/manual.yml` (at each push to main that changes the manual or a
     typing; actions pinned by commit SHA: the model for the other workflows).
     `.github/CODEOWNERS` (2026-11-19): `* @eco747` (eco747 and ecochard are both the
-    user; eco-incare is a third collaborator account).
+    user; a third account of his is a collaborator too).
 - Conditional breakpoints, logpoints and hit counts are compiled by the proxy and evaluated on
   the ESP itself (no round trip per hit).
 - Proxy core without CDP (API agreed by the user 2026-11-11, IMPLEMENTED the same day in

@@ -51,8 +51,10 @@
  * |---|---|---|---|---|
  * | — | ✓ ¹ | — | — | ✓ ² |
  *
- * ¹ Boards with a touch controller on I2C: the WT32-SC01 (FT6336) and the
- * M5Stack Tab5 (GT911, started by the firmware of the board).
+ * ¹ Boards with a touch controller on I2C: the WT32-SC01 (FT6336), the
+ * M5Stack Tab5 (GT911, started by the firmware of the board) and the
+ * Waveshare ESP32-P4-Module-DEV-KIT (GT9271, read as a GT911, polled: its
+ * interrupt pin is not wired).
  *
  * ² The twins of the WT32-SC01 (FT6336) and of the M5Stack Tab5 (GT911):
  * touched with the mouse on the screen of the page (one finger); a project

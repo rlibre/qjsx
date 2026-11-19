@@ -48,7 +48,7 @@ const size_t CHOICE_SIZE = 2 * SERIAL_NAME_SIZE + 96;   // largest JSON text of 
 // The wiring of a UART to a PC serial port.
 struct SerialLink {
     int                    number;            // the UART
-    char                   key[16];           // its key in twin.json: "serial<n>"
+    char                   key[24];           // its key in twin.json: "serial<n>" (room for any int)
     platform::Signal       lock;              // below, but 'open' read by its owner; notified when bytes are queued
     char                   port[SERIAL_NAME_SIZE];   // the port asked; "": none
     bool                   connect;           // wiring asked
@@ -389,10 +389,11 @@ bool setupSerial() {
             choicesRead(link->key, &takeChoice, link);
         }
 
-        // 2. its threads
-        char ownerName[24];
+        // 2. its threads (names large enough for any int, so that the
+        // compiler sees no truncation)
+        char ownerName[32];
         snprintf(ownerName, sizeof(ownerName), "twin serial %d", i);
-        char senderName[24];
+        char senderName[36];
         snprintf(senderName, sizeof(senderName), "twin serial %d out", i);
         bool started = platform::startThread(&ownPort, link, platform::defaultThreadOptions(ownerName))
                     && platform::startThread(&sendQueue, link, platform::defaultThreadOptions(senderName));

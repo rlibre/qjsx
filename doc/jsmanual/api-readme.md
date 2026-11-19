@@ -44,12 +44,14 @@ call throws (`code` `"ENOSYS"`), except `existsSync`, which returns false.
 ³ The twin of a board whose chip has one (`esp32-devkitc-wroom32`).
 
 ⁴ Only a firmware built for a board with a display has `sys/draw`, the renderer of
-`stdlib/display`: today the WT32-SC01.
+`stdlib/display`: the WT32-SC01 (ST7796 over SPI) and the two ESP32-P4 boards, the M5Stack
+Tab5 and the Waveshare ESP32-P4-Module-DEV-KIT (panel built into the board).
 
 ⁵ The twin of such a board (`wt32-sc01`, `m5stack-tab5`): its screen is drawn in the page.
 
-⁶ A touch controller on I2C: the WT32-SC01 (FT6336) and the M5Stack Tab5 (GT911). In the
-twins of both boards, the mouse on the screen of the page touches it (one finger).
+⁶ A touch controller on I2C: the WT32-SC01 (FT6336), the M5Stack Tab5 (GT911) and the
+Waveshare ESP32-P4-Module-DEV-KIT (GT9271, read as a GT911). In the twins of the first two
+boards, the mouse on the screen of the page touches it (one finger).
 
 PC: `qjsx run` and the programs of the PC. i.MX RT1062: the Teensy 4.0. Twin: the digital twin of a board offers the
 native modules of that board (here the YD-ESP32-S3, which has every module of the
