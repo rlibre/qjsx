@@ -1,4 +1,0 @@
-C:/Sandbox/espjs/ports/imxrt1062/build-teensy40/CMakeFiles/qjsx-engine-target.dir
-C:/Sandbox/espjs/ports/imxrt1062/build-teensy40/CMakeFiles/qjsx.elf.dir
-C:/Sandbox/espjs/ports/imxrt1062/build-teensy40/CMakeFiles/edit_cache.dir
-C:/Sandbox/espjs/ports/imxrt1062/build-teensy40/CMakeFiles/rebuild_cache.dir

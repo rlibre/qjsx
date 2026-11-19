@@ -22,6 +22,9 @@ build/
 # pico-sdk builds of the RP2350 firmware, one folder per board
 /ports/rp2350/build-*/
 
+# Builds of the i.MX RT1062 firmware (Teensy 4.0), one folder per board
+/ports/imxrt1062/build-*/
+
 # npm packages (the twin's page host/twin/ui, the JS manual doc/jsmanual).
 # The build of the twin's page (dist/) IS kept: a machine without Node builds
 # qjsx with it
