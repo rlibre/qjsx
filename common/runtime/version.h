@@ -19,4 +19,4 @@
 // in a program or a firmware to be flashed again; last figure: fixes only.
 #pragma once
 
-#define QJSX_VERSION "0.3.0"
+#define QJSX_VERSION "0.3.1"

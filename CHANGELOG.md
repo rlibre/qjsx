@@ -7,6 +7,8 @@ is released, then opens the next one above it.
 Version numbers: `0.Y.Z`. `Y` changes when a release may require a change in a program,
 or a firmware to be flashed again; `Z` for fixes only.
 
+## 0.3.1
+
 ## 0.3.0 - 2026-11-19
 
 A program that uses what is new here needs the firmware of this version on its board.
